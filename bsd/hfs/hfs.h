@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
 >>>>>>> origin/10.6
+=======
+ * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+>>>>>>> origin/10.10
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -1396,11 +1400,15 @@ typedef enum hfs_sync_mode {
 
 extern int hfs_fsync(struct vnode *, int, hfs_fsync_mode_t, struct proc *);
 
+<<<<<<< HEAD
 const struct cat_fork *
 hfs_prepare_fork_for_update(filefork_t *ff,
 							const struct cat_fork *cf,
 							struct cat_fork *cf_buf,
 							uint32_t block_size);
+=======
+extern int hfs_fsync(struct vnode *, int, int, struct proc *);
+>>>>>>> origin/10.10
 
 /*****************************************************************************
 	Functions from hfs_xattr.c
@@ -1426,8 +1434,12 @@ int hfs_getxattr_internal(cnode_t *, struct vnop_getxattr_args *,
 int hfs_xattr_write(vnode_t vp, const char *name, const void *data, size_t size);
 int hfs_setxattr_internal(struct cnode *, const void *, size_t, 
                           struct vnop_setxattr_args *, struct hfsmount *, u_int32_t);
+<<<<<<< HEAD
 extern int hfs_removeallattr(struct hfsmount *hfsmp, u_int32_t fileid, 
 							 bool *open_transaction);
+=======
+extern int hfs_removeallattr(struct hfsmount *hfsmp, u_int32_t fileid);
+>>>>>>> origin/10.10
 extern int hfs_set_volxattr(struct hfsmount *hfsmp, unsigned int xattrtype, int state);
 
 
@@ -1472,6 +1484,23 @@ extern void hfs_fsinfo_data_add(struct hfs_fsinfo_data *fsinfo, uint64_t entry);
 extern int hfs_namecmp(const char *, size_t, const char *, size_t);
 
 >>>>>>> origin/10.2
+
+/*****************************************************************************
+	Functions from VolumeAllocation.c
+ ******************************************************************************/
+extern int hfs_isallocated(struct hfsmount *hfsmp, u_int32_t startingBlock,
+						   u_int32_t numBlocks);
+
+extern int hfs_count_allocated(struct hfsmount *hfsmp, u_int32_t startBlock,
+							   u_int32_t numBlocks, u_int32_t *alloc_count);
+
+extern int hfs_isrbtree_active (struct hfsmount *hfsmp);
+
+/*****************************************************************************
+	Functions from hfs_fsinfo.c
+ ******************************************************************************/
+extern errno_t hfs_get_fsinfo(struct hfsmount *hfsmp, void *a_data);
+extern void hfs_fsinfo_data_add(struct hfs_fsinfo_data *fsinfo, uint64_t entry);
 
 #endif /* __APPLE_API_PRIVATE */
 #endif /* KERNEL */

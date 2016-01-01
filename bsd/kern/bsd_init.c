@@ -347,6 +347,10 @@ void bsd_utaskbootstrap(void);
 static void parse_bsd_args(void);
 extern task_t bsd_init_task;
 extern boolean_t init_task_died;
+<<<<<<< HEAD
+=======
+extern char    init_task_failure_data[];
+>>>>>>> origin/10.10
 #if CONFIG_DEV_KMEM
 extern void dev_kmem_init(void);
 #endif
@@ -1149,6 +1153,10 @@ bsdinit_task(void)
 
 	bsd_init_task = get_threadtask(thread);
 	init_task_died = FALSE;
+<<<<<<< HEAD
+=======
+	init_task_failure_data[0] = 0;
+>>>>>>> origin/10.10
 
 #if CONFIG_MACF
 	mac_cred_label_associate_user(p->p_ucred);

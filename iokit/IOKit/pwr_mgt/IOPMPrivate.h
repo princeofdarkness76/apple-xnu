@@ -1102,6 +1102,9 @@ inline char const* getDumpLogFilename(swd_hdr *hdr)
 /* Sleep Options/settings */
 #define kSleepOptionDisplayCapturedModeKey         "DisplayCapturedMode"
 
+/* Sleep Options/settings */
+#define kSleepOptionDisplayCapturedModeKey         "DisplayCapturedMode"
+
 
 #if defined(KERNEL) && defined(__cplusplus)
 
@@ -1141,6 +1144,7 @@ enum {
   kIOPMPerformanceWarning   = 100
 };
 
+<<<<<<< HEAD
 #endif /* ! _IOKIT_IOPMPRIVATE_H */
 =======
     kIOPMSetValue		= (1<<16),
@@ -1427,5 +1431,7 @@ typedef IOReturn (*IOPMSystemSleepPolicyHandler)(
 
 #endif /* KERNEL */
 
+=======
+>>>>>>> origin/10.10
 #endif /* ! _IOKIT_IOPMPRIVATE_H */
 >>>>>>> origin/10.6

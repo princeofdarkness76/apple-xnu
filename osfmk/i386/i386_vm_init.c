@@ -306,10 +306,17 @@ i386_vm_init(uint64_t	maxmem,
 					"__LINKEDIT", &segSizeLINK);
 	segHIBB  = (vm_offset_t) getsegdatafromheader(&_mh_execute_header,
 					"__HIB", &segSizeHIB);
+<<<<<<< HEAD
     segPRELINKB = (vm_offset_t) getsegdatafromheader(&_mh_execute_header,
                                                      "__PRELINK_TEXT", &segSizePRELINK);
     segPRELINKINFOB = (vm_offset_t) getsegdatafromheader(&_mh_execute_header,
                                                      "__PRELINK_INFO", &segSizePRELINKINFO);
+=======
+	segPRELINKB = (vm_offset_t) getsegdatafromheader(&_mh_execute_header,
+					"__PRELINK_TEXT", &segSizePRELINK);
+    segPRELINKINFOB = (vm_offset_t) getsegdatafromheader(&_mh_execute_header,
+                    "__PRELINK_INFO", &segSizePRELINKINFO);
+>>>>>>> origin/10.10
 	segTEXT = getsegbynamefromheader(&_mh_execute_header,
 					"__TEXT");
 	segDATA = getsegbynamefromheader(&_mh_execute_header,
@@ -350,7 +357,11 @@ i386_vm_init(uint64_t	maxmem,
 	DBG("segLINKB    = %p\n", (void *) segLINKB);
 	DBG("segHIBB     = %p\n", (void *) segHIBB);
 	DBG("segPRELINKB = %p\n", (void *) segPRELINKB);
+<<<<<<< HEAD
 	DBG("segPRELINKINFOB = %p\n", (void *) segPRELINKINFOB);
+=======
+    DBG("segPRELINKINFOB = %p\n", (void *) segPRELINKINFOB);
+>>>>>>> origin/10.10
 	DBG("sHIB        = %p\n", (void *) sHIB);
 	DBG("eHIB        = %p\n", (void *) eHIB);
 	DBG("stext       = %p\n", (void *) stext);
@@ -365,6 +376,12 @@ i386_vm_init(uint64_t	maxmem,
 	vm_kernel_top   = (vm_offset_t) &last_kernel_symbol;
 	vm_kernel_stext = stext;
 	vm_kernel_etext = etext;
+    vm_prelink_stext = segPRELINKB;
+    vm_prelink_etext = segPRELINKB + segSizePRELINK;
+    vm_prelink_sinfo = segPRELINKINFOB;
+    vm_prelink_einfo = segPRELINKINFOB + segSizePRELINKINFO;
+    vm_slinkedit = segLINKB;
+    vm_elinkedit = segLINKB + segSizePRELINK;
 
     vm_prelink_stext = segPRELINKB;
     vm_prelink_etext = segPRELINKB + segSizePRELINK;

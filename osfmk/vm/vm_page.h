@@ -307,12 +307,16 @@ struct vm_page {
 			cs_validated:1,    /* code-signing: page was checked */	
 			cs_tainted:1,	   /* code-signing: page is tainted */
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 			cs_nx:1,	   /* code-signing: page is nx */
 			reusable:1,
 		        lopage:1,
 			slid:1,
 		        compressor:1,	/* page owned by compressor pool */
 		        written_by_kernel:1,	/* page was written by kernel (i.e. decompressed) */
+<<<<<<< HEAD
 <<<<<<< HEAD
 			__unused_object_bits:4;  /* 5 bits available here */
 =======
@@ -335,6 +339,9 @@ struct vm_page {
 	ppnum_t		phys_page;	/* Physical address of page, passed
 					 *  to pmap_enter (read-only) */
 >>>>>>> origin/10.5
+=======
+			__unused_object_bits:4;  /* 5 bits available here */
+>>>>>>> origin/10.10
 };
 
 #define DEBUG_ENCRYPTED_SWAP	1

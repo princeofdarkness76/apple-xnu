@@ -2488,6 +2488,12 @@ hfs_mountfs(struct vnode *devvp, struct mount *mp, struct hfs_mount_args *args,
 			vhp = (HFSPlusVolumeHeader*) (bp->b_data + HFS_PRI_OFFSET(blksize));
 =======
 			mdb_offset = (daddr64_t)((embeddedOffset / log_blksize) + HFS_PRI_SECTOR(log_blksize));
+
+			if (bp) {
+				buf_markinvalid(bp);
+				buf_brelse(bp);
+				bp = NULL;
+			}
 			retval = (int)buf_meta_bread(devvp, HFS_PHYSBLK_ROUNDDOWN(mdb_offset, hfsmp->hfs_log_per_phys),
 					phys_blksize, cred, &bp);
 			if (retval)
@@ -2503,6 +2509,68 @@ hfs_mountfs(struct vnode *devvp, struct mount *mp, struct hfs_mount_args *args,
 			vhp = (HFSPlusVolumeHeader*) mdbp;
 		}
 
+<<<<<<< HEAD
+=======
+		retval = hfs_ValidateHFSPlusVolumeHeader(hfsmp, vhp);
+		if (retval)
+			goto error_exit;
+
+		/*
+		 * If allocation block size is less than the physical block size,
+		 * invalidate the buffer read in using native physical block size
+		 * to ensure data consistency.
+		 *
+		 * HFS Plus reserves one allocation block for the Volume Header.
+		 * If the physical size is larger, then when we read the volume header,
+		 * we will also end up reading in the next allocation block(s).
+		 * If those other allocation block(s) is/are modified, and then the volume
+		 * header is modified, the write of the volume header's buffer will write
+		 * out the old contents of the other allocation blocks.
+		 *
+		 * We assume that the physical block size is same as logical block size.
+		 * The physical block size value is used to round down the offsets for
+		 * reading and writing the primary and alternate volume headers.
+		 *
+		 * The same logic is also in hfs_MountHFSPlusVolume to ensure that
+		 * hfs_mountfs, hfs_MountHFSPlusVolume and later are doing the I/Os
+		 * using same block size.
+		 */
+		if (SWAP_BE32(vhp->blockSize) < hfsmp->hfs_physical_block_size) {
+			phys_blksize = hfsmp->hfs_logical_block_size;
+			hfsmp->hfs_physical_block_size = hfsmp->hfs_logical_block_size;
+			hfsmp->hfs_log_per_phys = 1;
+			// There should be one bp associated with devvp in buffer cache.
+			retval = buf_invalidateblks(devvp, 0, 0, 0);
+			if (retval)
+				goto error_exit;
+		}
+
+		if (isroot) {
+			hfs_root_unmounted_cleanly = ((SWAP_BE32(vhp->attributes) & kHFSVolumeUnmountedMask) != 0);
+		}
+
+		/*
+		 * On inconsistent disks, do not allow read-write mount
+		 * unless it is the boot volume being mounted.  We also
+		 * always want to replay the journal if the journal_replay_only
+		 * flag is set because that will (most likely) get the
+		 * disk into a consistent state before fsck_hfs starts
+		 * looking at it.
+		 */
+		if (  !(vfs_flags(mp) & MNT_ROOTFS)
+		   && (SWAP_BE32(vhp->attributes) & kHFSVolumeInconsistentMask)
+		   && !journal_replay_only
+		   && !(hfsmp->hfs_flags & HFS_READ_ONLY)) {
+			
+			if (HFS_MOUNT_DEBUG) { 
+				printf("hfs_mountfs: failed to mount non-root inconsistent disk\n");
+			}
+			retval = EINVAL;
+			goto error_exit;
+		}
+
+
+>>>>>>> origin/10.10
 		// XXXdbg
 		//
 		hfsmp->jnl = NULL;

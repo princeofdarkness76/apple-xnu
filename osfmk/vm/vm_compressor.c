@@ -550,6 +550,9 @@ vm_compressor_init(void)
 	if (COMPRESSED_PAGER_IS_ACTIVE || DEFAULT_FREEZER_COMPRESSED_PAGER_IS_SWAPBACKED)
 		vm_compressor_is_active = 1;
 
+	if (COMPRESSED_PAGER_IS_ACTIVE || DEFAULT_FREEZER_COMPRESSED_PAGER_IS_SWAPBACKED)
+		vm_compressor_is_active = 1;
+
 #if CONFIG_FREEZE
 	memorystatus_freeze_enabled = TRUE;
 #endif /* CONFIG_FREEZE */
@@ -992,7 +995,11 @@ c_seg_free(c_segment_t c_seg)
 void
 c_seg_free_locked(c_segment_t c_seg)
 {
+<<<<<<< HEAD
 	int		segno;
+=======
+	int		segno, i;
+>>>>>>> origin/10.10
 	int		pages_populated = 0;
 	int32_t		*c_buffer = NULL;
 	uint64_t	c_swap_handle = 0;

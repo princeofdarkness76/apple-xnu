@@ -356,7 +356,6 @@ mach_port_space_basic_info(
 	if (space == IS_NULL)
 		return KERN_INVALID_TASK;
 
-
 	is_read_lock(space);
 	if (!is_active(space)) {
 		is_read_unlock(space);
@@ -517,16 +516,25 @@ mach_port_kobject(
 	kaddr = (mach_vm_address_t)port->ip_kobject;
 	ip_unlock(port);
 
+<<<<<<< HEAD
 #if (DEVELOPMENT || DEBUG)
+=======
+#if !(DEVELOPMENT || DEBUG)
+	/* disable this interface on release kernels */
+        *addrp = 0;
+#else
+>>>>>>> origin/10.10
 	if (0 != kaddr && is_ipc_kobject(*typep))
 		*addrp = VM_KERNEL_UNSLIDE_OR_PERM(kaddr);
 	else
 #endif
 		*addrp = 0;
+#endif
 
 	return KERN_SUCCESS;
 }
 #endif /* MACH_IPC_DEBUG */
+
 /*
  *	Routine:	mach_port_kernel_object [Legacy kernel call]
  *	Purpose:

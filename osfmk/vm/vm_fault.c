@@ -165,9 +165,12 @@ uint64_t vm_hard_throttle_threshold;
 #define NEED_TO_HARD_THROTTLE_THIS_TASK()	(vm_wants_task_throttled(current_task()) ||	\
 						 (vm_page_free_count < vm_page_throttle_limit && \
 						  proc_get_effective_thread_policy(current_thread(), TASK_POLICY_IO) > THROTTLE_LEVEL_THROTTLED))
+<<<<<<< HEAD
 =======
 >>>>>>> origin/10.1
 
+=======
+>>>>>>> origin/10.10
 
 #define HARD_THROTTLE_DELAY	5000	/* 5000 us == 5 ms */
 #define SOFT_THROTTLE_DELAY	200	/* 200 us == .2 ms */
@@ -175,6 +178,15 @@ uint64_t vm_hard_throttle_threshold;
 #define	VM_PAGE_CREATION_THROTTLE_PERIOD_SECS	6
 #define	VM_PAGE_CREATION_THROTTLE_RATE_PER_SEC	20000
 
+<<<<<<< HEAD
+=======
+#define HARD_THROTTLE_DELAY	5000	/* 5000 us == 5 ms */
+#define SOFT_THROTTLE_DELAY	200	/* 200 us == .2 ms */
+
+#define	VM_PAGE_CREATION_THROTTLE_PERIOD_SECS	6
+#define	VM_PAGE_CREATION_THROTTLE_RATE_PER_SEC	20000
+
+>>>>>>> origin/10.10
 
 boolean_t current_thread_aborted(void);
 
@@ -639,7 +651,10 @@ vm_fault_deactivate_behind(
 #if (DEVELOPMENT || DEBUG)
 uint32_t	vm_page_creation_throttled_hard = 0;
 uint32_t	vm_page_creation_throttled_soft = 0;
+<<<<<<< HEAD
 uint64_t	vm_page_creation_throttle_avoided = 0;
+=======
+>>>>>>> origin/10.10
 #endif /* DEVELOPMENT || DEBUG */
 
 static int
@@ -724,7 +739,6 @@ no_throttle:
 	return (0);
 }
 
-
 /*
  * check for various conditions that would
  * prevent us from creating a ZF page...
@@ -775,6 +789,7 @@ vm_fault_check(vm_object_t object, vm_page_t m, vm_page_t first_m, boolean_t int
 			return (VM_FAULT_RETRY);
 		}
 	}
+<<<<<<< HEAD
 	if (page_throttle == TRUE) {
 		if ((throttle_delay = vm_page_throttled(FALSE))) {
 			/*
@@ -784,6 +799,16 @@ vm_fault_check(vm_object_t object, vm_page_t m, vm_page_t first_m, boolean_t int
 			if (m != VM_PAGE_NULL)
 				VM_PAGE_FREE(m);
 			vm_fault_cleanup(object, first_m);
+=======
+	if (page_throttle == TRUE && (throttle_delay = vm_page_throttled(FALSE))) {
+	        /*
+		 * we're throttling zero-fills...
+		 * treat this as if we couldn't grab a page
+		 */
+	        if (m != VM_PAGE_NULL)
+		        VM_PAGE_FREE(m);
+		vm_fault_cleanup(object, first_m);
+>>>>>>> origin/10.10
 
 			VM_DEBUG_EVENT(vmf_check_zfdelay, VMF_CHECK_ZFDELAY, DBG_FUNC_NONE, throttle_delay, 0, 0, 0);
 
@@ -5507,6 +5532,7 @@ done:
 		throttle_lowpri_io(1);
 	} else {
 		if (kr == KERN_SUCCESS && type_of_fault != DBG_CACHE_HIT_FAULT && type_of_fault != DBG_GUARD_FAULT) {
+<<<<<<< HEAD
 
 			if ((throttle_delay = vm_page_throttled(TRUE))) {
 
@@ -5526,6 +5552,23 @@ done:
 	throttle_lowpri_io(TRUE);
 
 >>>>>>> origin/10.8
+=======
+
+			if ((throttle_delay = vm_page_throttled(TRUE))) {
+
+				if (vm_debug_events) {
+					if (type_of_fault == DBG_COMPRESSOR_FAULT)
+						VM_DEBUG_EVENT(vmf_compressordelay, VMF_COMPRESSORDELAY, DBG_FUNC_NONE, throttle_delay, 0, 0, 0);
+					else if (type_of_fault == DBG_COW_FAULT)
+						VM_DEBUG_EVENT(vmf_cowdelay, VMF_COWDELAY, DBG_FUNC_NONE, throttle_delay, 0, 0, 0);
+					else
+						VM_DEBUG_EVENT(vmf_zfdelay, VMF_ZFDELAY, DBG_FUNC_NONE, throttle_delay, 0, 0, 0);
+				}
+				delay(throttle_delay);
+			}
+		}
+	}
+>>>>>>> origin/10.10
 	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, 
 			      (MACHDBG_CODE(DBG_MACH_VM, 2)) | DBG_FUNC_END,
 			      ((uint64_t)vaddr >> 32),
@@ -6785,7 +6828,8 @@ vm_page_validate_cs_mapped(
 	kern_return_t		kr;
 	memory_object_t		pager;
 	void			*blobs;
-	boolean_t		validated, tainted;
+	boolean_t		validated;
+	unsigned			tainted;
 
 	assert(page->busy);
 	vm_object_lock_assert_exclusive(page->object);
@@ -6847,6 +6891,7 @@ vm_page_validate_cs_mapped(
 	}
 
 	/* verify the SHA1 hash for this page */
+	tainted = 0;
 	validated = cs_validate_page(blobs,
 				     offset + object->paging_offset,
 				     (const void *)kaddr,
@@ -6854,7 +6899,8 @@ vm_page_validate_cs_mapped(
 
 	page->cs_validated = validated;
 	if (validated) {
-		page->cs_tainted = tainted;
+		page->cs_tainted = !!(tainted & CS_VALIDATE_TAINTED);
+		page->cs_nx = !!(tainted & CS_VALIDATE_NX);
 	}
 }
 

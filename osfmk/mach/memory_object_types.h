@@ -450,6 +450,9 @@ struct upl_page_info {
 		cs_validated:1,	/* CODE SIGNING: page was validated */
 		cs_tainted:1,	/* CODE SIGNING: page is tainted */
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 		cs_nx:1,	/* CODE SIGNING: page is NX */
 		needed:1,	/* page should be left in cache on abort */
 		mark:1,		/* a mark flag for the creator to use as they wish */
@@ -765,6 +768,9 @@ typedef uint64_t upl_control_flags_t;
 	((upl)[(index)].cs_tainted = ((value) ? TRUE : FALSE))
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 #define UPL_SET_CS_NX(upl, index, value) \
 	((upl)[(index)].cs_nx = ((value) ? TRUE : FALSE))
 

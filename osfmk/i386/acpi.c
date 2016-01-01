@@ -285,6 +285,11 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 =======
 >>>>>>> origin/10.5
 
+#if HYPERVISOR
+	/* Notify hypervisor that we are about to sleep */
+	hv_suspend();
+#endif
+
 #if CONFIG_VMX
 	/* 
 	 * Turn off VT, otherwise switching to legacy mode will fail

@@ -4046,6 +4046,13 @@ dlil_event_internal(struct ifnet *ifp, struct kev_msg *event)
 	struct if_proto *tmp_ifproto_stack_arr[TMP_IF_PROTO_ARR_SIZE] = {NULL};
 	int tmp_ifproto_arr_idx = 0;
 	bool tmp_malloc = false;
+<<<<<<< HEAD
+=======
+
+	/* Get an io ref count if the interface is attached */
+	if (!ifnet_is_attached(ifp, 1))
+		goto done;
+>>>>>>> origin/10.10
 
 	/*
 	 * Pass the event to the interface filters
@@ -4067,10 +4074,13 @@ dlil_event_internal(struct ifnet *ifp, struct kev_msg *event)
 	if_flt_monitor_unbusy(ifp);
 	lck_mtx_unlock(&ifp->if_flt_lock);
 
+<<<<<<< HEAD
 	/* Get an io ref count if the interface is attached */
 	if (!ifnet_is_attached(ifp, 1))
 		goto done;
 
+=======
+>>>>>>> origin/10.10
 	/*
 	 * An embedded tmp_list_entry in if_proto may still get
 	 * over-written by another thread after giving up ifnet lock,

@@ -853,6 +853,7 @@ enum {
 
 /* Thermal Warning Level values
 <<<<<<< HEAD
+<<<<<<< HEAD
  *      kIOPMThermalLevelNormal   - under normal operating conditions
  *      kIOPMThermalLevelDanger   - thermal pressure may cause system slowdown
  *      kIOPMThermalLevelCritical - thermal conditions may cause imminent shutdown
@@ -878,16 +879,33 @@ enum {
  *      kIOPMThermalWarningLevelNormal - under normal operating conditions
  *      kIOPMThermalWarningLevelDanger - thermal pressure may cause system slowdown
  *      kIOPMThermalWarningLevelCrisis - thermal conditions may cause imminent shutdown
+=======
+ *      kIOPMThermalLevelNormal   - under normal operating conditions
+ *      kIOPMThermalLevelDanger   - thermal pressure may cause system slowdown
+ *      kIOPMThermalLevelCritical - thermal conditions may cause imminent shutdown
+>>>>>>> origin/10.10
  *
  * The platform may define additional thermal levels if necessary.
+ * Platform specific values are defined from 100 and above
  */
 enum {
-  kIOPMThermalWarningLevelNormal    = 0,
-  kIOPMThermalWarningLevelDanger    = 5,
-  kIOPMThermalWarningLevelCrisis    = 10
+  kIOPMThermalLevelNormal    = 0,
+  kIOPMThermalLevelDanger    = 5,
+  kIOPMThermalLevelCritical  = 10,
+
+  kIOPMThermalLevelWarning = 100,
+  kIOPMThermalLevelTrap    = 110,
+
+  kIOPMThermalLevelUnknown = 255,
 };
 
+<<<<<<< HEAD
 >>>>>>> origin/10.5
+=======
+#define kIOPMThermalWarningLevelNormal kIOPMThermalLevelNormal
+#define kIOPMThermalWarningLevelDanger kIOPMThermalLevelWarning
+#define kIOPMThermalWarningLevelCrisis kIOPMThermalLevelCritical
+>>>>>>> origin/10.10
 
 // PM Settings Controller setting types
 // Settings types used primarily with:

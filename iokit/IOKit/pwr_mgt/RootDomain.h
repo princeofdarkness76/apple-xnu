@@ -1024,8 +1024,11 @@ private:
     unsigned int            displayIdleForDemandSleep :1;
     unsigned int            darkWakeHibernateError  :1;
     unsigned int            thermalWarningState:1;
+<<<<<<< HEAD
     unsigned int            toldPowerdCapWillChange :1;
     unsigned int            displayPowerOnRequested:1;
+=======
+>>>>>>> origin/10.10
 
     uint8_t                 tasksSuspended;
     uint32_t                hibernateMode;
@@ -1234,6 +1237,7 @@ private:
     void        systemDidNotSleep( void );
     void        preventTransitionToUserActive( bool prevent );
     void        setThermalState(OSObject *value);
+<<<<<<< HEAD
     void        copySleepPreventersList(OSArray  **idleSleepList, OSArray  **systemSleepList);
 #endif /* XNU_KERNEL_PRIVATE */
 =======
@@ -1306,6 +1310,8 @@ private:
     void        systemDidNotSleep( void );
     void        preventTransitionToUserActive( bool prevent );
 >>>>>>> origin/10.9
+=======
+>>>>>>> origin/10.10
 #endif /* XNU_KERNEL_PRIVATE */
 >>>>>>> origin/10.6
 };

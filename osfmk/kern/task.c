@@ -1650,7 +1650,11 @@ task_terminate_internal(
 	task_unlock(task);
 
 	proc_set_task_policy(task, THREAD_NULL, TASK_POLICY_ATTRIBUTE,
+<<<<<<< HEAD
 			     TASK_POLICY_TERMINATED, TASK_POLICY_ENABLE);
+=======
+	                     TASK_POLICY_TERMINATED, TASK_POLICY_ENABLE);
+>>>>>>> origin/10.10
 
         /* Early object reap phase */
 

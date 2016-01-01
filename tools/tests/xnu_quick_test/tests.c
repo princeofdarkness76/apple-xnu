@@ -884,10 +884,26 @@ test_passed_exit:
  */
 int access_chmod_fchmod_test( void * the_argp )
 {
+<<<<<<< HEAD
 	int				my_err;
 	int				my_fd = -1;
 	char *			my_pathp = NULL;
 	struct stat		my_sb;
+=======
+	int		error_occurred;
+	int		my_err;
+	int		my_fd = -1;
+
+	char *		my_pathp = NULL;
+
+	uid_t		ruid;
+	struct stat	my_sb;
+
+	FILE *		file_handle;
+
+	kern_return_t	my_kr;
+
+>>>>>>> origin/10.10
 
 	my_pathp = (char *) malloc( PATH_MAX );
 	if ( my_pathp == NULL ) {
@@ -955,6 +971,86 @@ int access_chmod_fchmod_test( void * the_argp )
 		printf( "chmod call appears to have failed.  stat shows incorrect values in st_mode! \n" );
 		goto test_failed_exit;
 	}
+<<<<<<< HEAD
+=======
+	
+	
+	/*  another test for the access system call  -- refer ro radar# 6725311 */
+
+
+	/*
+	 * This test makes sure that the access system call does not give the current user extra
+	 * permissions on files the current user does not own. From radar #6725311, this could
+	 * happen when the current user calls access() on a file owned by the current user in
+	 * the same directory as the other files not owned by the current user.
+	 * 
+	 * Note: This test expects that the effective uid (euid) is set to root.
+	 *
+	 */
+
+	/* Create a file that root owns  */
+	file_handle = fopen(FILE_NOTME, "w");
+	fclose(file_handle);
+
+	/* Currently running as root (through settid manipulation), switch to running as the current user. */
+	ruid = getuid();
+	my_err = syscall(SYS_settid, ruid, KAUTH_GID_NONE);
+	if (my_err != 0) {
+		printf("Failed to settid to non-root with error %d:%s\n", errno, strerror(errno));
+		goto test_failed_exit;
+	}
+
+	/* Create a file that the current user owns  */
+	file_handle = fopen(FILE_ME, "w");
+	fclose(file_handle);
+
+	error_occurred = 0;
+
+	/* Try to remove the file owned by root (this should fail). */
+	my_err = unlink(FILE_NOTME);
+
+	if (my_err < 0) {
+		my_err = errno;
+	}
+
+	if (my_err == 0) {
+		printf("Unresolved: First attempt deleted '" FILE_NOTME "'! \n");
+		error_occurred = 1;
+	} else {
+		printf("Status: First attempt to delete '" FILE_NOTME "' failed with error %d - %s.\n", my_err, strerror( my_err ));
+
+		/* Set _DELETE_OK on a file that the current user owns */
+		access(FILE_ME, _DELETE_OK);
+
+		/* Try to remove the file owned by root again (should give us: EPERM [13]) */
+		my_err = unlink(FILE_NOTME);
+
+		if (my_err < 0) {
+		    my_err = errno;
+		}
+
+		if (my_err == 0) {
+			printf("Failed: Second attempt deleted '" FILE_NOTME "'!\n");
+			error_occurred = 1;
+		} else if (my_err == 13) {
+			printf("Passed: Second attempt to delete '" FILE_NOTME "' failed with error %d - %s.\n", my_err, strerror( my_err ));
+		} else {
+			printf("Failed: Second attempt to delete '" FILE_NOTME "' failed with error %d - %s.\n", my_err, strerror( my_err ));
+			error_occurred = 1;
+		}
+	}
+
+	/* Reset to running as root */
+	my_err = syscall(SYS_settid, KAUTH_UID_NONE, KAUTH_GID_NONE);
+	if (my_err != 0) {
+		printf("Failed to revert to root using settid with error %d:%s\n", errno, strerror(errno));
+		goto test_failed_exit;
+	}
+	if(error_occurred == 1) {
+		goto test_failed_exit;
+	}
+
+>>>>>>> origin/10.10
 
 	/* test fchmod */
 	my_fd = open( my_pathp, O_RDONLY, 0 );
@@ -4921,6 +5017,7 @@ int kqueue_tests( void * the_argp )
 			printf( "unlink failed with error %d - \"%s\" \n", errno, strerror( errno) );
 			exit( -1 );
 		}
+<<<<<<< HEAD
 
 		/* wait for parent to tell us to exit */
 		my_count = read( my_sockets[1], &my_buffer[0], 1 );
@@ -4933,6 +5030,860 @@ int kqueue_tests( void * the_argp )
 			exit( -1 );
 		}
 		exit(0);
+=======
+		goto test_failed_exit;
+	}
+
+	/* Try to read - this should fail since we opened file with O_WRONLY */
+	my_result = read( my_fd, &my_buffer[0], sizeof(my_buffer) );
+	my_err = errno;
+	if ( my_result != -1 ) {
+		printf( "read call should have failed with errno 9 (EBADF) \n" );
+		goto test_failed_exit;
+	}
+	else if ( my_err != EBADF ) {
+		printf( "read call should have failed with errno 9 (EBADF).  actually failed with %d - \"%s\" \n", my_err, strerror( my_err) );
+		goto test_failed_exit;
+	}
+
+	close( my_fd );
+
+	/*  test O_TRUNC and O_APPEND case */
+	my_fd = openat( my_dirfd, my_namep, (O_RDWR | O_TRUNC | O_APPEND), 0 );
+	if ( my_fd == -1 ) {
+		printf( "open call failed with error %d - \"%s\" \n", errno, strerror( errno) );
+		printf( "\t file we attempted to open -> \"%s\" \n", my_pathp );
+		goto test_failed_exit;
+	}
+
+	my_result = read( my_fd, &my_buffer[0], sizeof(my_buffer) );
+	if ( my_result == -1 ) {
+		printf( "read call failed with error %d - \"%s\" \n", errno, strerror( errno) );
+		goto test_failed_exit;
+	}
+	if ( my_result != 0 ) {
+		printf( "read failed - should have read 0 bytes. \n" );
+		goto test_failed_exit;
+	}
+
+	my_result = write( my_fd, "kat", 3 );
+	my_err = errno;
+	if ( my_result != 3 ) {
+		if ( sizeof( ssize_t ) > sizeof( int ) ) {
+			printf( "write failed.  should have written 3 bytes actually wrote -  %ld \n", (long int) my_result );
+		}
+		else {
+			printf( "write failed.  should have written 3 bytes actually wrote -  %d \n", (int) my_result );
+		}
+		goto test_failed_exit;
+	}
+
+	/* add some more data to the test file - this should be appended */
+	lseek( my_fd, 0, SEEK_SET );
+	my_result = write( my_fd, "zzz", 3 );
+	my_err = errno;
+	if ( my_result != 3 ) {
+		if ( sizeof( ssize_t ) > sizeof( int ) ) {
+			printf( "write failed.  should have written 3 bytes actually wrote -  %ld \n", (long int) my_result );
+		}
+		else {
+			printf( "write failed.  should have written 3 bytes actually wrote -  %d \n", (int) my_result );
+		}
+		goto test_failed_exit;
+	}
+
+	/* now verify the writes */
+	bzero( (void *)&my_buffer[0], sizeof(my_buffer) );
+	lseek( my_fd, 0, SEEK_SET );
+	my_result = read( my_fd, &my_buffer[0], sizeof(my_buffer) );
+	if ( my_result == -1 ) {
+		printf( "read call failed with error %d - \"%s\" \n", errno, strerror( errno) );
+		goto test_failed_exit;
+	}
+	if ( my_buffer[0] != 'k' || my_buffer[5] != 'z' ) {
+		printf( "read failed to get correct data \n" );
+		goto test_failed_exit;
+	}
+
+	/*
+	 * try to stat relative to non-directory fd.
+	 * It should fail with ENOTDIR.
+	 */
+	if ((fstatat( my_fd, my_namep, &my_sb, 0 )) != -1) {
+		printf( "fstatat call succeded with fd being a non-directory fd\n");
+		printf( "\t file we attempted to stat (relative to itself)-> \"%s\" \n", my_pathp );
+		goto test_failed_exit;
+	} else if (errno != ENOTDIR) {
+		printf( "fstatat call should have failed with errno 20 (ENOTDIR).  actually failed with %d - \"%s\" \n", my_err, strerror( my_err) );
+	}
+
+	/* test fstatat */
+	my_err = fstatat( my_dirfd, my_namep, &my_sb, 0 );
+	if ( my_err == -1 ) {
+		printf( "fstatat call failed with error %d - \"%s\" \n", errno, strerror( errno) );
+		goto test_failed_exit;
+	}
+	if ( my_sb.st_size != 6 ) {
+		printf( "fstatat call failed - st_size is wrong \n" );
+		goto test_failed_exit;
+	}
+	if ( !S_ISREG( my_sb.st_mode ) ) {
+		printf( "fstatat call failed - st_mode does not indicate regular file \n" );
+		goto test_failed_exit;
+	}
+
+	my_err = 0;
+	goto test_passed_exit;
+
+test_failed_exit:
+	my_err = -1;
+
+test_passed_exit:
+	if ( my_fd != -1 )
+		close( my_fd );
+
+	if ( my_pathp != NULL ) {
+		remove(my_pathp);
+		vm_deallocate(mach_task_self(), (vm_address_t)my_pathp, PATH_MAX);
+	}
+
+	if ( my_namep ) {
+		unlinkat( my_dirfd, my_pathp, 0 );
+		vm_deallocate(mach_task_self(), (vm_address_t)my_namep, NAME_MAX);
+	}
+
+	if ( my_dirfd != -1)
+		close(my_dirfd);
+
+	if ( my_dirpathp != NULL ) {
+		vm_deallocate(mach_task_self(), (vm_address_t)my_dirpathp, PATH_MAX);
+	}
+
+	return( my_err );
+}
+
+/*  **************************************************************************************************************
+ *	Test linkat, fstatat and unlinkat system calls.
+ *  **************************************************************************************************************
+ */
+int linkat_fstatat_unlinkat_test( void * the_argp )
+{
+	int			my_err;
+	int			my_dirfd = -1;
+	int			my_fd = -1;
+	char *			my_dirpathp = NULL;
+	char *			my_namep = NULL;
+	char *			my_pathp = NULL;
+	char *			my_name2p = NULL;
+	nlink_t			my_link_count;
+	ssize_t			my_result;
+	struct stat		my_sb;
+	kern_return_t           my_kr;
+
+
+	my_kr = vm_allocate((vm_map_t) mach_task_self(), (vm_address_t*)&my_dirpathp, PATH_MAX, VM_FLAGS_ANYWHERE);
+        if(my_kr != KERN_SUCCESS){
+                printf( "vm_allocate failed with error %d - \"%s\" \n", errno, strerror( errno) );
+                goto test_failed_exit;
+        }
+
+	*my_dirpathp = 0x00;
+	strlcat( my_dirpathp, &g_target_path[0], PATH_MAX );
+
+	my_dirfd = openat(AT_FDCWD, my_dirpathp, O_RDONLY, 0 );
+	if ( my_dirfd == -1 ) {
+		printf( "openat call failed with error %d - \"%s\" \n", errno, strerror( errno) );
+		printf( "\t Directory we attempted to open -> \"%s\" \n", my_dirpathp );
+		goto test_failed_exit;
+	}
+
+	my_kr = vm_allocate((vm_map_t) mach_task_self(), (vm_address_t*)&my_namep, NAME_MAX, VM_FLAGS_ANYWHERE);
+        if(my_kr != KERN_SUCCESS){
+                printf( "vm_allocate failed with error %d - \"%s\" \n", errno, strerror( errno) );
+                goto test_failed_exit;
+        }
+
+	*my_namep = 0x00;
+	if (my_pathp) {
+		*my_pathp = 0x00;
+	}
+
+	/* If dirpath is absolute, we can ask for an absolute path name to file back from create_random_name_at */
+	if (*my_dirpathp == '/') {
+		my_kr = vm_allocate((vm_map_t) mach_task_self(), (vm_address_t*)&my_pathp, PATH_MAX, VM_FLAGS_ANYWHERE);
+		if(my_kr != KERN_SUCCESS){
+			printf( "vm_allocate failed with error %d - \"%s\" \n", errno, strerror( errno) );
+			goto test_failed_exit;
+		}
+	}
+
+	/* create a test file */
+	my_err = create_random_name_at( my_dirfd, my_dirpathp, my_namep, NAME_MAX, my_pathp, PATH_MAX, 1 );
+	if ( my_err != 0 ) {
+		goto test_failed_exit;
+	}
+
+	my_kr = vm_allocate((vm_map_t) mach_task_self(), (vm_address_t*)&my_name2p, NAME_MAX, VM_FLAGS_ANYWHERE);
+        if(my_kr != KERN_SUCCESS){
+                printf( "vm_allocate failed with error %d - \"%s\" \n", errno, strerror( errno) );
+                goto test_failed_exit;
+        }
+
+	*my_name2p = 0x00;
+
+	/* now create a name for the link file */
+	strlcat( my_name2p, my_namep, NAME_MAX );
+	strlcat( my_name2p, "link", NAME_MAX );
+
+	/* get the current link count */
+	my_err = fstatat( my_dirfd, my_namep, &my_sb, 0 );
+	if ( my_err != 0 ) {
+		printf( "stat call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+	my_link_count = my_sb.st_nlink;
+
+	/* Double check with absolute path name */
+	if (my_pathp) {
+		my_err = fstatat(INVALID_FD, my_pathp, &my_sb, 0 );
+		if ( my_err != 0 ) {
+			printf( "fstatat with INVALID_FD and absolute pathname failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+			goto test_failed_exit;
+		}
+		if (my_link_count != my_sb.st_nlink) {
+			printf( "fstatat call did not return correct number of links" );
+			goto test_failed_exit;
+		}
+	}
+
+	/* check file size (should be 0) */
+	if ( my_sb.st_size != 0 ) {
+		printf( "stat structure looks bogus for test file \"%s\" \n", my_pathp );
+		printf( "st_size is not 0 \n" );
+		goto test_failed_exit;
+	}
+
+	/* change file size */
+	my_fd = openat(my_dirfd, my_namep, O_RDWR, 0 );
+	if ( my_fd == -1 ) {
+		printf( "openat call failed with error %d - \"%s\" \n", errno, strerror( errno) );
+		printf( "\t file we attempted to open -> \"%s\" \n", my_pathp );
+		goto test_failed_exit;
+	}
+
+	my_result = write( my_fd, "kat", 3 );
+	my_err = errno;
+	if ( my_result != 3 ) {
+		if ( sizeof( ssize_t ) > sizeof( int ) ) {
+			printf( "write failed.  should have written 3 bytes actually wrote -  %ld \n", (long int) my_result );
+		}
+		else {
+			printf( "write failed.  should have written 3 bytes actually wrote -  %d \n", (int) my_result );
+		}
+		goto test_failed_exit;
+	}
+	close( my_fd );
+	my_fd = -1;
+
+	/* now link another file to our test file and recheck link count */
+	/* N.B. - HFS only supports AT_SYMLINK_FOLLOW */
+	my_err = linkat( my_dirfd, my_namep, my_dirfd, my_name2p, AT_SYMLINK_FOLLOW );
+	if ( my_err != 0 ) {
+		printf( "linkat call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+	my_err = fstatat( my_dirfd, my_pathp, &my_sb, 0 );
+	if ( my_err != 0 ) {
+		printf( "fstatat call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+	if ( (my_link_count + 1) != my_sb.st_nlink ) {
+		printf( "stat structure looks bogus for test file \"%s\" \n", my_pathp );
+		printf( "incorrect st_nlink \n" );
+		goto test_failed_exit;
+	}
+
+	/* check file size (should be 3) */
+	if ( my_sb.st_size != 3 ) {
+		printf( "stat structure looks bogus for test file \"%s\" \n", my_pathp );
+		printf( "st_size is not 3 \n" );
+		goto test_failed_exit;
+	}
+
+	/* now make sure unlink works OK */
+	my_err = unlinkat( my_dirfd, my_name2p, 0 );
+	if ( my_err != 0 ) {
+		printf( "unlinkat call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+	my_err = fstatat( my_dirfd, my_namep, &my_sb, 0 );
+	if ( my_err != 0 ) {
+		printf( "stat call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+	if ( my_link_count != my_sb.st_nlink ) {
+		printf( "stat structure looks bogus for test file \"%s\" \n", my_pathp );
+		printf( "incorrect st_nlink \n" );
+		goto test_failed_exit;
+	}
+
+	my_err = 0;
+	goto test_passed_exit;
+
+test_failed_exit:
+	my_err = -1;
+
+test_passed_exit:
+	if ( my_fd != -1 )
+		close( my_fd );
+
+	if ( my_name2p != NULL ) {
+		(void)unlinkat( my_dirfd, my_name2p, 0 );
+		vm_deallocate(mach_task_self(), (vm_address_t)my_name2p, NAME_MAX);
+	}
+
+	if ( my_namep != NULL ) {
+		(void)unlinkat( my_dirfd, my_name2p, 0 );
+		vm_deallocate(mach_task_self(), (vm_address_t)my_name2p, NAME_MAX);
+	}
+
+	if ( my_pathp != NULL ) {
+		remove( my_pathp );
+		vm_deallocate(mach_task_self(), (vm_address_t)my_pathp, PATH_MAX);
+	}
+
+	if ( my_dirpathp != NULL ) {
+		vm_deallocate(mach_task_self(), (vm_address_t)my_dirpathp, PATH_MAX);
+	}
+
+	if ( my_dirfd != -1 )
+		close( my_dirfd );
+	
+	return( my_err );
+}
+
+/*  **************************************************************************************************************
+ *	Test faccessat, fchmodat and fchmod system calls.
+ *  **************************************************************************************************************
+ */
+int faccessat_fchmodat_fchmod_test( void * the_argp )
+{
+	int		error_occurred;
+	int             is_absolute_path = 0;
+	int		my_err;
+	int		my_dirfd = -1;
+	int		my_fd = -1;
+
+	char *		my_dirpathp = NULL;
+	char *		my_namep = NULL;
+	char *		my_pathp = NULL;
+
+	uid_t		ruid;
+	struct stat	my_sb;
+
+	FILE *		file_handle;
+
+	kern_return_t	my_kr;
+
+
+        my_kr = vm_allocate((vm_map_t) mach_task_self(), (vm_address_t*)&my_dirpathp, PATH_MAX, VM_FLAGS_ANYWHERE);
+        if(my_kr != KERN_SUCCESS){
+                printf( "vm_allocate failed with error %d - \"%s\" \n", errno, strerror( errno) );
+                goto test_failed_exit;
+        }
+
+	*my_dirpathp = 0x00;
+	strlcat( my_dirpathp, &g_target_path[0], PATH_MAX );
+
+	/*
+	 * Some basic openat validation. If pathname is absolute, an invalid fd should
+	 * not matter.
+	 */
+
+	if (*my_dirpathp == '/') {
+		is_absolute_path = 1;
+		my_dirfd = openat(INVALID_FD, my_dirpathp, O_RDONLY, 0 );
+		if ( my_dirfd == -1 ) {
+			printf( "openat call failed with error %d - \"%s\" \n", errno, strerror( errno) );
+			printf( "\t Directory we attempted to open -> \"%s\" \n", my_dirpathp );
+			printf( "\t Was Absolute pathname, invalid fd, %d, provided as input \n", INVALID_FD);
+			goto test_failed_exit;
+		}
+		close( my_dirfd );
+	}
+
+	my_dirfd = openat(AT_FDCWD, my_dirpathp, O_RDONLY, 0 );
+	if ( my_dirfd == -1 ) {
+		printf( "openat call failed with error %d - \"%s\" \n", errno, strerror( errno) );
+		printf( "\t Directory we attempted to open -> \"%s\" \n", my_dirpathp );
+		goto test_failed_exit;
+	}
+
+	my_kr = vm_allocate((vm_map_t) mach_task_self(), (vm_address_t*)&my_namep, NAME_MAX, VM_FLAGS_ANYWHERE);
+        if(my_kr != KERN_SUCCESS){
+                printf( "vm_allocate failed with error %d - \"%s\" \n", errno, strerror( errno) );
+                goto test_failed_exit;
+        }
+
+	*my_namep = 0x00;
+
+	if (is_absolute_path) {
+		my_kr = vm_allocate((vm_map_t) mach_task_self(), (vm_address_t*)&my_pathp, PATH_MAX, VM_FLAGS_ANYWHERE);
+		if(my_kr != KERN_SUCCESS){
+			printf( "vm_allocate failed with error %d - \"%s\" \n", errno, strerror( errno) );
+			goto test_failed_exit;
+		}
+
+		*my_pathp = 0x00;
+	}
+
+	/* create a test file */
+	my_err = create_random_name_at(my_dirfd, my_dirpathp, my_namep, NAME_MAX, my_pathp, PATH_MAX, 1);
+	if ( my_err != 0 ) {
+		goto test_failed_exit;
+	}
+
+	/* test chmod */
+	my_err = fchmodat(my_dirfd, my_namep, S_IRWXU, 0);
+	if ( my_err == -1 ) {
+		printf( "chmod call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+
+	my_err = fchmodat( my_dirfd, my_namep, (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP), 0 );
+	if ( my_err == -1 ) {
+		printf( "chmod call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+
+	/* test access - this should fail */
+	my_err = faccessat( my_dirfd, my_namep, (X_OK), 0 );
+	if ( my_err == 0 ) {
+		printf( "access call should have failed, but did not. \n" );
+		goto test_failed_exit;
+	}
+	else if ( my_err == -1  ) {
+		int tmp = 0;
+		tmp = getuid( );
+
+		/* special case when running as root - we get back EPERM when running as root */
+		my_err = errno;
+		if ( ( tmp == 0 && my_err != EPERM) || (tmp != 0 && my_err != EACCES) ) {
+			printf( "access failed with errno %d - %s. \n", my_err, strerror( my_err ) );
+			goto test_failed_exit;
+		}
+	}
+
+	/* verify correct modes are set */
+	/* First check that Absolute path works even with an invalid FD */
+	if (is_absolute_path) {
+		my_err = fstatat( INVALID_FD, my_pathp, &my_sb, 0 );
+		if ( my_err != 0 ) {
+			printf( "fstatat call failed with an absolute pathname.  got errno %d - %s. \n", errno, strerror( errno ) );
+			goto test_failed_exit;
+		}
+	}
+
+	my_err = fstatat( my_dirfd, my_namep, &my_sb, 0 );
+	if ( my_err != 0 ) {
+		printf( "stat call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+
+	if ( (my_sb.st_mode & (S_IRWXO | S_IXGRP)) != 0 ||
+	    (my_sb.st_mode & (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP)) == 0 ) {
+		printf( "chmod call appears to have failed.  stat shows incorrect values in st_mode! \n" );
+		goto test_failed_exit;
+	}
+
+
+	/*  another test for the access system call  -- refer ro radar# 6725311 */
+
+
+	/*
+	 * This test makes sure that the access system call does not give the current user extra
+	 * permissions on files the current user does not own. From radar #6725311, this could
+	 * happen when the current user calls access() on a file owned by the current user in
+	 * the same directory as the other files not owned by the current user.
+	 *
+	 * Note: This test expects that the effective uid (euid) is set to root.
+	 *
+	 */
+
+	/* Create a file that root owns  */
+	file_handle = fopen(FILE_NOTME, "w");
+	fclose(file_handle);
+
+	/* Currently running as root (through settid manipulation), switch to running as the current user. */
+	ruid = getuid();
+	my_err = syscall(SYS_settid, ruid, KAUTH_GID_NONE);
+	if (my_err != 0) {
+		printf("Failed to settid to non-root with error %d:%s\n", errno, strerror(errno));
+		goto test_failed_exit;
+	}
+
+	/* Create a file that the current user owns  */
+	file_handle = fopen(FILE_ME, "w");
+	fclose(file_handle);
+
+	error_occurred = 0;
+
+	/* Try to remove the file owned by root (this should fail). */
+	my_err = unlinkat( AT_FDCWD, FILE_NOTME, 0 );
+
+	if (my_err < 0) {
+		my_err = errno;
+	}
+
+	if (my_err == 0) {
+		printf("Unresolved: First attempt deleted '" FILE_NOTME "'! \n");
+		error_occurred = 1;
+	} else {
+		printf("Passed: First attempt to delete '" FILE_NOTME "'  failed with error %d - %s.\n", my_err, strerror( my_err ));
+
+		/* Set _DELETE_OK on a file that the current user owns */
+		faccessat(AT_FDCWD, FILE_ME, _DELETE_OK, 0 );
+
+		/* Try to remove the file owned by root again (should give us: EPERM [13]) */
+		my_err = unlinkat(AT_FDCWD, FILE_NOTME, 0);
+
+		if (my_err < 0) {
+			my_err = errno;
+		}
+
+		if (my_err == 0) {
+			printf("Failed: Second attempt deleted '" FILE_NOTME "'!\n");
+			error_occurred = 1;
+		} else if (my_err == 13) {
+			printf("Passed: Second attempt to delete '" FILE_NOTME "' failed with error %d - %s.\n", my_err, strerror( my_err ));
+		} else {
+			printf("Failed: Second attempt to delete '" FILE_NOTME "' failed with error %d - %s.\n", my_err, strerror( my_err ));
+			error_occurred = 1;
+		}
+	}
+
+	/* Reset to running as root */
+	my_err = syscall(SYS_settid, KAUTH_UID_NONE, KAUTH_GID_NONE);
+	if (my_err != 0) {
+		printf("Failed to settid revert to root with error %d:%s\n", errno, strerror(errno));
+		goto test_failed_exit;
+	}
+
+	if(error_occurred == 1) {
+		goto test_failed_exit;
+	}
+
+
+	/* end of test*/
+
+
+	/* test fchmod */
+	my_fd = openat( my_dirfd, my_namep, O_RDONLY, 0);
+	if ( my_fd == -1 ) {
+		printf( "openat call failed with error %d - \"%s\" \n", errno, strerror( errno) );
+		printf( "\t we attempted to open -> \"%s\" \n", &g_target_path[0] );
+		goto test_failed_exit;
+	}
+
+	my_err = fchmod( my_fd, S_IRWXU );
+	if ( my_err == -1 ) {
+		printf( "fchmod call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+
+	my_err = fstatat( INVALID_FD, my_pathp, &my_sb, 0 );
+	if ( my_err != 0 ) {
+		printf( "stat call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+
+	/* verify correct modes are set */
+	if ( (my_sb.st_mode & (S_IRWXG | S_IRWXO)) != 0 ||
+	    (my_sb.st_mode & (S_IRWXU)) == 0 ) {
+		printf( "fchmod call appears to have failed.  stat shows incorrect values in st_mode! \n" );
+		goto test_failed_exit;
+	}
+
+	my_err = 0;
+	goto test_passed_exit;
+
+test_failed_exit:
+	my_err = -1;
+
+test_passed_exit:
+	if ( my_fd != -1 )
+		close( my_fd );
+	if ( my_pathp != NULL ) {
+		remove( my_pathp );
+		vm_deallocate(mach_task_self(), (vm_address_t)my_pathp, PATH_MAX);
+	}
+	if ( my_namep != NULL ) {
+		unlinkat(my_dirfd, my_namep, 0);
+		vm_deallocate(mach_task_self(), (vm_address_t)my_pathp, NAME_MAX);
+
+	}
+
+	if ( my_dirfd != -1)
+		close( my_dirfd);
+
+	if ( my_dirpathp != NULL ) {
+		vm_deallocate(mach_task_self(), (vm_address_t)my_pathp, PATH_MAX);
+	}
+	
+	return( my_err );
+}
+
+/*  **************************************************************************************************************
+ *	Test fchownat, fchown, readlinkat, symlinkat system calls.
+ *  **************************************************************************************************************
+ */
+int fchownat_fchown_symlinkat_test( void * the_argp )
+{
+	int			my_err, my_group_count, i;
+	int			my_fd = -1;
+	int			my_dirfd = -1;
+	char *			my_dirpathp = NULL;
+	char *			my_namep = NULL;
+	char *			my_link_namep = NULL;
+	char *			my_pathp = NULL;
+	char *			my_link_pathp = NULL;
+	int			is_absolute_path = 0;
+	uid_t			my_orig_uid;
+	gid_t			my_orig_gid, my_new_gid1 = 0, my_new_gid2 = 0;
+	ssize_t			my_result;
+	struct stat		my_sb;
+	gid_t			my_groups[ NGROUPS_MAX ];
+	char			my_buffer[ 64 ];
+	kern_return_t           my_kr;
+
+
+	my_kr = vm_allocate((vm_map_t) mach_task_self(), (vm_address_t*)&my_dirpathp, PATH_MAX, VM_FLAGS_ANYWHERE);
+        if(my_kr != KERN_SUCCESS){
+                printf( "vm_allocate failed with error %d - \"%s\" \n", errno, strerror( errno) );
+                goto test_failed_exit;
+        }
+
+	*my_dirpathp = 0x00;
+	strlcat( my_dirpathp, &g_target_path[0], PATH_MAX );
+
+	/*
+	 * Some basic openat validation. If pathname is absolute, an invalid fd should
+	 * not matter.
+	 */
+	if (*my_dirpathp == '/') {
+		is_absolute_path = 1;
+		my_dirfd = openat(INVALID_FD, my_dirpathp, O_RDONLY, 0 );
+		if ( my_dirfd == -1 ) {
+			printf( "openat call failed with error %d - \"%s\" \n", errno, strerror( errno) );
+			printf( "\t Directory we attempted to open -> \"%s\" \n", my_dirpathp );
+			printf( "\t Was Absolute pathname, invalid fd, %d, provided as input \n", INVALID_FD);
+			goto test_failed_exit;
+		}
+		close( my_dirfd );
+	}
+
+	my_dirfd = openat(AT_FDCWD, my_dirpathp, O_RDONLY, 0 );
+	if ( my_dirfd == -1 ) {
+		printf( "openat call failed with error %d - \"%s\" \n", errno, strerror( errno) );
+		printf( "\t Directory we attempted to open -> \"%s\" \n", my_dirpathp );
+		goto test_failed_exit;
+	}
+
+	my_kr = vm_allocate((vm_map_t) mach_task_self(), (vm_address_t*)&my_namep, NAME_MAX, VM_FLAGS_ANYWHERE);
+        if(my_kr != KERN_SUCCESS){
+                printf( "vm_allocate failed with error %d - \"%s\" \n", errno, strerror( errno) );
+                goto test_failed_exit;
+        }
+
+	*my_namep = 0x00;
+
+	if (is_absolute_path) {
+		my_kr = vm_allocate((vm_map_t) mach_task_self(), (vm_address_t*)&my_pathp, PATH_MAX, VM_FLAGS_ANYWHERE);
+		if(my_kr != KERN_SUCCESS){
+			printf( "vm_allocate failed with error %d - \"%s\" \n", errno, strerror( errno) );
+			goto test_failed_exit;
+		}
+
+		*my_pathp = 0x00;
+	}
+
+	/* create a test file */
+	my_err = create_random_name_at(my_dirfd, my_dirpathp, my_namep, NAME_MAX, my_pathp, PATH_MAX, 1);
+	if ( my_err != 0 ) {
+		goto test_failed_exit;
+	}
+
+	my_kr = vm_allocate((vm_map_t) mach_task_self(), (vm_address_t*)&my_link_namep, NAME_MAX, VM_FLAGS_ANYWHERE);
+        if(my_kr != KERN_SUCCESS){
+                printf( "vm_allocate failed with error %d - \"%s\" \n", errno, strerror( errno) );
+                goto test_failed_exit;
+        }
+
+	*my_link_namep = 0x00;
+
+	if (is_absolute_path) {
+		my_kr = vm_allocate((vm_map_t) mach_task_self(), (vm_address_t*)&my_link_pathp, PATH_MAX, VM_FLAGS_ANYWHERE);
+		if(my_kr != KERN_SUCCESS){
+			printf( "vm_allocate failed with error %d - \"%s\" \n", errno, strerror( errno) );
+			goto test_failed_exit;
+		}
+
+		*my_link_pathp = 0x00;
+	}
+
+	/* get a name for the link (to create the symlink later) */
+	my_err = create_random_name_at(my_dirfd, my_dirpathp, my_link_namep, NAME_MAX, my_link_pathp, PATH_MAX, 0 );
+	if ( my_err != 0 ) {
+		goto test_failed_exit;
+	}
+
+	if ( !_prime_groups() ) {
+		goto test_failed_exit;
+	}
+
+	/* set up by getting a list of groups */
+	my_group_count = getgroups( NGROUPS_MAX, &my_groups[0] );
+
+	if ( my_group_count == -1 || my_group_count < 1 ) {
+		printf( "getgroups call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+
+	my_err = fstatat( my_dirfd, my_namep, &my_sb, 0 );
+	if ( my_err != 0 ) {
+		printf( "stat call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+
+	/* now change group owner to something other than current value */
+	my_orig_gid = my_sb.st_gid;
+	my_orig_uid = my_sb.st_uid;
+
+	for ( i = 0; i < my_group_count; i++ ) {
+		if ( my_orig_gid != my_groups[ i ] ) {
+			if ( my_new_gid1 == 0 ) {
+				my_new_gid1 = my_groups[ i ];
+			}
+			else if( my_new_gid1 != my_groups[ i ] ) {
+				my_new_gid2 = my_groups[ i ];
+				break;
+			}
+		}
+	}
+	if ( i >= my_group_count ) {
+		printf( "not enough groups to choose from.  st_gid is the same as current groups! \n" );
+		goto test_failed_exit;
+	}
+
+	my_err = fchownat( my_dirfd, my_namep, my_orig_uid, my_new_gid1, 0 );
+	if ( my_err != 0 ) {
+		printf( "chown call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+
+	/* make sure the group owner was changed */
+	my_err = fstatat( my_dirfd, my_namep, &my_sb, 0 );
+	if ( my_err != 0 ) {
+		printf( "stat call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+	if ( my_sb.st_gid == my_orig_gid ) {
+		printf( "chown call failed.  st_gid is not correct! \n" );
+		goto test_failed_exit;
+	}
+
+	/* change group owner back using fchown */
+	if (is_absolute_path) {
+		my_fd = openat( INVALID_FD, my_pathp, O_RDWR, 0 );
+	} else {
+		my_fd = openat( my_dirfd, my_namep, O_RDWR, 0 );
+	}
+
+	if ( my_fd == -1 ) {
+		printf( "openat call failed with error %d - \"%s\" \n", errno, strerror( errno) );
+		printf( "\t we attempted to open -> \"%s\" \n", &g_target_path[0] );
+		goto test_failed_exit;
+	}
+
+	my_err = fchown( my_fd, my_orig_uid, my_new_gid2 );
+	if ( my_err != 0 ) {
+		printf( "fchown call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+
+	/* make sure the group owner was changed back to the original value */
+	my_err = fstatat( my_dirfd, my_namep, &my_sb, 0 );
+	if ( my_err != 0 ) {
+		printf( "fstatat call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+	if ( my_sb.st_gid == my_new_gid1 ) {
+		printf( "fchown call failed.  st_gid is not correct! \n" );
+		goto test_failed_exit;
+	}
+
+	/* create a link file and test fstatat(..., AT_SYMLINK_NOFOLLOW) */
+	my_err = symlinkat( my_namep, my_dirfd, my_link_namep );
+	if ( my_err != 0 ) {
+		printf( "symlinkat call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+
+	my_err = fstatat( my_dirfd, my_link_namep, &my_sb, AT_SYMLINK_NOFOLLOW );
+	if ( my_err != 0 ) {
+		printf( "fstatat call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+
+	/* now change group owner to something other than current value */
+	my_orig_gid = my_sb.st_gid;
+	my_orig_uid = my_sb.st_uid;
+	my_err = fchownat( my_dirfd, my_link_namep, my_orig_uid, my_new_gid1, AT_SYMLINK_NOFOLLOW );
+	if ( my_err != 0 ) {
+		printf( "fchownat call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+
+	/* make sure the group owner was changed to new value */
+	my_err = fstatat( my_dirfd, my_link_namep, &my_sb, AT_SYMLINK_NOFOLLOW );
+	if ( my_err != 0 ) {
+		printf( "fstatat call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+	if ( my_sb.st_gid == my_new_gid2 ) {
+		printf( "fchownat call failed.  st_gid is not correct! \n" );
+		goto test_failed_exit;
+	}
+
+	/* make sure we can read the symlink file */
+	my_result = readlinkat( my_dirfd, my_link_namep, &my_buffer[0], sizeof(my_buffer) );
+	if ( my_result == -1 ) {
+		printf( "readlinkat call failed.  got errno %d - %s. \n", errno, strerror( errno ) );
+		goto test_failed_exit;
+	}
+	/* make sure we read some data */
+	if ( my_result < 1 ) {
+		printf( "readlinkat failed to read any data. \n" );
+		goto test_failed_exit;
+	}
+
+	my_err = 0;
+	goto test_passed_exit;
+
+test_failed_exit:
+	my_err = -1;
+
+test_passed_exit:
+	if ( my_fd != -1 )
+		close( my_fd );
+	if  ( my_namep ) {
+		unlinkat( my_dirfd, my_namep, 0);
+		vm_deallocate(mach_task_self(), (vm_address_t)my_namep, NAME_MAX);
+	}
+	if ( my_pathp != NULL ) {
+		remove( my_pathp );
+		vm_deallocate(mach_task_self(), (vm_address_t)my_pathp, PATH_MAX);
+>>>>>>> origin/10.10
 	}
 	
 	/* parent process - wait for child to spin up */

@@ -73,6 +73,10 @@
 
 task_t	bsd_init_task = TASK_NULL;
 boolean_t init_task_died;
+<<<<<<< HEAD
+=======
+char	init_task_failure_data[1024];
+>>>>>>> origin/10.10
 extern unsigned int not_in_kdp; /* Skip acquiring locks if we're in kdp */
  
 thread_t get_firstthread(task_t);

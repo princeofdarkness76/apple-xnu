@@ -744,6 +744,27 @@ apple_protect_pager_data_request(
 			 * Decryption failed.  Abort the fault.
 			 */
 			retval = KERN_ABORTED;
+<<<<<<< HEAD
+=======
+		} else {
+			/*
+			 * Validate the original page...
+			 */
+			if (src_page->object->code_signed) {
+				vm_page_validate_cs_mapped(
+					src_page,
+					(const void *) src_vaddr);
+			}
+			/*
+			 * ... and transfer the results to the destination page.
+			 */
+			UPL_SET_CS_VALIDATED(upl_pl, cur_offset / PAGE_SIZE,
+					     src_page->cs_validated);
+			UPL_SET_CS_TAINTED(upl_pl, cur_offset / PAGE_SIZE,
+					   src_page->cs_tainted);
+			UPL_SET_CS_NX(upl_pl, cur_offset / PAGE_SIZE,
+					   src_page->cs_nx);
+>>>>>>> origin/10.10
 		}
 
 		assert(src_page->busy);

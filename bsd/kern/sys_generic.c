@@ -1908,7 +1908,12 @@ poll_callback(__unused struct kqueue *kq, struct kevent_internal_s *kevp, void *
 		if (fds->revents & POLLHUP)
 			mask = (POLLIN | POLLRDNORM | POLLPRI | POLLRDBAND );
 		else {
+<<<<<<< HEAD
 			mask = (POLLIN | POLLRDNORM);
+=======
+			if ((kevp->flags & EV_ERROR) == 0 && kevp->data != 0)
+				mask = (POLLIN | POLLRDNORM );
+>>>>>>> origin/10.10
 			if (kevp->flags & EV_OOBAND)
 				mask |= (POLLPRI | POLLRDBAND);
 		}

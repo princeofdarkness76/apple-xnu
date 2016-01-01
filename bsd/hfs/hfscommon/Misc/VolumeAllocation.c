@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
 >>>>>>> origin/10.6
+=======
+ * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+>>>>>>> origin/10.10
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -189,6 +193,7 @@ Optimization Routines
 					
 */
 
+<<<<<<< HEAD
 
 #include <sys/types.h>
 #include <sys/buf.h>
@@ -204,6 +209,18 @@ Optimization Routines
 =======
 #include <kern/kalloc.h>
 >>>>>>> origin/10.6
+=======
+#include <sys/types.h>
+#include <sys/buf.h>
+
+
+#if !HFS_ALLOC_TEST
+
+#include "../../hfs_macos_defs.h"
+#include <sys/systm.h>
+#include <sys/ubc.h>
+#include <kern/kalloc.h>
+>>>>>>> origin/10.10
 
 #include "../../hfs_macos_defs.h"
 #include <sys/systm.h>
@@ -211,10 +228,17 @@ Optimization Routines
 #include <kern/kalloc.h>
 /* For VM Page size */
 #include <libkern/libkern.h>
+<<<<<<< HEAD
 #include <vfs/vfs_journal.h>
 #include "../../hfs.h"
 #include "../../hfs_endian.h"
 #include "../headers/FileMgrInternal.h"
+=======
+#include "../../hfs.h"
+#include "../../hfs_endian.h"
+#include "../headers/FileMgrInternal.h"
+#include <vfs/vfs_journal.h>
+>>>>>>> origin/10.10
 
 #endif // !HFS_ALLOC_TEST
 
@@ -512,8 +536,11 @@ static void remove_free_extent_cache(struct hfsmount *hfsmp, u_int32_t startBloc
 static Boolean add_free_extent_cache(struct hfsmount *hfsmp, u_int32_t startBlock, u_int32_t blockCount);
 static void sanity_check_free_ext(struct hfsmount *hfsmp, int check_allocated);
 
+<<<<<<< HEAD
 static void hfs_release_reserved(hfsmount_t *hfsmp, struct rl_entry *range, int list);
 
+=======
+>>>>>>> origin/10.10
 /* Functions for getting free exents */
 
 typedef struct bitmap_context {
@@ -6438,6 +6465,7 @@ static int clzll(uint64_t x)
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 #if !HFS_ALLOC_TEST
 =======
 	if (err == noErr) {
@@ -6452,6 +6480,9 @@ static int clzll(uint64_t x)
 
 	return err;
 >>>>>>> origin/10.5
+=======
+#if !HFS_ALLOC_TEST
+>>>>>>> origin/10.10
 
 static errno_t get_more_bits(bitmap_context_t *bitmap_ctx)
 {
@@ -6491,7 +6522,11 @@ static errno_t get_more_bits(bitmap_context_t *bitmap_ctx)
 		hfs_journal_lock(hfsmp);
 
 		/* Flush the journal and wait for all I/Os to finish up */
+<<<<<<< HEAD
 		error = hfs_flush(hfsmp, HFS_FLUSH_JOURNAL_META);
+=======
+		error = hfs_journal_flush(hfsmp, TRUE);
+>>>>>>> origin/10.10
 		if (error) {
 			hfs_journal_unlock(hfsmp);
 			return error;
@@ -6548,8 +6583,11 @@ static errno_t get_more_bits(bitmap_context_t *bitmap_ctx)
 	if (error)
 		return error;
 
+<<<<<<< HEAD
 	assert(iosize != 0);
 
+=======
+>>>>>>> origin/10.10
 	/* hfs_scan_range_size should have verified startbit.  Convert it to bytes */
 	byte_offset = start_bit / kBitsPerByte;
 
@@ -6643,6 +6681,9 @@ static int bit_count_set(void *bitmap, int start, int end)
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 /* Returns the number of a run of cleared bits:
  *  bitmap is a single chunk of memory being examined
  *  start: the start bit relative to the current buffer to be examined; start is inclusive.
@@ -6652,6 +6693,7 @@ static int bit_count_clr(void *bitmap, int start, int end)
 {
 	if (start == end)
 		return 0;
+<<<<<<< HEAD
 =======
 		HFS_MOUNT_LOCK(vcb, TRUE);
 		if (free_extent_cache_active(vcb) == 0) {
@@ -6666,6 +6708,8 @@ static int bit_count_clr(void *bitmap, int start, int end)
 		for(j=0; j < vcb->vcbFreeExtCnt; j++) {
 			u_int32_t start, end;
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.10
 
 	assert(end > start);
 
@@ -6699,16 +6743,22 @@ static int bit_count_clr(void *bitmap, int start, int end)
 			return count + clzll(x);
 		}
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 		++p;
 		count += 64;
 	}
 
 	if (end_bit) {
 		x = OSSwapBigToHostInt64(*p) | BIT_RIGHT_MASK(end_bit);
+<<<<<<< HEAD
 =======
 skip_cache:
 		sanity_check_free_ext(vcb, 0);
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.10
 
 		count += clzll(x);
 	}
@@ -6849,7 +6899,11 @@ errno_t hfs_find_free_extents(struct hfsmount *hfsmp,
 	hfs_journal_lock(hfsmp);
 
 	/* Flush the journal and wait for all I/Os to finish up */
+<<<<<<< HEAD
 	error = hfs_flush(hfsmp, HFS_FLUSH_JOURNAL_META);
+=======
+	error = hfs_journal_flush(hfsmp, TRUE);
+>>>>>>> origin/10.10
 	if (error) {
 		hfs_journal_unlock(hfsmp);
 		return error;
@@ -6919,6 +6973,7 @@ out:
 	}
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	return error;
 }
 =======
@@ -6963,3 +7018,8 @@ static int free_extent_cache_active(ExtendedVCB *vcb)
 	}
 	return retval;
 }
+=======
+	return error;
+}
+
+>>>>>>> origin/10.10

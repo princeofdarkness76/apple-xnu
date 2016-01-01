@@ -20,8 +20,13 @@
  */
 
 /*
+<<<<<<< HEAD
  * Portions Copyright (c) 2013, Joyent, Inc. All rights reserved.
  * Portions Copyright (c) 2013 by Delphix. All rights reserved.
+=======
+ * Portions Copyright (c) 2011, Joyent, Inc. All rights reserved.
+ * Portions Copyright (c) 2012 by Delphix. All rights reserved.
+>>>>>>> origin/10.10
  */
 
 /*
@@ -9936,6 +9941,7 @@ dtrace_ecb_resize(dtrace_ecb_t *ecb)
 		ASSERT(rec->dtrd_size > 0 || rec->dtrd_alignment == 1);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 		ecb->dte_alignment = MAX(ecb->dte_alignment, rec->dtrd_alignment);
 =======
 		if ((align = rec->dtrd_alignment) > maxalign)
@@ -9973,6 +9979,9 @@ dtrace_ecb_resize(dtrace_ecb_t *ecb)
 				state->dts_needed = ecb->dte_needed;
 		}
 >>>>>>> origin/10.5
+=======
+		ecb->dte_alignment = MAX(ecb->dte_alignment, rec->dtrd_alignment);
+>>>>>>> origin/10.10
 
 		if (DTRACEACT_ISAGG(act->dta_kind)) {
 			dtrace_aggregation_t *agg = (dtrace_aggregation_t *)act;

@@ -359,11 +359,17 @@ diagCall64(x86_saved_state_t * state)
  			cest.cpu_ucc = cpu_data_ptr[i]->cpu_cur_ucc;
  			cest.cpu_urc = cpu_data_ptr[i]->cpu_cur_urc;
 <<<<<<< HEAD
+<<<<<<< HEAD
 #if DIAG_ALL_PMCS
 			bcopy(&cpu_data_ptr[i]->cpu_gpmcs[0], &cest.gpmcs[0], sizeof(cest.gpmcs));
 #endif /* DIAG_ALL_PMCS */
 =======
 >>>>>>> origin/10.8
+=======
+#if DIAG_ALL_PMCS
+			bcopy(&cpu_data_ptr[i]->cpu_gpmcs[0], &cest.gpmcs[0], sizeof(cest.gpmcs));
+#endif /* DIAG_ALL_PMCS */			
+>>>>>>> origin/10.10
  			(void) ml_set_interrupts_enabled(TRUE);
 
 			copyout(&cest, curpos, sizeof(cest));

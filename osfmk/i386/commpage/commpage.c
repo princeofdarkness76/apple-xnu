@@ -96,10 +96,13 @@
 
 #include <sys/kdebug.h>
 
+<<<<<<< HEAD
 #if CONFIG_ATM
 #include <atm/atm_internal.h>
 #endif
 
+=======
+>>>>>>> origin/10.10
 /* the lists of commpage routines are in commpage_asm.s  */
 extern	commpage_descriptor*	commpage_32_routines[];
 extern	commpage_descriptor*	commpage_64_routines[];
@@ -328,6 +331,9 @@ commpage_init_cpu_capabilities( void )
 	setif(bits, kHasAVX2_0,  cpuid_leaf7_features() &
 					CPUID_LEAF7_FEATURE_AVX2);
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 	setif(bits, kHasRDSEED,  cpuid_features() &
 					CPUID_LEAF7_FEATURE_RDSEED);
 	setif(bits, kHasADX,     cpuid_features() &
@@ -543,9 +549,12 @@ commpage_populate( void )
 	commpage_mach_approximate_time_init();
 	rtc_nanotime_init_commpage();
 	commpage_update_kdebug_enable();
+<<<<<<< HEAD
 #if CONFIG_ATM
 	commpage_update_atm_diagnostic_config(atm_get_diagnostic_config());
 #endif
+=======
+>>>>>>> origin/10.10
 }
 
 /* Fill in the common routines during kernel initialization. 
@@ -804,6 +813,7 @@ commpage_update_kdebug_enable(void)
 	}
 }
 
+<<<<<<< HEAD
 /* Ditto for atm_diagnostic_config */
 void
 commpage_update_atm_diagnostic_config(uint32_t diagnostic_config)
@@ -825,6 +835,8 @@ commpage_update_atm_diagnostic_config(uint32_t diagnostic_config)
 		*saved_data_ptr = diagnostic_config;
 	}
 }
+=======
+>>>>>>> origin/10.10
 
 /*
  * update the commpage data for last known value of mach_absolute_time()

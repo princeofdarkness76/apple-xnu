@@ -520,6 +520,7 @@ OSErr hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 		/* The in-memory signature is always 'H+'. */
 		signature = kHFSPlusSigWord;
 		hfsmp->hfs_flags |= HFS_X;
+<<<<<<< HEAD
 =======
 	// XXXdbg - added the kHFSJSigWord case
 	if ((SWAP_BE16(vhp->signature) != kHFSPlusSigWord &&
@@ -530,6 +531,8 @@ OSErr hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 			   vhp->signature, vhp->version);
 		return (EINVAL);
 >>>>>>> origin/10.2
+=======
+>>>>>>> origin/10.10
 	}
 
 	blockSize = SWAP_BE32(vhp->blockSize);
@@ -570,6 +573,7 @@ OSErr hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 	 * The same logic to ensure good hfs_physical_block_size is also in
 	 * hfs_mountfs so that hfs_mountfs, hfs_MountHFSPlusVolume and
 	 * later are doing the I/Os using same block size.
+<<<<<<< HEAD
 	 */
 	if (blockSize < hfsmp->hfs_physical_block_size) {
 		hfsmp->hfs_physical_block_size = hfsmp->hfs_logical_block_size;
@@ -613,6 +617,8 @@ OSErr hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 	 * reading and writing the primary and alternate volume 
 	 * headers at physical block boundary and will cause 
 	 * problems if it is less than the block size.
+=======
+>>>>>>> origin/10.10
 	 */
 	if (blockSize < hfsmp->hfs_physical_block_size) {
 		hfsmp->hfs_physical_block_size = hfsmp->hfs_logical_block_size;

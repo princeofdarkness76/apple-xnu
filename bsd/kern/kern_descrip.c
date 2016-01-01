@@ -2093,7 +2093,10 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 	case F_ADDSIGS:
 	case F_ADDFILESIGS:
 	case F_ADDFILESIGS_FOR_DYLD_SIM:
+<<<<<<< HEAD
 	case F_ADDFILESIGS_RETURN:
+=======
+>>>>>>> origin/10.10
 	{
 		struct cs_blob *blob = NULL;
 		struct user_fsignatures fs;
@@ -2138,6 +2141,7 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 			goto outdrop;
 		}
 
+<<<<<<< HEAD
 		/*
 		 * First check if we have something loaded a this offset
 		 */
@@ -2148,6 +2152,33 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 			if (uap->cmd == F_ADDFILESIGS_FOR_DYLD_SIM) {
 				error = ubc_cs_blob_revalidate(vp, blob, blob_add_flags);
 			}
+=======
+		struct cs_blob * existing_blob = ubc_cs_blob_get(vp, CPU_TYPE_ANY, fs.fs_file_start);
+		if (existing_blob != NULL)
+		{
+			/* If this is for dyld_sim revalidate the blob */
+			if (uap->cmd == F_ADDFILESIGS_FOR_DYLD_SIM) {
+				error = ubc_cs_blob_revalidate(vp, existing_blob, blob_add_flags);
+			}
+			vnode_put(vp);
+			goto outdrop;
+		}
+/*
+ * An arbitrary limit, to prevent someone from mapping in a 20GB blob.  This should cover
+ * our use cases for the immediate future, but note that at the time of this commit, some
+ * platforms are nearing 2MB blob sizes (with a prior soft limit of 2.5MB).
+ *
+ * We should consider how we can manage this more effectively; the above means that some
+ * platforms are using megabytes of memory for signing data; it merely hasn't crossed the
+ * threshold considered ridiculous at the time of this change.
+ */
+#define CS_MAX_BLOB_SIZE (10ULL * 1024ULL * 1024ULL)
+		if (fs.fs_blob_size > CS_MAX_BLOB_SIZE) {
+			error = E2BIG;
+			vnode_put(vp);
+			goto outdrop;
+		}
+>>>>>>> origin/10.10
 
 		} else {
 			/*
@@ -2166,6 +2197,7 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 				goto outdrop;
 			}
 
+<<<<<<< HEAD
 			kernel_blob_size = CAST_DOWN(vm_size_t, fs.fs_blob_size);
 			kr = ubc_cs_blob_allocate(&kernel_blob_addr, &kernel_blob_size);
 			if (kr != KERN_SUCCESS) {
@@ -2177,6 +2209,33 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 			if(uap->cmd == F_ADDSIGS) {
 				error = copyin(fs.fs_blob_start,
 					       (void *) kernel_blob_addr,
+=======
+		if(uap->cmd == F_ADDSIGS) {
+			error = copyin(fs.fs_blob_start,
+				       (void *) kernel_blob_addr,
+				       kernel_blob_size);
+		} else /* F_ADDFILESIGS */ {
+			int resid;
+
+			error = vn_rdwr(UIO_READ,
+					vp,
+					(caddr_t) kernel_blob_addr,
+					kernel_blob_size,
+					 fs.fs_file_start + fs.fs_blob_start,
+					UIO_SYSSPACE,
+					0,
+					kauth_cred_get(),
+					&resid,
+					p);
+			if ((error == 0) && resid) {
+				/* kernel_blob_size rounded to a page size, but signature may be at end of file */
+				memset((void *)(kernel_blob_addr + (kernel_blob_size - resid)), 0x0, resid);
+			}
+		}
+		
+		if (error) {
+			ubc_cs_blob_deallocate(kernel_blob_addr,
+>>>>>>> origin/10.10
 					       kernel_blob_size);
 			} else /* F_ADDFILESIGS || F_ADDFILESIGS_RETURN || F_ADDFILESIGS_FOR_DYLD_SIM */ {
 				int resid;
@@ -2204,6 +2263,7 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 				goto outdrop;
 			}
 
+<<<<<<< HEAD
 			blob = NULL;
 			error = ubc_cs_blob_add(vp,
 						CPU_TYPE_ANY,	/* not for a specific architecture */
@@ -2217,6 +2277,20 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 						       kernel_blob_size);
 			} else {
 				/* ubc_blob_add() has consumed "kernel_blob_addr" */
+=======
+		error = ubc_cs_blob_add(
+			vp,
+			CPU_TYPE_ANY,	/* not for a specific architecture */
+			fs.fs_file_start,
+			kernel_blob_addr,
+			kernel_blob_size,
+			blob_add_flags);
+		if (error) {
+			ubc_cs_blob_deallocate(kernel_blob_addr,
+					       kernel_blob_size);
+		} else {
+			/* ubc_blob_add() has consumed "kernel_blob_addr" */
+>>>>>>> origin/10.10
 #if CHECK_CS_VALIDATION_BITMAP
 				ubc_cs_validation_bitmap_allocate( vp );
 #endif

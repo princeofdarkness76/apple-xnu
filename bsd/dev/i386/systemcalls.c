@@ -69,9 +69,13 @@ extern void *find_user_regs(thread_t);
 /* dynamically generated at build time based on syscalls.master */
 extern const char *syscallnames[];
 
+<<<<<<< HEAD
 #define code_is_kdebug_trace(code) (((code) == SYS_kdebug_trace) ||   \
                                     ((code) == SYS_kdebug_trace64) || \
                                     ((code) == SYS_kdebug_trace_string))
+=======
+#define code_is_kdebug_trace(code) (((code) == SYS_kdebug_trace) || ((code) == SYS_kdebug_trace64))
+>>>>>>> origin/10.10
 
 /*
  * Function:	unix_syscall

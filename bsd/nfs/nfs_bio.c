@@ -5602,7 +5602,11 @@ again:
 	}
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	if (req->r_achain.tqe_next == NFSREQNOLIST)
+=======
+	if (req->r_achain.tqe_next == NFSREQNOLIST || req->r_achain.tqe_next == NFSIODCOMPLETING)
+>>>>>>> origin/10.10
 		TAILQ_INSERT_TAIL(&nmp->nm_iodq, req, r_achain);
 
 	/* If this mount doesn't already have an nfsiod working on it... */

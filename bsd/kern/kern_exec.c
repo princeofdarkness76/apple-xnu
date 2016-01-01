@@ -249,12 +249,15 @@ __attribute__((noinline)) int __EXEC_WAITING_ON_TASKGATED_CODE_SIGNATURE_UPCALL_
  *			it as malformed/corrupt.
  */
 #define EAI_ITERLIMIT		3
+<<<<<<< HEAD
 =======
 #if KTRACE   
 #include <sys/ktrace.h>
 #include <sys/ubc.h>
 #endif
 >>>>>>> origin/10.3
+=======
+>>>>>>> origin/10.10
 
 /*
  * For #! interpreter parsing
@@ -777,6 +780,9 @@ exec_fat_imgact(struct image_params *imgp)
 		uint32_t pr = 0;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 		/* Check each preference listed against all arches in header */
 		for (pr = 0; pr < NBINPREFS; pr++) {
 			cpu_type_t pref = psa->psa_binprefs[pr];
@@ -830,9 +836,12 @@ exec_fat_imgact(struct image_params *imgp)
 		 */
 		ipc_task_reset(task);
 
+<<<<<<< HEAD
 		p->p_flag |= P_SUGID;
 >>>>>>> origin/10.3
 
+=======
+>>>>>>> origin/10.10
 			lret = fatfile_getbestarch_for_cputype(pref,
 							(vm_offset_t)fat_header,
 							PAGE_SIZE,
@@ -842,18 +851,28 @@ exec_fat_imgact(struct image_params *imgp)
 			}
 		}
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
+=======
+
+		/* Requested binary preference was not honored */
+		error = EBADEXEC;
+		goto bad;
+>>>>>>> origin/10.10
 	}
 	p->p_cred->p_svuid = p->p_ucred->cr_uid;
 	p->p_cred->p_svgid = p->p_ucred->cr_gid;
 	set_security_token(p);
 >>>>>>> origin/10.3
 
+<<<<<<< HEAD
 		/* Requested binary preference was not honored */
 		error = EBADEXEC;
 		goto bad;
 	}
 
+=======
+>>>>>>> origin/10.10
 regular_grading:
 	/* Look up our preferred architecture in the fat file. */
 	lret = fatfile_getbestarch((vm_offset_t)fat_header,
@@ -1469,10 +1488,14 @@ exec_activate_image(struct image_params *imgp)
 	int once = 1;	/* save SGUID-ness for interpreted files */
 	int i;
 <<<<<<< HEAD
+<<<<<<< HEAD
 	int itercount = 0;
 =======
 	int iterlimit = EAI_ITERLIMIT;
 >>>>>>> origin/10.5
+=======
+	int itercount = 0;
+>>>>>>> origin/10.10
 	proc_t p = vfs_context_proc(imgp->ip_vfs_context);
 
 	error = execargs_alloc(imgp);

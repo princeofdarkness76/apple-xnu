@@ -478,6 +478,9 @@ pmap_cpu_init(void)
 	}
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 	if (cpuid_leaf7_features() & CPUID_LEAF7_FEATURE_SMAP) {
 		boolean_t nsmap;
 		if (!PE_parse_boot_argn("-pmap_smap_disable", &nsmap, sizeof(nsmap))) {
@@ -485,8 +488,11 @@ pmap_cpu_init(void)
 			pmap_smap_enabled = TRUE;
 		}
 	}
+<<<<<<< HEAD
 =======
 >>>>>>> origin/10.8
+=======
+>>>>>>> origin/10.10
 
 	if (cdp->cpu_fixed_pmcs_enabled) {
 		boolean_t enable = TRUE;
@@ -622,6 +628,9 @@ pmap_bootstrap(
 	if (pmap_smep_enabled)
 		printf("PMAP: Supervisor Mode Execute Protection enabled\n");
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 	if (pmap_smap_enabled)
 		printf("PMAP: Supervisor Mode Access Protection enabled\n");
 

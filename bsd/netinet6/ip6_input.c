@@ -644,6 +644,7 @@ ip6_input(struct mbuf *m)
 	}
 
 	ip6stat.ip6s_nxthist[ip6->ip6_nxt]++;
+<<<<<<< HEAD
 
 #if IPFW2
 	/*
@@ -666,6 +667,8 @@ ip6_input(struct mbuf *m)
 	}
 #endif
 
+=======
+>>>>>>> origin/10.10
 	/*
 >>>>>>> origin/10.6
 	 * Check against address spoofing/corruption.
@@ -732,6 +735,7 @@ ip6_input(struct mbuf *m)
 	}
 #endif
 #if IPFW2
+<<<<<<< HEAD
 	/*
 	 * Check with the firewall...
 	 */
@@ -746,6 +750,22 @@ ip6_input(struct mbuf *m)
 		if (!m)
 			goto done;
 	}
+=======
+        /*
+         * Check with the firewall...
+         */
+        if (ip6_fw_enable && ip6_fw_chk_ptr) {
+                u_short port = 0;
+                /* If ipfw says divert, we have to just drop packet */
+                /* use port as a dummy argument */
+                if ((*ip6_fw_chk_ptr)(&ip6, NULL, &port, &m)) {
+                        m_freem(m);
+                        m = NULL;
+                }
+                if (!m)
+                        goto done;
+        }
+>>>>>>> origin/10.10
 #endif /* IPFW2 */
 
 	/*

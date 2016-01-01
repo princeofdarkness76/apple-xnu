@@ -770,6 +770,17 @@ kernel_trap(
 =======
 >>>>>>> origin/10.7
 				/*
+				 * Additionally check for SMAP faults...
+				 * which are characterized by page-present and
+				 * the AC bit unset (i.e. not from copyin/out path).
+				 */
+				if (__improbable(code & T_PF_PROT &&
+						 pmap_smap_enabled &&
+						 (saved_state->isf.rflags & EFL_AC) == 0)) {
+					goto debugger_entry;
+				}
+
+				/*
 				 * If we're not sharing cr3 with the user
 				 * and we faulted in copyio,
 				 * then switch cr3 here and dismiss the fault.
@@ -1011,9 +1022,12 @@ panic_trap(x86_saved_state64_t *regs, uint32_t pl)
 <<<<<<< HEAD
 	boolean_t	potential_smep_fault = FALSE, potential_kernel_NX_fault = FALSE;
 	boolean_t	potential_smap_fault = FALSE;
+<<<<<<< HEAD
 =======
 	boolean_t	potential_smep_fault = FALSE;
 >>>>>>> origin/10.7
+=======
+>>>>>>> origin/10.10
 
 	pal_get_control_registers( &cr0, &cr2, &cr3, &cr4 );
 	assert(ml_get_interrupts_enabled() == FALSE);
@@ -1045,10 +1059,13 @@ panic_trap(x86_saved_state64_t *regs, uint32_t pl)
 		   regs->cr2 < VM_MAX_USER_PAGE_ADDRESS &&
 		   regs->isf.rip >= VM_MIN_KERNEL_AND_KEXT_ADDRESS) {
 		potential_smap_fault = TRUE;
+<<<<<<< HEAD
 =======
 	if ((regs->isf.trapno == T_PAGE_FAULT) && (regs->isf.err == (T_PF_PROT | T_PF_EXECUTE)) && (pmap_smep_enabled) && (regs->isf.rip == regs->cr2) && (regs->isf.rip < VM_MAX_USER_PAGE_ADDRESS)) {
 		potential_smep_fault = TRUE;
 >>>>>>> origin/10.7
+=======
+>>>>>>> origin/10.10
 	}
 
 #undef panic
@@ -1076,10 +1093,14 @@ panic_trap(x86_saved_state64_t *regs, uint32_t pl)
 	      virtualized ? " VMM" : "",
 	      potential_kernel_NX_fault ? " Kernel NX fault" : "",
 	      potential_smep_fault ? " SMEP/User NX fault" : "",
+<<<<<<< HEAD
 	      potential_smap_fault ? " SMAP fault" : "", pl);
 =======
 	      potential_smep_fault ? " SMEP/NX fault" : "");
 >>>>>>> origin/10.7
+=======
+	      potential_smap_fault ? " SMAP fault" : "");
+>>>>>>> origin/10.10
 	/*
 	 * This next statement is not executed,
 	 * but it's needed to stop the compiler using tail call optimization

@@ -28,7 +28,16 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <math.h>
+<<<<<<< HEAD
 #include <sys/kdebug.h>
+=======
+#include <sys/wait.h>
+#include <sys/param.h>
+#include <sys/kdebug.h>
+#include <sys/types.h>
+#include <sys/ptrace.h>
+#include <semaphore.h>
+>>>>>>> origin/10.10
 #include <stdlib.h>
 #include <pthread.h>
 #include <errno.h>
@@ -627,6 +636,16 @@ main(int argc, char **argv)
 
 			if (g_verbose)
 				printf("Worst on this round was %.2f us.\n", ((float)worst_latencies_from_first_ns[i]) / 1000.0);
+<<<<<<< HEAD
+=======
+			}
+
+			_tmp = kdebug_trace(0xeeeee0 | DBG_FUNC_NONE,
+								   worst_latencies_from_first_ns[i] >> 32,
+								   worst_latencies_from_first_ns[i] & 0xFFFFFFFF,
+								   traceworthy_latency_ns >> 32,
+								   traceworthy_latency_ns & 0xFFFFFFFF);
+>>>>>>> origin/10.10
 		}
 
 		/* Give the system a bit more time to settle */

@@ -366,6 +366,7 @@
 
 #define F_ADDFILESIGS_FOR_DYLD_SIM 83	/* Add signature from same file, only if it is signed by Apple (used by dyld for simulator) */
 
+<<<<<<< HEAD
 #ifdef PRIVATE
 #define F_RECYCLE			84	/* Recycle vnode; debug/development builds only */
 #endif
@@ -390,6 +391,8 @@
 #define F_GETPROTECTIONCLASS	62		/* Get the protection class of a file from the EA, returns int */
 #define F_SETPROTECTIONCLASS	63		/* Set the protection class of a file for the EA, requires int */
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.10
 
 // FS-specific fcntl()'s numbers begin at 0x00010000 and go up
 #define FCNTL_FS_SPECIFIC_BASE  0x00010000

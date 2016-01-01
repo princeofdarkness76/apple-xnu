@@ -313,8 +313,14 @@ init_fpu(void)
 		if (xsp->extended_state[0] & (uint32_t)XFEM_YMM) {
 			assert(xsp->extended_state[0] & (uint32_t) XFEM_SSE);
 			/* XSAVE container size for all features */
+<<<<<<< HEAD
 			assert(xsp->extended_state[2] == sizeof(struct x86_avx_thread_state));
 >>>>>>> origin/10.6
+=======
+			if (xsp->extended_state[2] != sizeof(struct x86_avx_thread_state))
+				kprintf("sizeof(struct x86_avx_thread_state)=%lu != xsp->extended_state[2]=%u\n",
+					sizeof(struct x86_avx_thread_state), xsp->extended_state[2]);
+>>>>>>> origin/10.10
 			fp_register_state_size = sizeof(struct x86_avx_thread_state);
 			fpu_YMM_present = TRUE;
 			set_cr4(get_cr4() | CR4_OSXSAVE);

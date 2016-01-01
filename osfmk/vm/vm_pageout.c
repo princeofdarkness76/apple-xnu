@@ -2301,11 +2301,16 @@ throttle_inactive:
 		if  (cache_evict_throttle)
 			cache_evict_throttle--;
 
+<<<<<<< HEAD
 #if CONFIG_JETSAM
 		/*
 		 * don't let the filecache_min fall below 15% of available memory
 		 * on systems with an active compressor that isn't nearing its
 		 * limits w/r to accepting new data
+=======
+		/*
+		 * don't let the filecache_min fall below 33% of available memory...
+>>>>>>> origin/10.10
 		 *
 		 * on systems w/o the compressor/swapper, the filecache is always
 		 * a very large percentage of the AVAILABLE_NON_COMPRESSED_MEMORY
@@ -2313,6 +2318,7 @@ throttle_inactive:
 		 * throttled queue (which isn't counted as available) which
 		 * effectively disables this filter
 		 */
+<<<<<<< HEAD
 		if (vm_compressor_low_on_space())
 			vm_page_filecache_min = 0;
 		else
@@ -2323,6 +2329,9 @@ throttle_inactive:
 		 */
 		vm_page_filecache_min = (AVAILABLE_NON_COMPRESSED_MEMORY / 3);
 #endif
+=======
+		vm_page_filecache_min = (AVAILABLE_NON_COMPRESSED_MEMORY / 3);
+>>>>>>> origin/10.10
 
 		exceeded_burst_throttle = FALSE;
 		/*
@@ -3566,7 +3575,11 @@ relock:
 	if (vm_page_free_target < vm_page_free_min + 5)
 		vm_page_free_target = vm_page_free_min + 5;
 
+<<<<<<< HEAD
 	vm_page_throttle_limit = vm_page_free_target - (vm_page_free_target / 2);
+=======
+	vm_page_throttle_limit = vm_page_free_target - (vm_page_free_target / 3);
+>>>>>>> origin/10.10
 }
 
 /*
@@ -5506,7 +5519,10 @@ void	vm_pageout_reinit_tuneables(void);
 void
 vm_pageout_reinit_tuneables(void)
 {
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.10
 	vm_compressor_minorcompact_threshold_divisor = 18;
 	vm_compressor_majorcompact_threshold_divisor = 22;
 	vm_compressor_unthrottle_threshold_divisor = 32;
@@ -7194,7 +7210,10 @@ check_busy:
 			user_page_list[entry].cs_validated = dst_page->cs_validated;
 			user_page_list[entry].cs_tainted = dst_page->cs_tainted;
 			user_page_list[entry].cs_nx = dst_page->cs_nx;
+<<<<<<< HEAD
 			user_page_list[entry].mark      = FALSE;
+=======
+>>>>>>> origin/10.10
 		}
 	        /*
 		 * if UPL_RET_ONLY_ABSENT is set, then
@@ -10468,7 +10487,10 @@ record_phys_addr:
 			user_page_list[entry].cs_validated = dst_page->cs_validated;
 			user_page_list[entry].cs_tainted = dst_page->cs_tainted;
 			user_page_list[entry].cs_nx = dst_page->cs_nx;
+<<<<<<< HEAD
 			user_page_list[entry].mark      = FALSE;
+=======
+>>>>>>> origin/10.10
 		}
 		if (object != kernel_object && object != compressor_object) {
 			/*

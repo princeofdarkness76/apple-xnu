@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+>>>>>>> origin/10.10
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -174,7 +178,11 @@ SYSCTL_INT(_net_inet_icmp, OID_AUTO, log_redirect,
     CTLFLAG_RW | CTLFLAG_LOCKED,
     &log_redirect, 0, "");
 
+<<<<<<< HEAD
 const static int icmp_datalen = 8;
+=======
+static int icmp_datalen = 8;
+>>>>>>> origin/10.10
 
 #if ICMP_BANDLIM 
 
@@ -313,7 +321,11 @@ stdreply:	icmpelen = max(ICMP_MINLEN, min(icmp_datalen,
 	 */
 	if (MHLEN > (sizeof(struct ip) + ICMP_MINLEN + icmplen))
 		m = m_gethdr(M_DONTWAIT, MT_HEADER);	/* MAC-OK */
+<<<<<<< HEAD
 	else
+=======
+	else 
+>>>>>>> origin/10.10
 		m = m_getcl(M_DONTWAIT, MT_DATA, M_PKTHDR);
 
 	if (m == NULL)

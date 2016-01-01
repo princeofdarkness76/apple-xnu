@@ -190,6 +190,10 @@ extern void dtrace_lazy_dofs_destroy(proc_t);
 #include <sys/sdt.h>
 
 extern boolean_t init_task_died;
+<<<<<<< HEAD
+=======
+extern char init_task_failure_data[];
+>>>>>>> origin/10.10
 void proc_prepareexit(proc_t p, int rv, boolean_t perf_notify);
 void vfork_exit(proc_t p, int rv);
 void vproc_exit(proc_t p);
@@ -580,6 +584,24 @@ exit1_internal(proc_t p, int rv, int *retval, boolean_t thread_can_terminate, bo
 		proc_unlock(p);
 		printf("pid 1 exited (signal %d, exit %d)",
 		    WTERMSIG(rv), WEXITSTATUS(rv));
+<<<<<<< HEAD
+=======
+#if (DEVELOPMENT || DEBUG)
+		int err;
+		/*
+		 * For debugging purposes, generate a core file of initproc before
+		 * panicking. Leave at least 300 MB free on the root volume, and ignore
+		 * the process's corefile ulimit.
+		 */
+		if ((err = coredump(p, 300, 1)) != 0) {
+			printf("Failed to generate initproc core file: error %d", err);
+		} else {
+			printf("Generated initproc core file");
+			sync(p, (void *)NULL, (int *)NULL);
+		}
+#endif
+		init_task_died = TRUE;
+>>>>>>> origin/10.10
 		panic("%s died\nState at Last Exception:\n\n%s", 
 							(p->p_comm[0] != '\0' ?
 								p->p_comm :

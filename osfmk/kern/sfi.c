@@ -42,6 +42,8 @@
 #include <kern/timer_call.h>
 #include <kern/waitq.h>
 #include <kern/ledger.h>
+#include <kern/coalition.h>
+
 #include <pexpert/pexpert.h>
 
 #include <libkern/kernel_mach_header.h>
@@ -429,9 +431,15 @@ static void sfi_timer_per_class_on(
 	sfi_class->class_in_on_phase = TRUE;
 	sfi_class->on_timer_programmed = FALSE;
 
+<<<<<<< HEAD
 	kret = waitq_wakeup64_all(&sfi_class->waitq,
 				  CAST_EVENT64_T(sfi_class_id),
 				  THREAD_AWAKENED, WAITQ_ALL_PRIORITIES);
+=======
+	kret = wait_queue_wakeup64_all(&sfi_class->wait_queue,
+								   CAST_EVENT64_T(sfi_class_id),
+								   THREAD_AWAKENED);
+>>>>>>> origin/10.10
 	assert(kret == KERN_SUCCESS || kret == KERN_NOT_WAITING);
 
 	KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SFI, SFI_ON_TIMER) | DBG_FUNC_END, 0, 0, 0, 0, 0);
@@ -776,6 +784,7 @@ sfi_class_id_t sfi_thread_classify(thread_t thread)
 	/*
 	 * Threads with unspecified, legacy, or user-initiated QOS class can be individually managed.
 	 */
+<<<<<<< HEAD
 	switch (task_role) {
 	case TASK_CONTROL_APPLICATION:
 	case TASK_FOREGROUND_APPLICATION:
@@ -791,6 +800,25 @@ sfi_class_id_t sfi_thread_classify(thread_t thread)
 		break;
 	default:
 		break;
+=======
+
+	switch (task_role) {
+		case TASK_CONTROL_APPLICATION:
+		case TASK_FOREGROUND_APPLICATION:
+			focal = TRUE;
+			break;
+
+		case TASK_BACKGROUND_APPLICATION:
+		case TASK_DEFAULT_APPLICATION:
+		case TASK_UNSPECIFIED:
+			/* Focal if in coalition with foreground app */
+			if (coalition_focal_task_count(thread->task->coalition) > 0)
+				focal = TRUE;
+			break;
+
+		default:
+			break;
+>>>>>>> origin/10.10
 	}
 
 	if (managed_task) {
@@ -1003,7 +1031,10 @@ void sfi_ast(thread_t thread)
 	}
 }
 
-/* Thread must be unlocked */
+/*
+ * Thread must be unlocked
+ * May be called with coalition, task, or thread mutex held
+ */
 void sfi_reevaluate(thread_t thread)
 {
 	kern_return_t kret;

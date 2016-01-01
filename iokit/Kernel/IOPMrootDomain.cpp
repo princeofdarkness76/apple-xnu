@@ -5310,6 +5310,7 @@ platformHaltRestartApplier( OSObject * object, void * context )
         // IOService children of IOPMrootDomain are not instrumented.
         // Only IORootParent currently falls under that group.
 
+<<<<<<< HEAD
         if (notifier)
         {
             LOG("%s handler %p took %u ms\n",
@@ -5319,6 +5320,21 @@ platformHaltRestartApplier( OSObject * object, void * context )
 
     ctx->Counter++;
 }
+=======
+            evaluateSystemSleepPolicyFinal();
+#else
+            LOG("System Sleep\n");
+#endif
+            if (thermalWarningState) {
+                const OSSymbol *event = OSSymbol::withCString(kIOPMThermalLevelWarningKey);
+                if (event) {
+                    systemPowerEventOccurred(event, kIOPMThermalLevelUnknown);
+                    event->release();
+                }
+            }
+            ((IOService *)this)->stop_watchdog_timer(); //14456299
+            getPlatform()->sleepKernel();
+>>>>>>> origin/10.10
 
 static void quiescePowerTreeCallback( void * target, void * param )
 {
@@ -5389,7 +5405,15 @@ void IOPMrootDomain::handlePlatformHaltRestart( UInt32 pe_type )
         notifySystemShutdown(this, ctx.MessageType);
     }
 
+<<<<<<< HEAD
     IOCPURunPlatformHaltRestartActions(pe_type);
+=======
+
+            OSString * wakeType = OSDynamicCast(
+                OSString, getProperty(kIOPMRootDomainWakeTypeKey));
+            OSString * wakeReason = OSDynamicCast(
+                OSString, getProperty(kIOPMRootDomainWakeReasonKey));
+>>>>>>> origin/10.10
 
     // Wait for PM to quiesce
     if ((kPEPagingOff != pe_type) && gPMHaltLock)
@@ -7182,10 +7206,61 @@ bool IOPMrootDomain::batteryPublished(
 // MARK: -
 // MARK: System PM Policy
 
+<<<<<<< HEAD
 //******************************************************************************
 // checkSystemSleepAllowed
 //
 //******************************************************************************
+=======
+    // Current factors based on environment and assertions
+    if (sleepTimerMaintenance)
+        currentFactors |= kIOPMSleepFactorSleepTimerWake;
+    if (standbyEnabled && sleepToStandby && !gSleepPolicyHandler)
+        currentFactors |= kIOPMSleepFactorSleepTimerWake;
+    if (!clamshellClosed)
+        currentFactors |= kIOPMSleepFactorLidOpen;
+    if (acAdaptorConnected)
+        currentFactors |= kIOPMSleepFactorACPower;
+    if (lowBatteryCondition)
+        currentFactors |= kIOPMSleepFactorBatteryLow;
+    if (!standbyDelay)
+        currentFactors |= kIOPMSleepFactorStandbyNoDelay;
+    if (!standbyEnabled)
+        currentFactors |= kIOPMSleepFactorStandbyDisabled;
+    if (getPMAssertionLevel(kIOPMDriverAssertionUSBExternalDeviceBit) !=
+        kIOPMDriverAssertionLevelOff)
+        currentFactors |= kIOPMSleepFactorUSBExternalDevice;
+    if (getPMAssertionLevel(kIOPMDriverAssertionBluetoothHIDDevicePairedBit) !=
+        kIOPMDriverAssertionLevelOff)
+        currentFactors |= kIOPMSleepFactorBluetoothHIDDevice;
+    if (getPMAssertionLevel(kIOPMDriverAssertionExternalMediaMountedBit) !=
+        kIOPMDriverAssertionLevelOff)
+        currentFactors |= kIOPMSleepFactorExternalMediaMounted;
+    if (getPMAssertionLevel(kIOPMDriverAssertionReservedBit5) !=
+        kIOPMDriverAssertionLevelOff)
+        currentFactors |= kIOPMSleepFactorThunderboltDevice;
+    if (_scheduledAlarms != 0)
+        currentFactors |= kIOPMSleepFactorRTCAlarmScheduled;
+    if (getPMAssertionLevel(kIOPMDriverAssertionMagicPacketWakeEnabledBit) !=
+        kIOPMDriverAssertionLevelOff)
+        currentFactors |= kIOPMSleepFactorMagicPacketWakeEnabled;
+#define TCPKEEPALIVE 1
+#if TCPKEEPALIVE
+    if (getPMAssertionLevel(kIOPMDriverAssertionNetworkKeepAliveActiveBit) !=
+        kIOPMDriverAssertionLevelOff)
+        currentFactors |= kIOPMSleepFactorNetworkKeepAliveActive;
+#endif
+    if (!powerOffEnabled)
+        currentFactors |= kIOPMSleepFactorAutoPowerOffDisabled;
+    if (desktopMode)
+        currentFactors |= kIOPMSleepFactorExternalDisplay;
+    if (userWasActive)
+        currentFactors |= kIOPMSleepFactorLocalUserActivity;
+    if (darkWakeHibernateError && !CAP_HIGHEST(kIOPMSystemCapabilityGraphics))
+        currentFactors |= kIOPMSleepFactorHibernateFailed;
+    if (thermalWarningState)
+        currentFactors |= kIOPMSleepFactorThermalWarning;
+>>>>>>> origin/10.10
 
 bool IOPMrootDomain::checkSystemSleepAllowed( IOOptionBits options,
                                               uint32_t     sleepReason )
@@ -7536,6 +7611,7 @@ void IOPMrootDomain::dispatchPowerEvent(
             }
             break;
 
+<<<<<<< HEAD
         case kPowerEventPolicyStimulus:
             if (arg0)
             {
@@ -7543,6 +7619,30 @@ void IOPMrootDomain::dispatchPowerEvent(
                 evaluatePolicy( stimulus, (uint32_t) arg1 );
             }
             break;
+=======
+    if (optionsDict)
+    {
+        obj = optionsDict->getObject(key);
+        if (obj) obj->retain();
+    }
+    if (!obj)
+    {
+        obj = copyProperty(key);
+    }
+    if (obj) 
+    {
+        if ((num = OSDynamicCast(OSNumber, obj)))
+        {
+            *option = num->unsigned32BitValue();
+            ok = true;
+        }
+        else if (OSDynamicCast(OSBoolean, obj))
+        {
+            *option = (obj == kOSBooleanTrue) ? 1 : 0;
+            ok = true;
+        }
+    }
+>>>>>>> origin/10.10
 
         case kPowerEventAssertionCreate:
             if (pmAssertions) {
@@ -9541,6 +9641,7 @@ struct IOPMSystemSleepPolicyEntry
     uint32_t    wakeEvents;
 };
 
+<<<<<<< HEAD
 struct IOPMSystemSleepPolicyTable
 {
     uint8_t     signature[4];
@@ -9548,6 +9649,12 @@ struct IOPMSystemSleepPolicyTable
     uint16_t    entryCount;
     IOPMSystemSleepPolicyEntry  entries[];
 };
+=======
+        if (lowBatteryCondition || thermalWarningState)
+        {
+            break;          // always sleep on low battery or when in thermal warning state
+        }
+>>>>>>> origin/10.10
 
 enum {
     kIOPMSleepFactorSleepTimerWake          = 0x00000001,
@@ -9700,6 +9807,7 @@ void IOPMrootDomain::evaluateSystemSleepPolicyEarly( void )
     // Evaluate sleep policy before driver sleep phase.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
     DLOG("%s\n", __FUNCTION__);
     removeProperty(kIOPMSystemSleepParametersKey);
 =======
@@ -9736,6 +9844,12 @@ void IOPMrootDomain::evaluateSystemSleepPolicyEarly( void )
     if (!hibernateNoDefeat &&
         evaluateSystemSleepPolicy(&params) &&
         ((params.sleepFlags & kIOPMSleepFlagHibernate) == 0))
+=======
+bool IOPMrootDomain::checkSystemCanSustainFullWake( void )
+{
+#if !NO_KERNEL_HID
+    if (lowBatteryCondition || thermalWarningState)
+>>>>>>> origin/10.10
     {
         hibernateDisabled = true;
     }
@@ -10131,7 +10245,31 @@ void IOPMrootDomain::tracePoint( uint8_t point, uint8_t data )
     pmTracer->tracePoint(point, data);
 }
 
+<<<<<<< HEAD
 void IOPMrootDomain::traceDetail( uint32_t detail )
+=======
+void IOPMrootDomain::setThermalState(OSObject *value)
+{
+   OSNumber * num;
+
+   if (gIOPMWorkLoop->inGate() == false) {
+       gIOPMWorkLoop->runAction(
+               OSMemberFunctionCast(IOWorkLoop::Action, this, &IOPMrootDomain::setThermalState),
+               (OSObject *)this,
+               (void *)value);
+
+       return;
+    }
+    if (value && (num = OSDynamicCast(OSNumber, value))) {
+        thermalWarningState = ((num->unsigned32BitValue() == kIOPMThermalLevelWarning) || 
+                               (num->unsigned32BitValue() == kIOPMThermalLevelTrap)) ? 1 : 0; 
+    }
+}
+
+IOReturn IOPMrootDomain::systemPowerEventOccurred(
+    const OSSymbol *event,
+    OSObject *value)
+>>>>>>> origin/10.10
 {
     if (!systemBooting)
         pmTracer->traceDetail( detail );
@@ -10183,7 +10321,17 @@ void IOPMrootDomain::configureReportGated(uint64_t channel_id, uint64_t action, 
             if (channel_id == kAssertDelayChID)
                 assertOnWakeSecs = 0;
 
+<<<<<<< HEAD
             break;
+=======
+    if (shouldUpdate) {
+        if (event && 
+             event->isEqualTo(kIOPMThermalLevelWarningKey)) {
+             setThermalState(value);
+        }
+        messageClients (kIOPMMessageSystemPowerEventOccurred, (void *)NULL);
+    }
+>>>>>>> origin/10.10
 
         case kIOReportDisable:
             if (*clientCnt == 0) {

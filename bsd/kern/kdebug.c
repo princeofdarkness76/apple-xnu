@@ -346,6 +346,10 @@ static uint64_t g_str_id_signature = (0x70acULL << STR_ID_SIG_OFFSET);
 #define MACH_vmfault	0x01300008
 #define BSC_SysCall	0x040c0000
 #define MACH_SysCall	0x010c0000
+<<<<<<< HEAD
+=======
+#define DBG_SCALL_MASK	0xffff0000
+>>>>>>> origin/10.10
 
 /* task to string structure */
 struct tts
@@ -1357,6 +1361,7 @@ kdebug_validate_debugid(uint32_t debugid)
  */
 int
 kdebug_trace(struct proc *p, struct kdebug_trace_args *uap, int32_t *retval)
+<<<<<<< HEAD
 {
 	struct kdebug_trace64_args uap64;
 
@@ -1378,6 +1383,36 @@ int kdebug_trace64(__unused struct proc *p, struct kdebug_trace64_args *uap, __u
 
 	if ((err = kdebug_validate_debugid(uap->code)) != 0) {
 		return err;
+=======
+{
+	struct kdebug_trace64_args uap64;
+
+	uap64.code = uap->code;
+	uap64.arg1 = uap->arg1;
+	uap64.arg2 = uap->arg2;
+	uap64.arg3 = uap->arg3;
+	uap64.arg4 = uap->arg4;
+
+	return kdebug_trace64(p, &uap64, retval);
+}
+
+/*
+ * Support syscall SYS_kdebug_trace64. 64-bit args on K32 will get truncated to fit in 32-bit record format.
+ */
+int kdebug_trace64(__unused struct proc *p, struct kdebug_trace64_args *uap, __unused int32_t *retval)
+{
+	uint8_t code_class;
+
+	/*
+	 * Not all class are supported for injection from userspace, especially ones used by the core
+	 * kernel tracing infrastructure.
+	 */
+	code_class = EXTRACT_CLASS(uap->code);
+
+	switch (code_class) {
+		case DBG_TRACE:
+			return EPERM;
+>>>>>>> origin/10.10
 	}
 
 	if ( __probable(kdebug_enable == 0) )
@@ -1388,6 +1423,7 @@ int kdebug_trace64(__unused struct proc *p, struct kdebug_trace64_args *uap, __u
 	return(0);
 }
 
+<<<<<<< HEAD
 /*
  * Adding enough padding to contain a full tracepoint for the last
  * portion of the string greatly simplifies the logic of splitting the
@@ -1689,6 +1725,8 @@ kdebug_trace_string(__unused struct proc *p,
 	return 0;
 }
 
+=======
+>>>>>>> origin/10.10
 static void
 kdbg_lock_init(void)
 {
@@ -3274,10 +3312,14 @@ kdbg_control(int *name, u_int namelen, user_addr_t where, size_t *sizep)
 					number = nkdbufs * sizeof(kd_buf);
 
 					KERNEL_DEBUG_CONSTANT(TRACE_WRITING_EVENTS | DBG_FUNC_START, 0, 0, 0, 0, 0);
+<<<<<<< HEAD
 					if (name[0] == KERN_KDWRITETR_V3)
 						ret = kdbg_read(0, &number, vp, &context, RAW_VERSION3);
 					else
 						ret = kdbg_read(0, &number, vp, &context, RAW_VERSION1);
+=======
+					ret = kdbg_read(0, &number, vp, &context);
+>>>>>>> origin/10.10
 					KERNEL_DEBUG_CONSTANT(TRACE_WRITING_EVENTS | DBG_FUNC_END, number, 0, 0, 0, 0);
 
 					*sizep = number;
@@ -4156,7 +4198,11 @@ kdebug_serial_print(
 	uint64_t	delta = timestamp - kd_last_timstamp;
 	uint64_t	delta_us = delta / NSEC_PER_USEC;
 	uint64_t	delta_us_tenth = (delta % NSEC_PER_USEC) / 100;
+<<<<<<< HEAD
 	uint32_t	event_id = debugid & KDBG_EVENTID_MASK;
+=======
+	uint32_t	event_id = debugid & DBG_FUNC_MASK;
+>>>>>>> origin/10.10
 	const char	*command;
 	const char	*bra;
 	const char	*ket;
@@ -4218,7 +4264,11 @@ kdebug_serial_print(
 	/* threadid, cpu and command name */
 	if (threadid == (uintptr_t)thread_tid(current_thread()) &&
 	    current_proc() &&
+<<<<<<< HEAD
 	    current_proc()->p_comm[0])
+=======
+	    current_proc()->p_comm)
+>>>>>>> origin/10.10
 		command = current_proc()->p_comm;
 	else
 		command = "-";

@@ -224,6 +224,7 @@ typedef struct boot_args {
     uint32_t    pciConfigSpaceEndBusNumber;
 <<<<<<< HEAD
     uint32_t	csrActiveConfig;
+<<<<<<< HEAD
     uint32_t	csrCapabilities;
     uint32_t    boot_SMC_plimit;
     uint16_t    bootProgressMeterStart;
@@ -232,6 +233,11 @@ typedef struct boot_args {
 =======
     uint32_t    __reserved4[730];
 >>>>>>> origin/10.7
+=======
+    uint32_t	csrPendingConfig;
+    uint32_t    boot_SMC_plimit;
+    uint32_t    __reserved4[727];
+>>>>>>> origin/10.10
 
 } boot_args;
 

@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+>>>>>>> origin/10.10
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -372,9 +376,12 @@ hfs_init_summary (struct hfsmount *hfsmp);
 errno_t hfs_find_free_extents(struct hfsmount *hfsmp,
 							  void (*callback)(void *data, off_t), void *callback_arg);
 
+<<<<<<< HEAD
 void hfs_free_tentative(hfsmount_t *hfsmp, struct rl_entry **reservation);
 void hfs_free_locked(hfsmount_t *hfsmp, struct rl_entry **reservation);
 
+=======
+>>>>>>> origin/10.10
 /*	File Extent Mapping routines*/
 EXTERN_API_C( OSErr )
 FlushExtentFile					(ExtendedVCB *			vcb);

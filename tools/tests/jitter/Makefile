@@ -16,7 +16,11 @@ endif
 
 DSTROOT?=$(shell /bin/pwd)
 
+<<<<<<< HEAD
 CFLAGS:=$(patsubst %, -arch %,$(ARCHS)) -g -Wall -Os -isysroot $(SDKROOT) -I$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders
+=======
+CFLAGS:=$(patsubst %, -arch %,$(ARCHS)) -g -Wall -Os -I$(SDKROOT)/System/Library/Frameworks/System.framework/PrivateHeaders
+>>>>>>> origin/10.10
 
 all: $(DSTROOT)/jitter
 

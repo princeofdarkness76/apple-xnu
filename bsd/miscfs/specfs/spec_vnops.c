@@ -3038,6 +3038,12 @@ filt_specdetach(struct knote *kn)
 		waitq_unlink_by_prepost_id(kn->kn_hook_data, kn->kn_kq->kq_wqs);
 		kn->kn_hook_data = 0;
 	}
+<<<<<<< HEAD
+=======
+	knote_clearstayqueued(kn);
+	(void)wait_queue_link_free(kn->kn_hook);
+	kn->kn_hook = NULL;
+>>>>>>> origin/10.10
 }
 
 static int 

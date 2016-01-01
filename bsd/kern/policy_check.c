@@ -118,7 +118,11 @@ common_hook(void)
 	return rv;
 }
 
+<<<<<<< HEAD
 #if (MAC_POLICY_OPS_VERSION != 37)
+=======
+#if (MAC_POLICY_OPS_VERSION != 32)
+>>>>>>> origin/10.10
 # error "struct mac_policy_ops doesn't match definition in mac_policy.h"
 #endif
 /*

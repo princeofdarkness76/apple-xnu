@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004-2014 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2004-2015 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -363,11 +363,15 @@ enum {
 #define HFSIOC_CS_FREESPACE_TRIM _IOWR('h', 39, u_int32_t)
 #define HFS_CS_FREESPACE_TRIM    IOCBASECMD(HFSIOC_CS_FREESPACE_TRIM)
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.10
 /* Get file system information for the given volume */
 #define HFSIOC_GET_FSINFO        _IOWR('h', 45, hfs_fsinfo)
 #define HFS_GET_FSINFO           IOCBASECMD(HFSIOC_GET_FSINFO)
 
+<<<<<<< HEAD
 /* Re-pin hotfile data; argument controls what state gets repinned */
 #define HFSIOC_REPIN_HOTFILE_STATE _IOWR('h', 46, u_int32_t)
 #define HFS_REPIN_HOTFILE_STATE    IOCBASECMD(HFSIOC_REPIN_HOTFILE_STATE)
@@ -395,6 +399,8 @@ enum {
 #define HFSIOC_TRANSFER_DOCUMENT_ID  _IOW('h', 32, u_int32_t)
 #define HFS_TRANSFER_DOCUMENT_ID  IOCBASECMD(HFSIOC_TRANSFER_DOCUMENT_ID)
 
+=======
+>>>>>>> origin/10.10
 #endif /* __APPLE_API_UNSTABLE */
 
 #endif /* ! _HFS_FSCTL_H_ */

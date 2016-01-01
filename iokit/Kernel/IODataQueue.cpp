@@ -143,6 +143,16 @@ Boolean IODataQueue::initWithCapacity(UInt32 size)
     dataQueue->queueSize    = size;
 //  dataQueue->head         = 0;
 //  dataQueue->tail         = 0;
+<<<<<<< HEAD
+=======
+
+    if (!notifyMsg) {
+        notifyMsg = IOMalloc(sizeof(mach_msg_header_t));
+        if (!notifyMsg)
+            return false;
+    }
+    bzero(notifyMsg, sizeof(mach_msg_header_t));
+>>>>>>> origin/10.10
 
     return true;
 }

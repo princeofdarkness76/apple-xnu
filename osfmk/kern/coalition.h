@@ -116,6 +116,7 @@ boolean_t task_is_in_privileged_coalition(task_t task, int type);
 
 kern_return_t coalition_resource_usage_internal(coalition_t coal, struct coalition_resource_usage *cru_out);
 
+<<<<<<< HEAD
 /*
  * development/debug interfaces
  */
@@ -157,5 +158,16 @@ static inline void coalition_for_each_task(__unused coalition_t coal,
 }
 
 #endif /* CONFIG_COALITIONS */
+=======
+ledger_t coalition_get_ledger(coalition_t coal);
+
+uint32_t coalition_adjust_focal_task_count(coalition_t coal, int count);
+uint32_t coalition_focal_task_count(coalition_t coal);
+uint32_t coalition_adjust_non_focal_task_count(coalition_t coal, int count);
+uint32_t coalition_non_focal_task_count(coalition_t coal);
+
+void coalition_sfi_reevaluate(coalition_t coal, task_t updated_task);
+
+>>>>>>> origin/10.10
 #endif /* XNU_KERNEL_PRIVATE */
 #endif /* _KERN_COALITION_H */

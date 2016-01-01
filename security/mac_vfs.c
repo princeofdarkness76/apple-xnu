@@ -961,6 +961,7 @@ mac_vnode_check_signature(struct vnode *vp, off_t macho_offset,
 			  unsigned char *sha1,
 			  const void *signature, size_t size,
 			  int flags, int *is_platform_binary)
+<<<<<<< HEAD
 {
 	int error;
 	
@@ -979,13 +980,21 @@ mac_vnode_check_signature(struct vnode *vp, off_t macho_offset,
 int
 mac_vnode_check_signature(struct vnode *vp, unsigned char *sha1,
 			  void * signature, size_t size)
+=======
+>>>>>>> origin/10.10
 {
 	int error;
 	
 	if (!mac_vnode_enforce || !mac_proc_enforce)
 		return (0);
 	
+<<<<<<< HEAD
 	MAC_CHECK(vnode_check_signature, vp, vp->v_label, sha1, signature, size);
+=======
+	MAC_CHECK(vnode_check_signature, vp, vp->v_label, macho_offset, sha1, 
+							  signature, size, 
+							  flags, is_platform_binary);
+>>>>>>> origin/10.10
 	return (error);
 }
 

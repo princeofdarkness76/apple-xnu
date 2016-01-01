@@ -735,7 +735,11 @@ ctl_rcvbspace(struct socket *so, u_int32_t datasize,
 	u_int32_t space = sbspace(sb);
 	errno_t error;
 
+<<<<<<< HEAD
 	if ((kctlflags & CTL_FLAG_REG_CRIT) == 0) {
+=======
+	if ((kctl->flags & CTL_FLAG_REG_CRIT) == 0) {
+>>>>>>> origin/10.10
 		if ((u_int32_t) space >= datasize)
 			error = 0;
 		else

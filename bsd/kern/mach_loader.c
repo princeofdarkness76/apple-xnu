@@ -693,9 +693,19 @@ parse_machfile(
 		return(LOAD_BADMACHO);
 	}
 
+<<<<<<< HEAD
 =======
 	
 >>>>>>> origin/10.5
+=======
+	if (resid) {
+		/* We must be able to read in as much as the mach_header indicated */
+		if (kl_addr)
+			kfree(kl_addr, kl_size);
+		return(LOAD_BADMACHO);
+	}
+
+>>>>>>> origin/10.10
 	/*
 	 *	For PIE and dyld, slide everything by the ASLR offset.
 	 */
@@ -999,15 +1009,24 @@ parse_machfile(
 			if (cs_enforcement(NULL)) {
 				ret = LOAD_FAILURE;
 			} else {
+<<<<<<< HEAD
                                /*
                                 * No embedded signatures: look for detached by taskgated,
                                 * this is only done on OSX, on embedded platforms we expect everything
                                 * to be have embedded signatures.
                                 */
+=======
+				/*
+				 * No embedded signatures: look for detached by taskgated,
+				 * this is only done on OSX, on embedded platforms we expect everything
+				 * to be have embedded signatures.
+				 */
+>>>>>>> origin/10.10
 				struct cs_blob *blob;
 
 				blob = ubc_cs_blob_get(vp, -1, file_offset);
 				if (blob != NULL) {
+<<<<<<< HEAD
 					unsigned int cs_flag_data = blob->csb_flags;
 					if(0 != ubc_cs_generation_check(vp)) {
 						if (0 != ubc_cs_blob_revalidate(vp, blob, 0)) {
@@ -1018,15 +1037,31 @@ parse_machfile(
 					}
 					/* get flags to be applied to the process */
 					result->csflags |= cs_flag_data;
+=======
+				    unsigned int cs_flag_data = blob->csb_flags;
+				    if(0 != ubc_cs_generation_check(vp)) {
+				    	if (0 != ubc_cs_blob_revalidate(vp, blob, 0)) {
+						/* clear out the flag data if revalidation fails */
+						cs_flag_data = 0;
+						result->csflags &= ~CS_VALID;
+					}
+				    }
+				    /* get flags to be applied to the process */
+				    result->csflags |= cs_flag_data;
+>>>>>>> origin/10.10
 				}
 			}
 		}
 
 		/* Make sure if we need dyld, we got it */
-		if (result->needs_dynlinker && !dlp) {
+		if ((ret == LOAD_SUCCESS) && result->needs_dynlinker && !dlp) {
 			ret = LOAD_FAILURE;
 		}
+<<<<<<< HEAD
 
+=======
+		
+>>>>>>> origin/10.10
 		if ((ret == LOAD_SUCCESS) && (dlp != 0)) {
 			/*
 			 * load the dylinker, and slide it by the independent DYLD ASLR
@@ -1370,6 +1405,21 @@ load_segment(
 	 * If we have a code signature attached for this slice
 	 * require that the segments are within the signed part
 	 * of the file.
+<<<<<<< HEAD
+=======
+	 */
+	if (result->cs_end_offset &&
+	    result->cs_end_offset < (off_t)scp->fileoff &&
+	    result->cs_end_offset - scp->fileoff < scp->filesize)
+        {
+		if (cs_debug)
+			printf("section outside code signature\n");
+		return LOAD_BADMACHO;
+	}
+
+	/*
+	 *	Round sizes to page size.
+>>>>>>> origin/10.10
 	 */
 	if (result->cs_end_offset &&
 	    result->cs_end_offset < (off_t)scp->fileoff &&
@@ -1563,7 +1613,11 @@ load_segment(
 	}
 
 	if (result->entry_point != MACH_VM_MIN_ADDRESS) {
+<<<<<<< HEAD
 		if ((result->entry_point >= vm_offset) && (result->entry_point < (vm_offset + vm_size))) {
+=======
+		if ((result->entry_point >= map_addr) && (result->entry_point < (map_addr + map_size))) {
+>>>>>>> origin/10.10
 			if ((scp->initprot & (VM_PROT_READ|VM_PROT_EXECUTE)) == (VM_PROT_READ|VM_PROT_EXECUTE)) {
 				result->validentry = 1;
 			} else {
@@ -2132,9 +2186,14 @@ load_code_signature(
 			    cputype,
 			    macho_offset,
 			    addr,
+<<<<<<< HEAD
 			    lcp->datasize,
 			    0,
 			    &blob)) {
+=======
+			    lcp->datasize, 
+			    0)) {
+>>>>>>> origin/10.10
 		ret = LOAD_FAILURE;
 		goto out;
 	} else {
@@ -2146,6 +2205,11 @@ load_code_signature(
 	ubc_cs_validation_bitmap_allocate( vp );
 #endif
 		
+<<<<<<< HEAD
+=======
+	blob = ubc_cs_blob_get(vp, cputype, macho_offset);
+
+>>>>>>> origin/10.10
 	ret = LOAD_SUCCESS;
 out:
 	if (ret == LOAD_SUCCESS) {

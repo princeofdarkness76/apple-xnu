@@ -173,10 +173,14 @@
  */
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 #define CR4_SEE		0x00008000	/* Secure Enclave Enable XXX */
 #define CR4_SMAP	0x00200000	/* Supervisor-Mode Access Protect */
 =======
 >>>>>>> origin/10.7
+=======
+#define CR4_SMAP	0x00200000	/* Supervisor-Mode Access Protect */
+>>>>>>> origin/10.10
 #define CR4_SMEP	0x00100000	/* Supervisor-Mode Execute Protect */
 #define CR4_OSXSAVE	0x00040000	/* OS supports XSAVE */
 #define CR4_PCIDE	0x00020000	/* PCID Enable */
@@ -235,12 +239,12 @@
 /*
  * XCR0 - XFEATURE_ENABLED_MASK (a.k.a. XFEM) register
  */
-#define	XCR0_YMM 0x0000000000000004ULL /* YMM state available */
-#define	XFEM_YMM XCR0_YMM
-#define XCR0_SSE 0x0000000000000002ULL	/* SSE supported by XSAVE/XRESTORE */
-#define XCR0_X87 0x0000000000000001ULL	/* x87, FPU/MMX (always set) */
-#define XFEM_SSE XCR0_SSE
-#define XFEM_X87 XCR0_X87
+#define XCR0_X87 	(1ULL << 0)	/* x87, FPU/MMX (always set) */
+#define XCR0_SSE	(1ULL << 1)	/* SSE supported by XSAVE/XRESTORE */
+#define	XCR0_YMM	(1ULL << 2)	/* YMM state available */
+#define XFEM_X87	XCR0_X87
+#define XFEM_SSE	XCR0_SSE
+#define	XFEM_YMM	XCR0_YMM
 #define XCR0 (0)
 #ifndef	ASSEMBLER
 
@@ -572,6 +576,9 @@ __END_DECLS
 #define MSR_IA32_PERFCTR0			0xc1
 #define MSR_IA32_PERFCTR1			0xc2
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 #define MSR_IA32_PERFCTR3			0xc3
 #define MSR_IA32_PERFCTR4			0xc4
 
@@ -604,10 +611,15 @@ __END_DECLS
 #define MSR_IA32_EVNTSEL0			0x186
 #define MSR_IA32_EVNTSEL1			0x187
 <<<<<<< HEAD
+<<<<<<< HEAD
 #define MSR_IA32_EVNTSEL2			0x188
 #define MSR_IA32_EVNTSEL3			0x189
 =======
 >>>>>>> origin/10.6
+=======
+#define MSR_IA32_EVNTSEL2			0x188
+#define MSR_IA32_EVNTSEL3			0x189
+>>>>>>> origin/10.10
 
 #define MSR_FLEX_RATIO				0x194
 #define MSR_IA32_PERF_STS			0x198

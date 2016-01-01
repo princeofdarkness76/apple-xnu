@@ -202,7 +202,11 @@ int UBCINFOEXISTS(const struct vnode *);
 
 /* code signing */
 struct cs_blob;
+<<<<<<< HEAD
 int	ubc_cs_blob_add(vnode_t, cpu_type_t, off_t, vm_address_t, vm_size_t, int, struct cs_blob **);
+=======
+int	ubc_cs_blob_add(vnode_t, cpu_type_t, off_t, vm_address_t, vm_size_t, int);
+>>>>>>> origin/10.10
 int	ubc_cs_sigpup_add(vnode_t, vm_address_t, vm_size_t);
 struct cs_blob *ubc_get_cs_blobs(vnode_t);
 void	ubc_get_cs_mtime(vnode_t, struct timespec *);

@@ -1,6 +1,7 @@
 /*
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 1995-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 1995-2004 Apple Computer, Inc. All rights reserved.
@@ -8,6 +9,9 @@
 =======
  * Copyright (c) 1995-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 1995-2015 Apple Inc. All rights reserved.
+>>>>>>> origin/10.10
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -5716,12 +5720,19 @@ lookup_continue:
 		if (!batched) {
 			error = vn_authorize_unlink(dvp, vp, cnp, ctx, NULL);
 			if (error) {
+<<<<<<< HEAD
 				if (error == ENOENT) {
 					assert(retry_count < MAX_AUTHORIZE_ENOENT_RETRIES);
 					if (retry_count < MAX_AUTHORIZE_ENOENT_RETRIES) {
 						do_retry = 1;
 						retry_count++;
 					}
+=======
+				if (error == ENOENT &&
+				    retry_count < MAX_AUTHORIZE_ENOENT_RETRIES) {
+					do_retry = 1;
+					retry_count++;
+>>>>>>> origin/10.10
 				}
 				goto out;
 			}
@@ -5786,6 +5797,7 @@ lookup_continue:
 				goto out;
 			}
 			goto lookup_continue;
+<<<<<<< HEAD
 		} else if (error == ENOENT && batched) {
 			assert(retry_count < MAX_AUTHORIZE_ENOENT_RETRIES);
 			if (retry_count < MAX_AUTHORIZE_ENOENT_RETRIES) {
@@ -5798,6 +5810,18 @@ lookup_continue:
 				retry_count += 1;
 				goto out;
 			}
+=======
+		} else if (error == ENOENT && batched &&
+		    retry_count < MAX_AUTHORIZE_ENOENT_RETRIES) {
+			/*
+			 * For compound VNOPs, the authorization callback may
+			 * return ENOENT in case of racing hardlink lookups
+			 * hitting the name  cache, redrive the lookup.
+			 */
+			do_retry = 1;
+			retry_count += 1;
+			goto out;
+>>>>>>> origin/10.10
 		}
 	}
 
@@ -7887,6 +7911,7 @@ continue_lookup:
 	if (!batched) {
 		error = vn_authorize_rename(fdvp, fvp, &fromnd->ni_cnd, tdvp, tvp, &tond->ni_cnd, ctx, NULL);
 		if (error) {
+<<<<<<< HEAD
 			if (error == ENOENT) {
 				assert(retry_count < MAX_AUTHORIZE_ENOENT_RETRIES);
 				if (retry_count < MAX_AUTHORIZE_ENOENT_RETRIES) {
@@ -7898,6 +7923,17 @@ continue_lookup:
 					do_retry = 1;
 					retry_count += 1;
 				}
+=======
+			if (error == ENOENT &&
+			    retry_count < MAX_AUTHORIZE_ENOENT_RETRIES) {
+				/*
+				 * We encountered a race where after doing the namei, tvp stops
+				 * being valid. If so, simply re-drive the rename call from the
+				 * top.
+				 */
+				do_retry = 1;
+				retry_count += 1;
+>>>>>>> origin/10.10
 			}
 			goto out1;
 		}
@@ -8170,12 +8206,19 @@ skipped_lookup:
 		 * ENOENT in case of racing hardlink lookups hitting the name
 		 * cache, redrive the lookup.
 		 */
+<<<<<<< HEAD
 		if (batched && error == ENOENT) {
 			assert(retry_count < MAX_AUTHORIZE_ENOENT_RETRIES);
 			if (retry_count < MAX_AUTHORIZE_ENOENT_RETRIES) {
 				do_retry = 1;
 				retry_count += 1;
 			}
+=======
+		if (batched && error == ENOENT &&
+		    retry_count < MAX_AUTHORIZE_ENOENT_RETRIES) {
+			do_retry = 1;
+			retry_count += 1;
+>>>>>>> origin/10.10
 		}
 
 		goto out1;
@@ -8743,12 +8786,19 @@ continue_lookup:
 			if (!batched) {
 				error = vn_authorize_rmdir(dvp, vp, &nd.ni_cnd, ctx, NULL);
 				if (error) {
+<<<<<<< HEAD
 					if (error == ENOENT) {
 						assert(restart_count < MAX_AUTHORIZE_ENOENT_RETRIES);
 						if (restart_count < MAX_AUTHORIZE_ENOENT_RETRIES) {
 							restart_flag = 1;
 							restart_count += 1;
 						}
+=======
+					if (error == ENOENT &&
+					    restart_count < MAX_AUTHORIZE_ENOENT_RETRIES) {
+						restart_flag = 1;
+						restart_count += 1;
+>>>>>>> origin/10.10
 					}
 					goto out;
 				}
@@ -8805,6 +8855,7 @@ continue_lookup:
 
 		if (error == EKEEPLOOKING) {
 			goto continue_lookup;
+<<<<<<< HEAD
 		} else if (batched && error == ENOENT) {
 			assert(restart_count < MAX_AUTHORIZE_ENOENT_RETRIES);
 			if (restart_count < MAX_AUTHORIZE_ENOENT_RETRIES) {
@@ -8817,6 +8868,18 @@ continue_lookup:
 				restart_count += 1;
 				goto out;
 			}
+=======
+		} else if (batched && error == ENOENT &&
+		    restart_count < MAX_AUTHORIZE_ENOENT_RETRIES) {
+			/*
+			 * For compound VNOPs, the authorization callback
+			 * may return ENOENT in case of racing hard link lookups
+			 * redrive the lookup.
+			 */
+			restart_flag = 1;
+			restart_count += 1;
+			goto out;
+>>>>>>> origin/10.10
 		}
 #if CONFIG_APPLEDOUBLE
 		/*
@@ -10694,12 +10757,19 @@ fsctl_internal(proc_t p, vnode_t *arg_vp, u_long cmd, user_addr_t udata, u_long 
 
 	memp = NULL;
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.10
 	/*
 	 * ensure the buffer is large enough for underlying calls
 	 */
 #ifndef HFSIOC_GETPATH
+<<<<<<< HEAD
 	typedef char pn_t[MAXPATHLEN];
+=======
+typedef char pn_t[MAXPATHLEN];
+>>>>>>> origin/10.10
 #define HFSIOC_GETPATH  _IOWR('h', 13, pn_t)
 #endif
 
@@ -10711,6 +10781,10 @@ fsctl_internal(proc_t p, vnode_t *arg_vp, u_long cmd, user_addr_t udata, u_long 
 		size = MAXPATHLEN;
 	}
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.10
 	if (size > sizeof (stkbuf)) {
 		if ((memp = (caddr_t)kalloc(size)) == 0) return ENOMEM;
 		data = memp;

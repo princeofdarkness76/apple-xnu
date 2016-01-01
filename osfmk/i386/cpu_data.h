@@ -300,6 +300,9 @@ typedef struct cpu_data
  	uint64_t		cpu_cur_ucc;
  	uint64_t		cpu_cur_urc;
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 	uint64_t		cpu_gpmcs[4];
 	uint64_t                cpu_max_observed_int_latency;
 	int                     cpu_max_observed_int_latency_vector;

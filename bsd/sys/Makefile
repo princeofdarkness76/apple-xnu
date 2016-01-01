@@ -225,8 +225,13 @@ sysproto.h: $(SRCROOT)/bsd/kern/syscalls.master $(MAKESYSCALLS) $(OBJROOT)/cscop
 	$(_v)$(MAKESYSCALLS) $< proto > /dev/null
 
 kdebugevents.h:  $(SRCROOT)/bsd/kern/trace.codes $(MAKEKDEBUGEVENTS) $(OBJROOT)/cscope.genhdrs
+<<<<<<< HEAD
 	@echo "Generating bsd/sys/$@ from $<";
 	@echo "$(OBJPATH)/bsd/sys/$@" > $(OBJROOT)/cscope.genhdrs/$@.path
+=======
+	@echo "Generating bsd/kern/$@ from $<";
+	@echo "$(OBJPATH)/bsd/kern/$@" > $(OBJROOT)/cscope.genhdrs/$@.path
+>>>>>>> origin/10.10
 	$(_v)$(MAKEKDEBUGEVENTS) $< > "$(OBJPATH)/bsd/sys/$@"
 
 MAKE_POSIX_AVAILABILITY = $(SRCROOT)/bsd/sys/make_posix_availability.sh

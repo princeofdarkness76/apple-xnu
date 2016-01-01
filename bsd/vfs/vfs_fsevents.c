@@ -697,9 +697,13 @@ add_fsevent(int type, vfs_context_t ctx, ...)
 		VATTR_WANTED(&va, va_uid);
 		VATTR_WANTED(&va, va_gid);
 <<<<<<< HEAD
+<<<<<<< HEAD
 		VATTR_WANTED(&va, va_nlink);
 =======
 >>>>>>> origin/10.5
+=======
+		VATTR_WANTED(&va, va_nlink);
+>>>>>>> origin/10.10
 		if ((ret = vnode_getattr(vp, &va, vfs_context_kernel())) != 0) {
 		    // printf("add_fsevent: failed to getattr on vp %p (%d)\n", cur->fref.vp, ret);
 		    cur->str = NULL;

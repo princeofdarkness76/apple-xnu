@@ -813,11 +813,19 @@ setuid(proc_t p, struct setuid_args *uap, __unused int32_t *retval)
 			 * may be able to decrement the proc count of B before we can increment it. This results in a panic.
 			 * Incrementing the proc count of the target ruid, B, before setting the process credentials prevents this race.
 			 */
+<<<<<<< HEAD
 			if (ruid != KAUTH_UID_NONE && chgproccnt_ok(p)) {
 				(void)chgproccnt(ruid, 1);
 			}
 
 			proc_ucred_lock(p);
+=======
+			if (ruid != KAUTH_UID_NONE) {
+				(void)chgproccnt(ruid, 1);
+			}
+
+			proc_lock(p);
+>>>>>>> origin/10.10
 			/*
 			 * We need to protect for a race where another thread
 			 * also changed the credential after we took our
@@ -827,12 +835,20 @@ setuid(proc_t p, struct setuid_args *uap, __unused int32_t *retval)
 			 * Note: the kauth_cred_setresuid has consumed a reference to my_cred, it p_ucred != my_cred, then my_cred must not be dereferenced!
 			 */
 			if (p->p_ucred != my_cred) {
+<<<<<<< HEAD
 				proc_ucred_unlock(p);
+=======
+				proc_unlock(p);
+>>>>>>> origin/10.10
 				/*
 				 * We didn't successfully switch to the new ruid, so decrement
 				 * the procs/uid count that we incremented above.
 				 */
+<<<<<<< HEAD
 				if (ruid != KAUTH_UID_NONE && chgproccnt_ok(p)) {
+=======
+				if (ruid != KAUTH_UID_NONE) {
+>>>>>>> origin/10.10
 					(void)chgproccnt(ruid, -1);
 				}
 				kauth_cred_unref(&my_new_cred);
@@ -846,12 +862,20 @@ setuid(proc_t p, struct setuid_args *uap, __unused int32_t *retval)
 			PROC_UPDATE_CREDS_ONPROC(p);
 
 			OSBitOrAtomic(P_SUGID, &p->p_flag);
+<<<<<<< HEAD
 			proc_ucred_unlock(p);
+=======
+			proc_unlock(p);
+>>>>>>> origin/10.10
 			/*
 			 * If we've updated the ruid, decrement the count of procs running
 			 * under the previous ruid
 			 */
+<<<<<<< HEAD
 			if (ruid != KAUTH_UID_NONE && chgproccnt_ok(p)) {
+=======
+			if (ruid != KAUTH_UID_NONE) {
+>>>>>>> origin/10.10
 				(void)chgproccnt(my_pcred->cr_ruid, -1);
 			}
 		}
@@ -1061,11 +1085,19 @@ setreuid(proc_t p, struct setreuid_args *uap, __unused int32_t *retval)
 			 * may be able to decrement the proc count of B before we can increment it. This results in a panic.
 			 * Incrementing the proc count of the target ruid, B, before setting the process credentials prevents this race.
 			 */
+<<<<<<< HEAD
 			if (ruid != KAUTH_UID_NONE && chgproccnt_ok(p)) {
 				(void)chgproccnt(ruid, 1);
 			}
 
 			proc_ucred_lock(p);
+=======
+			if (ruid != KAUTH_UID_NONE) {
+				(void)chgproccnt(ruid, 1);
+			}
+
+			proc_lock(p);
+>>>>>>> origin/10.10
 			/*
 			 * We need to protect for a race where another thread
 			 * also changed the credential after we took our
@@ -1075,8 +1107,13 @@ setreuid(proc_t p, struct setreuid_args *uap, __unused int32_t *retval)
 			 * Note: the kauth_cred_setresuid has consumed a reference to my_cred, it p_ucred != my_cred, then my_cred must not be dereferenced!
 			 */
 			if (p->p_ucred != my_cred) {
+<<<<<<< HEAD
 				proc_ucred_unlock(p);
 				if (ruid != KAUTH_UID_NONE && chgproccnt_ok(p)) {
+=======
+				proc_unlock(p);
+				if (ruid != KAUTH_UID_NONE) {
+>>>>>>> origin/10.10
 					/*
 					 * We didn't successfully switch to the new ruid, so decrement
 					 * the procs/uid count that we incremented above.
@@ -1094,9 +1131,15 @@ setreuid(proc_t p, struct setreuid_args *uap, __unused int32_t *retval)
 			/* update cred on proc */
 			PROC_UPDATE_CREDS_ONPROC(p);
 			OSBitOrAtomic(P_SUGID, &p->p_flag);
+<<<<<<< HEAD
 			proc_ucred_unlock(p);
 
 			if (ruid != KAUTH_UID_NONE && chgproccnt_ok(p)) {
+=======
+			proc_unlock(p);
+
+			if (ruid != KAUTH_UID_NONE) {
+>>>>>>> origin/10.10
 				/*
 				 * We switched to a new ruid, so decrement the count of procs running
 				 * under the previous ruid

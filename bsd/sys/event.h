@@ -588,12 +588,15 @@ extern int	knote_unlink_waitq(struct knote *kn, struct waitq *wq);
 extern void	knote_fdclose(struct proc *p, int fd);
 extern void	knote_markstayqueued(struct knote *kn);
 extern void	knote_clearstayqueued(struct knote *kn);
+<<<<<<< HEAD
 
 extern int	kevent_qos_internal(struct proc *p, int fd, 
 			    user_addr_t changelist, int nchanges,
 			    user_addr_t eventlist, int nevents,
 			    user_addr_t data_out, user_size_t *data_available,
 			    unsigned int flags, int32_t *retval);
+=======
+>>>>>>> origin/10.10
 #endif /* !KERNEL_PRIVATE */
 
 #else 	/* KERNEL */

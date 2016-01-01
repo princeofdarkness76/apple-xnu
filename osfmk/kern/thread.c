@@ -408,7 +408,20 @@ thread_init(void)
 >>>>>>> origin/10.6
 =======
 
+<<<<<<< HEAD
 >>>>>>> origin/10.7
+=======
+	thread_qos_override_zone = zinit(
+		sizeof(struct thread_qos_override),
+		4 * thread_max * sizeof(struct thread_qos_override),
+		PAGE_SIZE,
+		"thread qos override");
+	zone_change(thread_qos_override_zone, Z_EXPAND, TRUE);
+	zone_change(thread_qos_override_zone, Z_COLLECT, TRUE);
+	zone_change(thread_qos_override_zone, Z_CALLERACCT, FALSE);
+	zone_change(thread_qos_override_zone, Z_NOENCRYPT, TRUE);
+
+>>>>>>> origin/10.10
 	lck_grp_attr_setdefault(&thread_lck_grp_attr);
 	lck_grp_init(&thread_lck_grp, "thread", &thread_lck_grp_attr);
 	lck_attr_setdefault(&thread_lck_attr);

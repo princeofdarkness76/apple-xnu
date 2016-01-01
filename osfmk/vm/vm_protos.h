@@ -508,9 +508,12 @@ extern int cs_invalid_page(addr64_t vaddr);
 
 #define CS_VALIDATE_TAINTED	0x00000001
 #define CS_VALIDATE_NX		0x00000002
+<<<<<<< HEAD
 =======
 extern int cs_invalid_page(addr64_t vaddr);
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.10
 extern boolean_t cs_validate_page(void *blobs,
 				  memory_object_t pager,
 				  memory_object_offset_t offset, 

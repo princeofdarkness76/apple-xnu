@@ -6175,7 +6175,11 @@ soo_kqfilter(struct fileproc *fp, struct knote *kn, vfs_context_t ctx)
 		/*
 		 * If the caller explicitly asked for OOB results (e.g. poll()),
 		 * save that off in the hookid field and reserve the kn_flags
+<<<<<<< HEAD
 		 * EV_OOBAND bit for output only.
+=======
+		 * EV_OOBAND bit for output only).
+>>>>>>> origin/10.10
 		 */
 		if (kn->kn_flags & EV_OOBAND) {
 			kn->kn_flags &= ~EV_OOBAND;
@@ -6261,19 +6265,31 @@ filt_soread(struct knote *kn, long hint)
 	}
 
 	/* socket isn't a listener */
+<<<<<<< HEAD
 	/*
 	 * NOTE_LOWAT specifies new low water mark in data, i.e.
 	 * the bytes of protocol data. We therefore exclude any
 	 * control bytes.
 	 */
+=======
+>>>>>>> origin/10.10
 	kn->kn_data = so->so_rcv.sb_cc - so->so_rcv.sb_ctl;
+	/*
+	 * Clear out EV_OOBAND that filt_soread may have set in the
+	 * past.
+	 */
+	kn->kn_flags &= ~EV_OOBAND;
 
+<<<<<<< HEAD
 	/*
 	 * Clear out EV_OOBAND that filt_soread may have set in the
 	 * past.
 	 */
 	kn->kn_flags &= ~EV_OOBAND;
 	if ((so->so_oobmark) || (so->so_state & SS_RCVATMARK)) {
+=======
+	if ((so->so_oobmark) || (so->so_state & SS_RCVATMARK)){
+>>>>>>> origin/10.10
 		kn->kn_flags |= EV_OOBAND;
 		/*
 		 * If caller registered explicit interest in OOB data,
@@ -6289,6 +6305,7 @@ filt_soread(struct knote *kn, long hint)
 			if ((hint & SO_FILT_HINT_LOCKED) == 0)
 				socket_unlock(so, 1);
 			return (1);
+<<<<<<< HEAD
 =======
 		while (flags & MSG_WAITALL && m == 0 && uio->uio_resid > 0 &&
 		    !sosendallatonce(so) && !nextrecord) {
@@ -6318,6 +6335,11 @@ filt_soread(struct knote *kn, long hint)
 	        m_freem_list(free_list);
 	}
 
+=======
+		}
+	}
+	
+>>>>>>> origin/10.10
 	if ((so->so_state & SS_CANTRCVMORE)
 #if CONTENT_FILTER
 	    && cfil_sock_data_pending(&so->so_rcv) == 0
@@ -6352,6 +6374,7 @@ filt_soread(struct knote *kn, long hint)
 	if ((hint & SO_FILT_HINT_LOCKED) == 0)
 		socket_unlock(so, 1);
 
+<<<<<<< HEAD
 	/*
 	 * The order below is important. Since NOTE_LOWAT
 	 * overrides sb_lowat, check for NOTE_LOWAT case
@@ -6361,6 +6384,9 @@ filt_soread(struct knote *kn, long hint)
 		return (kn->kn_data >= lowwat);
 
 	return (so->so_rcv.sb_cc >= lowwat);
+=======
+	return (kn->kn_data >= lowwat);
+>>>>>>> origin/10.10
 }
 
 static void

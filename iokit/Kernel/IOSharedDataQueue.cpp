@@ -248,10 +248,14 @@ Boolean IOSharedDataQueue::enqueue(void * data, UInt32 dataSize)
     }
     // Check for underflow of (getQueueSize() - tail)
 <<<<<<< HEAD
+<<<<<<< HEAD
     if (getQueueSize() < tail || getQueueSize() < head) {
 =======
     if (getQueueSize() < tail) {
 >>>>>>> origin/10.9
+=======
+    if (getQueueSize() < tail || getQueueSize() < head) {
+>>>>>>> origin/10.10
         return false;
     }
     

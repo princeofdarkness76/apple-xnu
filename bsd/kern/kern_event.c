@@ -121,7 +121,11 @@
 #include <kern/clock.h>
 #include <kern/thread_call.h>
 #include <kern/sched_prim.h>
+<<<<<<< HEAD
 #include <kern/waitq.h>
+=======
+#include <kern/wait_queue.h>
+>>>>>>> origin/10.10
 #include <kern/zalloc.h>
 #include <kern/kalloc.h>
 #include <kern/assert.h>
@@ -3047,7 +3051,11 @@ knote_unlink_waitq(struct knote *kn, struct waitq *wq)
 	struct kqueue *kq = kn->kn_kq;
 	kern_return_t kr;
 
+<<<<<<< HEAD
 	kr = waitq_unlink(wq, kq->kq_wqs);
+=======
+	kr = wait_queue_unlink_nofree(wq, kq->kq_wqs, wqlp);
+>>>>>>> origin/10.10
 	knote_clearstayqueued(kn);
 	return ((kr != KERN_SUCCESS) ? EINVAL : 0);
 }
@@ -3953,6 +3961,7 @@ knote_clearstayqueued(struct knote *kn)
 	knote_dequeue(kn);
 	kqunlock(kn->kn_kq);
 }
+<<<<<<< HEAD
 
 static unsigned long
 kevent_extinfo_emit(struct kqueue *kq, struct knote *kn, struct kevent_extinfo *buf,
@@ -4045,3 +4054,5 @@ pid_kqueue_extinfo(proc_t p, struct kqueue *kq, user_addr_t ubuf,
 		*retval = nknotes;
 	return err;
 }
+=======
+>>>>>>> origin/10.10

@@ -1028,11 +1028,15 @@ cpuid_set_generic_info(i386_cpu_info_t *info_p)
 		 * Leaf7 Features:
 		 */
 		cpuid_fn(0x7, reg);
-		info_p->cpuid_leaf7_features = reg[ebx];
+		info_p->cpuid_leaf7_features = quad(reg[ecx], reg[ebx]);
 
 		DBG(" Feature Leaf7:\n");
 		DBG("  EBX           : 0x%x\n", reg[ebx]);
+<<<<<<< HEAD
 >>>>>>> origin/10.7
+=======
+		DBG("  ECX           : 0x%x\n", reg[ecx]);
+>>>>>>> origin/10.10
 	}
 
 	return;
@@ -1092,6 +1096,7 @@ cpuid_set_cpufamily(i386_cpu_info_t *info_p)
 		case CPUID_MODEL_BRYSTALWELL:
 			cpufamily = CPUFAMILY_INTEL_BROADWELL;
 			break;
+<<<<<<< HEAD
 		case CPUID_MODEL_SKYLAKE:
 		case CPUID_MODEL_SKYLAKE_DT:
 			cpufamily = CPUFAMILY_INTEL_SKYLAKE;
@@ -1111,6 +1116,8 @@ cpuid_set_cpufamily(i386_cpu_info_t *info_p)
 			cpufamily = CPUFAMILY_INTEL_HASWELL;
 			break;
 >>>>>>> origin/10.8
+=======
+>>>>>>> origin/10.10
 		}
 		break;
 	}
@@ -1188,19 +1195,26 @@ cpuid_set_info(void)
 	 */
 	switch (info_p->cpuid_cpufamily) {
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 	case CPUFAMILY_INTEL_MEROM:
 	case CPUFAMILY_INTEL_PENRYN:
 		info_p->core_count   = info_p->cpuid_cores_per_package;
 		info_p->thread_count = info_p->cpuid_logical_per_package;
 		break;
+<<<<<<< HEAD
 =======
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.10
 	case CPUFAMILY_INTEL_WESTMERE: {
 		uint64_t msr = rdmsr64(MSR_CORE_THREAD_COUNT);
 		info_p->core_count   = bitfield32((uint32_t)msr, 19, 16);
 		info_p->thread_count = bitfield32((uint32_t)msr, 15,  0);
 		break;
 		}
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -1215,6 +1229,9 @@ cpuid_set_info(void)
 	case CPUFAMILY_INTEL_SANDYBRIDGE:
 	case CPUFAMILY_INTEL_NEHALEM: {
 >>>>>>> origin/10.6
+=======
+	default: {
+>>>>>>> origin/10.10
 		uint64_t msr = rdmsr64(MSR_CORE_THREAD_COUNT);
 		info_p->core_count   = bitfield32((uint32_t)msr, 31, 16);
 		info_p->thread_count = bitfield32((uint32_t)msr, 15,  0);
@@ -1422,6 +1439,7 @@ leaf7_feature_map[] = {
 	{CPUID_LEAF7_FEATURE_BMI2,     "BMI2"},
 	{CPUID_LEAF7_FEATURE_INVPCID,  "INVPCID"},
 	{CPUID_LEAF7_FEATURE_RTM,      "RTM"},
+<<<<<<< HEAD
 	{CPUID_LEAF7_FEATURE_SMAP,     "SMAP"},
 	{CPUID_LEAF7_FEATURE_RDSEED,   "RDSEED"},
 	{CPUID_LEAF7_FEATURE_ADX,      "ADX"},
@@ -1450,6 +1468,11 @@ leaf7_feature_map[] = {
 	{CPUID_LEAF7_FEATURE_ENFSTRG,  "ENFSTRG"},
 	{CPUID_LEAF7_FEATURE_INVPCID,  "INVPCID"},
 	{CPUID_LEAF7_FEATURE_RTM,      "RTM"},
+=======
+	{CPUID_LEAF7_FEATURE_RDSEED,   "RDSEED"},
+	{CPUID_LEAF7_FEATURE_ADX,      "ADX"},
+	{CPUID_LEAF7_FEATURE_SMAP,     "SMAP"},
+>>>>>>> origin/10.10
 	{0, 0}
 };
 

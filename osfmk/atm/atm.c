@@ -345,9 +345,29 @@ atm_get_value(
 
 			task = current_task();
 			task_descriptor = task->atm_context;
+<<<<<<< HEAD
 				
 			kr = atm_value_register(atm_value, task_descriptor, guard);
 			if (kr != KERN_SUCCESS) {
+=======
+			if (task_descriptor != ATM_TASK_DESCRIPTOR_NULL) {
+				if (recipe_size != sizeof(mailbox_offset_t)) {
+					kr = KERN_INVALID_ARGUMENT;
+					break;
+				}
+				memcpy(&mailbox_offset, recipe, sizeof(mailbox_offset_t));
+				if (mailbox_offset > task_descriptor->mailbox_array_size) {
+					kr = KERN_INVALID_ARGUMENT;
+					break;
+				}
+
+				kr = atm_listener_insert(atm_value, task_descriptor, mailbox_offset);
+				if (kr != KERN_SUCCESS) {
+					break;
+				}
+			} else {
+				kr = KERN_INVALID_TASK;
+>>>>>>> origin/10.10
 				break;
 			}
 
@@ -1040,6 +1060,7 @@ atm_listener_insert(
 
 	/* Check if the task is already on the listener list */
 	lck_mtx_lock(&atm_value->listener_lock);
+<<<<<<< HEAD
 
 	next = (atm_link_object_t)(void *) queue_first(&atm_value->listeners);
 	while (!queue_end(&atm_value->listeners, (queue_entry_t)next)) {
@@ -1074,6 +1095,29 @@ atm_listener_insert(
 
 		}
 	}
+=======
+	queue_iterate(&atm_value->listeners, next, atm_link_object_t, listeners_element) {
+		if (next->descriptor == task_descriptor) {
+			/* 
+			 * Replace the mailbox with the new one, the old mailbox is anyways on unregister path.
+			 * There is a race when get_min_sub_aid would cache the mailbox, and this function will
+			 * replace it. It would just behave as if the get value call happened after get_min_sub_aid
+			 * was already completed.
+			 */
+			next->mailbox = mailbox;
+			lck_mtx_unlock(&atm_value->listener_lock);
+			KERNEL_DEBUG_CONSTANT((ATM_CODE(ATM_GETVALUE_INFO, (ATM_VALUE_REPLACED))) | DBG_FUNC_NONE,
+				VM_KERNEL_ADDRPERM(atm_value), atm_value->aid, mailbox_offset, 0, 0);
+
+			/* Drop the extra reference on task descriptor taken by this function. */
+			atm_task_descriptor_dealloc(task_descriptor);
+			zfree(atm_link_objects_zone, new_link_object);
+			return KERN_SUCCESS;
+		}
+	}
+	KERNEL_DEBUG_CONSTANT((ATM_CODE(ATM_GETVALUE_INFO, (ATM_VALUE_ADDED))) | DBG_FUNC_NONE,
+				VM_KERNEL_ADDRPERM(atm_value), atm_value->aid, mailbox_offset, 0, 0);
+>>>>>>> origin/10.10
 
 	if (element_found) {
 		lck_mtx_unlock(&atm_value->listener_lock);
@@ -1150,16 +1194,30 @@ atm_listener_delete(
 		next = (atm_link_object_t)(void *) queue_next(&next->listeners_element);
 
 		if (elem->descriptor == task_descriptor) {
+<<<<<<< HEAD
 			if (elem->guard == guard) {
 				KERNEL_DEBUG_CONSTANT((ATM_CODE(ATM_UNREGISTER_INFO,
 					(ATM_VALUE_UNREGISTERED))) | DBG_FUNC_NONE,
 					VM_KERNEL_ADDRPERM(atm_value), atm_value->aid, guard, elem->reference_count, 0);
 				elem->guard = 0;
+=======
+			if (elem->mailbox == mailbox) {
+				KERNEL_DEBUG_CONSTANT((ATM_CODE(ATM_UNREGISTER_INFO,
+					(ATM_VALUE_UNREGISTERED))) | DBG_FUNC_NONE,
+					VM_KERNEL_ADDRPERM(atm_value), atm_value->aid, mailbox_offset, 0, 0);
+				queue_remove(&atm_value->listeners, elem, atm_link_object_t, listeners_element);
+				queue_enter(&free_listeners, elem, atm_link_object_t, listeners_element);
+				atm_value->listener_count--;
+>>>>>>> origin/10.10
 				kr = KERN_SUCCESS;
 			} else {
 				KERNEL_DEBUG_CONSTANT((ATM_CODE(ATM_UNREGISTER_INFO,
 					(ATM_VALUE_DIFF_MAILBOX))) | DBG_FUNC_NONE,
+<<<<<<< HEAD
 					VM_KERNEL_ADDRPERM(atm_value), atm_value->aid, elem->guard, elem->reference_count, 0);
+=======
+					VM_KERNEL_ADDRPERM(atm_value), atm_value->aid, 0, 0, 0);
+>>>>>>> origin/10.10
 				kr = KERN_INVALID_VALUE;
 			}
 			if (0 == atm_link_object_release_internal(elem)) {
@@ -1353,11 +1411,32 @@ extern uint32_t atm_diagnostic_config; /* Proxied to commpage for fast user acce
 kern_return_t
 atm_set_diagnostic_config(uint32_t diagnostic_config)
 {
+<<<<<<< HEAD
 	if (disable_atm)
 		return KERN_NOT_SUPPORTED;
 
 	atm_diagnostic_config = diagnostic_config;
 	commpage_update_atm_diagnostic_config(atm_diagnostic_config);
+=======
+	atm_value_t atm_value;
+	uint32_t i;
+
+	KERNEL_DEBUG_CONSTANT((ATM_CODE(ATM_SUBAID_INFO, (ATM_MIN_CALLED))) | DBG_FUNC_START,
+			0, 0, 0, 0, 0);
+
+	for (i = 0; i < count; i++) {
+		atm_value = get_atm_value_from_aid(aid_array[i]);
+		if (atm_value == ATM_VALUE_NULL) {
+			subaid_array[i] = ATM_SUBAID32_MAX;
+			continue;
+		}
+		subaid_array[i] = atm_get_min_sub_aid(atm_value);
+		atm_value_dealloc(atm_value);
+	}
+
+	KERNEL_DEBUG_CONSTANT((ATM_CODE(ATM_SUBAID_INFO, (ATM_MIN_CALLED))) | DBG_FUNC_END,
+			count, 0, 0, 0, 0);
+>>>>>>> origin/10.10
 
 	return KERN_SUCCESS;
 }
@@ -1371,7 +1450,115 @@ atm_set_diagnostic_config(uint32_t diagnostic_config)
 uint32_t
 atm_get_diagnostic_config(void)
 {
+<<<<<<< HEAD
 	return atm_diagnostic_config;
+=======
+	int32_t i = 0, j, freed_count = 0, dead_but_not_freed = 0;
+	int32_t listener_count;
+	atm_subaid32_t min_subaid = ATM_SUBAID32_MAX, subaid, max_subaid;
+	atm_link_object_t *link_object_array = NULL;
+	atm_link_object_t next, elem;
+	queue_head_t free_listeners;
+
+	KERNEL_DEBUG_CONSTANT((ATM_CODE(ATM_SUBAID_INFO, (ATM_MIN_LINK_LIST))) | DBG_FUNC_START,
+			0, 0, 0, 0, 0);
+
+	lck_mtx_lock(&atm_value->listener_lock);
+	listener_count = atm_value->listener_count;
+	lck_mtx_unlock(&atm_value->listener_lock);
+
+	/* separate memory access from locked iterate since memory read may fault */
+	link_object_array = (atm_link_object_t *) kalloc(sizeof(atm_link_object_t) * listener_count);
+	if (link_object_array == NULL) {
+		return 0;
+	}
+
+	/* Iterate the list and take a ref on link objects and store it in an array */ 
+	lck_mtx_lock(&atm_value->listener_lock);
+	queue_iterate(&atm_value->listeners, next, atm_link_object_t, listeners_element) {
+		/* Additional listener are added between the allocation of array and iterating the list */
+		if (i >= listener_count)
+			break;
+
+		/* Get a ref on the link object */
+		atm_link_get_reference(next);
+		link_object_array[i] = (atm_link_object_t)next;
+		i++;
+	}
+	lck_mtx_unlock(&atm_value->listener_lock);
+	j = i;
+
+	/* Iterate the array to find the min */
+	for (i = 0; i < j; i++) {
+		/* Ignore the min value of the dead processes. */
+		if (link_object_array[i]->descriptor->flags == ATM_TASK_DEAD)
+			continue;
+		/* Dereference the mailbox to get the min subaid */
+		subaid = *((atm_subaid32_t *)link_object_array[i]->mailbox);
+		if (subaid < min_subaid)
+			min_subaid = subaid;
+	}
+
+	/*
+	 * Mark the link object that can be freed, and release the ref on the link object
+	 * Mark the link object of dead task free after the dead task descriptor count
+	 * increases than ATM_LIST_DEAD_MAX.
+	 */
+	for (i = j - 1; i >= 0; i--) {
+		if (link_object_array[i]->descriptor->flags == ATM_TASK_DEAD) {
+			if (dead_but_not_freed > ATM_LIST_DEAD_MAX) {
+				link_object_array[i]->flags = ATM_LINK_REMOVE;
+				freed_count++;
+			} else {
+				max_subaid = *(((atm_subaid32_t *)link_object_array[i]->mailbox) + 1);
+				if (max_subaid < min_subaid) {
+					link_object_array[i]->flags = ATM_LINK_REMOVE;
+					freed_count++;
+				} else {
+					dead_but_not_freed++;
+				}
+			}
+		}
+		atm_link_dealloc(link_object_array[i]);
+		link_object_array[i] = NULL;
+	}
+
+	/* Check if the number of live entries in list is less than maxproc */
+	assert((j - (freed_count + dead_but_not_freed)) <= maxproc);
+
+	kfree(link_object_array, (sizeof(atm_link_object_t) * listener_count));
+
+	/* Remove the marked link objects from the list */
+	lck_mtx_lock(&atm_value->listener_lock);
+	
+	queue_init(&free_listeners);
+	next = (atm_link_object_t)(void *) queue_first(&atm_value->listeners);
+	while (!queue_end(&atm_value->listeners, (queue_entry_t)next)) {
+		elem = next;
+		next = (atm_link_object_t)(void *) queue_next(&next->listeners_element);
+
+		if (elem->flags == ATM_LINK_REMOVE) {
+			queue_remove(&atm_value->listeners, elem, atm_link_object_t, listeners_element);
+			queue_enter(&free_listeners, elem, atm_link_object_t, listeners_element);
+			atm_value->listener_count--;
+		}
+	}
+	lck_mtx_unlock(&atm_value->listener_lock);
+
+	/* Free the link objects */
+	while(!queue_empty(&free_listeners)) {
+		queue_remove_first(&free_listeners, next, atm_link_object_t, listeners_element);
+	
+		/* Drops the reference on the link object */
+		atm_link_dealloc(next);
+	}
+	
+	KERNEL_DEBUG_CONSTANT((ATM_CODE(ATM_SUBAID_INFO, (ATM_MIN_LINK_LIST))) | DBG_FUNC_END,
+			j, freed_count, dead_but_not_freed, 0, 0);
+
+	/* explicitly upgrade uint32_t to 64 bit mach size */
+	return CAST_DOWN(mach_atm_subaid_t, min_subaid);
+>>>>>>> origin/10.10
 }
 
 

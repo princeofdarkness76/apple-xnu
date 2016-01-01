@@ -3099,8 +3099,12 @@ ubc_cs_blob_add(
 	off_t		base_offset,
 	vm_address_t	addr,
 	vm_size_t	size,
+<<<<<<< HEAD
 	__unused int	flags,
 	struct cs_blob	**ret_blob)
+=======
+	__unused int flags)
+>>>>>>> origin/10.10
 {
 	kern_return_t		kr;
 	struct ubc_info		*uip;
@@ -3229,17 +3233,30 @@ ubc_cs_blob_add(
 	 */
 #if CONFIG_MACF
 <<<<<<< HEAD
+<<<<<<< HEAD
 	error = mac_vnode_check_signature(vp, 
 					  base_offset, 
 					  blob->csb_cdhash, 
 					  (const void*)addr, size,
 					  flags, &cs_flags);
+=======
+	error = mac_vnode_check_signature(vp, 
+					  base_offset, 
+					  blob->csb_sha1, 
+					  (const void*)cd,
+					  size, flags, 
+					  &is_platform_binary);
+>>>>>>> origin/10.10
 	if (error) {
 		if (cs_debug) 
 			printf("check_signature[pid: %d], error = %d\n", current_proc()->p_pid, error);
 		goto out;
 	}
+<<<<<<< HEAD
 	if ((flags & MAC_VNODE_CHECK_DYLD_SIM) && !(cs_flags & CS_PLATFORM_BINARY)) {
+=======
+	if ((flags & MAC_VNODE_CHECK_DYLD_SIM) && !is_platform_binary) {
+>>>>>>> origin/10.10
 		if (cs_debug)
 			printf("check_signature[pid: %d], is not apple signed\n", current_proc()->p_pid);
 		error = EPERM;
@@ -3655,9 +3672,13 @@ ubc_cs_blob_revalidate(
 
 	/* callout to mac_vnode_check_signature */
 #if CONFIG_MACF
+<<<<<<< HEAD
 	error = mac_vnode_check_signature(vp, blob->csb_base_offset, blob->csb_cdhash,
 					  (const void*)blob->csb_mem_kaddr, (int)blob->csb_mem_size,
 					  flags, &cs_flags);
+=======
+	error = mac_vnode_check_signature(vp, blob->csb_base_offset, blob->csb_sha1, (const void*)cd, blob->csb_cpu_type, flags, &is_platform_binary);
+>>>>>>> origin/10.10
 	if (cs_debug && error) {
 			printf("revalidate: check_signature[pid: %d], error = %d\n", current_proc()->p_pid, error);
 	}
@@ -3884,6 +3905,9 @@ cs_validate_page(
 	} else {
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 		*tainted = 0;
 
 		size = PAGE_SIZE_4K;

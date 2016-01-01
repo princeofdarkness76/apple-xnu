@@ -517,9 +517,14 @@ void 	panic_display_ecc_errors(void);
 						* post-panic crashdump/paniclog
 						* dump.
 						*/
+<<<<<<< HEAD
 #define DB_NMI_BTN_ENA  	0x8000  /* Enable button to directly trigger NMI */
 #define DB_PRT_KDEBUG   	0x10000 /* kprintf KDEBUG traces */
 #define DB_DISABLE_LOCAL_CORE   0x20000 /* ignore local core dump support */
+=======
+#define DB_NMI_BTN_ENA  0x8000  /* Enable button to directly trigger NMI */
+#define DB_PRT_KDEBUG   0x10000 /* kprintf KDEBUG traces */
+>>>>>>> origin/10.10
 
 #if DEBUG
 /*

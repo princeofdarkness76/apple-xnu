@@ -3446,8 +3446,11 @@ SYSCTL_INT(_vm, OID_AUTO, vm_page_filecache_min, CTLFLAG_RW | CTLFLAG_LOCKED, &v
 
 extern int	vm_compressor_mode;
 extern int	vm_compressor_is_active;
+<<<<<<< HEAD
 extern int	vm_compressor_available;
 extern uint32_t	vm_ripe_target_age;
+=======
+>>>>>>> origin/10.10
 extern uint32_t	swapout_target_age;
 extern int64_t  compressor_bytes_used;
 extern int64_t  c_segment_input_bytes;
@@ -3462,8 +3465,13 @@ extern uint32_t	vm_compressor_majorcompact_threshold_divisor;
 extern uint32_t	vm_compressor_unthrottle_threshold_divisor;
 extern uint32_t	vm_compressor_catchup_threshold_divisor;
 
+<<<<<<< HEAD
 SYSCTL_QUAD(_vm, OID_AUTO, compressor_input_bytes, CTLFLAG_RD | CTLFLAG_LOCKED, &c_segment_input_bytes, "");
 SYSCTL_QUAD(_vm, OID_AUTO, compressor_compressed_bytes, CTLFLAG_RD | CTLFLAG_LOCKED, &c_segment_compressed_bytes, "");
+=======
+SYSCTL_INT(_vm, OID_AUTO, compressor_mode, CTLFLAG_RD | CTLFLAG_LOCKED, &vm_compressor_mode, 0, "");
+SYSCTL_INT(_vm, OID_AUTO, compressor_is_active, CTLFLAG_RD | CTLFLAG_LOCKED, &vm_compressor_is_active, 0, "");
+>>>>>>> origin/10.10
 SYSCTL_QUAD(_vm, OID_AUTO, compressor_bytes_used, CTLFLAG_RD | CTLFLAG_LOCKED, &compressor_bytes_used, "");
 
 SYSCTL_INT(_vm, OID_AUTO, compressor_mode, CTLFLAG_RD | CTLFLAG_LOCKED, &vm_compressor_mode, 0, "");
@@ -3499,6 +3507,7 @@ SYSCTL_INT(_vm, OID_AUTO, phantom_cache_thrashing_threshold_ssd, CTLFLAG_RW | CT
 #if (DEVELOPMENT || DEBUG)
 
 SYSCTL_UINT(_vm, OID_AUTO, vm_page_creation_throttled_hard,
+<<<<<<< HEAD
 		CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED,
 		&vm_page_creation_throttled_hard, 0, "");
 =======
@@ -3507,6 +3516,14 @@ SYSCTL_UINT(_vm, OID_AUTO, vm_page_creation_throttled_hard,
 SYSCTL_UINT(_vm, OID_AUTO, vm_page_creation_throttled_soft,
 		CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED,
 		&vm_page_creation_throttled_soft, 0, "");
+=======
+	    CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED,
+	    &vm_page_creation_throttled_hard, 0, "");
+
+SYSCTL_UINT(_vm, OID_AUTO, vm_page_creation_throttled_soft,
+	    CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED,
+	    &vm_page_creation_throttled_soft, 0, "");
+>>>>>>> origin/10.10
 
 #endif /* DEVELOPMENT || DEBUG */
 

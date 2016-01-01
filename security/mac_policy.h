@@ -4513,10 +4513,13 @@ typedef int mpo_vnode_check_signature_t(struct vnode *vp,  struct label *label,
 					off_t macho_offset, unsigned char *sha1, 
 					const void *signature, int size,
 					int flags, int *is_platform_binary);
+<<<<<<< HEAD
 =======
 					unsigned char *sha1, void *signature, 
 					int size);
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.10
 
 /**
   @brief Access control check for retrieving file attributes
@@ -5804,6 +5807,7 @@ typedef void mpo_reserved_hook_t(void);
  * Please note that this should be kept in sync with the check assumptions
  * policy in bsd/kern/policy_check.c (policy_ops struct).
  */
+<<<<<<< HEAD
 #define MAC_POLICY_OPS_VERSION 37 /* inc when new reserved slots are taken */
 =======
 /*!
@@ -5811,6 +5815,9 @@ typedef void mpo_reserved_hook_t(void);
 */
 #define MAC_POLICY_OPS_VERSION 2 /* inc when new reserved slots are taken */
 >>>>>>> origin/10.6
+=======
+#define MAC_POLICY_OPS_VERSION 32 /* inc when new reserved slots are taken */
+>>>>>>> origin/10.10
 struct mac_policy_ops {
 	mpo_audit_check_postselect_t		*mpo_audit_check_postselect;
 	mpo_audit_check_preselect_t		*mpo_audit_check_preselect;

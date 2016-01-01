@@ -8418,7 +8418,10 @@ OSKext::copyInfo(OSArray * infoKeys)
                 linkedExecutable->getBytesNoCopy();
 
 #if !SECURE_KERNEL
+<<<<<<< HEAD
             // do not return macho header info on shipping iOS - 19095897
+=======
+>>>>>>> origin/10.10
             if (!infoKeys || _OSArrayContainsCString(infoKeys, kOSBundleMachOHeadersKey)) {
                 kernel_mach_header_t *  temp_kext_mach_hdr;
                 struct load_command *   lcp;
@@ -8460,11 +8463,19 @@ OSKext::copyInfo(OSArray * infoKeys)
                                   VM_KERNEL_UNSLIDE(segp->vmaddr),
                                   segp->vmsize, segp->nsects);
 <<<<<<< HEAD
+<<<<<<< HEAD
                         if ( (VM_KERNEL_IS_SLID(segp->vmaddr) == false) &&
                             (VM_KERNEL_IS_KEXT(segp->vmaddr) == false) &&
                             (VM_KERNEL_IS_PRELINKTEXT(segp->vmaddr) == false) &&
                             (VM_KERNEL_IS_PRELINKINFO(segp->vmaddr) == false) &&
                             (VM_KERNEL_IS_KEXT_LINKEDIT(segp->vmaddr) == false) ) {
+=======
+                        if ( (VM_KERNEL_IS_SLID(segp->vmaddr) == false) &&
+                             (VM_KERNEL_IS_KEXT(segp->vmaddr) == false) &&
+                             (VM_KERNEL_IS_PRELINKTEXT(segp->vmaddr) == false) &&
+                             (VM_KERNEL_IS_PRELINKINFO(segp->vmaddr) == false) &&
+                             (VM_KERNEL_IS_KEXT_LINKEDIT(segp->vmaddr) == false) ) {
+>>>>>>> origin/10.10
                             OSKextLog(/* kext */ NULL,
                                       kOSKextLogErrorLevel |
                                       kOSKextLogGeneralFlag,

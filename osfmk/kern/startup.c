@@ -233,8 +233,11 @@ unsigned int wake_nkdbufs = 0;
 unsigned int write_trace_on_panic = 0;
 unsigned int trace_typefilter = 0;
 boolean_t    trace_serial = FALSE;
+<<<<<<< HEAD
 =======
 >>>>>>> origin/10.8
+=======
+>>>>>>> origin/10.10
 
 /* mach leak logging */
 int log_leaks = 0;

@@ -102,7 +102,11 @@
 #include <device/device_port.h>
 
 ipc_port_t	master_device_port;
+<<<<<<< HEAD
 void           *master_device_kobject;
+=======
+void        *master_device_kobject;
+>>>>>>> origin/10.10
 
 lck_grp_attr_t * dev_lck_grp_attr;
 lck_grp_t * dev_lck_grp;
@@ -116,8 +120,13 @@ device_service_create(void)
 	if (master_device_port == IP_NULL)
 	    panic("can't allocate master device port");
 
+<<<<<<< HEAD
 	ipc_kobject_set(master_device_port, (ipc_kobject_t)&master_device_kobject, IKOT_MASTER_DEVICE);
 	kernel_set_special_port(host_priv_self(), HOST_IO_MASTER_PORT,
+=======
+    ipc_kobject_set(master_device_port, (ipc_kobject_t)&master_device_kobject, IKOT_MASTER_DEVICE);
+    kernel_set_special_port(host_priv_self(), HOST_IO_MASTER_PORT,
+>>>>>>> origin/10.10
 				ipc_port_make_send(master_device_port));
 
 	/* allocate device lock group attribute and group */

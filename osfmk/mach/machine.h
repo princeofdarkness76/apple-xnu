@@ -426,12 +426,15 @@ __END_DECLS
 <<<<<<< HEAD
 #define CPUFAMILY_INTEL_HASWELL		0x10b282dc
 #define CPUFAMILY_INTEL_BROADWELL	0x582ed09c
+<<<<<<< HEAD
 #define CPUFAMILY_INTEL_SKYLAKE		0x37fc219f
 =======
 >>>>>>> origin/10.7
 =======
 #define CPUFAMILY_INTEL_HASWELL		0x10b282dc
 >>>>>>> origin/10.8
+=======
+>>>>>>> origin/10.10
 #define CPUFAMILY_ARM_9			0xe73283ae
 #define CPUFAMILY_ARM_11		0x8ff620d8
 #define CPUFAMILY_ARM_XSCALE		0x53b005f5

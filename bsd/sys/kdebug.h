@@ -88,6 +88,7 @@ __BEGIN_DECLS
 #include <mach/branch_predicates.h>
 #endif
 
+<<<<<<< HEAD
 /*
  * Kdebug is a facility for tracing events occurring on a system.
  *
@@ -145,6 +146,8 @@ __BEGIN_DECLS
 #define KDBG_EXTRACT_CODE(Debugid) \
         ((uint16_t)(((Debugid) & KDBG_CODE_MASK) >> KDBG_CODE_OFFSET))
 
+=======
+>>>>>>> origin/10.10
 #ifdef KERNEL_PRIVATE
 
 typedef enum
@@ -196,6 +199,18 @@ extern void kernel_debug_enter(
 	);
 
 #endif /* KERNEL_PRIVATE */
+<<<<<<< HEAD
+=======
+
+/* The debug code consists of the following 
+*
+* ----------------------------------------------------------------------
+*|              |               |                               |Func   |
+*| Class (8)    | SubClass (8)  |          Code (14)            |Qual(2)|
+* ----------------------------------------------------------------------
+* The class specifies the higher level 
+*/
+>>>>>>> origin/10.10
 
 /* The Function qualifiers  */
 #define DBG_FUNC_START		1
@@ -226,8 +241,11 @@ extern void kernel_debug_enter(
 #define DBG_XPC                 41
 #define DBG_ATM                 42
 #define DBG_ARIADNE             43
+<<<<<<< HEAD
 #define DBG_DAEMON              44
 #define DBG_ENERGYTRACE         45
+=======
+>>>>>>> origin/10.10
 
 
 #define DBG_MIG			255
@@ -251,6 +269,7 @@ extern void kernel_debug_enter(
  * On error, -1 will be returned and errno will indicate the error.
  */
 #ifndef KERNEL
+<<<<<<< HEAD
 extern int kdebug_trace(uint32_t code, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4) __OSX_AVAILABLE_STARTING(__MAC_10_10_2, __IPHONE_8_2);
 #endif
 
@@ -330,6 +349,12 @@ __OSX_AVAILABLE_STARTING(__MAC_10_11, __IPHONE_9_0);
 extern void kernel_debug_string_simple(const char *message);
 #endif /* XNU_KERNEL_PRIVATE */
 
+=======
+extern int kdebug_trace(uint32_t code, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4) __OSX_AVAILABLE_STARTING(__MAC_10_10_2, __IPHONE_NA);
+#endif
+#endif /* PRIVATE */
+
+>>>>>>> origin/10.10
 /* **** The Kernel Debug Sub Classes for Mach (DBG_MACH) **** */
 #define	DBG_MACH_EXCP_KTRAP_x86	0x02	/* Kernel Traps on x86 */
 #define	DBG_MACH_EXCP_DFLT	0x03	/* Data Translation Fault */
@@ -417,7 +442,11 @@ extern void kernel_debug_string_simple(const char *message);
 #define DBG_COW_FAULT         3
 #define DBG_CACHE_HIT_FAULT   4
 #define DBG_NZF_PAGE_FAULT    5
+<<<<<<< HEAD
 #define DBG_GUARD_FAULT	      6
+=======
+#define DBG_GUARD_FAULT	      6	
+>>>>>>> origin/10.10
 #define DBG_PAGEINV_FAULT     7
 #define DBG_PAGEIND_FAULT     8
 #define DBG_COMPRESSOR_FAULT  9
@@ -484,10 +513,13 @@ extern void kernel_debug_string_simple(const char *message);
 #define SFI_PID_SET_MANAGED		0x8
 #define SFI_PID_CLEAR_MANAGED		0x9
 #define SFI_GLOBAL_DEFER		0xa
+<<<<<<< HEAD
 
 /* Codes for Zone Allocator (DBG_MACH_ZALLOC) */
 #define ZALLOC_ZCRAM 			0x0
 
+=======
+>>>>>>> origin/10.10
 /* **** The Kernel Debug Sub Classes for Network (DBG_NETWORK) **** */
 #define DBG_NETIP	1	/* Internet Protocol */
 #define DBG_NETARP	2	/* Address Resolution Protocol */
@@ -636,10 +668,15 @@ extern void kernel_debug_string_simple(const char *message);
 #define DBG_HFS_UPDATE_MODTIME	 0x02
 #define DBG_HFS_UPDATE_CHGTIME	 0x04
 #define DBG_HFS_UPDATE_MODIFIED	 0x08
+<<<<<<< HEAD
 #define DBG_HFS_UPDATE_FORCE     0x10
 #define DBG_HFS_UPDATE_DATEADDED 0x20
 #define DBG_HFS_UPDATE_MINOR     0x40
 #define DBG_HFS_UPDATE_SKIPPED	 0x80
+=======
+#define DBG_HFS_UPDATE_FORCE	 0x10
+#define DBG_HFS_UPDATE_DATEADDED 0x20
+>>>>>>> origin/10.10
 
 /* The Kernel Debug Sub Classes for BSD */
 #define DBG_BSD_PROC		0x01	/* process/signals related */
@@ -680,7 +717,10 @@ extern void kernel_debug_string_simple(const char *message);
 #define	TRACE_DATA_NEWTHREAD		(TRACEDBG_CODE(DBG_TRACE_DATA, 1))
 #define	TRACE_DATA_EXEC			(TRACEDBG_CODE(DBG_TRACE_DATA, 2))
 #define	TRACE_DATA_THREAD_TERMINATE	(TRACEDBG_CODE(DBG_TRACE_DATA, 3))
+<<<<<<< HEAD
 #define TRACE_STRING_GLOBAL		(TRACEDBG_CODE(DBG_TRACE_STRING, 0))
+=======
+>>>>>>> origin/10.10
 #define	TRACE_STRING_NEWTHREAD		(TRACEDBG_CODE(DBG_TRACE_STRING, 1))
 #define	TRACE_STRING_EXEC		(TRACEDBG_CODE(DBG_TRACE_STRING, 2))
 #define	TRACE_PANIC			(TRACEDBG_CODE(DBG_TRACE_INFO, 0))
@@ -821,7 +861,10 @@ extern void kernel_debug_string_simple(const char *message);
 #define QTDBG_CODE(SubClass,code) KDBG_CODE(DBG_QT, SubClass, code)
 #define APPSDBG_CODE(SubClass,code) KDBG_CODE(DBG_APPS, SubClass, code)
 #define ARIADNEDBG_CODE(SubClass, code) KDBG_CODE(DBG_ARIADNE, SubClass, code)
+<<<<<<< HEAD
 #define DAEMONDBG_CODE(SubClass, code) KDBG_CODE(DBG_DAEMON, SubClass, code)
+=======
+>>>>>>> origin/10.10
 #define CPUPM_CODE(code) IOKDBG_CODE(DBG_IOCPUPM, code)
 
 #define KMEM_ALLOC_CODE MACHDBG_CODE(DBG_MACH_LEAKS, 0)
@@ -1507,11 +1550,17 @@ int kdbg_write_v3_chunk_to_fd(uint32_t tag, uint32_t sub_tag, uint64_t length, v
 #define VFS_LOOKUP	(FSDBG_CODE(DBG_FSRW,36))
 #define VFS_LOOKUP_DONE	(FSDBG_CODE(DBG_FSRW,39))
 
+<<<<<<< HEAD
 #ifdef XNU_KERNEL_PRIVATE
 #if (DEVELOPMENT || DEBUG)
 #define KDEBUG_MOJO_TRACE 1
 #endif
 #endif
+=======
+#if !CONFIG_EMBEDDED && (DEVELOPMENT || DEBUG)
+#define KDEBUG_MOJO_TRACE 1
+#endif
+>>>>>>> origin/10.10
 
 #endif /* __APPLE_API_PRIVATE */
 #endif	/* PRIVATE */

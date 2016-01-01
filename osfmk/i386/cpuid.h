@@ -175,6 +175,7 @@
 #define CPUID_LEAF7_FEATURE_RDSEED   _Bit(18)	/* RDSEED Instruction */
 #define CPUID_LEAF7_FEATURE_ADX      _Bit(19)	/* ADX Instructions */
 #define CPUID_LEAF7_FEATURE_SMAP     _Bit(20)	/* Supervisor Mode Access Protect */
+<<<<<<< HEAD
 #define CPUID_LEAF7_FEATURE_SGX      _Bit(2)	/* Software Guard eXtensions */
 #define CPUID_LEAF7_FEATURE_PQM      _Bit(12)	/* Platform Qos Monitoring */
 #define CPUID_LEAF7_FEATURE_FPU_CSDS _Bit(13)	/* FPU CS/DS deprecation */
@@ -274,6 +275,8 @@
 #define CPUID_LEAF7_FEATURE_INVPCID  _Bit(10)	/* INVPCID intruction, TDB */
 #define CPUID_LEAF7_FEATURE_RTM      _Bit(11)	/* TBD */
 >>>>>>> origin/10.8
+=======
+>>>>>>> origin/10.10
 
 /*
  * The CPUID_EXTFEATURE_XXX values define 64-bit values
@@ -460,10 +463,13 @@
 #define CPUID_MODEL_BROADWELL_ULX	0x3D
 #define CPUID_MODEL_BROADWELL_ULT	0x3D
 #define CPUID_MODEL_BRYSTALWELL		0x47
+<<<<<<< HEAD
 #define CPUID_MODEL_SKYLAKE		0x4E
 #define CPUID_MODEL_SKYLAKE_ULT		0x4E
 #define CPUID_MODEL_SKYLAKE_ULX		0x4E
 #define CPUID_MODEL_SKYLAKE_DT		0x5E
+=======
+>>>>>>> origin/10.10
 
 #define CPUID_VMM_FAMILY_UNKNOWN	0x0
 #define CPUID_VMM_FAMILY_VMWARE		0x1
@@ -695,6 +701,7 @@ typedef struct {
 	cpuid_xsave_leaf_t	*cpuid_xsave_leafp;
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 	uint64_t		cpuid_leaf7_features;
 	cpuid_tsc_leaf_t	cpuid_tsc_leaf;
 	cpuid_xsave_leaf_t	cpuid_xsave_leaf[2];
@@ -705,6 +712,9 @@ typedef struct {
 =======
 	uint32_t		cpuid_leaf7_features;
 >>>>>>> origin/10.7
+=======
+	uint64_t		cpuid_leaf7_features;
+>>>>>>> origin/10.10
 } i386_cpu_info_t;
 
 #ifdef MACH_KERNEL_PRIVATE
