@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -134,7 +156,12 @@ extern void iokit_release_port_send( ipc_port_t port );
 
 extern kern_return_t iokit_switch_object_port( ipc_port_t port, io_object_t obj, ipc_kobject_type_t type );
 
+<<<<<<< HEAD
 #include <mach/mach_traps.h>
+=======
+extern kern_return_t iokit_switch_object_port( ipc_port_t port, io_object_t obj, ipc_kobject_type_t type );
+
+>>>>>>> origin/10.2
 #include <vm/vm_map.h>
 
 } /* extern "C" */
@@ -337,6 +364,10 @@ void IOUserClient::destroyUserReferences( OSObject * obj )
     }
     obj->release();
     IOUnlock( gIOObjectPortLock);
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.2
 }
 
 mach_port_name_t IOMachPort::makeSendRightForTask( task_t task,
@@ -516,6 +547,7 @@ iokit_client_died( io_object_t obj, ipc_port_t /* port */,
     if( !IOMachPort::noMoreSendersForObject( obj, type, mscount ))
 	return( kIOReturnNotReady );
 
+<<<<<<< HEAD
     if( IKOT_IOKIT_CONNECT == type)
     {
 	if( (client = OSDynamicCast( IOUserClient, obj ))) {
@@ -530,6 +562,13 @@ iokit_client_died( io_object_t obj, ipc_port_t /* port */,
 	else if( (notify = OSDynamicCast( IOUserNotification, obj )))
 	    notify->setNotification( 0 );
     }
+=======
+    if( (IKOT_IOKIT_CONNECT == type)
+     && (client = OSDynamicCast( IOUserClient, obj )))
+	client->clientDied();
+    if( (map = OSDynamicCast( IOMemoryMap, obj )))
+	map->taskDied();
+>>>>>>> origin/10.2
 
     return( kIOReturnSuccess );
 }
@@ -1016,6 +1055,7 @@ static OSDictionary * CopyConsoleUser(UInt32 uid)
     return user;
 }
 
+<<<<<<< HEAD
 static OSDictionary * CopyUserOnConsole(void)
 {
     OSArray * array;
@@ -1060,6 +1100,23 @@ IOReturn IOUserClient::clientHasAuthorization( task_t task,
     }
 
     return (kIOReturnNotPermitted);
+=======
+static bool IOUCIsBackgroundTask(task_t task, bool * isBg)
+{
+    kern_return_t               kr;
+    task_category_policy_data_t info;
+    mach_msg_type_number_t      count = TASK_CATEGORY_POLICY_COUNT;
+    boolean_t                   get_default = false;
+
+    kr = task_policy_get(current_task(),
+                         TASK_CATEGORY_POLICY,
+                         (task_policy_t) &info,
+                         &count,
+                         &get_default);
+
+    *isBg = ((KERN_SUCCESS == kr) && (info.role == TASK_THROTTLE_APPLICATION));
+    return (kr);
+>>>>>>> origin/10.6
 }
 
 IOReturn IOUserClient::clientHasPrivilege( void * securityToken,
@@ -1076,6 +1133,7 @@ IOReturn IOUserClient::clientHasPrivilege( void * securityToken,
     if (!strncmp(privilegeName, kIOClientPrivilegeForeground, 
                 sizeof(kIOClientPrivilegeForeground)))
     {
+<<<<<<< HEAD
 	if (task_is_gpu_denied(current_task()))
 		return (kIOReturnNotPrivileged);
 	else
@@ -1110,6 +1168,14 @@ IOReturn IOUserClient::clientHasPrivilege( void * securityToken,
 	    kauth_cred_unref(&cred);
 	}
 	return (kr);
+=======
+        bool isBg;
+        kern_return_t kr = IOUCIsBackgroundTask(current_task(), &isBg);
+
+        if (KERN_SUCCESS != kr)
+            return (kr);
+        return (isBg ? kIOReturnNotPrivileged : kIOReturnSuccess);
+>>>>>>> origin/10.6
     }
 
     if ((secureConsole = !strncmp(privilegeName, kIOClientPrivilegeSecureConsoleProcess,
@@ -2629,6 +2695,28 @@ kern_return_t is_io_registry_entry_get_registry_entry_id(
     return (kIOReturnSuccess);
 }
 
+<<<<<<< HEAD
+=======
+// Create a vm_map_copy_t or kalloc'ed data for memory
+// to be copied out. ipc will free after the copyout.
+
+static kern_return_t copyoutkdata( const void * data, vm_size_t len,
+                                    io_buf_ptr_t * buf )
+{
+    kern_return_t	err;
+    vm_map_copy_t	copy;
+
+    err = vm_map_copyin( kernel_map, CAST_USER_ADDR_T(data), len,
+                    false /* src_destroy */, &copy);
+
+    assert( err == KERN_SUCCESS );
+    if( err == KERN_SUCCESS )
+        *buf = (char *) copy;
+
+    return( err );
+}
+
+>>>>>>> origin/10.7
 /* Routine io_registry_entry_get_property */
 kern_return_t is_io_registry_entry_get_property_bytes(
 	io_object_t registry_entry,
@@ -3388,8 +3476,39 @@ kern_return_t is_io_connect_map_memory_into_task
     return( err );
 }
 
+<<<<<<< HEAD
 /* Routine is_io_connect_map_memory */
 kern_return_t is_io_connect_map_memory(
+=======
+IOMemoryMap * IOUserClient::removeMappingForDescriptor(IOMemoryDescriptor * mem)
+{
+    OSIterator *  iter;
+    IOMemoryMap * map = 0;
+
+    IOLockLock(gIOObjectPortLock);
+
+    iter = OSCollectionIterator::withCollection(mappings);
+    if(iter)
+    {
+        while ((map = OSDynamicCast(IOMemoryMap, iter->getNextObject())))
+        {
+            if(mem == map->getMemoryDescriptor())
+            {
+                map->retain();
+                mappings->removeObject(map);
+                break;
+            }
+        }
+        iter->release();
+    }
+
+    IOLockUnlock(gIOObjectPortLock);
+
+    return (map);
+}
+
+kern_return_t is_io_connect_unmap_memory(
+>>>>>>> origin/10.3
 	io_object_t     connect,
 	uint32_t	type,
 	task_t		task,
@@ -3587,7 +3706,10 @@ kern_return_t is_io_connect_method_var_output
 
     args.scalarOutput = scalar_output;
     args.scalarOutputCount = *scalar_outputCnt;
+<<<<<<< HEAD
     bzero(&scalar_output[0], *scalar_outputCnt * sizeof(scalar_output[0]));
+=======
+>>>>>>> origin/10.7
     args.structureOutput = inband_output;
     args.structureOutputSize = *inband_outputCnt;
     args.structureOutputDescriptor = NULL;
@@ -5027,7 +5149,14 @@ IOReturn IOUserClient::externalMethod( uint32_t selector, IOExternalMethodArgume
 
     if (kIOUCForegroundOnly & method->flags)
     {
+<<<<<<< HEAD
 	if (task_is_gpu_denied(current_task()))
+=======
+        bool isBg;
+        kern_return_t kr = IOUCIsBackgroundTask(current_task(), &isBg);
+    
+        if ((KERN_SUCCESS == kr) && isBg)
+>>>>>>> origin/10.6
             return (kIOReturnNotPermitted);
     }
 
@@ -5076,7 +5205,14 @@ IOReturn IOUserClient::externalMethod( uint32_t selector, IOExternalMethodArgume
 
     if (kIOUCForegroundOnly & method->flags)
     {
+<<<<<<< HEAD
 	if (task_is_gpu_denied(current_task()))
+=======
+        bool isBg;
+        kern_return_t kr = IOUCIsBackgroundTask(current_task(), &isBg);
+    
+        if ((KERN_SUCCESS == kr) && isBg)
+>>>>>>> origin/10.6
             return (kIOReturnNotPermitted);
     }
 

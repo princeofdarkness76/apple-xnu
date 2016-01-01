@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -110,6 +132,7 @@ typedef struct boot_icon_element boot_icon_element;
 /* Boot argument structure - passed into Mach kernel at boot time.
  * "Revision" can be incremented for compatible changes
  */
+<<<<<<< HEAD
 #define kBootArgsRevision		0
 #define kBootArgsVersion		2
 
@@ -117,10 +140,21 @@ typedef struct boot_icon_element boot_icon_element;
 #define kBootArgsVersion1		1
 #define kBootArgsVersion2		2
 #define kBootArgsRevision2_0		0
+=======
+#define kBootArgsRevision		6
+#define kBootArgsVersion		1
+
+/* Snapshot constants of previous revisions that are supported */
+#define kBootArgsVersion1		1
+#define kBootArgsRevision1_4		4
+#define kBootArgsRevision1_5		5
+#define kBootArgsRevision1_6		6
+>>>>>>> origin/10.6
 
 #define kBootArgsEfiMode32              32
 #define kBootArgsEfiMode64              64
 
+<<<<<<< HEAD
 /* Bitfields for boot_args->flags */
 #define kBootArgsFlagRebootOnPanic	(1 << 0)
 #define kBootArgsFlagHiDPI		(1 << 1)
@@ -131,6 +165,10 @@ typedef struct boot_icon_element boot_icon_element;
 #define kBootArgsFlagBlackBg		(1 << 6)
 #define kBootArgsFlagLoginUI		(1 << 7)
 #define kBootArgsFlagInstallUI		(1 << 8)
+=======
+#define kBootArgsFlagRebootOnPanic	1
+#define kBootArgsFlagHiDPI		2
+>>>>>>> origin/10.7
 
 typedef struct boot_args {
     uint16_t    Revision;	/* Revision of boot_args structure */
@@ -157,6 +195,16 @@ typedef struct boot_args {
 
     uint32_t    efiRuntimeServicesPageStart; /* physical address of defragmented runtime pages */
     uint32_t    efiRuntimeServicesPageCount;
+<<<<<<< HEAD
+=======
+    uint32_t    efiSystemTable;   /* physical address of system table in runtime area */
+
+    uint8_t     efiMode;       /* 32 = 32-bit, 64 = 64-bit */
+    uint8_t     __reserved1[3];
+    uint32_t    __reserved2[1];
+    uint32_t    performanceDataStart; /* physical address of log */
+    uint32_t    performanceDataSize;
+>>>>>>> origin/10.6
     uint64_t    efiRuntimeServicesVirtualPageStart; /* virtual address of defragmented runtime pages */
 
     uint32_t    efiSystemTable;   /* physical address of system table in runtime area */
@@ -174,12 +222,22 @@ typedef struct boot_args {
     uint64_t    pciConfigSpaceBaseAddress;
     uint32_t    pciConfigSpaceStartBusNumber;
     uint32_t    pciConfigSpaceEndBusNumber;
+<<<<<<< HEAD
     uint32_t	csrActiveConfig;
+<<<<<<< HEAD
     uint32_t	csrCapabilities;
     uint32_t    boot_SMC_plimit;
     uint16_t    bootProgressMeterStart;
     uint16_t    bootProgressMeterEnd;
     uint32_t    __reserved4[726];
+=======
+    uint32_t    __reserved4[730];
+>>>>>>> origin/10.7
+=======
+    uint32_t	csrPendingConfig;
+    uint32_t    boot_SMC_plimit;
+    uint32_t    __reserved4[727];
+>>>>>>> origin/10.10
 
 } boot_args;
 

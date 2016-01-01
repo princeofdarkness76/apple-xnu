@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -156,6 +182,7 @@
 #define BASEPRI_BACKGROUND	(BASEPRI_DEFAULT + 15)				/* 46 */
 #define BASEPRI_USER_INITIATED	(BASEPRI_DEFAULT +  6)				/* 37 */
 #define BASEPRI_DEFAULT		(MAXPRI_USER - (NRQS / 4))			/* 31 */
+<<<<<<< HEAD
 #define MAXPRI_SUPPRESSED	(BASEPRI_DEFAULT - 3)				/* 28 */
 #define BASEPRI_UTILITY		(BASEPRI_DEFAULT - 11)				/* 20 */
 #define MAXPRI_THROTTLE		(MINPRI + 4)						/*  4 */
@@ -171,6 +198,16 @@ typedef enum {
 	TH_MODE_FIXED,						/* use fixed priorities, no decay */
 	TH_MODE_TIMESHARE,					/* use timesharing algorithm */
 } sched_mode_t;
+=======
+#define MAXPRI_THROTTLE		(MINPRI + 4)						/*  4 */
+#define MINPRI_USER			MINPRI								/*  0 */
+
+#ifdef CONFIG_EMBEDDED
+#define DEPRESSPRI	MAXPRI_THROTTLE
+#else
+#define DEPRESSPRI	MINPRI			/* depress priority */
+#endif
+>>>>>>> origin/10.6
 
 /*
  *	Macro to check for invalid priorities.
@@ -256,7 +293,11 @@ sched_group_t   sched_group_create(void);
 void            sched_group_destroy(sched_group_t sched_group);
 #endif /* defined(CONFIG_SCHED_MULTIQ) */
 
+<<<<<<< HEAD
 
+=======
+extern struct run_queue		rt_runq;
+>>>>>>> origin/10.5
 
 /*
  *	Scheduler routines.
@@ -268,8 +309,12 @@ extern void		thread_quantum_expire(
 					timer_call_param_t	thread);
 
 /* Context switch check for current processor */
+<<<<<<< HEAD
 extern ast_t	csw_check(processor_t		processor,
 						ast_t			check_reason);
+=======
+extern ast_t	csw_check(processor_t		processor);
+>>>>>>> origin/10.5
 
 #if defined(CONFIG_SCHED_TIMESHARE_CORE)
 extern uint32_t	std_quantum, min_std_quantum;
@@ -349,6 +394,7 @@ extern uint32_t		avenrun[3], mach_factor[3];
 extern uint64_t		max_unsafe_computation;
 extern uint64_t		max_poll_computation;
 
+<<<<<<< HEAD
 /* TH_RUN & !TH_IDLE controls whether a thread has a run count */
 #define sched_run_incr(th)                                      \
 	hw_atomic_add(&sched_run_count, 1)                      \
@@ -392,6 +438,27 @@ MACRO_BEGIN                                             \
 MACRO_END
 
 #endif /* !MACH_ASSERT */
+=======
+#define sched_run_incr()			\
+MACRO_BEGIN													\
+	machine_run_count(hw_atomic_add(&sched_run_count, 1));	\
+MACRO_END
+
+#define sched_run_decr()			\
+MACRO_BEGIN													\
+	machine_run_count(hw_atomic_sub(&sched_run_count, 1));	\
+MACRO_END
+
+#define sched_share_incr()			\
+MACRO_BEGIN											\
+	(void)hw_atomic_add(&sched_share_count, 1);		\
+MACRO_END
+
+#define sched_share_decr()			\
+MACRO_BEGIN											\
+	(void)hw_atomic_sub(&sched_share_count, 1);		\
+MACRO_END
+>>>>>>> origin/10.5
 
 /*
  *	thread_timer_delta macro takes care of both thread timers.

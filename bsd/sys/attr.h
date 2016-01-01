@@ -1,8 +1,10 @@
 /*
- * Copyright (c) 2000-2010 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2000-2014 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -54,6 +76,13 @@
 #endif
 
 #define FSOPT_ATTR_CMN_EXTENDED	0x00000020
+
+/* we currently aren't anywhere near this amount for a valid
+ * fssearchblock.sizeofsearchparams1 or fssearchblock.sizeofsearchparams2
+ * but we put a sanity check in to avoid abuse of the value passed in from
+ * user land.
+ */
+#define SEARCHFS_MAX_SEARCHPARMS  4096
 
 /* we currently aren't anywhere near this amount for a valid
  * fssearchblock.sizeofsearchparams1 or fssearchblock.sizeofsearchparams2
@@ -372,6 +401,7 @@ typedef struct vol_attributes_attr {
  */
 #define ATTR_CMN_RETURNED_ATTRS 		0x80000000	
 
+<<<<<<< HEAD
 #define ATTR_CMN_VALIDMASK			0xFFFFFFFF
 /*
  * The settable ATTR_CMN_* attributes include the following:
@@ -394,6 +424,9 @@ typedef struct vol_attributes_attr {
  * 
  * ATTR_CMN_GRPUUID
  */
+=======
+#define ATTR_CMN_VALIDMASK			0xBFFFFFFF
+>>>>>>> origin/10.9
 #define ATTR_CMN_SETMASK			0x01C7FF00
 #define ATTR_CMN_VOLSETMASK			0x00006700
 
@@ -451,13 +484,20 @@ typedef struct vol_attributes_attr {
 #define ATTR_FILE_DATAALLOCSIZE			0x00000400
 #define ATTR_FILE_RSRCLENGTH			0x00001000
 #define ATTR_FILE_RSRCALLOCSIZE			0x00002000
+/* Only used when CONFIG_PROTECT is ON */
+#define ATTR_FILE_PROTECTION_CLASS			0x00004000
 
+<<<<<<< HEAD
 #define ATTR_FILE_VALIDMASK			0x000037FF
 /* 
  * Settable ATTR_FILE_* attributes include:
  * ATTR_FILE_DEVTYPE
  */
 #define ATTR_FILE_SETMASK			0x00000020
+=======
+#define ATTR_FILE_VALIDMASK			0x000077FF
+#define ATTR_FILE_SETMASK			0x00004020
+>>>>>>> origin/10.6
 
 #define ATTR_FORK_TOTALSIZE			0x00000001
 #define ATTR_FORK_ALLOCSIZE			0x00000002

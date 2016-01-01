@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -95,7 +117,12 @@ enum {
     An indication that the power flags represent the state of the root power
     domain. This bit must not be set in the IOPMPowerState structure.
     Power Management may pass this bit to initialPowerStateForDomainState()
+<<<<<<< HEAD
     to map from a global system state to the desired device state.
+=======
+    or powerStateForDomainState() to map from a global system state to the
+    desired device state.
+>>>>>>> origin/10.8
 */
 typedef unsigned long IOPMPowerFlags;
 enum {
@@ -227,7 +254,99 @@ enum {
  * 
  * See IOPMrootDomain notification kIOPMMessageSleepWakeUUIDChange
  */
- #define kIOPMSleepWakeUUIDKey              "SleepWakeUUID"
+#define kIOPMSleepWakeUUIDKey               "SleepWakeUUID"
+
+/* kIOPMDeepSleepEnabledKey
+ * Indicates the Deep Sleep enable state.
+ * It has a boolean value.
+ *  true        == Deep Sleep is enabled
+ *  false       == Deep Sleep is disabled
+ *  not present == Deep Sleep is not supported on this hardware
+ */
+#define kIOPMDeepSleepEnabledKey            "Standby Enabled"
+
+/* kIOPMDeepSleepDelayKey
+ * Key refers to a CFNumberRef that represents the delay in seconds before
+ * entering Deep Sleep state. The property is not present if Deep Sleep is
+ * unsupported.
+ */
+#define kIOPMDeepSleepDelayKey              "Standby Delay"
+
+/* kIOPMLowBatteryWakeThresholdKey
+ * Key refers to a CFNumberRef that represents the percentage of battery
+ * remaining charge that will trigger a system wake followed by Deep Sleep.
+ */
+#define kIOPMLowBatteryWakeThresholdKey     "LowBatteryWakeThreshold"
+
+/*******************************************************************************
+ *
+ * Driver PM Assertions
+ *
+ ******************************************************************************/
+
+/* Driver Assertion bitfield description
+ * Driver PM assertions are defined by these bits.
+ */
+enum {
+    /*! kIOPMDriverAssertionCPUBit
+     * When set, PM kernel will prefer to leave the CPU and core hardware
+     * running in "Dark Wake" state, instead of sleeping.
+     */
+    kIOPMDriverAssertionCPUBit                      = 0x01,
+
+    /*! kIOPMDriverAssertionUSBExternalDeviceBit
+     * When set, driver is informing PM that an external USB device is attached.
+     */
+    kIOPMDriverAssertionUSBExternalDeviceBit        = 0x04,
+
+    /*! kIOPMDriverAssertionBluetoothHIDDevicePairedBit
+     * When set, driver is informing PM that a Bluetooth HID device is paired.
+     */
+    kIOPMDriverAssertionBluetoothHIDDevicePairedBit = 0x08,
+
+    /*! kIOPMDriverAssertionExternalMediaMountedBit
+     * When set, driver is informing PM that an external media is mounted.
+     */
+    kIOPMDriverAssertionExternalMediaMountedBit     = 0x10,
+
+    kIOPMDriverAssertionReservedBit5                = 0x20,
+    kIOPMDriverAssertionReservedBit6                = 0x40,
+    kIOPMDriverAssertionReservedBit7                = 0x80
+};
+
+ /* kIOPMAssertionsDriverKey
+  * This kIOPMrootDomain key refers to a CFNumberRef property, containing
+  * a bitfield describing the aggregate PM assertion levels.
+  * Example: A value of 0 indicates that no driver has asserted anything.
+  * Or, a value of <link>kIOPMDriverAssertionCPUBit</link>
+  *   indicates that a driver (or drivers) have asserted a need fro CPU and video.
+  */
+#define kIOPMAssertionsDriverKey            "DriverPMAssertions"
+
+ /* kIOPMAssertionsDriverKey
+  * This kIOPMrootDomain key refers to a CFNumberRef property, containing
+  * a bitfield describing the aggregate PM assertion levels.
+  * Example: A value of 0 indicates that no driver has asserted anything.
+  * Or, a value of <link>kIOPMDriverAssertionCPUBit</link>
+  *   indicates that a driver (or drivers) have asserted a need fro CPU and video.
+  */
+#define kIOPMAssertionsDriverDetailedKey    "DriverPMAssertionsDetailed"
+
+/*******************************************************************************
+ *
+ * Kernel Driver assertion detailed dictionary keys
+ *
+ * Keys decode the Array & dictionary data structure under IOPMrootDomain property 
+ *  kIOPMAssertionsDriverKey.
+ *
+ */
+#define kIOPMDriverAssertionIDKey               "ID"
+#define kIOPMDriverAssertionCreatedTimeKey      "CreatedTime"
+#define kIOPMDriverAssertionModifiedTimeKey     "ModifiedTime"
+#define kIOPMDriverAssertionOwnerStringKey      "Owner"
+#define kIOPMDriverAssertionOwnerServiceKey     "ServicePtr"
+#define kIOPMDriverAssertionLevelKey            "Level"
+#define kIOPMDriverAssertionAssertedKey         "Assertions"
 
 /* kIOPMBootSessionUUIDKey
  * Key refers to a CFStringRef that will uniquely identify
@@ -262,6 +381,10 @@ enum {
  *  not present == Retain FV key when going to standby mode
  */
 #define kIOPMDestroyFVKeyOnStandbyKey       "DestroyFVKeyOnStandby"
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.8
 
 /*******************************************************************************
  *
@@ -286,6 +409,11 @@ enum {
  * runtime before calling PMinit().
  */
 #define kIOPMResetPowerStateOnWakeKey       "IOPMResetPowerStateOnWake"
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.7
+=======
+>>>>>>> origin/10.8
 
 /*******************************************************************************
  *
@@ -333,6 +461,8 @@ enum {
      */
     kIOPMDriverAssertionReservedBit7                = 0x80,
 
+<<<<<<< HEAD
+<<<<<<< HEAD
     /*! kIOPMDriverAssertionMagicPacketWakeEnabledBit
      * When set, driver is informing PM that magic packet wake is enabled.
      */
@@ -343,6 +473,18 @@ enum {
      * interface up to do TCPKeepAlive
      */
     kIOPMDriverAssertionNetworkKeepAliveActiveBit   = 0x200
+=======
+    /*! kIOPMDriverAssertionReservedBit8
+     * Reserved for networking family.
+     */
+    kIOPMDriverAssertionReservedBit8                = 0x100
+>>>>>>> origin/10.7
+=======
+    /*! kIOPMDriverAssertionMagicPacketWakeEnabledBit
+     * When set, driver is informing PM that magic packet wake is enabled.
+     */
+    kIOPMDriverAssertionMagicPacketWakeEnabledBit   = 0x100
+>>>>>>> origin/10.8
 };
 
  /* kIOPMAssertionsDriverKey
@@ -438,6 +580,7 @@ enum {
 #define kIOPMMessageSystemPowerEventOccurred  \
                 iokit_family_msg(sub_iokit_powermanagement, 0x130)
 
+<<<<<<< HEAD
 /* kIOPMMessageSleepWakeUUIDChange
  * Either a new SleepWakeUUID has been specified at the beginning of a sleep,
  * or we're removing the existing property upon completion of a wakeup.
@@ -463,13 +606,18 @@ enum {
 #define kIOPMMessageDriverAssertionsChanged  \
                 iokit_family_msg(sub_iokit_powermanagement, 0x150)
 
+<<<<<<< HEAD
 /*! kIOPMMessageDarkWakeThermalEmergency
  * Sent when machine becomes unsustainably warm in DarkWake.
  * Kernel PM might choose to put the machine back to sleep right after.
  */
 #define kIOPMMessageDarkWakeThermalEmergency \
                 iokit_family_msg(sub_iokit_powermanagement, 0x160)
+=======
+>>>>>>> origin/10.5
 
+=======
+>>>>>>> origin/10.6
 /*******************************************************************************
  *
  * Power commands issued to root domain
@@ -587,16 +735,24 @@ enum {
 #define kIOPMPSCapacityEstimatedKey	                "CapacityEstimated"
 #define kIOPMPSBatteryChargeStatusKey               "ChargeStatus"
 #define kIOPMPSBatteryTemperatureKey                "Temperature"
+<<<<<<< HEAD
 #define kIOPMPSAdapterDetailsKey		    "AdapterDetails"
 #define kIOPMPSChargerConfigurationKey		    "ChargerConfiguration"
 
 // kIOPMPSBatteryChargeStatusKey may have one of the following values, or may have
+=======
+
+// kIOPMBatteryChargeStatusKey may have one of the following values, or may have
+>>>>>>> origin/10.5
 // no value. If kIOPMBatteryChargeStatusKey has a NULL value (or no value) associated with it
 // then charge is proceeding normally. If one of these battery charge status reasons is listed,
 // then the charge may have been interrupted.
 #define kIOPMBatteryChargeStatusTooHot              "HighTemperature"
 #define kIOPMBatteryChargeStatusTooCold             "LowTemperature"
+<<<<<<< HEAD
 #define kIOPMBatteryChargeStatusTooHotOrCold	    "HighOrLowTemperature"
+=======
+>>>>>>> origin/10.5
 #define kIOPMBatteryChargeStatusGradient            "BatteryTemperatureGradient"
 
 // Definitions for battery location, in case of multiple batteries.
@@ -696,6 +852,8 @@ enum {
 #define kIOPMThermalLevelWarningKey                     "Thermal_Level_Warning"
 
 /* Thermal Warning Level values
+<<<<<<< HEAD
+<<<<<<< HEAD
  *      kIOPMThermalLevelNormal   - under normal operating conditions
  *      kIOPMThermalLevelDanger   - thermal pressure may cause system slowdown
  *      kIOPMThermalLevelCritical - thermal conditions may cause imminent shutdown
@@ -717,6 +875,37 @@ enum {
 #define kIOPMThermalWarningLevelNormal kIOPMThermalLevelNormal
 #define kIOPMThermalWarningLevelDanger kIOPMThermalLevelWarning
 #define kIOPMThermalWarningLevelCrisis kIOPMThermalLevelCritical
+=======
+ *      kIOPMThermalWarningLevelNormal - under normal operating conditions
+ *      kIOPMThermalWarningLevelDanger - thermal pressure may cause system slowdown
+ *      kIOPMThermalWarningLevelCrisis - thermal conditions may cause imminent shutdown
+=======
+ *      kIOPMThermalLevelNormal   - under normal operating conditions
+ *      kIOPMThermalLevelDanger   - thermal pressure may cause system slowdown
+ *      kIOPMThermalLevelCritical - thermal conditions may cause imminent shutdown
+>>>>>>> origin/10.10
+ *
+ * The platform may define additional thermal levels if necessary.
+ * Platform specific values are defined from 100 and above
+ */
+enum {
+  kIOPMThermalLevelNormal    = 0,
+  kIOPMThermalLevelDanger    = 5,
+  kIOPMThermalLevelCritical  = 10,
+
+  kIOPMThermalLevelWarning = 100,
+  kIOPMThermalLevelTrap    = 110,
+
+  kIOPMThermalLevelUnknown = 255,
+};
+
+<<<<<<< HEAD
+>>>>>>> origin/10.5
+=======
+#define kIOPMThermalWarningLevelNormal kIOPMThermalLevelNormal
+#define kIOPMThermalWarningLevelDanger kIOPMThermalLevelWarning
+#define kIOPMThermalWarningLevelCrisis kIOPMThermalLevelCritical
+>>>>>>> origin/10.10
 
 // PM Settings Controller setting types
 // Settings types used primarily with:
@@ -817,6 +1006,10 @@ enum {
 };
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.3
 // Private power management message indicating battery data has changed
 // Indicates new data resides in the IORegistry
 #define kIOPMMessageBatteryStatusHasChanged         iokit_family_msg(sub_iokit_pmu, 0x100)

@@ -65,11 +65,52 @@ _commpage_sched_gen_inc:
 	.align	3
 	.globl	_commpage_32_routines
 _commpage_32_routines:
+<<<<<<< HEAD
 	COMMPAGE_DESCRIPTOR_REFERENCE(preempt)
 	COMMPAGE_DESCRIPTOR_REFERENCE(backoff)
 	COMMPAGE_DESCRIPTOR_REFERENCE(pfz_enqueue)
 	COMMPAGE_DESCRIPTOR_REFERENCE(pfz_dequeue)
 	.quad	0
+=======
+	.long	CPN(compare_and_swap32_mp)
+	.long	CPN(compare_and_swap32_up)
+	.long	CPN(compare_and_swap64_mp)
+	.long	CPN(compare_and_swap64_up)
+	.long	CPN(AtomicEnqueue)
+	.long	CPN(AtomicDequeue)
+	.long	CPN(memory_barrier)
+	.long	CPN(memory_barrier_sse2)
+	.long	CPN(atomic_add32_mp)
+	.long	CPN(atomic_add32_up)
+	.long	CPN(mach_absolute_time)
+	.long	CPN(spin_lock_try_mp)
+	.long	CPN(spin_lock_try_up)
+	.long	CPN(spin_lock_mp)
+	.long	CPN(spin_lock_up)
+	.long	CPN(spin_unlock)
+	.long	CPN(pthread_getspecific)
+	.long	CPN(gettimeofday)
+	.long	CPN(sys_flush_dcache)
+	.long	CPN(sys_icache_invalidate)
+	.long	CPN(pthread_self)
+//	.long	CPN(relinquish)
+	.long	CPN(bit_test_and_set_mp)
+	.long	CPN(bit_test_and_set_up)
+	.long	CPN(bit_test_and_clear_mp)
+	.long	CPN(bit_test_and_clear_up)
+	.long	CPN(bzero_scalar)
+	.long	CPN(bzero_sse2)
+	.long	CPN(bzero_sse42)
+	.long	CPN(bcopy_scalar)
+	.long	CPN(bcopy_sse2)
+	.long	CPN(bcopy_sse3x)
+	.long	CPN(bcopy_sse42)
+	.long	CPN(memset_pattern_sse2)
+	.long	CPN(longcopy_sse3x)
+	.long	CPN(nanotime)
+	.long	CPN(nanotime_slow)
+	.long	0
+>>>>>>> origin/10.5
 
 
 /* pointers to the 64-bit commpage routine descriptors */
@@ -78,9 +119,46 @@ _commpage_32_routines:
 	.align	3
 	.globl	_commpage_64_routines
 _commpage_64_routines:
+<<<<<<< HEAD
 	COMMPAGE_DESCRIPTOR_REFERENCE(preempt_64)
 	COMMPAGE_DESCRIPTOR_REFERENCE(backoff_64)
 	COMMPAGE_DESCRIPTOR_REFERENCE(pfz_enqueue_64)
 	COMMPAGE_DESCRIPTOR_REFERENCE(pfz_dequeue_64)
 	.quad	0
+=======
+	.long	CPN(compare_and_swap32_mp_64)
+	.long	CPN(compare_and_swap32_up_64)
+	.long	CPN(compare_and_swap64_mp_64)
+	.long	CPN(compare_and_swap64_up_64)
+	.long	CPN(AtomicEnqueue_64)
+	.long	CPN(AtomicDequeue_64)
+	.long	CPN(memory_barrier_sse2)	/* same routine as 32-bit version */
+	.long	CPN(atomic_add32_mp_64)
+	.long	CPN(atomic_add32_up_64)
+	.long	CPN(atomic_add64_mp_64)
+	.long	CPN(atomic_add64_up_64)
+	.long	CPN(mach_absolute_time)
+	.long	CPN(spin_lock_try_mp_64)
+	.long	CPN(spin_lock_try_up_64)
+	.long	CPN(spin_lock_mp_64)
+	.long	CPN(spin_lock_up_64)
+	.long	CPN(spin_unlock_64)
+	.long	CPN(pthread_getspecific_64)
+	.long	CPN(gettimeofday_64)
+	.long	CPN(sys_flush_dcache_64)
+	.long	CPN(sys_icache_invalidate)	/* same routine as 32-bit version, just a "ret" */
+	.long	CPN(pthread_self_64)
+	.long	CPN(bit_test_and_set_mp_64)
+	.long	CPN(bit_test_and_set_up_64)
+	.long	CPN(bit_test_and_clear_mp_64)
+	.long	CPN(bit_test_and_clear_up_64)
+	.long	CPN(bzero_sse2_64)
+	.long	CPN(bzero_sse42_64)
+	.long	CPN(bcopy_sse3x_64)
+	.long	CPN(bcopy_sse42_64)
+	.long	CPN(memset_pattern_sse2_64)
+	.long	CPN(longcopy_sse3x_64)
+	.long	CPN(nanotime_64)
+	.long	0
+>>>>>>> origin/10.5
 

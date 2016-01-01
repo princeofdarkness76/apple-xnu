@@ -154,6 +154,7 @@ L_dispatch:
 
 	swapgs
 
+<<<<<<< HEAD
 L_dispatch_user:
 	cmpl	$(TASK_MAP_32BIT), %gs:CPU_TASK_MAP
 	je	L_dispatch_U32		/* 32-bit user task */
@@ -169,6 +170,11 @@ L_dispatch_kernel:
 	subq	$(ISS64_OFFSET), %rsp
 	mov	%r15, R64_R15(%rsp)
 	mov	%rsp, %r15
+=======
+	cmpl	$(TASK_MAP_32BIT), %gs:CPU_TASK_MAP
+	je	L_32bit_dispatch	/* 32-bit user task */
+	/* fall through to 64bit user dispatch */
+>>>>>>> origin/10.6
 
 /*
  * Here for 64-bit user task or kernel
@@ -260,6 +266,7 @@ L_dispatch_U32: /* 32-bit user task */
 	 * Copy registers already saved in the machine state 
 	 * (in the interrupt stack frame) into the compat save area.
 	 */
+<<<<<<< HEAD
 	mov	R64_RIP(%r15), %eax
 	mov	%eax, R32_EIP(%r15)
 	mov	R64_RFLAGS(%r15), %eax
@@ -276,6 +283,24 @@ L_dispatch_U32_after_fault:
 	mov	R64_ERR(%r15), %eax
 	mov	%eax, R32_ERR(%r15)
 	mov	R64_TRAPFN(%r15), %rdx		/* %rdx := trapfn for later */
+=======
+	mov	ISC32_RIP(%rsp), %eax
+	mov	%eax, R32_EIP(%rsp)
+	mov	ISC32_RFLAGS(%rsp), %eax
+	mov	%eax, R32_EFLAGS(%rsp)
+	mov	ISC32_RSP(%rsp), %eax
+	mov	%eax, R32_UESP(%rsp)
+	mov	ISC32_SS(%rsp), %eax
+	mov	%eax, R32_SS(%rsp)
+L_32bit_dispatch_after_fault:
+	mov	ISC32_CS(%rsp), %esi		/* %esi := %cs for later */
+	mov	%esi, R32_CS(%rsp)
+	mov	ISC32_TRAPNO(%rsp), %ebx	/* %ebx := trapno for later */
+	mov	%ebx, R32_TRAPNO(%rsp)
+	mov	ISC32_ERR(%rsp), %eax
+	mov	%eax, R32_ERR(%rsp)
+	mov	ISC32_TRAPFN(%rsp), %rdx	/* %rdx := trapfn for later */
+>>>>>>> origin/10.7
 
 L_common_dispatch:
 	cld		/* Ensure the direction flag is clear in the kernel */
@@ -1234,6 +1259,7 @@ int_from_intstack:
 	incl	%gs:CPU_PREEMPTION_LEVEL
 	incl	%gs:CPU_INTERRUPT_LEVEL
 	incl	%gs:CPU_NESTED_ISTACK
+<<<<<<< HEAD
 
 	push	%gs:CPU_INT_STATE
 	mov	%r15, %gs:CPU_INT_STATE
@@ -1241,11 +1267,23 @@ int_from_intstack:
 	CCALL1(interrupt, %r15)
 
 	pop	%gs:CPU_INT_STATE
+=======
+	mov	%rsp, %rdi		/* x86_saved_state */
+	CCALL(interrupt)
+>>>>>>> origin/10.6
 
 	decl	%gs:CPU_INTERRUPT_LEVEL
 	decl	%gs:CPU_PREEMPTION_LEVEL
 	decl	%gs:CPU_NESTED_ISTACK
+<<<<<<< HEAD
 
+=======
+#if DEBUG_IDT64
+	CCALL1(panic_idt64, %rsp)
+	POSTCODE2(0x6411)
+	hlt
+#endif
+>>>>>>> origin/10.6
 	jmp	ret_to_kernel
 
 /*
@@ -1339,6 +1377,38 @@ Entry(hndl_mdep_scall)
 	 * always returns through thread_exception_return
 	 */
 
+<<<<<<< HEAD
+=======
+
+Entry(hndl_diag_scall)
+	TIME_TRAP_UENTRY
+
+	movq	%gs:CPU_KERNEL_STACK,%rdi
+	xchgq	%rdi,%rsp			/* switch to kernel stack */
+	
+	/* Check for active vtimers in the current task */
+	movq	%gs:CPU_ACTIVE_THREAD,%rcx	/* get current thread     */
+	movq	ACT_TASK(%rcx),%rbx		/* point to current task  */
+	TASK_VTIMER_CHECK(%rbx,%rcx)
+
+	pushq	%rdi			/* push pcb stack */
+
+	CCALL(diagCall)			// Call diagnostics
+
+	cli				// Disable interruptions just in case
+	cmpl	$0,%eax			// What kind of return is this?
+	je	1f			// - branch if bad (zero)
+	popq	%rsp			// Get back the original stack
+	jmp	EXT(return_to_user)	// Normal return, do not check asts...
+1:
+	CCALL3(i386_exception, $EXC_SYSCALL, $0x6000, $1)
+		// pass what would be the diag syscall
+		// error return - cause an exception
+	/* no return */
+	
+
+
+>>>>>>> origin/10.6
 /*
  * 64bit Tasks
  * System call entries via syscall only:
@@ -1413,12 +1483,25 @@ Entry(hndl_mdep_scall64)
 	 */
 
 Entry(hndl_diag_scall64)
+<<<<<<< HEAD
 	CCALL1(diagCall64, %r15)	// Call diagnostics
 	test	%eax, %eax		// What kind of return is this?
 	je	1f			// - branch if bad (zero)
 	jmp	EXT(return_to_user)	// Normal return, do not check asts...
 1:
 	sti
+=======
+	pushq	%rdi			// Push the previous stack
+
+	CCALL(diagCall64)		// Call diagnostics
+
+	cli				// Disable interruptions just in case
+	cmpl	$0,%eax			// What kind of return is this?
+	je	1f			// - branch if bad (zero)
+	popq	%rsp			// Get back the original stack
+	jmp	EXT(return_to_user)	// Normal return, do not check asts...
+1:
+>>>>>>> origin/10.6
 	CCALL3(i386_exception, $EXC_SYSCALL, $0x6000, $1)
 	/* no return */
 

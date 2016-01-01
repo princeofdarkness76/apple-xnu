@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -338,6 +360,7 @@ LEAF_ENTRY(hw_lock_to)
 	 * and then spin re-checking the lock but pausing
 	 * every so many (INNER_LOOP_COUNT) spins to check for timeout.
 	 */
+<<<<<<< HEAD
 	push	%r9
 	lfence
 	rdtsc				/* read cyclecount into %edx:%eax */
@@ -345,6 +368,20 @@ LEAF_ENTRY(hw_lock_to)
 	orq	%rdx, %rax		/* load 64-bit quantity into %rax */
 	addq	%rax, %rsi		/* %rsi is the timeout expiry */
 	
+=======
+	movl	L_ARG1,%ecx		/* fetch timeout */
+	push	%edi
+	push	%ebx
+	mov	%edx,%edi
+
+	lfence
+	rdtsc				/* read cyclecount into %edx:%eax */
+	lfence
+	addl	%ecx,%eax		/* fetch and timeout */
+	adcl	$0,%edx			/* add carry */
+	mov	%edx,%ecx
+	mov	%eax,%ebx		/* %ecx:%ebx is the timeout expiry */
+>>>>>>> origin/10.5
 4:
 	/*
 	 * The inner-loop spin to look for the lock being freed.
@@ -363,9 +400,14 @@ LEAF_ENTRY(hw_lock_to)
 	 */
 	lfence
 	rdtsc				/* cyclecount into %edx:%eax */
+<<<<<<< HEAD
 	shlq	$32, %rdx
 	orq	%rdx, %rax		/* load 64-bit quantity into %rax */
 	cmpq	%rsi, %rax		/* compare to timeout */
+=======
+	lfence
+	cmpl	%ecx,%edx		/* compare high-order 32-bits */
+>>>>>>> origin/10.5
 	jb	4b			/* continue spinning if less, or */
 	xor	%rax,%rax		/* with 0 return value */
 	pop	%r9

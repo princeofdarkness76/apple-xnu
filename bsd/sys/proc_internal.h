@@ -364,10 +364,13 @@ struct	proc {
 	void *	p_rcall;
 	int		p_ractive;
 	int	p_idversion;		/* version of process identity */
+<<<<<<< HEAD
 	void *	p_pthhash;			/* pthread waitqueue hash */
 	volatile uint64_t was_throttled __attribute__((aligned(8))); /* Counter for number of throttled I/Os */
 	volatile uint64_t did_throttle __attribute__((aligned(8)));  /* Counter for number of I/Os this proc throttled */
 
+=======
+>>>>>>> origin/10.5
 #if DIAGNOSTIC
 	unsigned int p_fdlock_pc[4];
 	unsigned int p_fdunlock_pc[4];
@@ -454,6 +457,7 @@ struct	proc {
 #define P_LRETURNWAIT  	0x00200000 	/* process is completing spawn/vfork-exec/fork */
 #define P_LRAGE_VNODES	0x00400000
 #define P_LREGISTER	0x00800000	/* thread start fns registered  */
+<<<<<<< HEAD
 #define P_LVMRSRCOWNER	0x01000000	/* can handle the resource ownership of  */
 #define P_LRETURNWAITER 0x02000000	/* thread is waiting on P_LRETURNWAIT being cleared */
 #define P_LTERM_DECRYPTFAIL	0x04000000	/* process terminating due to key failure to decrypt */
@@ -466,6 +470,9 @@ struct	proc {
 #define P_JETSAM_VNODE		0x50000000	/* jetsam: vnode kill */
 #define P_JETSAM_FCTHRASHING	0x60000000	/* jetsam: lowest jetsam priority proc, killed due to filecache thrashing */
 #define P_JETSAM_MASK		0x70000000	/* jetsam type mask */
+=======
+#define P_LBACKGROUND	0x01000000
+>>>>>>> origin/10.6
 
 /* Process control state for resource starvation */
 #define P_PCTHROTTLE	1

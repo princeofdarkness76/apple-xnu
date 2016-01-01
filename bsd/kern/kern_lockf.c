@@ -144,12 +144,24 @@ static int	 lf_getlock(struct lockf *, struct flock *, pid_t);
 static int	 lf_setlock(struct lockf *, struct timespec *);
 static int	 lf_split(struct lockf *, struct lockf *);
 static void	 lf_wakelock(struct lockf *, boolean_t);
+<<<<<<< HEAD
 #if IMPORTANCE_INHERITANCE
 static void	 lf_hold_assertion(task_t, struct lockf *);
 static void	 lf_jump_to_queue_head(struct lockf *, struct lockf *);
 static void	 lf_drop_assertion(struct lockf *);
 static void	 lf_boost_blocking_proc(struct lockf *, struct lockf *);
 #endif /* IMPORTANCE_INHERITANCE */
+=======
+
+
+/*
+ * in order to mitigate risk
+ * don't switch to new wake-one method unless
+ * we have at least this many waiters to wake up
+ */
+#define SAFE_WAITER_LIMIT    20
+
+>>>>>>> origin/10.5
 
 /*
  * lf_advlock
@@ -284,6 +296,7 @@ lf_advlock(struct vnop_advlock_args *ap)
 	lock->lf_type = fl->l_type;
 	lock->lf_head = head;
 	lock->lf_next = (struct lockf *)0;
+	lock->lf_waiters = 0;
 	TAILQ_INIT(&lock->lf_blkhd);
 	lock->lf_flags = ap->a_flags;
 #if IMPORTANCE_INHERITANCE
@@ -293,6 +306,9 @@ lf_advlock(struct vnop_advlock_args *ap)
 		lock->lf_owner = (struct proc *)lock->lf_id;
 	else
 		lock->lf_owner = NULL;
+
+	if (ap->a_flags & F_FLOCK)
+	        lock->lf_flags |= F_WAKE1_SAFE;
 
 	if (ap->a_flags & F_FLOCK)
 	        lock->lf_flags |= F_WAKE1_SAFE;
@@ -615,10 +631,15 @@ lf_setlock(struct lockf *lock, struct timespec *timeout)
 		 */
 		lock->lf_next = block;
 		TAILQ_INSERT_TAIL(&block->lf_blkhd, lock, lf_block);
+<<<<<<< HEAD
+=======
+		block->lf_waiters++;
+>>>>>>> origin/10.5
 
 		if ( !(lock->lf_flags & F_FLOCK))
 		        block->lf_flags &= ~F_WAKE1_SAFE;
 
+<<<<<<< HEAD
 #if IMPORTANCE_INHERITANCE
 		/*
 		 * Importance donation is done only for cases where the
@@ -642,20 +663,47 @@ lf_setlock(struct lockf *lock, struct timespec *timeout)
 			lf_boost_blocking_proc(lock, block);
 #endif /* IMPORTANCE_INHERITANCE */
 
+=======
+>>>>>>> origin/10.5
 #ifdef LOCKF_DEBUGGING
 		if (lockf_debug & LF_DBG_LOCKOP) {
 			lf_print("lf_setlock: blocking on", block);
 			lf_printlist("lf_setlock(block)", block);
 		}
 #endif /* LOCKF_DEBUGGING */
+<<<<<<< HEAD
 		DTRACE_FSINFO(advlock__wait, vnode_t, vp);
 
+<<<<<<< HEAD
 		error = msleep(lock, &vp->v_lock, priority, lockstr, timeout);
 
+=======
+>>>>>>> origin/10.8
 		if (error == 0 && (lock->lf_flags & F_ABORT) != 0)
 			error = EBADF;
 
 		if (lock->lf_next) {
+<<<<<<< HEAD
+=======
+		error = msleep(lock, &vp->v_lock, priority, lockstr, 0);
+
+		if (!TAILQ_EMPTY(&lock->lf_blkhd)) {
+			struct lockf *tlock;
+
+		        if ((block = lf_getblock(lock))) {
+			        TAILQ_FOREACH(tlock, &lock->lf_blkhd, lf_block) {
+				        tlock->lf_next = block;
+				}
+			        TAILQ_CONCAT(&block->lf_blkhd, &lock->lf_blkhd, lf_block);
+
+				block->lf_waiters += lock->lf_waiters;
+				lock->lf_waiters = 0;
+			}
+		}
+		if (error) {	/* XXX */
+>>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.8
 			/*
 			 * lf_wakelock() always sets wakelock->lf_next to
 			 * NULL before a wakeup; so we've been woken early
@@ -664,6 +712,10 @@ lf_setlock(struct lockf *lock, struct timespec *timeout)
 			 * Remove 'lock' from the block list (avoids double-add
 			 * in the spurious case, which would create a cycle)
 			 */
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.8
 			TAILQ_REMOVE(&lock->lf_next->lf_blkhd, lock, lf_block);
 			lock->lf_next = NULL;
 
@@ -674,6 +726,7 @@ lf_setlock(struct lockf *lock, struct timespec *timeout)
 				printf("%s: spurious wakeup, retrying lock\n",
 				    __func__);
 				continue;
+<<<<<<< HEAD
 			}
 		}
 
@@ -685,6 +738,29 @@ lf_setlock(struct lockf *lock, struct timespec *timeout)
 		if (error) {
 			if (!TAILQ_EMPTY(&lock->lf_blkhd))
 			        lf_wakelock(lock, TRUE);
+=======
+			if (lock->lf_next) {
+				TAILQ_REMOVE(&lock->lf_next->lf_blkhd, lock, lf_block);
+				lock->lf_next->lf_waiters--;
+				lock->lf_next = NOLOCKF;
+=======
+>>>>>>> origin/10.8
+			}
+		}
+
+		if (!TAILQ_EMPTY(&lock->lf_blkhd)) {
+		        if ((block = lf_getblock(lock, -1)) != NULL)
+				lf_move_blocked(block, lock);
+		}
+
+		if (error) {
+			if (!TAILQ_EMPTY(&lock->lf_blkhd))
+			        lf_wakelock(lock, TRUE);
+<<<<<<< HEAD
+			  
+>>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.8
 			FREE(lock, M_LOCKF);
 			/* Return ETIMEDOUT if timeout occoured. */
 			if (error == EWOULDBLOCK) {
@@ -779,8 +855,12 @@ lf_setlock(struct lockf *lock, struct timespec *timeout)
 					ltmp = TAILQ_FIRST(&overlap->lf_blkhd);
 					TAILQ_REMOVE(&overlap->lf_blkhd, ltmp,
 					    lf_block);
+					overlap->lf_waiters--;
+
 					TAILQ_INSERT_TAIL(&lock->lf_blkhd,
 					    ltmp, lf_block);
+					lock->lf_waiters++;
+
 					ltmp->lf_next = lock;
 				}
 			}
@@ -873,11 +953,14 @@ lf_clearlock(struct lockf *unlock)
 		 * Wakeup the list of locks to be retried.
 		 */
 	        lf_wakelock(overlap, FALSE);
+<<<<<<< HEAD
 #if IMPORTANCE_INHERITANCE
 		if (overlap->lf_boosted == LF_BOOSTED) {
 			lf_drop_assertion(overlap);
 		}
 #endif /* IMPORTANCE_INHERITANCE */
+=======
+>>>>>>> origin/10.5
 
 		switch (ovcase) {
 		case OVERLAP_NONE:	/* satisfy compiler enum/switch */
@@ -1262,12 +1345,20 @@ lf_wakelock(struct lockf *listhead, boolean_t force_all)
 	struct lockf *wakelock;
 	boolean_t wake_all = TRUE;
 
+<<<<<<< HEAD
 	if (force_all == FALSE && (listhead->lf_flags & F_WAKE1_SAFE))
+=======
+	if (force_all == FALSE && (listhead->lf_flags & F_WAKE1_SAFE) && listhead->lf_waiters > SAFE_WAITER_LIMIT)
+>>>>>>> origin/10.5
 	        wake_all = FALSE;
 
 	while (!TAILQ_EMPTY(&listhead->lf_blkhd)) {
 		wakelock = TAILQ_FIRST(&listhead->lf_blkhd);
 		TAILQ_REMOVE(&listhead->lf_blkhd, wakelock, lf_block);
+<<<<<<< HEAD
+=======
+		listhead->lf_waiters--;
+>>>>>>> origin/10.5
 
 		wakelock->lf_next = NOLOCKF;
 #ifdef LOCKF_DEBUGGING
@@ -1275,6 +1366,7 @@ lf_wakelock(struct lockf *listhead, boolean_t force_all)
 			lf_print("lf_wakelock: awakening", wakelock);
 #endif /* LOCKF_DEBUGGING */
 		if (wake_all == FALSE) {
+<<<<<<< HEAD
 			/*
 			 * If there are items on the list head block list,
 			 * move them to the wakelock list instead, and then
@@ -1290,6 +1382,20 @@ lf_wakelock(struct lockf *listhead, boolean_t force_all)
 						/* See rdar://10887303 */
 						panic("cycle in wakelock list");
 					}
+<<<<<<< HEAD
+=======
+
+		        TAILQ_CONCAT(&wakelock->lf_blkhd, &listhead->lf_blkhd, lf_block);
+			wakelock->lf_waiters = listhead->lf_waiters;
+			listhead->lf_waiters = 0;
+
+			if (!TAILQ_EMPTY(&wakelock->lf_blkhd)) {
+			        struct lockf *tlock;
+
+			        TAILQ_FOREACH(tlock, &wakelock->lf_blkhd, lf_block) {
+>>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.8
 				        tlock->lf_next = wakelock;
 				}
 			}

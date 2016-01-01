@@ -233,6 +233,7 @@ _decmp_get_func(vnode_t vp, uint32_t type, uintptr_t offset)
     if (IOCatalogueMatchingDriversPresent(providesName)) {
         // there is a kext that says it will register for this type, so let's wait for it
         char resourceName[80];
+<<<<<<< HEAD
         uint64_t delay = 10000000ULL; // 10 milliseconds.
         snprintf(resourceName, sizeof(resourceName), "com.apple.AppleFSCompression.Type%u", type);
         ErrorLogWithPath("waiting for %s\n", resourceName);
@@ -240,21 +241,39 @@ _decmp_get_func(vnode_t vp, uint32_t type, uintptr_t offset)
             lck_rw_unlock_shared(decompressorsLock); // we have to unlock to allow the kext to register
             if (IOServiceWaitForMatchingResource(resourceName, delay)) {
                 lck_rw_lock_shared(decompressorsLock);
+=======
+        snprintf(resourceName, sizeof(resourceName), "com.apple.AppleFSCompression.Type%u", type);
+        printf("waiting for %s\n", resourceName);
+        while(decompressors[type] == NULL) {
+            lck_rw_done(decompressorsLock); // we have to unlock to allow the kext to register
+            if (IOServiceWaitForMatchingResource(resourceName, 60)) {
+>>>>>>> origin/10.6
                 break;
             }
             if (!IOCatalogueMatchingDriversPresent(providesName)) {
                 // 
+<<<<<<< HEAD
                 ErrorLogWithPath("the kext with %s is no longer present\n", providesName);
                 lck_rw_lock_shared(decompressorsLock);
                 break;
             }
             ErrorLogWithPath("still waiting for %s\n", resourceName);
             delay *= 2;
+=======
+                printf("the kext with %s is no longer present\n", providesName);
+                break;
+            }
+            printf("still waiting for %s\n", resourceName);
+>>>>>>> origin/10.6
             lck_rw_lock_shared(decompressorsLock);
         }
         // IOKit says the kext is loaded, so it should be registered too!
         if (decompressors[type] == NULL) {
+<<<<<<< HEAD
             ErrorLogWithPath("we found %s, but the type still isn't registered\n", providesName);
+=======
+            ErrorLog("we found %s, but the type still isn't registered\n", providesName);
+>>>>>>> origin/10.6
             return NULL;
         }
         // it's now registered, so let's return the function
@@ -266,7 +285,11 @@ _decmp_get_func(vnode_t vp, uint32_t type, uintptr_t offset)
 	return NULL;
 }
 
+<<<<<<< HEAD
 #define decmp_get_func(vp, type, func) ((typeof(((decmpfs_registration*)NULL)->func))_decmp_get_func(vp, type, offsetof_func(func)))
+=======
+#define decmp_get_func(type, func) ((typeof(((decmpfs_registration*)NULL)->func))_decmp_get_func(type, offsetof_func(func)))
+>>>>>>> origin/10.6
 
 #pragma mark --- utilities ---
 
@@ -935,6 +958,10 @@ register_decmpfs_decompressor(uint32_t compression_type, decmpfs_registration *r
     decompressors[compression_type] = registration;
     snprintf(resourceName, sizeof(resourceName), "com.apple.AppleFSCompression.Type%u", compression_type);
     IOServicePublishResource(resourceName, TRUE);
+<<<<<<< HEAD
+=======
+    wakeup((caddr_t)&decompressors);
+>>>>>>> origin/10.6
     
 out:
     if (locked) lck_rw_unlock_exclusive(decompressorsLock);
@@ -950,7 +977,13 @@ unregister_decmpfs_decompressor(uint32_t compression_type, decmpfs_registration 
     int locked = 0;
     char resourceName[80];
 
+<<<<<<< HEAD
     if ((compression_type >= CMP_MAX) || !registration_valid(registration)) {
+=======
+    if ((compression_type >= CMP_MAX) ||
+        (!registration) ||
+        (registration->decmpfs_registration != DECMPFS_REGISTRATION_VERSION)) {
+>>>>>>> origin/10.6
         ret = EINVAL;
         goto out;
     }
@@ -963,6 +996,10 @@ unregister_decmpfs_decompressor(uint32_t compression_type, decmpfs_registration 
     decompressors[compression_type] = NULL;
     snprintf(resourceName, sizeof(resourceName), "com.apple.AppleFSCompression.Type%u", compression_type);
     IOServicePublishResource(resourceName, FALSE);
+<<<<<<< HEAD
+=======
+    wakeup((caddr_t)&decompressors);
+>>>>>>> origin/10.6
     
 out:
     if (locked) lck_rw_unlock_exclusive(decompressorsLock);

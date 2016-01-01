@@ -58,7 +58,10 @@ typedef union {
 	uint64_t	mcg_ecms		:BIT1(12);
 	uint64_t	mcg_reserved2		:BITS(15,13);
 	uint64_t	mcg_ext_cnt		:BITS(23,16);
+<<<<<<< HEAD
 	uint64_t	mcg_ser_p		:BIT1(24);
+=======
+>>>>>>> origin/10.5
      }		bits;
      uint64_t	u64;
 } ia32_mcg_cap_t;
@@ -129,13 +132,20 @@ typedef union {
 	uint64_t	over			:BIT1(62);
 	uint64_t	val			:BIT1(63);
     }		bits;
+<<<<<<< HEAD
     struct {		/* Variant if threshold-based error status present: */
+=======
+     struct {		/* Variant if threshold-based error status present: */
+>>>>>>> origin/10.5
 	uint64_t	mca_error		:BITS(15,0);
 	uint64_t	model_specific_error	:BITS(31,16);
 	uint64_t	other_information	:BITS(52,32);
 	uint64_t	threshold		:BITS(54,53);
+<<<<<<< HEAD
 	uint64_t	ar			:BIT1(55);
 	uint64_t	s			:BIT1(56);
+=======
+>>>>>>> origin/10.5
 	uint64_t	pcc			:BIT1(57);
 	uint64_t	addrv			:BIT1(58);
 	uint64_t	miscv			:BIT1(59);
@@ -144,6 +154,27 @@ typedef union {
 	uint64_t	over			:BIT1(62);
 	uint64_t	val			:BIT1(63);
     }		bits_tes_p;
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+    struct ia32_mc8_specific {
+	uint64_t	channel_number		:BITS(3,0);
+	uint64_t	memory_operation	:BITS(6,4);
+	uint64_t	unused			:BITS(15,7);
+	uint64_t	read_ecc		:BIT1(16);
+	uint64_t	ecc_on_a_scrub		:BIT1(17);
+	uint64_t	write_parity		:BIT1(18);
+	uint64_t	redundant_memory	:BIT1(19);
+	uint64_t	sparing			:BIT1(20);
+	uint64_t	access_out_of_range	:BIT1(21);
+	uint64_t	address_parity		:BIT1(23);
+	uint64_t	byte_enable_parity	:BIT1(24);
+	uint64_t	reserved		:BITS(37,25);
+	uint64_t	cor_err_cnt		:BITS(52,38);
+    }		bits_mc8;
+>>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.9
     uint64_t	u64;
 } ia32_mci_status_t;
 
@@ -153,9 +184,73 @@ typedef union {
 #define THRESHOLD_STATUS_YELLOW		2
 #define THRESHOLD_STATUS_RESERVED	3
 
+<<<<<<< HEAD
+/* MC8 memory operations encoding: */
+#define	MC8_MMM_GENERIC			0
+#define	MC8_MMM_READ			1
+#define	MC8_MMM_WRITE			2
+#define	MC8_MMM_ADDRESS_COMMAND		3
+#define	MC8_MMM_RESERVED		4
+
+typedef union {
+    struct {
+	uint64_t	reserved1		:BITS(15,0);
+	uint64_t	dimm			:BITS(17,16);
+	uint64_t	channel			:BITS(19,18);
+	uint64_t	reserved2		:BITS(31,20);
+	uint64_t	syndrome		:BITS(63,32);
+    }		bits;
+    uint64_t	u64;
+} ia32_mc8_misc_t;
+
 typedef uint64_t	ia32_mci_addr_t;
 typedef uint64_t	ia32_mci_misc_t;
 
+<<<<<<< HEAD
+=======
+#define IA32_MCG_EAX		(0x180)
+#define IA32_MCG_EBX		(0x181)
+#define IA32_MCG_ECX		(0x182)
+#define IA32_MCG_EDX		(0x183)
+#define IA32_MCG_ESI		(0x184)
+#define IA32_MCG_EDI		(0x185)
+#define IA32_MCG_EBP		(0x186)
+#define IA32_MCG_ESP		(0x187)
+#define IA32_MCG_EFLAGS		(0x188)
+#define IA32_MCG_EIP		(0x189)
+#define IA32_MCG_MISC		(0x18A)
+
+#define IA32_MCG_RAX		(0x180)
+#define IA32_MCG_RBX		(0x181)
+#define IA32_MCG_RCX		(0x182)
+#define IA32_MCG_RDX		(0x183)
+#define IA32_MCG_RSI		(0x184)
+#define IA32_MCG_RDI		(0x185)
+#define IA32_MCG_RBP		(0x186)
+#define IA32_MCG_RSP		(0x187)
+#define IA32_MCG_RFLAGS		(0x188)
+#define IA32_MCG_RIP		(0x189)
+#define IA32_MCG_MISC		(0x18A)
+#define IA32_MCG_RESERVED1	(0x18B)
+#define IA32_MCG_RESERVED2	(0x18C)
+#define IA32_MCG_RESERVED3	(0x18D)
+#define IA32_MCG_RESERVED4	(0x18E)
+#define IA32_MCG_RESERVED5	(0x18F)
+#define IA32_MCG_R8		(0x190)
+#define IA32_MCG_R9		(0x191)
+#define IA32_MCG_R10		(0x192)
+#define IA32_MCG_R11		(0x193)
+#define IA32_MCG_R12		(0x194)
+#define IA32_MCG_R13		(0x195)
+#define IA32_MCG_R14		(0x196)
+#define IA32_MCG_R15		(0x197)
+
+>>>>>>> origin/10.5
+=======
+typedef uint64_t	ia32_mci_addr_t;
+typedef uint64_t	ia32_mci_misc_t;
+
+>>>>>>> origin/10.9
 extern void		mca_cpu_alloc(cpu_data_t *cdp);
 extern void		mca_cpu_init(void);
 extern void		mca_dump(void);

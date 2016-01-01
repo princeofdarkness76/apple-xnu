@@ -74,8 +74,18 @@ CFLAGS=-std=c99 -Wall -Wextra -Werror -pedantic -Wformat=2 -Wcast-align \
 	-Wchar-subscripts -Winline -Wnested-externs -Wredundant-decls -g
 LDFLAGS=$(ARCHS) -dynamiclib -install_name $(LIBKXLD_INSTALLNAME) \
 	-compatibility_version $(COMPATIBILITY_VERSION) \
+<<<<<<< HEAD
 	-current_version $(CURRENT_VERSION) -lstdc++
 INCLUDES=-I$(HDRSRC) -isystem $(EXTHDRSRC)
+=======
+	-current_version $(CURRENT_VERSION) -isysroot $(SDKROOT) -lstdc++
+INCLUDES=-I$(HDRSRC) $(INCFLAGS_EXTERN)
+
+# Tools
+CC = xcrun -sdk $(SDKROOT) cc
+LIBTOOL = xcrun -sdk $(SDKROOT) libtool
+STRIP = xcrun -sdk $(SDKROOT) strip
+>>>>>>> origin/10.6
 
 ifneq ($(SDK_DIR),/)
 	CFLAGS += -isysroot $(SDK_DIR)
@@ -92,10 +102,15 @@ DSYMUTIL = xcrun -sdk $(SDK_DIR) dsymutil
 # Files
 HDR_NAMES=kxld.h kxld_types.h
 OBJ_NAMES=kxld.o kxld_array.o kxld_copyright.o kxld_demangle.o kxld_dict.o \
+<<<<<<< HEAD
 	kxld_kext.o kxld_object.o kxld_reloc.o kxld_sect.o kxld_seg.o	   \
 	kxld_srcversion.o kxld_sym.o kxld_symtab.o kxld_util.o kxld_uuid.o \
     kxld_vtable.o kxld_versionmin.o
 
+=======
+	kxld_kext.o kxld_reloc.o kxld_sect.o kxld_seg.o kxld_sym.o kxld_state.o \
+	kxld_symtab.o kxld_util.o kxld_uuid.o kxld_vtable.o
+>>>>>>> origin/10.6
 HDRS=$(addprefix $(HDRSRC)/, $(HDR_NAMES))
 OBJS=$(addprefix $(OBJROOT)/, $(OBJ_NAMES))
 

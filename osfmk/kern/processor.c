@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -130,12 +156,17 @@ processor_bootstrap(void)
 
 /*
  *	Initialize the given processor for the cpu
+<<<<<<< HEAD
  *	indicated by cpu_id, and assign to the
+=======
+ *	indicated by cpu_num, and assign to the
+>>>>>>> origin/10.5
  *	specified processor set.
  */
 void
 processor_init(
 	processor_t			processor,
+<<<<<<< HEAD
 	int					cpu_id,
 	processor_set_t		pset)
 {
@@ -145,11 +176,18 @@ processor_init(
 		/* Scheduler state deferred until sched_init() */
 		SCHED(processor_init)(processor);
 	}
+=======
+	int					cpu_num,
+	processor_set_t		pset)
+{
+	run_queue_init(&processor->runq);
+>>>>>>> origin/10.5
 
 	processor->state = PROCESSOR_OFF_LINE;
 	processor->active_thread = processor->next_thread = processor->idle_thread = THREAD_NULL;
 	processor->processor_set = pset;
 	processor->current_pri = MINPRI;
+<<<<<<< HEAD
 	processor->current_thmode = TH_MODE_NONE;
 	processor->cpu_id = cpu_id;
 	timer_call_setup(&processor->quantum_timer, thread_quantum_expire, processor);
@@ -163,6 +201,27 @@ processor_init(
 	processor->processor_self = IP_NULL;
 	processor_data_init(processor);
 	processor->processor_list = NULL;
+
+	s = splsched();
+	pset_lock(pset);
+	if (pset->cpu_set_count++ == 0)
+		pset->cpu_set_low = pset->cpu_set_hi = cpu_id;
+	else {
+		pset->cpu_set_low = (cpu_id < pset->cpu_set_low)? cpu_id: pset->cpu_set_low;
+		pset->cpu_set_hi = (cpu_id > pset->cpu_set_hi)? cpu_id: pset->cpu_set_hi;
+	}
+	pset_unlock(pset);
+	splx(s);
+=======
+	processor->cpu_num = cpu_num;
+	timer_call_setup(&processor->quantum_timer, thread_quantum_expire, processor);
+	processor->deadline = UINT64_MAX;
+	processor->timeslice = 0;
+	processor->processor_self = IP_NULL;
+	simple_lock_init(&processor->lock, 0);
+	processor_data_init(processor);
+	processor->processor_list = NULL;
+>>>>>>> origin/10.5
 
 	s = splsched();
 	pset_lock(pset);
@@ -263,6 +322,7 @@ pset_init(
 
 	queue_init(&pset->active_queue);
 	queue_init(&pset->idle_queue);
+<<<<<<< HEAD
 	queue_init(&pset->idle_secondary_queue);
 	pset->online_processor_count = 0;
 	pset->cpu_set_low = pset->cpu_set_hi = 0;
@@ -271,6 +331,15 @@ pset_init(
 #if defined(CONFIG_SCHED_DEFERRED_AST)
 	pset->pending_deferred_AST_cpu_mask = 0;
 #endif
+=======
+	pset->processor_count = 0;
+	pset->low_pri = pset->low_count = PROCESSOR_NULL;
+<<<<<<< HEAD
+>>>>>>> origin/10.5
+=======
+	pset->cpu_set_low = pset->cpu_set_hi = 0;
+	pset->cpu_set_count = 0;
+>>>>>>> origin/10.6
 	pset_lock_init(pset);
 	pset->pset_self = IP_NULL;
 	pset->pset_name_self = IP_NULL;
@@ -309,13 +378,21 @@ processor_info(
 	processor_info_t		info,
 	mach_msg_type_number_t	*count)
 {
+<<<<<<< HEAD
 	register int	cpu_id, state;
+=======
+	register int	cpu_num, state;
+>>>>>>> origin/10.5
 	kern_return_t	result;
 
 	if (processor == PROCESSOR_NULL)
 		return (KERN_INVALID_ARGUMENT);
 
+<<<<<<< HEAD
 	cpu_id = processor->cpu_id;
+=======
+	cpu_num = processor->cpu_num;
+>>>>>>> origin/10.5
 
 	switch (flavor) {
 
@@ -327,14 +404,23 @@ processor_info(
 			return (KERN_FAILURE);
 
 		basic_info = (processor_basic_info_t) info;
+<<<<<<< HEAD
 		basic_info->cpu_type = slot_type(cpu_id);
 		basic_info->cpu_subtype = slot_subtype(cpu_id);
+=======
+		basic_info->cpu_type = slot_type(cpu_num);
+		basic_info->cpu_subtype = slot_subtype(cpu_num);
+>>>>>>> origin/10.5
 		state = processor->state;
 		if (state == PROCESSOR_OFF_LINE)
 			basic_info->running = FALSE;
 		else
 			basic_info->running = TRUE;
+<<<<<<< HEAD
 		basic_info->slot_num = cpu_id;
+=======
+		basic_info->slot_num = cpu_num;
+>>>>>>> origin/10.5
 		if (processor == master_processor) 
 			basic_info->is_master = TRUE;
 		else
@@ -422,7 +508,11 @@ processor_info(
 	}
 
 	default:
+<<<<<<< HEAD
 	    result = cpu_info(flavor, cpu_id, info, count);
+=======
+	    result = cpu_info(flavor, cpu_num, info, count);
+>>>>>>> origin/10.5
 	    if (result == KERN_SUCCESS)
 			*host = &realhost;		   
 
@@ -448,7 +538,11 @@ processor_start(
 		prev = thread_bind(processor);
 		thread_block(THREAD_CONTINUE_NULL);
 
+<<<<<<< HEAD
 		result = cpu_start(processor->cpu_id);
+=======
+		result = cpu_start(processor->cpu_num);
+>>>>>>> origin/10.5
 
 		thread_bind(prev);
 
@@ -518,7 +612,11 @@ processor_start(
 	if (processor->processor_self == IP_NULL)
 		ipc_processor_init(processor);
 
+<<<<<<< HEAD
 	result = cpu_start(processor->cpu_id);
+=======
+	result = cpu_start(processor->cpu_num);
+>>>>>>> origin/10.5
 	if (result != KERN_SUCCESS) {
 		s = splsched();
 		pset_lock(pset);
@@ -553,7 +651,11 @@ processor_control(
 	if (processor == PROCESSOR_NULL)
 		return(KERN_INVALID_ARGUMENT);
 
+<<<<<<< HEAD
 	return(cpu_control(processor->cpu_id, info, count));
+=======
+	return(cpu_control(processor->cpu_num, info, count));
+>>>>>>> origin/10.5
 }
 	    
 kern_return_t
@@ -1062,6 +1164,15 @@ processor_set_threads(
 	__unused mach_msg_type_number_t	*count)
 {
     return KERN_FAILURE;
+}
+#elif defined(CONFIG_EMBEDDED)
+kern_return_t
+processor_set_threads(
+	__unused processor_set_t		pset,
+	__unused thread_array_t		*thread_list,
+	__unused mach_msg_type_number_t	*count)
+{
+    return KERN_NOT_SUPPORTED;
 }
 #else
 kern_return_t

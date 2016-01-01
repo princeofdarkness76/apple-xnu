@@ -78,6 +78,7 @@ fslog_extmod_msgtracer(proc_t caller, proc_t target)
 			return;
 		}
 
+<<<<<<< HEAD
 		strlcpy(t_name, target->p_comm, sizeof(t_name));
 		uuid_unparse_upper(target->p_uuid, uuidstr);
 		strlcat(t_name, "(", sizeof(t_name));
@@ -85,6 +86,18 @@ fslog_extmod_msgtracer(proc_t caller, proc_t target)
 		strlcat(t_name, ")", sizeof(t_name));
 		if (0 != escape_str(t_name, strlen(t_name), sizeof(t_name))) {
 			return;
+=======
+		src = str + len;
+		dst = src + count;
+		while (count) {
+			*dst-- = *src;
+			if ((*src == '[') || (*src == ']')) {
+				/* Last char copied needs to be escaped */
+				*dst-- = '\\';
+				count--;
+			}
+			src--;
+>>>>>>> origin/10.5
 		}
 #if DEBUG
 		printf("EXTMOD: %s(%d) -> %s(%d)\n",

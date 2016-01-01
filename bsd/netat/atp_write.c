@@ -683,7 +683,7 @@ atp_pack_bdsp(trp, bdsp)
 						(caddr_t)&buf[tmp],
 						len);
 					bufsize -= len;
-					tmp =+ len;
+					tmp += len;
 				}
 				m = gbuf_cont(m);
 			}

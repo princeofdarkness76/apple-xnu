@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -108,7 +130,10 @@ const struct memory_object_pager_ops vnode_pager_ops = {
 	vnode_pager_synchronize,
 	vnode_pager_map,
 	vnode_pager_last_unmap,
+<<<<<<< HEAD
 	NULL, /* data_reclaim */
+=======
+>>>>>>> origin/10.5
 	"vnode pager"
 };
 
@@ -356,6 +381,8 @@ trigger_name_to_port(
 extern int	uiomove64(addr64_t, int, void *);
 #define	MAX_RUN	32
 
+unsigned long vm_cs_tainted_forces = 0;
+
 int
 memory_object_control_uiomove(
 	memory_object_control_t	control,
@@ -410,6 +437,64 @@ memory_object_control_uiomove(
 		        if ((dst_page = vm_page_lookup(object, offset)) == VM_PAGE_NULL)
 			        break;
 
+<<<<<<< HEAD
+=======
+			/*
+			 * if we're in this routine, we are inside a filesystem's
+			 * locking model, so we don't ever want to wait for pages that have
+			 * list_req_pending == TRUE since it means that the
+			 * page is a candidate for some type of I/O operation,
+			 * but that it has not yet been gathered into a UPL...
+			 * this implies that it is still outside the domain
+			 * of the filesystem and that whoever is responsible for
+			 * grabbing it into a UPL may be stuck behind the filesystem
+			 * lock this thread owns, or trying to take a lock exclusively
+			 * and waiting for the readers to drain from a rw lock...
+			 * if we block in those cases, we will deadlock
+			 */
+			if (dst_page->list_req_pending) {
+
+				if (dst_page->absent) {
+					/*
+					 * this is the list_req_pending | absent | busy case
+					 * which originates from vm_fault_page... we want
+					 * to fall out of the fast path and go back
+					 * to the caller which will gather this page
+					 * into a UPL and issue the I/O if no one
+					 * else beats us to it
+					 */
+					break;
+				}
+				if (dst_page->pageout || dst_page->cleaning) {
+					/*
+					 * this is the list_req_pending | pageout | busy case
+					 * or the list_req_pending | cleaning case...
+					 * which originate from the pageout_scan and
+					 * msync worlds for the pageout case and the hibernate
+					 * pre-cleaning world for the cleaning case...
+					 * we need to reset the state of this page to indicate
+					 * it should stay in the cache marked dirty... nothing else we
+					 * can do at this point... we can't block on it, we can't busy
+					 * it and we can't clean it from this routine.
+					 */
+					vm_page_lockspin_queues();
+
+					vm_pageout_queue_steal(dst_page, TRUE); 
+					vm_page_deactivate(dst_page);
+
+					vm_page_unlock_queues();
+				}
+				/*
+				 * this is the list_req_pending | cleaning case...
+				 * we can go ahead and deal with this page since
+				 * its ok for us to mark this page busy... if a UPL
+				 * tries to gather this page, it will block until the
+				 * busy is cleared, thus allowing us safe use of the page
+				 * when we're done with it, we will clear busy and wake
+				 * up anyone waiting on it, thus allowing the UPL creation
+				 * to finish
+				 */
+>>>>>>> origin/10.6
 
 			if (dst_page->busy || dst_page->cleaning) {
 				/*
@@ -437,6 +522,7 @@ memory_object_control_uiomove(
 			assert(!dst_page->encrypted);
 
 		        if (mark_dirty) {
+<<<<<<< HEAD
 				if (dst_page->dirty == FALSE)
 					dirty_count++;
 				SET_PAGE_DIRTY(dst_page, FALSE);
@@ -452,6 +538,17 @@ memory_object_control_uiomove(
                                         vm_cs_validated_resets++;
 #endif
 					pmap_disconnect(dst_page->phys_page);
+=======
+			        dst_page->dirty = TRUE;
+				if (dst_page->cs_validated) {
+					/*
+					 * CODE SIGNING:
+					 * We're modifying a code-signed
+					 * page:  assume that it is now tainted.
+					 */
+					dst_page->cs_tainted = TRUE;
+					vm_cs_tainted_forces++;
+>>>>>>> origin/10.5
 				}
 			}
 			dst_page->busy = TRUE;
@@ -538,14 +635,25 @@ vnode_pager_bootstrap(void)
 	size = (vm_size_t) sizeof(struct vnode_pager);
 	vnode_pager_zone = zinit(size, (vm_size_t) MAX_VNODE*size,
 				PAGE_SIZE, "vnode pager structures");
+<<<<<<< HEAD
+<<<<<<< HEAD
 	zone_change(vnode_pager_zone, Z_CALLERACCT, FALSE);
 	zone_change(vnode_pager_zone, Z_NOENCRYPT, TRUE);
 
 
+=======
+	zone_change(vnode_pager_zone, Z_NOENCRYPT, TRUE);
+
+>>>>>>> origin/10.6
 #if CONFIG_CODE_DECRYPTION
 	apple_protect_pager_bootstrap();
 #endif	/* CONFIG_CODE_DECRYPTION */
 	swapfile_pager_bootstrap();
+=======
+#if CONFIG_CODE_DECRYPTION
+	apple_protect_pager_bootstrap();
+#endif	/* CONFIG_CODE_DECRYPTION */
+>>>>>>> origin/10.5
 	return;
 }
 

@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  *
@@ -95,6 +121,11 @@
 #include <sys/timeb.h>
 #include <sys/times.h>
 #include <sys/malloc.h>
+<<<<<<< HEAD
+=======
+
+#include <bsm/audit_kernel.h>
+>>>>>>> origin/10.3
 
 #define chgproccnt_ok(p) 1
 
@@ -153,7 +184,11 @@ extern void task_importance_update_owner_info(task_t);
 int
 setprivexec(proc_t p, struct setprivexec_args *uap, int32_t *retval)
 {
+<<<<<<< HEAD
 	AUDIT_ARG(value32, uap->flag);
+=======
+	AUDIT_ARG(value, uap->flag);
+>>>>>>> origin/10.3
 	*retval = p->p_debugger;
 	p->p_debugger = (uap->flag != 0);
 	return(0);
@@ -778,11 +813,19 @@ setuid(proc_t p, struct setuid_args *uap, __unused int32_t *retval)
 			 * may be able to decrement the proc count of B before we can increment it. This results in a panic.
 			 * Incrementing the proc count of the target ruid, B, before setting the process credentials prevents this race.
 			 */
+<<<<<<< HEAD
 			if (ruid != KAUTH_UID_NONE && chgproccnt_ok(p)) {
 				(void)chgproccnt(ruid, 1);
 			}
 
 			proc_ucred_lock(p);
+=======
+			if (ruid != KAUTH_UID_NONE) {
+				(void)chgproccnt(ruid, 1);
+			}
+
+			proc_lock(p);
+>>>>>>> origin/10.10
 			/*
 			 * We need to protect for a race where another thread
 			 * also changed the credential after we took our
@@ -792,12 +835,20 @@ setuid(proc_t p, struct setuid_args *uap, __unused int32_t *retval)
 			 * Note: the kauth_cred_setresuid has consumed a reference to my_cred, it p_ucred != my_cred, then my_cred must not be dereferenced!
 			 */
 			if (p->p_ucred != my_cred) {
+<<<<<<< HEAD
 				proc_ucred_unlock(p);
+=======
+				proc_unlock(p);
+>>>>>>> origin/10.10
 				/*
 				 * We didn't successfully switch to the new ruid, so decrement
 				 * the procs/uid count that we incremented above.
 				 */
+<<<<<<< HEAD
 				if (ruid != KAUTH_UID_NONE && chgproccnt_ok(p)) {
+=======
+				if (ruid != KAUTH_UID_NONE) {
+>>>>>>> origin/10.10
 					(void)chgproccnt(ruid, -1);
 				}
 				kauth_cred_unref(&my_new_cred);
@@ -811,12 +862,20 @@ setuid(proc_t p, struct setuid_args *uap, __unused int32_t *retval)
 			PROC_UPDATE_CREDS_ONPROC(p);
 
 			OSBitOrAtomic(P_SUGID, &p->p_flag);
+<<<<<<< HEAD
 			proc_ucred_unlock(p);
+=======
+			proc_unlock(p);
+>>>>>>> origin/10.10
 			/*
 			 * If we've updated the ruid, decrement the count of procs running
 			 * under the previous ruid
 			 */
+<<<<<<< HEAD
 			if (ruid != KAUTH_UID_NONE && chgproccnt_ok(p)) {
+=======
+			if (ruid != KAUTH_UID_NONE) {
+>>>>>>> origin/10.10
 				(void)chgproccnt(my_pcred->cr_ruid, -1);
 			}
 		}
@@ -1026,11 +1085,19 @@ setreuid(proc_t p, struct setreuid_args *uap, __unused int32_t *retval)
 			 * may be able to decrement the proc count of B before we can increment it. This results in a panic.
 			 * Incrementing the proc count of the target ruid, B, before setting the process credentials prevents this race.
 			 */
+<<<<<<< HEAD
 			if (ruid != KAUTH_UID_NONE && chgproccnt_ok(p)) {
 				(void)chgproccnt(ruid, 1);
 			}
 
 			proc_ucred_lock(p);
+=======
+			if (ruid != KAUTH_UID_NONE) {
+				(void)chgproccnt(ruid, 1);
+			}
+
+			proc_lock(p);
+>>>>>>> origin/10.10
 			/*
 			 * We need to protect for a race where another thread
 			 * also changed the credential after we took our
@@ -1040,8 +1107,13 @@ setreuid(proc_t p, struct setreuid_args *uap, __unused int32_t *retval)
 			 * Note: the kauth_cred_setresuid has consumed a reference to my_cred, it p_ucred != my_cred, then my_cred must not be dereferenced!
 			 */
 			if (p->p_ucred != my_cred) {
+<<<<<<< HEAD
 				proc_ucred_unlock(p);
 				if (ruid != KAUTH_UID_NONE && chgproccnt_ok(p)) {
+=======
+				proc_unlock(p);
+				if (ruid != KAUTH_UID_NONE) {
+>>>>>>> origin/10.10
 					/*
 					 * We didn't successfully switch to the new ruid, so decrement
 					 * the procs/uid count that we incremented above.
@@ -1059,9 +1131,15 @@ setreuid(proc_t p, struct setreuid_args *uap, __unused int32_t *retval)
 			/* update cred on proc */
 			PROC_UPDATE_CREDS_ONPROC(p);
 			OSBitOrAtomic(P_SUGID, &p->p_flag);
+<<<<<<< HEAD
 			proc_ucred_unlock(p);
 
 			if (ruid != KAUTH_UID_NONE && chgproccnt_ok(p)) {
+=======
+			proc_unlock(p);
+
+			if (ruid != KAUTH_UID_NONE) {
+>>>>>>> origin/10.10
 				/*
 				 * We switched to a new ruid, so decrement the count of procs running
 				 * under the previous ruid
@@ -1952,6 +2030,7 @@ setlogin(proc_t p, struct setlogin_args *uap, __unused int32_t *retval)
 
 	if ((error = proc_suser(p)))
 		return (error);
+<<<<<<< HEAD
 
 	bzero(&buffer[0], MAXLOGNAME+1);
 
@@ -1973,6 +2052,15 @@ setlogin(proc_t p, struct setlogin_args *uap, __unused int32_t *retval)
 	if (!error) {
 		AUDIT_ARG(text, buffer);
 	 } else if (error == ENAMETOOLONG)
+=======
+	 
+	error = copyinstr((caddr_t) uap->namebuf,
+	    (caddr_t) p->p_pgrp->pg_session->s_login,
+	    sizeof (p->p_pgrp->pg_session->s_login) - 1, (size_t *)&dummy);
+	if(!error)
+		AUDIT_ARG(text, p->p_pgrp->pg_session->s_login);
+	else if (error == ENAMETOOLONG)
+>>>>>>> origin/10.3
 		error = EINVAL;
 	return (error);
 }
@@ -1992,6 +2080,7 @@ set_security_token(proc_t p)
 	posix_cred_t my_pcred;
 	host_priv_t host_priv;
 
+<<<<<<< HEAD
 	/*
 	 * Don't allow a vfork child to override the parent's token settings
 	 * (since they share a task).  Instead, the child will just have to
@@ -2016,6 +2105,10 @@ set_security_token(proc_t p)
 		sec_token.val[0] = 0;
 		sec_token.val[1] = 0;
 	}
+=======
+	sec_token.val[0] = p->p_ucred->cr_uid;
+ 	sec_token.val[1] = p->p_ucred->cr_gid;
+>>>>>>> origin/10.3
 
 	/*
 	 * The current layout of the Mach audit token explicitly
@@ -2026,13 +2119,18 @@ set_security_token(proc_t p)
 	 * the user of the trailer from future representation
 	 * changes.
 	 */
+<<<<<<< HEAD
 	audit_token.val[0] = my_cred->cr_audit.as_aia_p->ai_auid;
 	audit_token.val[1] = my_pcred->cr_uid;
 	audit_token.val[2] = my_pcred->cr_gid;
 	audit_token.val[3] = my_pcred->cr_ruid;
 	audit_token.val[4] = my_pcred->cr_rgid;
 	audit_token.val[5] = p->p_pid;
+<<<<<<< HEAD
 	audit_token.val[6] = my_cred->cr_audit.as_aia_p->ai_asid;
+=======
+	audit_token.val[6] = my_cred->cr_au.ai_asid;
+>>>>>>> origin/10.5
 	audit_token.val[7] = p->p_idversion;
 
 	host_priv = (sec_token.val[0]) ? HOST_PRIV_NULL : host_priv_self();
@@ -2050,6 +2148,18 @@ set_security_token(proc_t p)
 #endif
 
 	return (host_security_set_task_token(host_security_self(),
+=======
+	audit_token.val[0] = p->p_au->ai_auid;
+	audit_token.val[1] = p->p_ucred->cr_uid;
+ 	audit_token.val[2] = p->p_ucred->cr_gid;
+	audit_token.val[3] = p->p_cred->p_ruid;
+        audit_token.val[4] = p->p_cred->p_rgid;
+	audit_token.val[5] = p->p_pid;
+	audit_token.val[6] = p->p_au->ai_asid;
+	audit_token.val[7] = p->p_au->ai_termid.port;
+
+	return host_security_set_task_token(host_security_self(),
+>>>>>>> origin/10.3
 					   p->task,
 					   sec_token,
 					   audit_token,

@@ -75,7 +75,11 @@ Boolean IOSharedDataQueue::initWithCapacity(UInt32 size)
 {
     IODataQueueAppendix *   appendix;
     vm_size_t               allocSize;
+<<<<<<< HEAD
 
+=======
+    
+>>>>>>> origin/10.9
     if (!super::init()) {
         return false;
     }
@@ -89,12 +93,30 @@ Boolean IOSharedDataQueue::initWithCapacity(UInt32 size)
         return false;
     }
     
+<<<<<<< HEAD
     allocSize = round_page(size + DATA_QUEUE_MEMORY_HEADER_SIZE + DATA_QUEUE_MEMORY_APPENDIX_SIZE);
 
     if (allocSize < size) {
         return false;
     }
 
+=======
+    _reserved = (ExpansionData *)IOMalloc(sizeof(struct ExpansionData));
+    if (!_reserved) {
+        return false;
+    }
+    
+    if (size > UINT32_MAX - DATA_QUEUE_MEMORY_HEADER_SIZE - DATA_QUEUE_MEMORY_APPENDIX_SIZE) {
+        return false;
+    }
+    
+    allocSize = round_page(size + DATA_QUEUE_MEMORY_HEADER_SIZE + DATA_QUEUE_MEMORY_APPENDIX_SIZE);
+    
+    if (allocSize < size) {
+        return false;
+    }
+    
+>>>>>>> origin/10.9
     dataQueue = (IODataQueueMemory *)IOMallocAligned(allocSize, PAGE_SIZE);
     if (dataQueue == 0) {
         return false;
@@ -105,6 +127,10 @@ Boolean IOSharedDataQueue::initWithCapacity(UInt32 size)
 //  dataQueue->head         = 0;
 //  dataQueue->tail         = 0;
 
+    if (!setQueueSize(size)) {
+        return false;
+    }
+    
     if (!setQueueSize(size)) {
         return false;
     }
@@ -138,7 +164,11 @@ void IOSharedDataQueue::free()
     if (_reserved) {
         IOFree (_reserved, sizeof(struct ExpansionData));
         _reserved = NULL;
+<<<<<<< HEAD
     } 
+=======
+    }
+>>>>>>> origin/10.9
     
     super::free();
 }
@@ -164,18 +194,31 @@ IODataQueueEntry * IOSharedDataQueue::peek()
         UInt32              headSize    = 0;
         UInt32              headOffset  = dataQueue->head;
         UInt32              queueSize   = getQueueSize();
+<<<<<<< HEAD
         
+=======
+
+>>>>>>> origin/10.9
         if (headOffset >= queueSize) {
             return NULL;
         }
         
+<<<<<<< HEAD
         head         = (IODataQueueEntry *)((char *)dataQueue->queue + headOffset);
         headSize     = head->size;
+=======
+        head 		= (IODataQueueEntry *)((char *)dataQueue->queue + headOffset);
+        headSize 	= head->size;
+>>>>>>> origin/10.9
         
         // Check if there's enough room before the end of the queue for a header.
         // If there is room, check if there's enough room to hold the header and
         // the data.
+<<<<<<< HEAD
         
+=======
+
+>>>>>>> origin/10.9
         if ((headOffset > UINT32_MAX - DATA_QUEUE_ENTRY_HEADER_SIZE) ||
             (headOffset + DATA_QUEUE_ENTRY_HEADER_SIZE > queueSize) ||
             (headOffset + DATA_QUEUE_ENTRY_HEADER_SIZE > UINT32_MAX - headSize) ||
@@ -204,7 +247,15 @@ Boolean IOSharedDataQueue::enqueue(void * data, UInt32 dataSize)
         return false;
     }
     // Check for underflow of (getQueueSize() - tail)
+<<<<<<< HEAD
+<<<<<<< HEAD
     if (getQueueSize() < tail || getQueueSize() < head) {
+=======
+    if (getQueueSize() < tail) {
+>>>>>>> origin/10.9
+=======
+    if (getQueueSize() < tail || getQueueSize() < head) {
+>>>>>>> origin/10.10
         return false;
     }
     
@@ -292,13 +343,22 @@ Boolean IOSharedDataQueue::dequeue(void *data, UInt32 *dataSize)
             UInt32              headSize    = 0;
             UInt32              headOffset  = dataQueue->head;
             UInt32              queueSize   = getQueueSize();
+<<<<<<< HEAD
             
+=======
+
+>>>>>>> origin/10.9
             if (headOffset > queueSize) {
                 return false;
             }
             
+<<<<<<< HEAD
             head         = (IODataQueueEntry *)((char *)dataQueue->queue + headOffset);
             headSize     = head->size;
+=======
+            head 		= (IODataQueueEntry *)((char *)dataQueue->queue + headOffset);
+            headSize 	= head->size;
+>>>>>>> origin/10.9
             
             // we wrapped around to beginning, so read from there
             // either there was not even room for the header

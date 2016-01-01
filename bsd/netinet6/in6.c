@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2003-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2003-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -598,8 +602,13 @@ in6ctl_associd(struct socket *so, u_long cmd, caddr_t data)
 		struct so_aidreq64 a64;
 	} u;
 
+<<<<<<< HEAD
 	VERIFY(so != NULL);
 
+=======
+	privileged = (proc_suser(p) == 0);
+#if MROUTING
+>>>>>>> origin/10.6
 	switch (cmd) {
 	case SIOCGASSOCIDS32: {		/* struct so_aidreq32 */
 		bcopy(data, &u.a32, sizeof (u.a32));
@@ -608,12 +617,30 @@ in6ctl_associd(struct socket *so, u_long cmd, caddr_t data)
 			bcopy(&u.a32, data, sizeof (u.a32));
 		break;
 	}
+<<<<<<< HEAD
 
 	case SIOCGASSOCIDS64: {		/* struct so_aidreq64 */
 		bcopy(data, &u.a64, sizeof (u.a64));
 		error = in6_getassocids(so, &u.a64.sar_cnt, u.a64.sar_aidp);
 		if (error == 0)
 			bcopy(&u.a64, data, sizeof (u.a64));
+=======
+#endif
+	if (ifp == NULL)
+		return (EOPNOTSUPP);
+
+	switch (cmd) {
+	case SIOCAUTOCONF_START:
+	case SIOCAUTOCONF_STOP:
+	case SIOCLL_START_32:
+	case SIOCLL_START_64:
+	case SIOCLL_STOP:
+	case SIOCPROTOATTACH_IN6_32:
+	case SIOCPROTOATTACH_IN6_64:
+	case SIOCPROTODETACH_IN6:
+                if (!privileged)
+                        return (EPERM);
+>>>>>>> origin/10.6
 		break;
 	}
 
@@ -809,8 +836,22 @@ in6ctl_llstop(struct ifnet *ifp)
 		lck_mtx_unlock(nd6_mutex);
 	}
 
+<<<<<<< HEAD
 	return (0);
 }
+=======
+	case SIOCPROTOATTACH_IN6_32:
+	case SIOCPROTOATTACH_IN6_64:
+		if ((error = proto_plumb(PF_INET6, ifp)))
+			printf("SIOCPROTOATTACH_IN6: %s "
+				   "error=%d\n", if_name(ifp), error);
+		return (error);
+		/* NOTREACHED */
+
+	case SIOCPROTODETACH_IN6:
+		/* Cleanup interface routes and addresses */
+		in6_purgeif(ifp);
+>>>>>>> origin/10.6
 
 static __attribute__((noinline)) int
 in6ctl_cgastart(struct ifnet *ifp, u_long cmd, caddr_t data)

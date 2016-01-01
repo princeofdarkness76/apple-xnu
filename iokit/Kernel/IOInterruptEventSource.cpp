@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -42,6 +64,7 @@ do { \
 	IOStatistics::setCounterType(IOEventSource::reserved->counter, kIOStatisticsInterruptEventSourceCounter); \
 } while (0)
 
+<<<<<<< HEAD
 #define IOStatisticsCheckForWork() \
 do { \
 	IOStatistics::countInterruptCheckForWork(IOEventSource::reserved->counter); \
@@ -60,6 +83,8 @@ do { \
 
 #endif // IOKITSTATS
 
+=======
+>>>>>>> origin/10.6
 #define super IOEventSource
 
 OSDefineMetaClassAndStructors(IOInterruptEventSource, IOEventSource)
@@ -97,6 +122,7 @@ bool IOInterruptEventSource::init(OSObject *inOwner,
 
     // Assumes inOwner holds a reference(retain) on the provider
     if (inProvider) {
+<<<<<<< HEAD
         if (IA_ANY_STATISTICS_ENABLED) {
             /*
              * We only treat this as an "interrupt" if it has a provider; if it does,
@@ -127,6 +153,11 @@ bool IOInterruptEventSource::init(OSObject *inOwner,
 	if (res) {
 	    intIndex = inIntIndex;
         }
+=======
+        res = (kIOReturnSuccess == registerInterruptHandler(inProvider, inIntIndex));
+	if (res)
+	    intIndex = inIntIndex;
+>>>>>>> origin/10.6
     }
 
     IOStatisticsInitializeCounter();
@@ -156,6 +187,7 @@ IOReturn IOInterruptEventSource::registerInterruptHandler(IOService *inProvider,
 
     ret = provider->registerInterrupt(inIntIndex, this, intHandler);
 
+<<<<<<< HEAD
     /*
      * Add statistics to the provider.  The setWorkLoop convention should ensure
      * that we always go down the unregister path before we register (outside of
@@ -204,6 +236,11 @@ IOInterruptEventSource::unregisterInterruptHandler(IOService *inProvider,
 }
 
 
+=======
+    return (ret);
+}
+
+>>>>>>> origin/10.6
 IOInterruptEventSource *
 IOInterruptEventSource::interruptEventSource(OSObject *inOwner,
 					     Action inAction,
@@ -223,6 +260,7 @@ IOInterruptEventSource::interruptEventSource(OSObject *inOwner,
 void IOInterruptEventSource::free()
 {
     if (provider && intIndex >= 0)
+<<<<<<< HEAD
         unregisterInterruptHandler(provider, intIndex);
 
     if (reserved) {
@@ -232,6 +270,9 @@ void IOInterruptEventSource::free()
 
         IODelete(reserved, ExpansionData, 1);
     }
+=======
+        provider->unregisterInterrupt(intIndex);
+>>>>>>> origin/10.6
 
     super::free();
 }
@@ -256,11 +297,16 @@ void IOInterruptEventSource::disable()
 
 void IOInterruptEventSource::setWorkLoop(IOWorkLoop *inWorkLoop)
 {
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.8
     if (inWorkLoop) super::setWorkLoop(inWorkLoop);
 
     if (provider) {
 	if (!inWorkLoop) {
 	    if (intIndex >= 0) {
+<<<<<<< HEAD
                 /*
                  * It isn't necessarily safe to wait until free() to unregister the interrupt;
                  * our provider may disappear.
@@ -274,6 +320,30 @@ void IOInterruptEventSource::setWorkLoop(IOWorkLoop *inWorkLoop)
     }
 
     if (!inWorkLoop) super::setWorkLoop(inWorkLoop);
+=======
+    super::setWorkLoop(inWorkLoop);
+
+    if (!provider)
+    	return;
+
+    if ( !inWorkLoop ) {
+	if (intIndex >= 0) {
+	    provider->unregisterInterrupt(intIndex);
+=======
+		provider->unregisterInterrupt(intIndex);
+		intIndex = ~intIndex;
+	    }
+	} else if ((intIndex < 0) && (kIOReturnSuccess == registerInterruptHandler(provider, ~intIndex))) {
+>>>>>>> origin/10.8
+	    intIndex = ~intIndex;
+	}
+    }
+<<<<<<< HEAD
+>>>>>>> origin/10.6
+=======
+
+    if (!inWorkLoop) super::setWorkLoop(inWorkLoop);
+>>>>>>> origin/10.8
 }
 
 const IOService *IOInterruptEventSource::getProvider() const
@@ -301,13 +371,18 @@ bool IOInterruptEventSource::checkForWork()
     int numInts = cacheProdCount - consumerCount;
     IOInterruptEventAction intAction = (IOInterruptEventAction) action;
 	bool trace = (gIOKitTrace & kIOTraceIntEventSource) ? true : false;
+<<<<<<< HEAD
 	
     IOStatisticsCheckForWork();
 	
+=======
+
+>>>>>>> origin/10.6
 	if ( numInts > 0 )
 	{
 		if (trace)
 			IOTimeStampStartConstant(IODBG_INTES(IOINTES_ACTION),
+<<<<<<< HEAD
 						 VM_KERNEL_UNSLIDE(intAction), (uintptr_t) owner, (uintptr_t) this, (uintptr_t) workLoop);
 
 		if (reserved->statistics) {
@@ -347,11 +422,27 @@ bool IOInterruptEventSource::checkForWork()
 		if (autoDisable && !explicitDisable)
 			enable();
 	}
+=======
+									 (uintptr_t) intAction, (uintptr_t) owner, (uintptr_t) this, (uintptr_t) workLoop);
+
+		// Call the handler
+        (*intAction)(owner, this,  numInts);
+		
+		if (trace)
+			IOTimeStampEndConstant(IODBG_INTES(IOINTES_ACTION),
+								   (uintptr_t) intAction, (uintptr_t) owner, (uintptr_t) this, (uintptr_t) workLoop);
+
+        consumerCount = cacheProdCount;
+        if (autoDisable && !explicitDisable)
+            enable();
+    }
+>>>>>>> origin/10.6
 	
 	else if ( numInts < 0 )
 	{
 		if (trace)
 			IOTimeStampStartConstant(IODBG_INTES(IOINTES_ACTION),
+<<<<<<< HEAD
 						 VM_KERNEL_UNSLIDE(intAction), (uintptr_t) owner, (uintptr_t) this, (uintptr_t) workLoop);
 
 		if (reserved->statistics) {
@@ -392,6 +483,22 @@ bool IOInterruptEventSource::checkForWork()
 			enable();
 	}
 	
+=======
+									 (uintptr_t) intAction, (uintptr_t) owner, (uintptr_t) this, (uintptr_t) workLoop);
+		
+		// Call the handler
+    	(*intAction)(owner, this, -numInts);
+		
+		if (trace)
+			IOTimeStampEndConstant(IODBG_INTES(IOINTES_ACTION),
+								   (uintptr_t) intAction, (uintptr_t) owner, (uintptr_t) this, (uintptr_t) workLoop);
+    
+        consumerCount = cacheProdCount;
+        if (autoDisable && !explicitDisable)
+            enable();
+    }
+
+>>>>>>> origin/10.6
     return false;
 }
 
@@ -399,13 +506,18 @@ void IOInterruptEventSource::normalInterruptOccurred
     (void */*refcon*/, IOService */*prov*/, int /*source*/)
 {
 	bool trace = (gIOKitTrace & kIOTraceIntEventSource) ? true : false;
+<<<<<<< HEAD
 	
     IOStatisticsInterrupt();
+=======
+
+>>>>>>> origin/10.6
     producerCount++;
 	
 	if (trace)
 	    IOTimeStampStartConstant(IODBG_INTES(IOINTES_SEMA), (uintptr_t) this, (uintptr_t) owner);
 
+<<<<<<< HEAD
     if (reserved->statistics) {
         if (IA_GET_STATISTIC_ENABLED(kInterruptAccountingFirstLevelCountIndex)) {
             IA_ADD_VALUE(&reserved->statistics->interruptStatistics[kInterruptAccountingFirstLevelCountIndex], 1);
@@ -414,6 +526,13 @@ void IOInterruptEventSource::normalInterruptOccurred
 	
     signalWorkAvailable();
 	
+=======
+	if (trace)
+	    IOTimeStampStartConstant(IODBG_INTES(IOINTES_SEMA), (uintptr_t) this, (uintptr_t) owner);
+	
+    signalWorkAvailable();
+
+>>>>>>> origin/10.6
 	if (trace)
 	    IOTimeStampEndConstant(IODBG_INTES(IOINTES_SEMA), (uintptr_t) this, (uintptr_t) owner);
 }
@@ -422,7 +541,11 @@ void IOInterruptEventSource::disableInterruptOccurred
     (void */*refcon*/, IOService *prov, int source)
 {
 	bool trace = (gIOKitTrace & kIOTraceIntEventSource) ? true : false;
+<<<<<<< HEAD
 	
+=======
+
+>>>>>>> origin/10.6
     prov->disableInterrupt(source);	/* disable the interrupt */
 	
     IOStatisticsInterrupt();
@@ -431,6 +554,7 @@ void IOInterruptEventSource::disableInterruptOccurred
 	if (trace)
 	    IOTimeStampStartConstant(IODBG_INTES(IOINTES_SEMA), (uintptr_t) this, (uintptr_t) owner);
 
+<<<<<<< HEAD
     if (reserved->statistics) {
         if (IA_GET_STATISTIC_ENABLED(kInterruptAccountingFirstLevelCountIndex)) {
             IA_ADD_VALUE(&reserved->statistics->interruptStatistics[kInterruptAccountingFirstLevelCountIndex], 1);
@@ -439,6 +563,13 @@ void IOInterruptEventSource::disableInterruptOccurred
     
     signalWorkAvailable();
 	
+=======
+	if (trace)
+	    IOTimeStampStartConstant(IODBG_INTES(IOINTES_SEMA), (uintptr_t) this, (uintptr_t) owner);
+    
+    signalWorkAvailable();
+
+>>>>>>> origin/10.6
 	if (trace)
 	    IOTimeStampEndConstant(IODBG_INTES(IOINTES_SEMA), (uintptr_t) this, (uintptr_t) owner);
 }

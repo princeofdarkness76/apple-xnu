@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -119,6 +145,8 @@
 
 #include <security/audit/audit.h>
 
+#include <bsm/audit_kernel.h>
+
 #include <net/if.h>
 #include <net/route.h>
 
@@ -171,7 +199,20 @@ void select_waitq_init(void);
 void
 select_waitq_init(void)
 {
+<<<<<<< HEAD
 	waitq_init(&select_conflict_queue, SYNC_POLICY_FIFO | SYNC_POLICY_DISABLE_IRQ);
+=======
+	struct file* fp;
+
+	if (((u_int)fd) >= fdp->fd_nfiles ||
+		(fp = fdp->fd_ofiles[fd]) == NULL ||
+		(fp->f_flag & flag) == 0) {
+			return (NULL);
+	}
+	if (fref(fp) == -1)
+		return (NULL);
+	return (fp);   
+>>>>>>> origin/10.2
 }
 
 #define f_flag f_fglob->fg_flag
@@ -248,9 +289,12 @@ pread_nocancel(struct proc *p, struct pread_nocancel_args *uap, user_ssize_t *re
 
 	if ( (error = preparefileread(p, &fp, fd, 1)) )
 		goto out;
+<<<<<<< HEAD
 
 	context = *(vfs_context_current());
 	context.vc_ucred = fp->f_fglob->fg_cred;
+=======
+>>>>>>> origin/10.5
 
 	error = dofileread(&context, fp, uap->buf, uap->nbyte,
 			uap->offset, FOF_OFFSET, retval);
@@ -727,10 +771,30 @@ rd_uio(struct proc *p, int fdes, uio_t uio, user_ssize_t *retval)
 	user_ssize_t count;
 	struct vfs_context context = *vfs_context_current();
 
+<<<<<<< HEAD
 	if ( (error = preparefileread(p, &fp, fdes, 0)) )
 	        return (error);
 
 	count = uio_resid(uio);
+=======
+	AUDIT_ARG(fd, uap->fd);
+	AUDIT_ARG(cmd, uap->com); /* XXX cmd is int, uap->com is long */
+	AUDIT_ARG(addr, uap->data);
+	if (error = fdgetf(p, uap->fd, &fp))
+		return (error);
+
+	AUDIT_ARG(file, p, fp);
+	if ((fp->f_flag & (FREAD | FWRITE)) == 0)
+		return (EBADF);
+		
+#if NETAT
+	/*
+	 * ### LD 6/11/97 Hack Alert: this is to get AppleTalk to work
+	 * while implementing an ATioctl system call
+	 */
+	{
+		extern int appletalk_inited;
+>>>>>>> origin/10.3
 
 	context.vc_ucred = fp->f_cred;
 
@@ -1844,7 +1908,12 @@ poll_callback(__unused struct kqueue *kq, struct kevent_internal_s *kevp, void *
 		if (fds->revents & POLLHUP)
 			mask = (POLLIN | POLLRDNORM | POLLPRI | POLLRDBAND );
 		else {
+<<<<<<< HEAD
 			mask = (POLLIN | POLLRDNORM);
+=======
+			if ((kevp->flags & EV_ERROR) == 0 && kevp->data != 0)
+				mask = (POLLIN | POLLRDNORM );
+>>>>>>> origin/10.10
 			if (kevp->flags & EV_OOBAND)
 				mask |= (POLLPRI | POLLRDBAND);
 		}

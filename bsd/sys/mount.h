@@ -1,8 +1,22 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +28,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -287,12 +321,26 @@ struct vfs_attr {
 #define	MNT_NODEV	0x00000010	/* don't interpret special files */
 #define	MNT_UNION	0x00000020	/* union with underlying filesystem */
 #define	MNT_ASYNC	0x00000040	/* file system written asynchronously */
+<<<<<<< HEAD
+<<<<<<< HEAD
 #define	MNT_CPROTECT	0x00000080	/* file system supports content protection */
+=======
+#define MNT_DONTBROWSE	0x00100000	/* file system is not appropriate path to user data */
+#define MNT_UNKNOWNPERMISSIONS 0x00200000 /* no known mapping for uid/gid in permissions information on disk */
+#define MNT_AUTOMOUNTED 0x00400000	/* filesystem was mounted by automounter */
+#define MNT_JOURNALED   0x00800000  /* filesystem is journaled */
+>>>>>>> origin/10.2
+=======
+#define	MNT_CPROTECT	0x00000080	/* file system supports content protection */
+>>>>>>> origin/10.6
 
 /*
  * NFS export related mount flags.
  */
 #define	MNT_EXPORTED	0x00000100	/* file system is exported */
+#ifdef PRIVATE
+#define MNT_IMGSRC	0x00000200
+#endif /* CONFIG_IMGSRC_ACCESS */
 
 /*
  * MAC labeled / "quarantined" flag
@@ -333,9 +381,17 @@ struct vfs_attr {
 			MNT_ASYNC	| MNT_EXPORTED	| MNT_QUARANTINE | \
 			MNT_LOCAL	| MNT_QUOTA | \
 			MNT_ROOTFS	| MNT_DOVOLFS	| MNT_DONTBROWSE | \
+<<<<<<< HEAD
 			MNT_IGNORE_OWNERSHIP | MNT_AUTOMOUNTED | MNT_JOURNALED | \
+<<<<<<< HEAD
 			MNT_NOUSERXATTR | MNT_DEFWRITE	| MNT_MULTILABEL | \
 			MNT_NOATIME | MNT_CPROTECT)
+=======
+			MNT_UNKNOWNPERMISSIONS | MNT_AUTOMOUNTED | MNT_JOURNALED | MNT_FIXEDSCRIPTENCODING )
+>>>>>>> origin/10.2
+=======
+			MNT_NOUSERXATTR | MNT_DEFWRITE	| MNT_MULTILABEL | MNT_NOATIME | MNT_CPROTECT )
+>>>>>>> origin/10.6
 /*
  * External filesystem command modifier flags.
  * Unmount can use the MNT_FORCE flag.
@@ -441,10 +497,13 @@ union union_vfsidctl { /* the fields vc_vers and vc_fsid are compatible */
 #define VFS_CTL_NEWADDR	0x00010004	/* reconnect to new address */
 #define VFS_CTL_TIMEO	0x00010005	/* set timeout for vfs notification */
 #define VFS_CTL_NOLOCKS	0x00010006	/* disable file locking */
+<<<<<<< HEAD
 #define VFS_CTL_SADDR	0x00010007	/* get server address */
 #define VFS_CTL_DISC    0x00010008	/* server disconnected */
 #define VFS_CTL_SERVERINFO  0x00010009  /* information about fs server */
 #define VFS_CTL_NSTATUS 0x0001000A	/* netfs mount status */
+=======
+>>>>>>> origin/10.3
 
 struct vfsquery {
 	u_int32_t	vq_flags;
@@ -474,12 +533,22 @@ struct netfs_status {
 #define VQ_MOUNT	0x0008	/* new filesystem arrived */
 #define VQ_UNMOUNT	0x0010	/* filesystem has left */
 #define VQ_DEAD		0x0020	/* filesystem is dead, needs force unmount */
+<<<<<<< HEAD
 #define VQ_ASSIST	0x0040	/* filesystem needs assistance from external program */
 #define VQ_NOTRESPLOCK	0x0080	/* server lockd down */
 #define VQ_UPDATE	0x0100	/* filesystem information has changed */
 #define VQ_VERYLOWDISK	0x0200	/* file system has *very* little disk space left */
 #define VQ_SYNCEVENT	0x0400	/* a sync just happened (not set by kernel starting Mac OS X 10.9) */
 #define VQ_SERVEREVENT  0x0800  /* server issued notification/warning */
+=======
+#define VQ_ASSIST	0x0040	/* filesystem needs assistance from external
+				   program */
+#define VQ_NOTRESPLOCK	0x0080	/* server lockd down */
+#define VQ_FLAG0100	0x0100	/* placeholder */
+#define VQ_FLAG0200	0x0200	/* placeholder */
+#define VQ_FLAG0400	0x0400	/* placeholder */
+#define VQ_FLAG0800	0x0800	/* placeholder */
+>>>>>>> origin/10.3
 #define VQ_FLAG1000	0x1000	/* placeholder */
 #define VQ_FLAG2000	0x2000	/* placeholder */
 #define VQ_FLAG4000	0x4000	/* placeholder */
@@ -501,7 +570,11 @@ struct vfsioattr {
 	void *		io_reserved[2];		/* extended attribute information */
 };
 
+<<<<<<< HEAD
 #define VFS_IOATTR_FLAGS_FUA	0x01	/* Write-through cache supported */
+=======
+#define VFS_IOATTR_FLAGS_FUA		0x01	/* Write-through cache supported */
+>>>>>>> origin/10.6
 #define VFS_IOATTR_FLAGS_UNMAP		0x02	/* Unmap (trim) supported */
 
 /*
@@ -1199,6 +1272,7 @@ int	vfs_setattr(mount_t mp, struct vfs_attr *vfa, vfs_context_t ctx);
 int	vfs_extendedsecurity(mount_t);
 mount_t	vfs_getvfs_by_mntonname(char *);
 vnode_t vfs_vnodecovered(mount_t mp); /* Returns vnode with an iocount that must be released with vnode_put() */
+<<<<<<< HEAD
 vnode_t vfs_devvp(mount_t mp); /* Please see block comment with implementation */
 int vfs_nativexattrs (mount_t mp); /* whether or not the FS supports EAs natively */
 void *  vfs_mntlabel(mount_t mp); /* Safe to cast to "struct label*"; returns "void*" to limit dependence of mount.h on security headers.  */
@@ -1274,6 +1348,10 @@ typedef void vfs_trigger_callback_t(mount_t mp, vfs_trigger_callback_op_t op, vo
   */
 int 	vfs_settriggercallback(fsid_t *fsid, vfs_trigger_callback_t vtc, void *data, uint32_t flags, vfs_context_t ctx);
 
+=======
+void * vfs_mntlabel(mount_t mp); /* Safe to cast to "struct label*"; returns "void*" to limit dependence of mount.h on security headers.  */
+void	vfs_setunmountpreflight(mount_t mp);
+>>>>>>> origin/10.6
 #endif	/* KERNEL_PRIVATE */
 __END_DECLS
 

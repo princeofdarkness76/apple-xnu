@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -1107,6 +1111,7 @@ extern void in6_aliasreq_64_to_32(struct in6_aliasreq_64 *,
 extern void in6_aliasreq_32_to_64(struct in6_aliasreq_32 *,
     struct in6_aliasreq_64 *);
 extern void in6_ifaddr_init(void);
+<<<<<<< HEAD
 extern int in6_inithead(void **, int);
 extern void in6_rtqdrain(void);
 extern struct radix_node *in6_validate(struct radix_node *);
@@ -1129,4 +1134,8 @@ extern int in6_cga_generate(const struct in6_cga_prepare *, u_int8_t,
     struct in6_addr *);
 
 #endif /* BSD_KERNEL_PRIVATE */
+=======
+extern void in6_rtqdrain(void);
+#endif /* KERNEL_PRIVATE */
+>>>>>>> origin/10.6
 #endif /* _NETINET6_IN6_VAR_H_ */

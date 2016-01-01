@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2006 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -56,6 +82,10 @@
 #include <sys/filedesc.h>
 #include <mach/host_priv.h>
 #include <mach/host_reboot.h>
+<<<<<<< HEAD
+=======
+#include <bsm/audit_kernel.h>
+>>>>>>> origin/10.3
 
 #include <security/audit/audit.h>
 
@@ -473,6 +503,7 @@ sigterm_loop:
 	/*
 	 * send SIGTERM to those procs interested in catching one
 	 */
+<<<<<<< HEAD
 	sfargs.delayterm = delayterm;
 	sfargs.shutdownstate = 0;
 	sdargs.signo = SIGTERM;
@@ -506,6 +537,36 @@ sigterm_loop:
 				}
 			}
 			
+=======
+sigterm_loop:
+	for (p = allproc.lh_first; p; p = p->p_list.le_next) {
+	        if (((p->p_flag&P_SYSTEM) == 0) && (p->p_pptr->p_pid != 0) && (p != self) && (p->p_shutdownstate == 0)) {
+		        if (p->p_sigcatch & sigmask(SIGTERM)) {
+			        p->p_shutdownstate = 1;
+			        psignal(p, SIGTERM);
+
+				goto sigterm_loop;
+			}
+		}
+	}
+	/*
+	 * now wait for up to 30 seconds to allow those procs catching SIGTERM
+	 * to digest it
+	 * as soon as these procs have exited, we'll continue on to the next step
+	 */
+	for (i = 0; i < 300; i++) {
+	        /*
+		 * sleep for a tenth of a second
+		 * and then check to see if the tasks that were sent a
+		 * SIGTERM have exited
+		 */
+	        IOSleep(100);   
+		TERM_catch = 0;
+
+	        for (p = allproc.lh_first; p; p = p->p_list.le_next) {
+		        if (p->p_shutdownstate == 1)
+			        TERM_catch++;
+>>>>>>> origin/10.3
 		}
 		proc_list_unlock();
 	}
@@ -513,6 +574,7 @@ sigterm_loop:
 		/*
 		 * log the names of the unresponsive tasks
 		 */
+<<<<<<< HEAD
 
 
 		proc_list_lock();
@@ -522,6 +584,11 @@ sigterm_loop:
 				printf("%s[%d]: didn't act on SIGTERM\n", p->p_comm, p->p_pid);
 				sd_log(ctx, "%s[%d]: didn't act on SIGTERM\n", p->p_comm, p->p_pid);
 			}
+=======
+	        for (p = allproc.lh_first; p; p = p->p_list.le_next) {
+		        if (p->p_shutdownstate == 1)
+				  printf("%s[%d]: didn't act on SIGTERM\n", p->p_comm, p->p_pid);
+>>>>>>> origin/10.3
 		}
 
 		proc_list_unlock();
@@ -532,6 +599,7 @@ sigterm_loop:
 	/*
 	 * send a SIGKILL to all the procs still hanging around
 	 */
+<<<<<<< HEAD
 	sfargs.delayterm = delayterm;
 	sfargs.shutdownstate = 2;
 	sdargs.signo = SIGKILL;
@@ -564,6 +632,26 @@ sigterm_loop:
 						p->p_listflag &= ~P_LIST_EXITCOUNT;
 				}
 			}
+=======
+sigkill_loop:
+	for (p = allproc.lh_first; p; p = p->p_list.le_next) {
+	        if (((p->p_flag&P_SYSTEM) == 0) && (p->p_pptr->p_pid != 0) && (p != self) && (p->p_shutdownstate != 2)) {
+		        psignal(p, SIGKILL);
+			p->p_shutdownstate = 2;
+			
+			goto sigkill_loop;
+		}
+	}
+	/*
+	 * wait for up to 60 seconds to allow these procs to exit normally
+	 */
+	for (i = 0; i < 300; i++) {
+		IOSleep(200);  /* double the time from 100 to 200 for NFS requests in particular */
+
+	        for (p = allproc.lh_first; p; p = p->p_list.le_next) {
+		        if (p->p_shutdownstate == 2)
+			        break;
+>>>>>>> origin/10.3
 		}
 		proc_list_unlock();
 	}
@@ -581,6 +669,7 @@ sigterm_loop:
 	/* post a SIGTERM to all that catch SIGTERM and not marked for delay */
 	proc_rebootscan(sd_callback3, (void *)&sdargs, sd_filt2, (void *)&sfargs);
 	printf("\n");
+<<<<<<< HEAD
 
 	/* Now start the termination of processes that are marked for delayed termn */
 	if (delayterm == 0) {
@@ -592,6 +681,27 @@ sigterm_loop:
 
 	/*
 	 * Now that all other processes have been terminated, suspend init
+=======
+	/*
+	 *	Forcibly free resources of what's left.
+	 */
+#ifdef notyet
+	p = allproc.lh_first;
+	while (p) {
+	/*
+	 * Close open files and release open-file table.
+	 * This may block!
+	 */
+
+	/* panics on reboot due to "zfree: non-allocated memory in collectable zone" message */
+	fdfree(p);
+	p = p->p_list.le_next;
+	}
+#endif /* notyet */
+	/* Wait for the reaper thread to run, and clean up what we have done 
+	 * before we proceed with the hardcore shutdown. This reduces the race
+	 * between kill_tasks and the reaper thread.
+>>>>>>> origin/10.3
 	 */
 	task_suspend_internal(initproc->task);
 

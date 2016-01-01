@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -71,9 +93,15 @@
 
 #ifdef	KERNEL
 
+<<<<<<< HEAD
 #ifndef	ASSEMBLER
 #include <mach/vm_types.h>
 #endif	/* ASSEMBLER */
+=======
+#include <mach/machine/vm_param.h>
+
+#include <mach/vm_types.h>
+>>>>>>> origin/10.2
 
 /*
  *	The machine independent pages are refered to as PAGES.  A page
@@ -122,6 +150,7 @@
 #define memory_object_round_page(x) (((memory_object_offset_t)(x) + PAGE_MASK) & ~((signed)PAGE_MASK))
 #define memory_object_trunc_page(x) ((memory_object_offset_t)(x) & ~((signed)PAGE_MASK))
 
+<<<<<<< HEAD
 /*
  *	Rounding macros for the legacy (scalable with the current task's
  *	address space size) VM types.
@@ -129,6 +158,35 @@
 
 #define round_page(x) (((vm_offset_t)(x) + PAGE_MASK) & ~((vm_offset_t)PAGE_MASK))
 #define trunc_page(x) ((vm_offset_t)(x) & ~((vm_offset_t)PAGE_MASK))
+=======
+#ifndef	ASSEMBLER
+
+/*
+ *	Convert addresses to pages and vice versa.  No rounding is used.
+ *      The atop_32 and ptoa_32 macros should not be use on 64 bit types.
+ *      The round_page_64 and trunc_page_64 macros should be used instead.
+ */
+
+#define atop_32(x) ((uint32_t)(x) >> PAGE_SHIFT)
+#define ptoa_32(x) ((uint32_t)(x) << PAGE_SHIFT)
+#define atop_64(x) ((uint64_t)(x) >> PAGE_SHIFT)
+#define ptoa_64(x) ((uint64_t)(x) << PAGE_SHIFT)
+
+/*
+ *      While the following block is enabled, the legacy atop and ptoa
+ *      macros will behave correctly.  If not, they will generate
+ *      invalid lvalue errors.
+ */
+
+#if 1
+#define atop(x)	((uint32_t)(x) >> PAGE_SHIFT)
+#define ptoa(x)	((uint32_t)(x) << PAGE_SHIFT)
+#else
+#define atop(x) (0UL = 0)
+#define ptoa(x) (0UL = 0)
+#endif
+
+>>>>>>> origin/10.2
 
 /*
  *	Round off or truncate to the nearest page.  These will work
@@ -136,6 +194,7 @@
  *	bytes.  The round_page_32 and trunc_page_32 macros should not be
  *      use on 64 bit types.  The round_page_64 and trunc_page_64 macros
  *      should be used instead.
+<<<<<<< HEAD
  *
  *	These should only be used in the rare case the size of the address
  *	or length is hard-coded as 32 or 64 bit.  Otherwise, the macros
@@ -146,6 +205,29 @@
 #define trunc_page_32(x) ((uint32_t)(x) & ~((uint32_t)PAGE_MASK))
 #define round_page_64(x) (((uint64_t)(x) + PAGE_MASK_64) & ~((uint64_t)PAGE_MASK_64))
 #define trunc_page_64(x) ((uint64_t)(x) & ~((uint64_t)PAGE_MASK_64))
+=======
+ */
+
+#define round_page_32(x) (((uint32_t)(x) + PAGE_MASK) & ~((signed)PAGE_MASK))
+#define trunc_page_32(x) ((uint32_t)(x) & ~((signed)PAGE_MASK))
+#define round_page_64(x) (((uint64_t)(x) + PAGE_MASK) & ~((signed)PAGE_MASK))
+#define trunc_page_64(x) ((uint64_t)(x) & ~((signed)PAGE_MASK))
+
+
+/*
+ *      While the following block is enabled, the legacy round_page
+ *      and trunc_page macros will behave correctly.  If not, they will
+ *      generate invalid lvalue errors.
+ */
+
+#if 1
+#define round_page(x) (((uint32_t)(x) + PAGE_MASK) & ~((signed)PAGE_MASK))
+#define trunc_page(x) ((uint32_t)(x) & ~((signed)PAGE_MASK))
+#else
+#define round_page(x) (0UL = 0)
+#define trunc_page(x) (0UL = 0)
+#endif
+>>>>>>> origin/10.2
 
 /*
  *      Enable the following block to find uses of xxx_32 macros that should
@@ -158,6 +240,7 @@
  *      unsigned long type first.  Look for invalid operands to binary + error
  *      in the compiler output.
  */
+<<<<<<< HEAD
 
 #if 0
 #undef atop_32
@@ -181,6 +264,31 @@
         (*(long *)0), \
         (0UL)) = 0)
 
+=======
+
+#if 0
+#undef atop_32
+#undef ptoa_32
+#undef round_page_32
+#undef trunc_page_32
+#undef atop_64
+#undef ptoa_64
+#undef round_page_64
+#undef trunc_page_64
+
+#ifndef __cplusplus
+
+#define atop_32(x) \
+    (__builtin_choose_expr (sizeof(x) != sizeof(uint64_t), \
+        (*(long *)0), \
+        (0UL)) = 0)
+
+#define ptoa_32(x) \
+    (__builtin_choose_expr (sizeof(x) != sizeof(uint64_t), \
+        (*(long *)0), \
+        (0UL)) = 0)
+
+>>>>>>> origin/10.2
 #define round_page_32(x) \
     (__builtin_choose_expr (sizeof(x) != sizeof(uint64_t), \
         (*(long *)0), \
@@ -260,12 +368,18 @@ extern vm_offset_t      vm_elinkedit;
 #define VM_KERNEL_IS_SLID(_o)						       \
 		(((vm_offset_t)(_o) >= vm_kernel_base) &&		       \
 		 ((vm_offset_t)(_o) <=  vm_kernel_top))
+<<<<<<< HEAD
 #define VM_KERNEL_IS_KEXT(_o)      \
                 (((vm_offset_t)(_o) >= vm_kext_base) &&   \
+=======
+#define VM_KERNEL_IS_KEXT(_o)                                                  \
+                (((vm_offset_t)(_o) >= vm_kext_base) &&                        \
+>>>>>>> origin/10.10
                  ((vm_offset_t)(_o) <  vm_kext_top))
 
 #define VM_KERNEL_IS_PRELINKTEXT(_o)        \
         (((vm_offset_t)(_o) >= vm_prelink_stext) &&     \
+<<<<<<< HEAD
         ((vm_offset_t)(_o) <  vm_prelink_etext))
 
 #define VM_KERNEL_IS_PRELINKINFO(_o)        \
@@ -275,6 +389,17 @@ extern vm_offset_t      vm_elinkedit;
 #define VM_KERNEL_IS_KEXT_LINKEDIT(_o)        \
     (((vm_offset_t)(_o) >= vm_slinkedit) &&     \
     ((vm_offset_t)(_o) <  vm_elinkedit))
+=======
+         ((vm_offset_t)(_o) <  vm_prelink_etext))
+
+#define VM_KERNEL_IS_PRELINKINFO(_o)        \
+        (((vm_offset_t)(_o) >= vm_prelink_sinfo) &&     \
+         ((vm_offset_t)(_o) <  vm_prelink_einfo))
+
+#define VM_KERNEL_IS_KEXT_LINKEDIT(_o)        \
+        (((vm_offset_t)(_o) >= vm_slinkedit) &&     \
+         ((vm_offset_t)(_o) <  vm_elinkedit))
+>>>>>>> origin/10.10
 
 #define VM_KERNEL_SLIDE(_u)						       \
 		((vm_offset_t)(_u) + vm_kernel_slide)
@@ -316,11 +441,19 @@ extern vm_offset_t      vm_elinkedit;
  */
 #define VM_KERNEL_UNSLIDE(_v)						       \
 		((VM_KERNEL_IS_SLID(_v) ||				       \
+<<<<<<< HEAD
 		  VM_KERNEL_IS_KEXT(_v) ||      \
           VM_KERNEL_IS_PRELINKTEXT(_v) ||   \
           VM_KERNEL_IS_PRELINKINFO(_v) ||   \
           VM_KERNEL_IS_KEXT_LINKEDIT(_v)) ?      \
 			(vm_offset_t)(_v) - vm_kernel_slide :    \
+=======
+          VM_KERNEL_IS_KEXT(_v) ||      \
+          VM_KERNEL_IS_PRELINKTEXT(_v) ||   \
+          VM_KERNEL_IS_PRELINKINFO(_v) ||   \
+          VM_KERNEL_IS_KEXT_LINKEDIT(_v)) ?     \
+			(vm_offset_t)(_v) - vm_kernel_slide :		       \
+>>>>>>> origin/10.10
 			(vm_offset_t)(_v))
 
 #define	VM_KERNEL_ADDRPERM(_v)						       \
@@ -333,11 +466,18 @@ extern vm_offset_t      vm_elinkedit;
           VM_KERNEL_IS_KEXT(_v) ||      \
           VM_KERNEL_IS_PRELINKTEXT(_v) ||   \
           VM_KERNEL_IS_PRELINKINFO(_v) ||   \
+<<<<<<< HEAD
           VM_KERNEL_IS_KEXT_LINKEDIT(_v)) ?         \
 			(vm_offset_t)(_v) - vm_kernel_slide :    \
 		 ((vm_offset_t)(_v) >= VM_MIN_KERNEL_AND_KEXT_ADDRESS ? VM_KERNEL_ADDRPERM(_v) : (vm_offset_t)(_v)))
+=======
+          VM_KERNEL_IS_KEXT_LINKEDIT(_v)) ?     \
+			(vm_offset_t)(_v) - vm_kernel_slide :		       \
+			VM_KERNEL_ADDRPERM(_v))
+>>>>>>> origin/10.10
 	
 
+<<<<<<< HEAD
 #endif	/* XNU_KERNEL_PRIVATE */
 
 extern vm_size_t	page_size;
@@ -359,6 +499,10 @@ extern int		page_shift;
 #define CAST_DOWN_EXPLICIT( type, addr )  ( ((type)((uintptr_t) (addr))) ) 
 
 #endif /* __CAST_DOWN_CHECK */
+=======
+extern vm_size_t	mem_size;	/* size of physical memory (bytes) */
+extern uint64_t	max_mem;			/* 64-bit size of memory - limited by maxmem */
+>>>>>>> origin/10.2
 
 #endif	/* ASSEMBLER */
 

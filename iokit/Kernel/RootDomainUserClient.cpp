@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 1998-2012 Apple Computer, Inc. All rights reserved.
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
@@ -17,11 +18,23 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -199,6 +212,8 @@ IOReturn RootDomainUserClient::secureSetUserAssertionLevels(
 
 IOReturn RootDomainUserClient::secureGetSystemSleepType(
     uint32_t    *outSleepType)
+<<<<<<< HEAD
+=======
 {
     int                     admin_priv = 0;
     IOReturn                ret;
@@ -212,6 +227,40 @@ IOReturn RootDomainUserClient::secureGetSystemSleepType(
         ret = kIOReturnNotPrivileged;
     }
     return ret;
+}
+
+IOReturn RootDomainUserClient::clientClose( void )
+>>>>>>> origin/10.8
+{
+    int                     admin_priv = 0;
+    IOReturn                ret;
+
+    ret = clientHasPrivilege(fOwningTask, kIOClientPrivilegeAdministrator);
+    admin_priv = (kIOReturnSuccess == ret);
+
+    if (admin_priv && fOwner) {
+        ret = fOwner->getSystemSleepType(outSleepType);
+    } else {
+        ret = kIOReturnNotPrivileged;
+    }
+    return ret;
+}
+
+IOReturn RootDomainUserClient::secureSetUserAssertionLevels(
+    uint32_t assertBits )
+{
+    int                     admin_priv = 0;
+    IOReturn                ret = kIOReturnNotPrivileged;
+    
+    ret = clientHasPrivilege(fOwningTask, kIOClientPrivilegeAdministrator);
+    admin_priv = (kIOReturnSuccess == ret);
+
+    if (admin_priv && fOwner) {
+        ret = fOwner->setPMAssertionUserLevels(assertBits);
+    } else {
+        ret = kIOReturnNotPrivileged;
+    }
+    return kIOReturnSuccess;
 }
 
 IOReturn RootDomainUserClient::clientClose( void )
@@ -233,6 +282,7 @@ IOReturn RootDomainUserClient::externalMethod(
     OSObject * target __unused,
     void * reference __unused )
 {
+<<<<<<< HEAD
     IOReturn    ret = kIOReturnBadArgument;
 
     switch (selector)
@@ -309,6 +359,39 @@ IOReturn RootDomainUserClient::externalMethod(
             ret = this->secureSetUserAssertionLevels(
                         (uint32_t)arguments->scalarInput[0]);
             break;
+<<<<<<< HEAD
+=======
+            
+        case kPMActivityTickle:
+<<<<<<< HEAD
+            fOwner->reportUserInput( );
+=======
+            if ( fOwner->checkSystemCanSustainFullWake() )
+            {
+               fOwner->reportUserInput( );
+               fOwner->setProperty(kIOPMRootDomainWakeTypeKey, "UserActivity Assertion");
+            }
+>>>>>>> origin/10.8
+            ret = kIOReturnSuccess;
+            break;
+
+        case kPMSetClamshellSleepState:
+            fOwner->setDisableClamShellSleep(arguments->scalarInput[0] ? true : false);
+            ret = kIOReturnSuccess;
+            break;
+
+        case kPMGetSystemSleepType:
+            if (1 == arguments->scalarOutputCount)
+            {
+                ret = this->secureGetSystemSleepType(
+                        (uint32_t *) &arguments->scalarOutput[0]);
+            }
+            break;
+/*
+        case kPMMethodCopySystemTimeline:
+            // intentional fallthrough
+        case kPMMethodCopyDetailedTimeline:
+>>>>>>> origin/10.7
 
         case kPMActivityTickle:
             if ( fOwner->checkSystemCanSustainFullWake() )
@@ -359,6 +442,53 @@ IOReturn RootDomainUserClient::externalMethod(
         default:
             // bad selector
             return kIOReturnBadArgument;
+=======
+    static const IOExternalMethod sMethods[] = {
+        {   // kPMSetAggressiveness, 0
+            (IOService *)1, (IOMethod)&RootDomainUserClient::secureSetAggressiveness, kIOUCScalarIScalarO, 2, 1
+        },
+        {   // kPMGetAggressiveness, 1
+            0, (IOMethod)&IOPMrootDomain::getAggressiveness, kIOUCScalarIScalarO, 1, 1
+        },
+        {   // kPMSleepSystem, 2
+            (IOService *)1, (IOMethod)&RootDomainUserClient::secureSleepSystem, kIOUCScalarIScalarO, 0, 1
+        },
+        {   // kPMAllowPowerChange, 3
+            0, (IOMethod)&IOPMrootDomain::allowPowerChange, kIOUCScalarIScalarO, 1, 0
+        },
+        {   // kPMCancelPowerChange, 4
+            0, (IOMethod)&IOPMrootDomain::cancelPowerChange, kIOUCScalarIScalarO, 1, 0
+        },
+        {   // kPMShutdownSystem, 5
+            0, (IOMethod)&IOPMrootDomain::shutdownSystem, kIOUCScalarIScalarO, 0, 0
+        },
+        {   // kPMRestartSystem, 6
+            0, (IOMethod)&IOPMrootDomain::restartSystem, kIOUCScalarIScalarO, 0, 0
+        },
+        {   // kPMSleepSystemOptions, 7
+            (IOService *)1, (IOMethod)&RootDomainUserClient::secureSleepSystemOptions, 
+            kIOUCStructIStructO, kIOUCVariableStructureSize, sizeof(uint32_t)
+        },
+        {   // kPMSetMaintenanceWakeCalendar, 8
+            (IOService *)1, (IOMethod)&RootDomainUserClient::secureSetMaintenanceWakeCalendar,
+            kIOUCStructIStructO, sizeof(IOPMCalendarStruct), sizeof(uint32_t)
+        },
+        {   // kPMSetUserAssertionLevels, 9
+            (IOService *)1, (IOMethod)&RootDomainUserClient::secureSetUserAssertionLevels,
+            kIOUCScalarIScalarO, 1, 0
+        }
+    };
+    
+    if(index >= kNumPMMethods)
+    	return NULL;
+    else {
+        if (sMethods[index].object)
+            *targetP = this;
+        else
+            *targetP = fOwner;
+
+        return (IOExternalMethod *)&sMethods[index];
+>>>>>>> origin/10.6
     }
 
     return ret;

@@ -1,6 +1,19 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
+=======
+ * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+>>>>>>> origin/10.7
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +28,24 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +53,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /*
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -150,6 +195,25 @@ struct net_event_data {
 
 #pragma pack(4)
 
+<<<<<<< HEAD
+=======
+#ifdef __APPLE__
+#ifdef KERNEL_PRIVATE
+/* bottom 16 bits reserved for hardware checksum */
+#define IF_HWASSIST_CSUM_IP		0x0001	/* will csum IP */
+#define IF_HWASSIST_CSUM_TCP		0x0002	/* will csum TCP */
+#define IF_HWASSIST_CSUM_UDP		0x0004	/* will csum UDP */
+#define IF_HWASSIST_CSUM_IP_FRAGS	0x0008	/* will csum IP fragments */
+#define IF_HWASSIST_CSUM_FRAGMENT	0x0010  /* will do IP fragmentation */
+#define IF_HWASSIST_CSUM_TCP_SUM16	0x1000	/* simple TCP Sum16 computation */
+#define IF_HWASSIST_CSUM_MASK		0xffff
+#define IF_HWASSIST_CSUM_FLAGS(hwassist)	((hwassist) & IF_HWASSIST_CSUM_MASK)
+
+/* VLAN support */
+#define IF_HWASSIST_VLAN_TAGGING	0x10000	/* supports VLAN tagging */
+#define IF_HWASSIST_VLAN_MTU		0x20000 /* supports VLAN MTU-sized packet (for software VLAN) */
+#endif KERNEL_PRIVATE
+>>>>>>> origin/10.3
 /*
  * Structure describing information about an interface
  * which may be of interest to management entities.
@@ -168,6 +232,7 @@ struct if_data {
 	u_int32_t	ifi_metric;	/* routing metric (external only) */
 	u_int32_t	ifi_baudrate;	/* linespeed */
 	/* volatile statistics */
+<<<<<<< HEAD
 	u_int32_t	ifi_ipackets;	/* packets received on interface */
 	u_int32_t	ifi_ierrors;	/* input errors on interface */
 	u_int32_t	ifi_opackets;	/* packets sent on interface */
@@ -186,6 +251,36 @@ struct if_data {
 	u_int32_t	ifi_hwassist;	/* HW offload capabilities */
 	u_int32_t	ifi_reserved1;	/* for future use */
 	u_int32_t	ifi_reserved2;	/* for future use */
+=======
+	u_long	ifi_ipackets;		/* packets received on interface */
+	u_long	ifi_ierrors;		/* input errors on interface */
+	u_long	ifi_opackets;		/* packets sent on interface */
+	u_long	ifi_oerrors;		/* output errors on interface */
+	u_long	ifi_collisions;		/* collisions on csma interfaces */
+	u_long	ifi_ibytes;		/* total number of octets received */
+	u_long	ifi_obytes;		/* total number of octets sent */
+	u_long	ifi_imcasts;		/* packets received via multicast */
+	u_long	ifi_omcasts;		/* packets sent via multicast */
+	u_long	ifi_iqdrops;		/* dropped on input, this interface */
+	u_long	ifi_noproto;		/* destined for unsupported protocol */
+#ifdef __APPLE__
+	u_long	ifi_recvtiming;		/* usec spent receiving when timing */
+	u_long	ifi_xmittiming;		/* usec spent xmitting when timing */
+#endif
+	struct	timeval ifi_lastchange;	/* time of last administrative change */
+#ifdef __APPLE__
+	u_long	default_proto;		/* Default dl_tag when none is specified 
+								 * on dlil_output */
+#endif
+	u_long	ifi_hwassist;		/* HW offload capabilities */
+#ifdef KERNEL_PRIVATE
+	u_short ifi_nvlans;		/* number of attached vlans */
+	u_short ifi_reserved_1;		/* for future use */
+#else KERNEL_PRIVATE
+	u_long	ifi_reserved1;		/* for future use */
+#endif KERNEL_PRIVATE
+	u_long	ifi_reserved2;		/* for future use */
+>>>>>>> origin/10.3
 };
 
 /*
@@ -561,6 +656,7 @@ struct chain_len_stats {
 
 #pragma pack()
 
+<<<<<<< HEAD
 /*
  * Structure defining a queue for a network interface.
  */
@@ -573,6 +669,24 @@ struct	ifqueue {
 };
 
 #ifdef BSD_KERNEL_PRIVATE
+=======
+#ifdef PRIVATE
+struct if_traffic_class {
+	u_int64_t		ifi_ibkpackets;	/* TC_BK packets received on interface */
+	u_int64_t		ifi_ibkbytes;	/* TC_BK bytes received on interface */
+	u_int64_t		ifi_obkpackets;	/* TC_BK packet sent on interface */
+	u_int64_t		ifi_obkbytes;	/* TC_BK bytes sent on interface */
+	u_int64_t		ifi_ivipackets;	/* TC_VI packets received on interface */
+	u_int64_t		ifi_ivibytes;	/* TC_VI bytes received on interface */
+	u_int64_t		ifi_ovipackets;	/* TC_VI packets sent on interface */
+	u_int64_t		ifi_ovibytes;	/* TC_VI bytes sent on interface */
+	u_int64_t		ifi_ivopackets;	/* TC_VO packets received on interface */
+	u_int64_t		ifi_ivobytes;	/* TC_VO bytes received on interface */
+	u_int64_t		ifi_ovopackets;	/* TC_VO packets sent on interface */
+	u_int64_t		ifi_ovobytes;	/* TC_VO bytes sent on interface */
+};
+
+>>>>>>> origin/10.6
 /*
  * Internal storage of if_data. This is bound to change. Various places in the
  * stack will translate this data structure in to the externally visible
@@ -663,6 +777,7 @@ struct if_measured_bw {
 #define	if_lastchange	if_data.ifi_lastchange
 #define if_recvquota	if_data.ifi_recvquota
 #define	if_xmitquota	if_data.ifi_xmitquota
+<<<<<<< HEAD
 #endif /* PRIVATE */
 #ifdef BSD_KERNEL_PRIVATE
 #define	if_tso_v4_mtu	if_data.ifi_tso_v4_mtu
@@ -672,6 +787,12 @@ struct if_measured_bw {
 #define	if_fpackets	if_data.ifi_fpackets
 #define	if_fbytes	if_data.ifi_fbytes
 #endif /* BSD_KERNEL_PRIVATE */
+=======
+#ifdef KERNEL_PRIVATE
+#define if_nvlans	if_data.ifi_nvlans
+#endif KERNEL_PRIVATE
+#define if_rawoutput(if, m, sa) if_output(if, m, sa, (struct rtentry *)0)
+>>>>>>> origin/10.3
 
 #ifdef BSD_KERNEL_PRIVATE
 /*
@@ -736,6 +857,26 @@ TAILQ_HEAD(ddesc_head_name, dlil_demux_desc);
 
 #ifdef PRIVATE
 #define	IFXNAMSIZ	(IFNAMSIZ + 8)	/* external name (name + unit) */
+#endif
+#ifdef KERNEL_PRIVATE
+/*
+ * Structure describing a `cloning' interface.
+ */
+struct if_clone {
+	LIST_ENTRY(if_clone) ifc_list;	/* on list of cloners */
+	const char *ifc_name;		/* name of device, e.g. `vlan' */
+	size_t ifc_namelen;		/* length of name */
+	int ifc_minifs;			/* minimum number of interfaces */
+	int ifc_maxunit;		/* maximum unit number */
+	unsigned char *ifc_units;	/* bitmap to handle units */
+	int ifc_bmlen;			/* bitmap length */
+
+	int	(*ifc_create)(struct if_clone *, int);
+	void	(*ifc_destroy)(struct ifnet *);
+};
+
+#define IF_CLONE_INITIALIZER(name, create, destroy, minifs, maxunit)	\
+    { { 0 }, name, sizeof(name) - 1, minifs, maxunit, NULL, 0, create, destroy }
 #endif
 
 #ifdef BSD_KERNEL_PRIVATE
@@ -938,11 +1079,24 @@ struct ifnet {
 	decl_lck_rw_data(, if_inet6data_lock);
 	void			*if_inet6data;
 #endif
+<<<<<<< HEAD
 	decl_lck_rw_data(, if_link_status_lock);
 	struct if_link_status	*if_link_status;
 	struct if_interface_state	if_interface_state;
 	struct if_tcp_ecn_stat *if_ipv4_stat;
 	struct if_tcp_ecn_stat *if_ipv6_stat;
+=======
+	struct route	if_fwd_route;	/* cached IPv4 forwarding route */
+	void	*if_bridge;		/* bridge glue */
+#if IFNET_ROUTE_REFCNT
+	u_int32_t	if_want_aggressive_drain;
+	u_int32_t	if_idle_flags;	/* idle flags */
+	u_int32_t	if_route_refcnt; /* idle: route ref count */
+#endif /* IFNET_ROUTE_REFCNT */
+#if PKT_PRIORITY
+	struct if_traffic_class if_tc __attribute__((aligned(8)));
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 };
 
 #define	IF_TCP_STATINC(_ifp, _s) do {					\
@@ -971,6 +1125,7 @@ struct ifnet {
  */
 struct if_clone {
 	LIST_ENTRY(if_clone) ifc_list;	/* on list of cloners */
+<<<<<<< HEAD
 	const char	*ifc_name;	/* name of device, e.g. `vlan' */
 	size_t		ifc_namelen;	/* length of name */
 	u_int32_t	ifc_minifs;	/* minimum number of interfaces */
@@ -980,6 +1135,17 @@ struct if_clone {
 
 	int		(*ifc_create)(struct if_clone *, u_int32_t, void *);
 	int		(*ifc_destroy)(struct ifnet *);
+=======
+	const char *ifc_name;			/* name of device, e.g. `vlan' */
+	size_t ifc_namelen;		/* length of name */
+	u_int32_t ifc_minifs;			/* minimum number of interfaces */
+	u_int32_t ifc_maxunit;		/* maximum unit number */
+	unsigned char *ifc_units;	/* bitmap to handle units */
+	u_int32_t ifc_bmlen;			/* bitmap length */
+
+	int	(*ifc_create)(struct if_clone *, u_int32_t, void *);
+	int	(*ifc_destroy)(struct ifnet *);
+>>>>>>> origin/10.6
 };
 
 #define IF_CLONE_INITIALIZER(name, create, destroy, minifs, maxunit) {	      \
@@ -988,6 +1154,15 @@ struct if_clone {
 }
 
 #define M_CLONE         M_IFADDR
+<<<<<<< HEAD
+=======
+
+/*
+ * Bit values in if_ipending
+ */
+#define	IFI_RECV	1	/* I want to receive */
+#define	IFI_XMIT	2	/* I want to transmit */
+>>>>>>> origin/10.6
 
 /*
  * Macros to manipulate ifqueue.  Users of these macros are responsible
@@ -1173,6 +1348,7 @@ struct ifmultiaddr {
 	    (struct ifmultiaddr *, int);
 };
 
+<<<<<<< HEAD
 /*
  * Values for ifma_flags
  */
@@ -1180,6 +1356,45 @@ struct ifmultiaddr {
 
 #define	IFMA_LOCK_ASSERT_HELD(_ifma)					\
 	lck_mtx_assert(&(_ifma)->ifma_lock, LCK_MTX_ASSERT_OWNED)
+=======
+#ifdef KERNEL_PRIVATE
+#define IFAREF(ifa) ifaref(ifa)
+#define IFAFREE(ifa) ifafree(ifa)
+
+/*
+ * To preserve kmem compatibility, we define
+ * ifnet_head to ifnet. This should be temp.
+ */
+#define ifnet_head ifnet
+extern	struct ifnethead ifnet_head;
+extern struct	ifnet	**ifindex2ifnet;
+extern	int ifqmaxlen;
+extern	ifnet_t  lo_ifp;
+extern	int if_index;
+extern	struct ifaddr **ifnet_addrs;
+
+int	if_addmulti(struct ifnet *, const struct sockaddr *, struct ifmultiaddr **);
+int	if_allmulti(struct ifnet *, int);
+void	if_attach(struct ifnet *);
+int	if_delmultiaddr(struct ifmultiaddr *ifma, int locked);
+int	if_delmulti(struct ifnet *, const struct sockaddr *);
+void	if_down(struct ifnet *);
+int 	if_down_all(void);
+void	if_route(struct ifnet *, int flag, int fam);
+void	if_unroute(struct ifnet *, int flag, int fam);
+void	if_up(struct ifnet *);
+void	if_updown(struct ifnet *ifp, int up);
+/*void	ifinit(void));*/ /* declared in systm.h for main( */
+int	ifioctl(struct socket *, u_long, caddr_t, struct proc *);
+int	ifioctllocked(struct socket *, u_long, caddr_t, struct proc *);
+struct	ifnet *ifunit(const char *);
+struct  ifnet *if_withname(struct sockaddr *);
+
+int	if_clone_attach(struct if_clone *);
+void	if_clone_detach(struct if_clone *);
+struct if_clone *
+	if_clone_lookup(const char *, u_int32_t *);
+>>>>>>> origin/10.6
 
 #define	IFMA_LOCK_ASSERT_NOTHELD(_ifma)					\
 	lck_mtx_assert(&(_ifma)->ifma_lock, LCK_MTX_ASSERT_NOTOWNED)
@@ -1195,8 +1410,24 @@ struct ifmultiaddr {
 	lck_mtx_convert_spin(&(_ifma)->ifma_lock);			\
 } while (0)
 
+<<<<<<< HEAD
 #define	IFMA_UNLOCK(_ifma)						\
 	lck_mtx_unlock(&(_ifma)->ifma_lock)
+=======
+struct	ifaddr *ifa_ifwithaddr(const struct sockaddr *);
+struct	ifaddr *ifa_ifwithaddr_scoped(const struct sockaddr *, unsigned int);
+struct	ifaddr *ifa_ifwithdstaddr(const struct sockaddr *);
+struct	ifaddr *ifa_ifwithnet(const struct sockaddr *);
+struct	ifaddr *ifa_ifwithnet_scoped(const struct sockaddr *, unsigned int);
+struct	ifaddr *ifa_ifwithroute(int, const struct sockaddr *, const struct sockaddr *);
+struct	ifaddr *ifa_ifwithroute_locked(int, const struct sockaddr *, const struct sockaddr *);
+struct ifaddr *ifa_ifwithroute_scoped_locked(int, const struct sockaddr *,
+    const struct sockaddr *, unsigned int);
+struct	ifaddr *ifaof_ifpforaddr(const struct sockaddr *, struct ifnet *);
+struct	ifaddr *ifa_ifpgetprimary(struct ifnet *, int);
+void	ifafree(struct ifaddr *);
+void	ifaref(struct ifaddr *);
+>>>>>>> origin/10.5
 
 #define	IFMA_ADDREF(_ifma)						\
 	ifma_addref(_ifma, 0)
@@ -1348,10 +1579,54 @@ __private_extern__ void if_inetdata_lock_exclusive(struct ifnet *ifp);
 __private_extern__ void if_inetdata_lock_done(struct ifnet *ifp);
 #endif
 
+<<<<<<< HEAD
 #if INET6
 __private_extern__ void if_inet6data_lock_shared(struct ifnet *ifp);
 __private_extern__ void if_inet6data_lock_exclusive(struct ifnet *ifp);
 __private_extern__ void if_inet6data_lock_done(struct ifnet *ifp);
+=======
+int	if_addmulti __P((struct ifnet *, struct sockaddr *,
+			 struct ifmultiaddr **));
+int	if_allmulti __P((struct ifnet *, int));
+void	if_attach __P((struct ifnet *));
+int	if_delmultiaddr __P((struct ifmultiaddr *ifma));
+int	if_delmulti __P((struct ifnet *, struct sockaddr *));
+void	if_down __P((struct ifnet *));
+void	if_route __P((struct ifnet *, int flag, int fam));
+void	if_unroute __P((struct ifnet *, int flag, int fam));
+void	if_up __P((struct ifnet *));
+/*void	ifinit __P((void));*/ /* declared in systm.h for main() */
+int	ifioctl __P((struct socket *, u_long, caddr_t, struct proc *));
+int	ifpromisc __P((struct ifnet *, int));
+struct	ifnet *ifunit __P((const char *));
+struct  ifnet *if_withname __P((struct sockaddr *));
+
+int	if_poll_recv_slow __P((struct ifnet *ifp, int *quotap));
+void	if_poll_xmit_slow __P((struct ifnet *ifp, int *quotap));
+void	if_poll_throttle __P((void));
+void	if_poll_unthrottle __P((void *));
+void	if_poll_init __P((void));
+void	if_poll __P((void));
+#ifdef KERNEL_PRIVATE
+void	if_clone_attach(struct if_clone *);
+void	if_clone_detach(struct if_clone *);
+#endif KERNEL_PRIVATE
+
+struct	ifaddr *ifa_ifwithaddr __P((struct sockaddr *));
+struct	ifaddr *ifa_ifwithdstaddr __P((struct sockaddr *));
+struct	ifaddr *ifa_ifwithnet __P((struct sockaddr *));
+struct	ifaddr *ifa_ifwithroute __P((int, struct sockaddr *,
+					struct sockaddr *));
+struct	ifaddr *ifaof_ifpforaddr __P((struct sockaddr *, struct ifnet *));
+void	ifafree __P((struct ifaddr *));
+void	ifaref __P((struct ifaddr *));
+
+struct	ifmultiaddr *ifmaof_ifpforaddr __P((struct sockaddr *, 
+					    struct ifnet *));
+#ifndef __APPLE__
+int	if_simloop __P((struct ifnet *ifp, struct mbuf *m,
+		struct sockaddr *dst, int hlen));
+>>>>>>> origin/10.3
 #endif
 
 __private_extern__ void	ifnet_head_lock_shared(void);

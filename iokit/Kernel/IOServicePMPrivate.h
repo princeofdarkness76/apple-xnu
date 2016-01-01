@@ -55,8 +55,12 @@ enum {
     kIOPMRequestTypeRequestPowerStateOverride   = 0x0E,
     kIOPMRequestTypeSetIdleTimerPeriod          = 0x0F,
     kIOPMRequestTypeIgnoreIdleTimer             = 0x10,
+<<<<<<< HEAD
     kIOPMRequestTypeQuiescePowerTree            = 0x11,
 
+=======
+    
+>>>>>>> origin/10.7
     /* Reply Types */
     kIOPMRequestTypeReplyStart                  = 0x80,
     kIOPMRequestTypeAckPowerChange              = 0x81,
@@ -205,6 +209,9 @@ private:
     // Power flags supplied by domain accounting for parent changes.
     IOPMPowerFlags          HeadNoteDomainTargetFlags;
 
+    // Power flags supplied by domain accounting for parent changes.
+    IOPMPowerFlags          HeadNoteDomainTargetFlags;
+
     // Connection attached to the changing parent.
     IOPowerConnection *     HeadNoteParentConnection;
 
@@ -217,6 +224,10 @@ private:
     // PM state lock.
     IOLock *                PMLock;
 
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.8
     unsigned int            InitialPowerChange          :1;
     unsigned int            InitialSetPowerState        :1;
     unsigned int            DeviceOverrideEnabled       :1;
@@ -225,7 +236,11 @@ private:
     unsigned int            StrictTreeOrder             :1;
     unsigned int            IdleTimerStopped            :1;
     unsigned int            AdjustPowerScheduled        :1;
+<<<<<<< HEAD
 
+=======
+    
+>>>>>>> origin/10.8
     unsigned int            IsPreChange                 :1;
     unsigned int            DriverCallBusy              :1;
     unsigned int            PCDFunctionOverride         :1;
@@ -233,6 +248,24 @@ private:
     unsigned int            HasAdvisoryDesire           :1;
     unsigned int            AdvisoryTickleUsed          :1;
     unsigned int            ResetPowerStateOnWake       :1;
+<<<<<<< HEAD
+=======
+    unsigned int            InitialPowerChange:1;
+    unsigned int            InitialSetPowerState:1;
+    unsigned int            DeviceOverrideEnabled:1;
+    unsigned int            DeviceWasActive:1;
+    unsigned int            DoNotPowerDown:1;
+    unsigned int            ParentsKnowState:1;
+    unsigned int            StrictTreeOrder:1;
+    unsigned int            IdleTimerStopped:1;
+    unsigned int            AdjustPowerScheduled:1;
+    unsigned int            IsPreChange:1;
+    unsigned int            DriverCallBusy:1;
+    unsigned int            PCDFunctionOverride:1;
+    unsigned int            IdleTimerIgnored:1;
+>>>>>>> origin/10.7
+=======
+>>>>>>> origin/10.8
 
     // Time of last device activity.
     AbsoluteTime            DeviceActiveTimestamp;
@@ -245,6 +278,7 @@ private:
     // Idle timer's period in seconds.
     unsigned long           IdleTimerPeriod;
     unsigned long           IdleTimerMinPowerState;
+<<<<<<< HEAD
     unsigned long           NextIdleTimerPeriod;
     AbsoluteTime            IdleTimerStartTime;
 
@@ -253,6 +287,8 @@ private:
 
     // This is the power state we desire currently.
     IOPMPowerStateIndex     DesiredPowerState;
+=======
+>>>>>>> origin/10.5
 
     // This is what our parent thinks our need is.
     IOPMPowerFlags          PreviousRequestPowerFlags;
@@ -312,8 +348,13 @@ private:
     uint32_t                DeviceUsablePowerState;
 
     // Protected by ActivityLock - BEGIN
+<<<<<<< HEAD
     IOPMPowerStateIndex     ActivityTicklePowerState;
     IOPMPowerStateIndex     AdvisoryTicklePowerState;
+=======
+    int                     ActivityTicklePowerState;
+    int                     AdvisoryTicklePowerState;
+>>>>>>> origin/10.8
     uint32_t                ActivityTickleCount;
     uint32_t                DeviceWasActive     : 1;
     uint32_t                AdvisoryTickled     : 1;
@@ -344,9 +385,15 @@ private:
     IOPMActions             PMActions;
 
     // Serialize IOServicePM state for debug output.
+<<<<<<< HEAD
     IOReturn gatedSerialize( OSSerialize * s ) const;
     virtual bool serialize( OSSerialize * s ) const APPLE_KEXT_OVERRIDE;
 
+=======
+    IOReturn gatedSerialize( OSSerialize * s );
+    virtual bool serialize( OSSerialize * s ) const;
+    
+>>>>>>> origin/10.8
     // PM log and trace
     void pmPrint( uint32_t event, uintptr_t param1, uintptr_t param2 ) const;
     void pmTrace( uint32_t event, uintptr_t param1, uintptr_t param2 ) const;
@@ -384,17 +431,32 @@ private:
 #define fDriverCallBusy             pwrMgt->DriverCallBusy
 #define fPCDFunctionOverride        pwrMgt->PCDFunctionOverride
 #define fIdleTimerIgnored           pwrMgt->IdleTimerIgnored
+<<<<<<< HEAD
+<<<<<<< HEAD
 #define fHasAdvisoryDesire          pwrMgt->HasAdvisoryDesire
 #define fAdvisoryTickleUsed         pwrMgt->AdvisoryTickleUsed
 #define fResetPowerStateOnWake      pwrMgt->ResetPowerStateOnWake
+=======
+>>>>>>> origin/10.7
+=======
+#define fHasAdvisoryDesire          pwrMgt->HasAdvisoryDesire
+#define fAdvisoryTickleUsed         pwrMgt->AdvisoryTickleUsed
+#define fResetPowerStateOnWake      pwrMgt->ResetPowerStateOnWake
+>>>>>>> origin/10.8
 #define fDeviceActiveTimestamp      pwrMgt->DeviceActiveTimestamp
 #define fMaxPowerStateEntryTime     pwrMgt->MaxPowerStateEntryTime
 #define fMaxPowerStateExitTime      pwrMgt->MaxPowerStateExitTime
 #define fActivityLock               pwrMgt->ActivityLock
 #define fIdleTimerPeriod            pwrMgt->IdleTimerPeriod
 #define fIdleTimerMinPowerState     pwrMgt->IdleTimerMinPowerState
+<<<<<<< HEAD
 #define fNextIdleTimerPeriod        pwrMgt->NextIdleTimerPeriod
 #define fIdleTimerStartTime         pwrMgt->IdleTimerStartTime
+=======
+#define fDeviceActive               pwrMgt->DeviceActive
+#define fDeviceActiveTimestamp      pwrMgt->DeviceActiveTimestamp
+#define fDriverDesire               pwrMgt->DriverDesire
+>>>>>>> origin/10.5
 #define fDeviceDesire               pwrMgt->DeviceDesire
 #define fDesiredPowerState          pwrMgt->DesiredPowerState
 #define fPreviousRequestPowerFlags  pwrMgt->PreviousRequestPowerFlags
@@ -437,8 +499,16 @@ private:
 #define fPMDriverCallQueue          pwrMgt->PMDriverCallQueue
 #define fInsertInterestSet          pwrMgt->InsertInterestSet
 #define fRemoveInterestSet          pwrMgt->RemoveInterestSet
+<<<<<<< HEAD
 #define fReportClientCnt            pwrMgt->ReportClientCnt
 #define fReportBuf                  pwrMgt->ReportBuf
+=======
+#define fStrictTreeOrder            pwrMgt->StrictTreeOrder
+#define fNotifyChildArray           pwrMgt->NotifyChildArray
+#define fIdleTimerStopped           pwrMgt->IdleTimerStopped
+#define fAdjustPowerScheduled       pwrMgt->AdjustPowerScheduled
+#define fActivityTicklePowerState   pwrMgt->ActivityTicklePowerState
+>>>>>>> origin/10.6
 #define fPMVars                     pwrMgt->PMVars
 #define fPMActions                  pwrMgt->PMActions
 
@@ -481,10 +551,14 @@ the ack timer is ticking every tenth of a second.
 #define kIOPMSyncNoChildNotify      0x0200  // sync root domain only, not entire tree
 #define kIOPMSyncTellPowerDown      0x0400  // send the ask/will power off messages
 #define kIOPMSyncCancelPowerDown    0x0800  // sleep cancel for maintenance wake
+<<<<<<< HEAD
 #define kIOPMInitialPowerChange     0x1000  // set for initial power change
 #define kIOPMRootChangeUp           0x2000  // Root power domain change up
 #define kIOPMRootChangeDown         0x4000  // Root power domain change down
+<<<<<<< HEAD
 #define kIOPMExpireIdleTimer        0x8000  // Accelerate idle timer expiration
+=======
+>>>>>>> origin/10.8
 
 #define kIOPMRootBroadcastFlags     (kIOPMSynchronize  | \
                                      kIOPMRootChangeUp | kIOPMRootChangeDown)
@@ -494,6 +568,12 @@ the ack timer is ticking every tenth of a second.
 #define kTickleTypePowerRise        0x02
 #define kTickleTypeActivity         0x04
 #define kTickleTypeAdvisory         0x08
+<<<<<<< HEAD
+=======
+#define kIOPMPowerSuppressed        0x1000  // power suppressed for dark wake
+>>>>>>> origin/10.7
+=======
+>>>>>>> origin/10.8
 
 enum {
     kDriverCallInformPreChange,
@@ -538,7 +618,35 @@ struct IOPMInterestContext {
 
 // assertPMDriverCall() options
 enum {
+<<<<<<< HEAD
     kIOPMADC_NoInactiveCheck = 1
+=======
+    /* Command Types */
+    kIOPMRequestTypeInvalid                = 0x00,
+    kIOPMRequestTypePMStop                 = 0x01,
+    kIOPMRequestTypeAddPowerChild1         = 0x02,
+    kIOPMRequestTypeAddPowerChild2         = 0x03,
+    kIOPMRequestTypeAddPowerChild3         = 0x04,
+    kIOPMRequestTypeRegisterPowerDriver    = 0x05,
+    kIOPMRequestTypeAdjustPowerState       = 0x06,
+    kIOPMRequestTypeMakeUsable             = 0x07,
+    kIOPMRequestTypeTemporaryPowerClamp    = 0x08,
+    kIOPMRequestTypePowerDomainWillChange  = 0x09,
+    kIOPMRequestTypePowerDomainDidChange   = 0x0A,
+    kIOPMRequestTypeChangePowerStateTo     = 0x0B,
+    kIOPMRequestTypeChangePowerStateToPriv = 0x0C,
+    kIOPMRequestTypePowerOverrideOnPriv    = 0x0D,
+    kIOPMRequestTypePowerOverrideOffPriv   = 0x0E,
+    kIOPMRequestTypeActivityTickle         = 0x0F,
+    /* Reply Types */
+    kIOPMRequestTypeReplyStart             = 0x80,
+    kIOPMRequestTypeAckPowerChange         = 0x81,
+    kIOPMRequestTypeAckSetPowerState       = 0x82,
+    kIOPMRequestTypeAllowPowerChange       = 0x83,
+    kIOPMRequestTypeCancelPowerChange      = 0x84,
+    kIOPMRequestTypeInterestChanged        = 0x85,
+    kIOPMRequestTypeIdleCancel             = 0x86
+>>>>>>> origin/10.5
 };
 
 //******************************************************************************
@@ -560,6 +668,7 @@ class IOPMRequest : public IOCommand
     OSDeclareDefaultStructors( IOPMRequest )
 
 protected:
+<<<<<<< HEAD
     IOService *          fTarget;           // request target
     IOPMRequest *        fRequestNext;      // the next request in the chain
     IOPMRequest *        fRequestRoot;      // the root request in the call tree
@@ -567,6 +676,14 @@ protected:
     IOItemCount          fFreeWaitCount;    // completion blocked if non-zero
     uint32_t             fRequestType;      // request type
     bool                 fIsQuiesceBlocker;
+=======
+    IOService *          fTarget;        // request target
+    IOPMRequest *        fRequestNext;   // the next request in the chain
+    IOPMRequest *        fRequestRoot;   // the root request in the issue tree
+    IOItemCount          fWorkWaitCount; // execution blocked if non-zero
+    IOItemCount          fFreeWaitCount; // completion blocked if non-zero
+    uint32_t             fType;          // request type
+>>>>>>> origin/10.6
 
     IOPMCompletionAction fCompletionAction;
     void *               fCompletionTarget;
@@ -598,7 +715,10 @@ public:
         if (fRequestRoot) return fRequestRoot;
 #if NOT_READY
         if (fCompletionAction) return (IOPMRequest *) this;
+<<<<<<< HEAD
 #endif
+=======
+>>>>>>> origin/10.6
         return 0;
     }
 
@@ -710,12 +830,22 @@ protected:
     bool    checkRequestQueue( queue_head_t * queue, bool * empty );
 
 public:
+<<<<<<< HEAD
     static  IOPMWorkQueue * create( IOService * inOwner, Action invoke, Action retire );
     bool    queuePMRequest( IOPMRequest * request, IOServicePM * pwrMgt );
     void    signalWorkAvailable( void );
     void    incrementProducerCount( void );
     void    attachQuiesceRequest( IOPMRequest * quiesceRequest );
     void    finishQuiesceRequest( IOPMRequest * quiesceRequest );
+=======
+    static  IOPMWorkQueue * create( IOService * inOwner, Action work, Action retire );
+    void    queuePMRequest( IOPMRequest * request );
+
+    inline boolean_t isEmpty( void )
+    {
+        return queue_empty(&fWorkQueue);
+    }
+>>>>>>> origin/10.6
 };
 
 //******************************************************************************

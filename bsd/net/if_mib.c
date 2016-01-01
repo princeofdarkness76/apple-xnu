@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -66,6 +92,11 @@
 #include <net/if.h>
 #include <net/if_mib.h>
 #include <net/if_var.h>
+<<<<<<< HEAD
+=======
+
+#if NETMIBS
+>>>>>>> origin/10.6
 
 /*
  * A sysctl(3) MIB for generic interface information.  This information
@@ -108,7 +139,11 @@ SYSCTL_NODE(_net_link_generic, IFMIB_IFALLDATA, ifalldata, CTLFLAG_RD | CTLFLAG_
 
 static int make_ifmibdata(struct ifnet *, int *, struct sysctl_req *);
 
+<<<<<<< HEAD
 int
+=======
+int 
+>>>>>>> origin/10.6
 make_ifmibdata(struct ifnet *ifp, int *name, struct sysctl_req *req)
 {
 	struct ifmibdata	ifmd;
@@ -124,18 +159,31 @@ make_ifmibdata(struct ifnet *ifp, int *name, struct sysctl_req *req)
 		/*
 		 * Make sure the interface is in use
 		 */
+<<<<<<< HEAD
 		if (ifnet_is_attached(ifp, 0)) {
 			snprintf(ifmd.ifmd_name, sizeof(ifmd.ifmd_name), "%s",
 				if_name(ifp));
 
+=======
+		if (ifp->if_refcnt > 0) {
+			snprintf(ifmd.ifmd_name, sizeof(ifmd.ifmd_name), "%s%d",
+				ifp->if_name, ifp->if_unit);
+	
+>>>>>>> origin/10.6
 #define COPY(fld) ifmd.ifmd_##fld = ifp->if_##fld
 			COPY(pcount);
 			COPY(flags);
 			if_data_internal_to_if_data64(ifp, &ifp->if_data, &ifmd.ifmd_data);
 #undef COPY
+<<<<<<< HEAD
 			ifmd.ifmd_snd_len = IFCQ_LEN(&ifp->if_snd);
 			ifmd.ifmd_snd_maxlen = IFCQ_MAXLEN(&ifp->if_snd);
 			ifmd.ifmd_snd_drops = ifp->if_snd.ifcq_dropcnt.packets;
+=======
+			ifmd.ifmd_snd_len = ifp->if_snd.ifq_len;
+			ifmd.ifmd_snd_maxlen = ifp->if_snd.ifq_maxlen;
+			ifmd.ifmd_snd_drops = ifp->if_snd.ifq_drops;
+>>>>>>> origin/10.6
 		}
 		error = SYSCTL_OUT(req, &ifmd, sizeof ifmd);
 		if (error || !req->newptr)
@@ -175,6 +223,7 @@ make_ifmibdata(struct ifnet *ifp, int *name, struct sysctl_req *req)
 #endif /* IF_MIB_WR */
 		break;
 
+<<<<<<< HEAD
 	case IFDATA_SUPPLEMENTAL: {
 		struct ifmibdata_supplemental *ifmd_supp;
 
@@ -198,6 +247,13 @@ make_ifmibdata(struct ifnet *ifp, int *name, struct sysctl_req *req)
 		_FREE(ifmd_supp, M_TEMP);
 		break;
 	}
+=======
+#if PKT_PRIORITY
+	case IFDATA_SUPPLEMENTAL:
+		error = SYSCTL_OUT(req, &ifp->if_tc, sizeof(struct if_traffic_class));
+		break;
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 	}
 
 	return error;
@@ -217,7 +273,8 @@ sysctl_ifdata SYSCTL_HANDLER_ARGS /* XXX bad syntax! */
 
 	ifnet_head_lock_shared();
 	if (name[0] <= 0 || name[0] > if_index ||
-	    (ifp = ifindex2ifnet[name[0]]) == NULL) {
+	    (ifp = ifindex2ifnet[name[0]]) == NULL ||
+	    ifp->if_refcnt == 0) {
 		ifnet_head_done();
 		return (ENOENT);
 	}

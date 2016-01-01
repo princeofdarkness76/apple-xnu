@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -265,7 +291,12 @@ hfs_relconverter(u_int32_t encoding)
 				lck_mtx_unlock(&encodinglst_mutex);
  
  				FREE(encp, M_TEMP);
+<<<<<<< HEAD
    				(void)OSKextUnloadKextWithLoadTag(loadTag);
+=======
+                record_kext_unload(id);
+   				kmod_destroy((host_priv_t) host_priv_self(), id);
+>>>>>>> origin/10.5
 				return (0);
 			}
 			lck_mtx_unlock(&encodinglst_mutex);
@@ -290,6 +321,7 @@ hfs_to_utf8(ExtendedVCB *vcb, const Str31 hfs_str, ByteCount maxDstLen, ByteCoun
 	UniChar uniStr[MAX_HFS_UNICODE_CHARS];
 	ItemCount uniCount;
 	size_t utf8len;
+	u_int8_t pascal_length = 0;
 	hfs_to_unicode_func_t hfs_get_unicode = VCBTOHFS(vcb)->hfs_get_unicode;
 	u_int8_t pascal_length = 0;
 
@@ -303,7 +335,11 @@ hfs_to_utf8(ExtendedVCB *vcb, const Str31 hfs_str, ByteCount maxDstLen, ByteCoun
 		error = EINVAL;
 		return error;
 	}	
+<<<<<<< HEAD
 	
+=======
+
+>>>>>>> origin/10.6
 	error = hfs_get_unicode(hfs_str, uniStr, MAX_HFS_UNICODE_CHARS, &uniCount);
 	
 	if (uniCount == 0)
@@ -342,7 +378,11 @@ mac_roman_to_utf8(const Str31 hfs_str, ByteCount maxDstLen, ByteCount *actualDst
 		/* invalid string; longer than 31 bytes */
 		error = EINVAL;
 		return error;
+<<<<<<< HEAD
 	}
+=======
+	}	
+>>>>>>> origin/10.6
 
 	error = mac_roman_to_unicode(hfs_str, uniStr, MAX_HFS_UNICODE_CHARS, &uniCount);
 	

@@ -1,5 +1,13 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2006-2010 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2006-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
+=======
+ * Copyright (c) 2006-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -30,6 +38,7 @@
 #define _I386_PMCPU_H_
 
 #include <i386/cpu_topology.h>
+#include <i386/rtclock.h>
 
 #ifndef ASSEMBLER
 
@@ -37,7 +46,15 @@
  * This value should be changed each time that pmDispatch_t or pmCallBacks_t
  * changes.
  */
+<<<<<<< HEAD
+<<<<<<< HEAD
 #define PM_DISPATCH_VERSION	102
+=======
+#define PM_DISPATCH_VERSION	16
+>>>>>>> origin/10.5
+=======
+#define PM_DISPATCH_VERSION	23
+>>>>>>> origin/10.6
 
 /*
  * Dispatch table for functions that get installed when the power
@@ -51,9 +68,25 @@
  */
 typedef struct
 {
+<<<<<<< HEAD
+<<<<<<< HEAD
     kern_return_t	(*pmCPUStateInit)(void);
     void		(*cstateInit)(void);
     uint64_t		(*MachineIdle)(uint64_t maxIdleDuration);
+=======
+    int			(*pmCPUStateInit)(void);
+
+    /*
+     * The following are the 'C' State interfaces.
+     */
+    void		(*cstateInit)(void);
+    uint64_t		(*cstateMachineIdle)(uint64_t maxIdleDuration);
+>>>>>>> origin/10.5
+=======
+    kern_return_t	(*pmCPUStateInit)(void);
+    void		(*cstateInit)(void);
+    uint64_t		(*MachineIdle)(uint64_t maxIdleDuration);
+>>>>>>> origin/10.6
     uint64_t		(*GetDeadline)(x86_lcpu_t *lcpu);
     uint64_t		(*SetDeadline)(x86_lcpu_t *lcpu, uint64_t);
     void		(*Deadline)(x86_lcpu_t *lcpu);
@@ -74,11 +107,18 @@ typedef struct
     void		(*markAllCPUsOff)(void);
     void		(*pmSetRunCount)(uint32_t count);
     boolean_t		(*pmIsCPUUnAvailable)(x86_lcpu_t *lcpu);
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
     int			(*pmChooseCPU)(int startCPU, int endCPU, int preferredCPU);
     int			(*pmIPIHandler)(void *state);
     void		(*pmThreadTellUrgency)(int urgency, uint64_t rt_period, uint64_t rt_deadline);
     void		(*pmActiveRTThreads)(boolean_t active);
+<<<<<<< HEAD
     boolean_t           (*pmInterruptPrewakeApplicable)(void);
+=======
+>>>>>>> origin/10.6
 } pmDispatch_t;
 
 /* common time fields exported to PM code. This structure may be
@@ -94,6 +134,28 @@ typedef struct pm_rtc_nanotime {
 
 typedef struct {
     uint64_t		(*setRTCPop)(uint64_t time);
+=======
+} pmDispatch_t;
+
+/*
+ * common time fields exported to PM code. This structure may be
+ * allocated on the stack, so avoid making it unnecessarily large.
+ */
+typedef struct pm_rtc_nanotime {
+	uint64_t	tsc_base;		/* timestamp */
+	uint64_t	ns_base;		/* nanoseconds */
+	uint32_t	scale;			/* tsc -> nanosec multiplier */
+	uint32_t	shift;			/* tsc -> nanosec shift/div */
+	uint32_t	generation;		/* 0 == being updated */
+} pm_rtc_nanotime_t;
+
+typedef struct {
+<<<<<<< HEAD
+    int			(*setRTCPop)(uint64_t time);
+>>>>>>> origin/10.5
+=======
+    uint64_t		(*setRTCPop)(uint64_t time);
+>>>>>>> origin/10.6
     void		(*resyncDeadlines)(int cpu);
     void		(*initComplete)(void);
     x86_lcpu_t		*(*GetLCPU)(int cpu);
@@ -110,9 +172,11 @@ typedef struct {
     processor_t		(*LCPUtoProcessor)(int lcpu);
     processor_t		(*ThreadBind)(processor_t proc);
     uint32_t		(*GetSavedRunCount)(void);
+<<<<<<< HEAD
     void		(*pmSendIPI)(int cpu);
     void		(*GetNanotimeInfo)(pm_rtc_nanotime_t *);
     int			(*ThreadGetUrgency)(uint64_t *rt_period, uint64_t *rt_deadline);
+<<<<<<< HEAD
     uint32_t		(*timerQueueMigrate)(int cpu);
     void		(*RTCClockAdjust)(uint64_t adjustment);
     x86_topology_parameters_t	*topoParms;
@@ -120,6 +184,19 @@ typedef struct {
     boolean_t		(*IsInterrupting)(uint8_t vector);
     void		(*InterruptStats)(uint64_t intrs[256]);
     void		(*DisableApicTimer)(void);
+=======
+    x86_topology_parameters_t	*topoParms;
+>>>>>>> origin/10.5
+=======
+    uint32_t		(*timeQueueMigrate)(int cpu);
+    void		(*RTCClockAdjust)(uint64_t adjustment);
+    uint32_t		(*timerQueueMigrate)(int cpu);
+    x86_topology_parameters_t	*topoParms;
+    boolean_t		(*InterruptPending)(void);
+    boolean_t		(*IsInterrupting)(uint8_t vector);
+    void		(*InterruptStats)(uint64_t intrs[256]);
+    void		(*DisableApicTimer)(void);
+>>>>>>> origin/10.6
 } pmCallBacks_t;
 
 extern pmDispatch_t	*pmDispatch;
@@ -141,7 +218,19 @@ void pmTimerSave(void);
 void pmTimerRestore(void);
 kern_return_t pmCPUExitHalt(int cpu);
 kern_return_t pmCPUExitHaltToOff(int cpu);
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
 uint32_t pmTimerQueueMigrate(int);
+=======
+>>>>>>> origin/10.5
+=======
+void thread_tell_urgency(int urgency, uint64_t rt_period, uint64_t rt_deadline);
+void active_rt_threads(boolean_t active);
+>>>>>>> origin/10.6
+=======
+uint32_t pmTimerQueueMigrate(int);
+>>>>>>> origin/10.8
 
 #define PM_HALT_NORMAL		0		/* normal halt path */
 #define PM_HALT_DEBUG		1		/* debug code wants to halt */
@@ -156,6 +245,7 @@ void pmSafeMode(x86_lcpu_t *lcpu, uint32_t flags);
 #define PM_SAFE_FL_RESUME	0x00000020	/* resume execution on the CPU */
 
 extern int pmsafe_debug;
+<<<<<<< HEAD
 /* Default urgency timing threshold for the DEBUG build */
 #define		URGENCY_NOTIFICATION_ASSERT_NS (5 * 1000 * 1000)
 extern uint64_t	urgency_notification_assert_abstime_threshold;
@@ -169,6 +259,12 @@ pmLCPUtoProcessor(int lcpu);
 x86_pkg_t *
 pmGetPkgRoot(void);
 
+<<<<<<< HEAD
+=======
+extern int idlehalt;
+>>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.8
 
 /******************************************************************************
  *

@@ -71,8 +71,11 @@
 
 #include <mach/shared_region.h>
 
+<<<<<<< HEAD
 #include <libkern/section_keywords.h>
 
+=======
+>>>>>>> origin/10.9
 unsigned long cs_procs_killed = 0;
 unsigned long cs_procs_invalidated = 0;
 
@@ -123,9 +126,15 @@ int panic_on_cs_killed = 0;
 void
 cs_init(void)
 {
+<<<<<<< HEAD
 #if MACH_ASSERT && __x86_64__
 	panic_on_cs_killed = 1;
 #endif /* MACH_ASSERT && __x86_64__ */
+=======
+#if MACH_ASSERT
+	panic_on_cs_killed = 1;
+#endif
+>>>>>>> origin/10.9
 	PE_parse_boot_argn("panic_on_cs_killed", &panic_on_cs_killed,
 			   sizeof (panic_on_cs_killed));
 #if !SECURE_KERNEL

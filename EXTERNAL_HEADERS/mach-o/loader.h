@@ -1,7 +1,23 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 1999-2010 Apple Inc.  All Rights Reserved.
+=======
+ * Copyright (c) 1999-2008 Apple Inc.  All Rights Reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_LICENSE_HEADER_START@
+ * 
+<<<<<<< HEAD
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -10,13 +26,24 @@
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
  * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -190,6 +217,7 @@ struct mach_header_64 {
 					   load the main executable at a
 					   random address.  Only used in
 					   MH_EXECUTE filetypes. */
+<<<<<<< HEAD
 #define	MH_DEAD_STRIPPABLE_DYLIB 0x400000 /* Only for use on dylibs.  When
 					     linking against a dylib that
 					     has this bit set, the static linker
@@ -209,6 +237,8 @@ struct mach_header_64 {
 
 #define MH_APP_EXTENSION_SAFE 0x02000000 /* The code was linked for use in an
 					    application extension. */
+=======
+>>>>>>> origin/10.5
 
 /*
  * The load commands directly follow the mach_header.  The total size of all
@@ -285,6 +315,7 @@ struct load_command {
 #define LC_REEXPORT_DYLIB (0x1f | LC_REQ_DYLD) /* load and re-export dylib */
 #define	LC_LAZY_LOAD_DYLIB 0x20	/* delay load of dylib until first use */
 #define	LC_ENCRYPTION_INFO 0x21	/* encrypted segment information */
+<<<<<<< HEAD
 #define	LC_DYLD_INFO 	0x22	/* compressed dyld information */
 #define	LC_DYLD_INFO_ONLY (0x22|LC_REQ_DYLD)	/* compressed dyld information only */
 #define	LC_LOAD_UPWARD_DYLIB (0x23 | LC_REQ_DYLD) /* load upward dylib */
@@ -301,6 +332,8 @@ struct load_command {
 #define LC_LINKER_OPTION 0x2D /* linker options in MH_OBJECT files */
 #define LC_LINKER_OPTIMIZATION_HINT 0x2E /* optimization hints in MH_OBJECT files */
 #define LC_VERSION_MIN_WATCHOS 0x30 /* build for Watch min OS version */
+=======
+>>>>>>> origin/10.5
 
 /*
  * A variable length string in a load command is represented by an lc_str
@@ -490,6 +523,7 @@ struct section_64 { /* for 64-bit architectures */
 #define	S_LAZY_DYLIB_SYMBOL_POINTERS	0x10	/* section with only lazy
 						   symbol pointers to lazy
 						   loaded dylibs */
+<<<<<<< HEAD
 /*
  * Section types to support thread local variables
  */
@@ -504,6 +538,8 @@ struct section_64 { /* for 64-bit architectures */
 							  to initialize TLV
 							  values */
 
+=======
+>>>>>>> origin/10.5
 /*
  * Constants for the section attributes part of the flags field of a section
  * structure.
@@ -1182,6 +1218,7 @@ struct encryption_info_command {
 };
 
 /*
+<<<<<<< HEAD
  * The encryption_info_command_64 contains the file offset and size of an
  * of an encrypted segment (for use in x86_64 targets).
  */
@@ -1394,6 +1431,8 @@ struct linker_option_command {
 };
 
 /*
+=======
+>>>>>>> origin/10.5
  * The symseg_command contains the offset and size of the GNU style
  * symbol table information as described in the header file <symseg.h>.
  * The symbol roots of the symbol segments must also be aligned properly

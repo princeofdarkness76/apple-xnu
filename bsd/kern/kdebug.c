@@ -52,11 +52,15 @@
 #include <kern/thread.h>
 #include <kern/task.h>
 #include <kern/debug.h>
+<<<<<<< HEAD
 #include <kern/kalloc.h>
 #include <kern/cpu_data.h>
 #include <kern/assert.h>
 #include <kern/telemetry.h>
 #include <kern/sched_prim.h>
+=======
+#include <kern/assert.h>
+>>>>>>> origin/10.6
 #include <vm/vm_kern.h>
 #include <sys/lock.h>
 
@@ -294,9 +298,17 @@ extern kern_return_t stack_snapshot2(int pid, user_addr_t tracebuf, uint32_t tra
 extern kern_return_t stack_microstackshot(user_addr_t tracebuf, uint32_t tracebuf_size, uint32_t flags, int32_t *retval);
 #endif /* CONFIG_TELEMETRY */
 
+<<<<<<< HEAD
 extern kern_return_t kern_stack_snapshot_with_reason(char* reason);
 
 extern kern_return_t kern_stack_snapshot_internal(int stackshot_config_version, void *stackshot_config, size_t stackshot_config_size, boolean_t stackshot_from_user);
+=======
+int
+stack_snapshot2(pid_t pid, user_addr_t tracebuf, uint32_t tracebuf_size, uint32_t flags, uint32_t dispatch_offset, int32_t *retval);
+
+extern void
+kdp_snapshot_preflight(int pid, void  *tracebuf, uint32_t tracebuf_size, uint32_t flags, uint32_t dispatch_offset);
+>>>>>>> origin/10.6
 
 extern kern_return_t stack_snapshot_from_kernel_internal(int pid, void *buf, uint32_t size, uint32_t flags, unsigned *bytes_traced);
 
@@ -334,6 +346,10 @@ static uint64_t g_str_id_signature = (0x70acULL << STR_ID_SIG_OFFSET);
 #define MACH_vmfault	0x01300008
 #define BSC_SysCall	0x040c0000
 #define MACH_SysCall	0x010c0000
+<<<<<<< HEAD
+=======
+#define DBG_SCALL_MASK	0xffff0000
+>>>>>>> origin/10.10
 
 /* task to string structure */
 struct tts
@@ -494,8 +510,15 @@ enable_wrap(uint32_t old_slowcheck, boolean_t lostevents)
 	if ( !(old_slowcheck & SLOW_NOLOG))
 		kd_ctrl_page.kdebug_slowcheck &= ~SLOW_NOLOG;
 
+<<<<<<< HEAD
 	if (lostevents == TRUE)
 		kd_ctrl_page.kdebug_flags |= KDBG_WRAPPED;
+=======
+	/* get the number of cpus and cache it */
+#define BSD_HOST 1
+	host_info((host_t)BSD_HOST, HOST_BASIC_INFO, (host_info_t)&hinfo, &count);
+	kd_cpus = hinfo.logical_cpu_max;
+>>>>>>> origin/10.5
 
 	lck_spin_unlock(kds_spin_lock);
 	ml_set_interrupts_enabled(s);
@@ -1338,6 +1361,7 @@ kdebug_validate_debugid(uint32_t debugid)
  */
 int
 kdebug_trace(struct proc *p, struct kdebug_trace_args *uap, int32_t *retval)
+<<<<<<< HEAD
 {
 	struct kdebug_trace64_args uap64;
 
@@ -1359,6 +1383,36 @@ int kdebug_trace64(__unused struct proc *p, struct kdebug_trace64_args *uap, __u
 
 	if ((err = kdebug_validate_debugid(uap->code)) != 0) {
 		return err;
+=======
+{
+	struct kdebug_trace64_args uap64;
+
+	uap64.code = uap->code;
+	uap64.arg1 = uap->arg1;
+	uap64.arg2 = uap->arg2;
+	uap64.arg3 = uap->arg3;
+	uap64.arg4 = uap->arg4;
+
+	return kdebug_trace64(p, &uap64, retval);
+}
+
+/*
+ * Support syscall SYS_kdebug_trace64. 64-bit args on K32 will get truncated to fit in 32-bit record format.
+ */
+int kdebug_trace64(__unused struct proc *p, struct kdebug_trace64_args *uap, __unused int32_t *retval)
+{
+	uint8_t code_class;
+
+	/*
+	 * Not all class are supported for injection from userspace, especially ones used by the core
+	 * kernel tracing infrastructure.
+	 */
+	code_class = EXTRACT_CLASS(uap->code);
+
+	switch (code_class) {
+		case DBG_TRACE:
+			return EPERM;
+>>>>>>> origin/10.10
 	}
 
 	if ( __probable(kdebug_enable == 0) )
@@ -1369,6 +1423,7 @@ int kdebug_trace64(__unused struct proc *p, struct kdebug_trace64_args *uap, __u
 	return(0);
 }
 
+<<<<<<< HEAD
 /*
  * Adding enough padding to contain a full tracepoint for the last
  * portion of the string greatly simplifies the logic of splitting the
@@ -1670,6 +1725,8 @@ kdebug_trace_string(__unused struct proc *p,
 	return 0;
 }
 
+=======
+>>>>>>> origin/10.10
 static void
 kdbg_lock_init(void)
 {
@@ -2938,8 +2995,13 @@ kdbg_control_chud(int val, void *fn)
 int
 kdbg_control(int *name, u_int namelen, user_addr_t where, size_t *sizep)
 {
+<<<<<<< HEAD
 	int ret = 0;
 	size_t size = *sizep;
+=======
+        int ret=0;
+	size_t size=*sizep;
+>>>>>>> origin/10.5
 	unsigned int value = 0;
 	kd_regtype kd_Reg;
 	kbufinfo_t kd_bufinfo;
@@ -2969,6 +3031,7 @@ kdbg_control(int *name, u_int namelen, user_addr_t where, size_t *sizep)
 
 	lck_mtx_lock(kd_trace_mtx_sysctl);
 
+<<<<<<< HEAD
 	switch(name[0]) {
 		case KERN_KDGETBUF:
 			/*
@@ -3051,6 +3114,20 @@ kdbg_control(int *name, u_int namelen, user_addr_t where, size_t *sizep)
 				ret = EINVAL;
 				goto out;
 			}
+=======
+	if (name[0] == KERN_KDGETENTROPY ||
+		name[0] == KERN_KDEFLAGS ||
+		name[0] == KERN_KDDFLAGS ||
+		name[0] == KERN_KDENABLE ||
+		name[0] == KERN_KDSETBUF) {
+		
+		if ( namelen < 2 )
+	        return(EINVAL);
+		value = name[1];
+	}
+	
+	kdbg_lock_init();
+>>>>>>> origin/10.5
 
 			if (size != KDBG_TYPEFILTER_BITMAP_SIZE) {
 				ret = EINVAL;
@@ -3235,10 +3312,14 @@ kdbg_control(int *name, u_int namelen, user_addr_t where, size_t *sizep)
 					number = nkdbufs * sizeof(kd_buf);
 
 					KERNEL_DEBUG_CONSTANT(TRACE_WRITING_EVENTS | DBG_FUNC_START, 0, 0, 0, 0, 0);
+<<<<<<< HEAD
 					if (name[0] == KERN_KDWRITETR_V3)
 						ret = kdbg_read(0, &number, vp, &context, RAW_VERSION3);
 					else
 						ret = kdbg_read(0, &number, vp, &context, RAW_VERSION1);
+=======
+					ret = kdbg_read(0, &number, vp, &context);
+>>>>>>> origin/10.10
 					KERNEL_DEBUG_CONSTANT(TRACE_WRITING_EVENTS | DBG_FUNC_END, number, 0, 0, 0, 0);
 
 					*sizep = number;
@@ -3630,8 +3711,25 @@ unsigned char *getProcName(struct proc *proc) {
 
 }
 
+<<<<<<< HEAD
 static int
 stackshot_kern_return_to_bsd_error(kern_return_t kr)
+=======
+#define STACKSHOT_SUBSYS_LOCK() lck_mtx_lock(&stackshot_subsys_mutex)
+#define STACKSHOT_SUBSYS_UNLOCK() lck_mtx_unlock(&stackshot_subsys_mutex)
+#if defined(__i386__) || defined (__x86_64__)
+#define TRAP_DEBUGGER __asm__ volatile("int3");
+#endif
+#ifdef __ppc__
+#define TRAP_DEBUGGER __asm__ volatile("tw 4,r3,r3");
+#endif
+
+#define SANE_TRACEBUF_SIZE (8 * 1024 * 1024)
+
+/* Initialize the mutex governing access to the stack snapshot subsystem */
+__private_extern__ void
+stackshot_lock_init( void )
+>>>>>>> origin/10.6
 {
 	switch (kr) {
 		case KERN_SUCCESS:
@@ -3686,8 +3784,13 @@ stack_snapshot(struct proc *p, register struct stack_snapshot_args *uap, int32_t
 	if ((error = suser(kauth_cred_get(), &p->p_acflag)))
                 return(error);
 
+<<<<<<< HEAD
 	kr = stack_snapshot2(uap->pid, uap->tracebuf, uap->tracebuf_size, uap->flags, retval);
 	return stackshot_kern_return_to_bsd_error(kr);
+=======
+	return stack_snapshot2(uap->pid, uap->tracebuf, uap->tracebuf_size,
+	    uap->flags, uap->dispatch_offset, retval);
+>>>>>>> origin/10.6
 }
 
 /*
@@ -3711,14 +3814,23 @@ stack_snapshot(struct proc *p, register struct stack_snapshot_args *uap, int32_t
  *				returns KERN_SUCCESS on success	
  */
 int
+<<<<<<< HEAD
 stack_snapshot_with_config(struct proc *p, struct stack_snapshot_with_config_args *uap, __unused int *retval)
 {
 	int error = 0;
 	kern_return_t kr;
+=======
+stack_snapshot2(pid_t pid, user_addr_t tracebuf, uint32_t tracebuf_size, uint32_t flags, uint32_t dispatch_offset, int32_t *retval)
+{
+	int error = 0;
+	unsigned bytesTraced = 0;
+	boolean_t istate;
+>>>>>>> origin/10.6
 
 	if ((error = suser(kauth_cred_get(), &p->p_acflag)))
                 return(error);
 
+<<<<<<< HEAD
 	if((void*)uap->stackshot_config == NULL) {
 		return EINVAL;
 	}
@@ -3740,6 +3852,22 @@ stack_snapshot_with_config(struct proc *p, struct stack_snapshot_with_config_arg
 			return ENOTSUP;
 	}
 }
+=======
+	assert(stackshot_snapbuf == NULL);
+	if (kmem_alloc_kobject(kernel_map, (vm_offset_t *)&stackshot_snapbuf, tracebuf_size) != KERN_SUCCESS) {
+		error = ENOMEM;
+		goto error_exit;
+	}
+
+	if (panic_active()) {
+		error = ENOMEM;
+		goto error_exit;
+	}
+
+	istate = ml_set_interrupts_enabled(FALSE);
+/* Preload trace parameters*/	
+	kdp_snapshot_preflight(pid, stackshot_snapbuf, tracebuf_size, flags, dispatch_offset);
+>>>>>>> origin/10.6
 
 #if CONFIG_TELEMETRY
 /*
@@ -3756,19 +3884,40 @@ stack_snapshot_with_config(struct proc *p, struct stack_snapshot_with_config_arg
  *			*retval contains the number of bytes traced, if successful
  *			and -1 otherwise.
  */
+<<<<<<< HEAD
 int
 microstackshot(struct proc *p, struct microstackshot_args *uap, int32_t *retval)
 {
 	int error = 0;
 	kern_return_t kr;
+=======
+>>>>>>> origin/10.6
 
 	if ((error = suser(kauth_cred_get(), &p->p_acflag)))
                 return(error);
 
+<<<<<<< HEAD
 	kr = stack_microstackshot(uap->tracebuf, uap->tracebuf_size, uap->flags, retval);
 	return stackshot_kern_return_to_bsd_error(kr);
 }
 #endif /* CONFIG_TELEMETRY */
+=======
+	ml_set_interrupts_enabled(istate);
+
+	bytesTraced = kdp_stack_snapshot_bytes_traced();
+			
+	if (bytesTraced > 0) {
+		if ((error = copyout(stackshot_snapbuf, tracebuf,
+			((bytesTraced < tracebuf_size) ?
+			    bytesTraced : tracebuf_size))))
+			goto error_exit;
+		*retval = bytesTraced;
+	}
+	else {
+		error = ENOENT;
+		goto error_exit;
+	}
+>>>>>>> origin/10.6
 
 /*
  * kern_stack_snapshot_with_reason:	Obtains a coherent set of stack traces for specified threads on the sysem,
@@ -3821,17 +3970,37 @@ stack_snapshot_from_kernel(pid_t pid, void *buf, uint32_t size, uint32_t flags, 
 		return -1;
 	}
 
+<<<<<<< HEAD
 	return kr;
+=======
+error_exit:
+	if (stackshot_snapbuf != NULL)
+		kmem_free(kernel_map, (vm_offset_t) stackshot_snapbuf, tracebuf_size);
+	stackshot_snapbuf = NULL;
+	STACKSHOT_SUBSYS_UNLOCK();
+	return error;
+>>>>>>> origin/10.6
 }
 
 void
+<<<<<<< HEAD
 start_kern_tracing(unsigned int new_nkdbufs, boolean_t need_map)
 {
+=======
+start_kern_tracing(unsigned int new_nkdbufs, boolean_t need_map) {
+>>>>>>> origin/10.8
 
 	if (!new_nkdbufs)
 		return;
 	nkdbufs = kdbg_set_nkdbufs(new_nkdbufs);
 	kdbg_lock_init();
+<<<<<<< HEAD
+=======
+	kdbg_reinit(TRUE);
+    if (need_map == TRUE)
+       kdbg_mapinit();
+	kdbg_set_tracing_enabled(TRUE, KDEBUG_ENABLE_TRACE);
+>>>>>>> origin/10.8
 
 	kernel_debug_string_simple("start_kern_tracing");
 
@@ -4029,7 +4198,11 @@ kdebug_serial_print(
 	uint64_t	delta = timestamp - kd_last_timstamp;
 	uint64_t	delta_us = delta / NSEC_PER_USEC;
 	uint64_t	delta_us_tenth = (delta % NSEC_PER_USEC) / 100;
+<<<<<<< HEAD
 	uint32_t	event_id = debugid & KDBG_EVENTID_MASK;
+=======
+	uint32_t	event_id = debugid & DBG_FUNC_MASK;
+>>>>>>> origin/10.10
 	const char	*command;
 	const char	*bra;
 	const char	*ket;
@@ -4091,7 +4264,11 @@ kdebug_serial_print(
 	/* threadid, cpu and command name */
 	if (threadid == (uintptr_t)thread_tid(current_thread()) &&
 	    current_proc() &&
+<<<<<<< HEAD
 	    current_proc()->p_comm[0])
+=======
+	    current_proc()->p_comm)
+>>>>>>> origin/10.10
 		command = current_proc()->p_comm;
 	else
 		command = "-";

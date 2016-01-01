@@ -51,6 +51,8 @@
 #include <libkern/libkern.h>
 #include <libkern/OSAtomic.h>
 
+#include <libkern/libkern.h>
+
 #include <string.h>
 
 #define	SFEF_ATTACHED		0x1	/* SFE is on socket list */
@@ -1011,6 +1013,7 @@ sflt_setsockopt(struct socket *so, struct sockopt *sopt)
 		if ((entry->sfe_flags & SFEF_ATTACHED) &&
 		    entry->sfe_filter->sf_filter.sf_setoption) {
 			/*
+<<<<<<< HEAD
 			 * Retain the filter entry and release
 			 * the socket filter lock
 			 */
@@ -1021,6 +1024,30 @@ sflt_setsockopt(struct socket *so, struct sockopt *sopt)
 			if (unlocked == 0) {
 				socket_unlock(so, 0);
 				unlocked = 1;
+=======
+			 * Another thread is unregistering the filter, we
+			 * need to avoid detaching the filter here so the
+			 * socket won't go away.  Bump up the socket's
+			 * usecount so that it won't be freed until after
+			 * the filter unregistration has been completed;
+			 * at this point the caller has already held the
+			 * socket's lock, so we can directly modify the
+			 * usecount.
+			 */
+			if (!(entry->sfe_flags & SFEF_DETACHXREF)) {
+				entry->sfe_socket->so_usecount++;
+				entry->sfe_flags |= SFEF_DETACHXREF;
+			}
+			lck_mtx_unlock(sock_filter_lock);
+			return;
+		}
+		for (next_ptr = &entry->sfe_filter->sf_entry_head; *next_ptr;
+			 next_ptr = &((*next_ptr)->sfe_next_onfilter)) {
+			if (*next_ptr == entry) {
+				found = 1;
+				*next_ptr = entry->sfe_next_onfilter;
+				break;
+>>>>>>> origin/10.5
 			}
 
 			/* Call the filter */
@@ -1034,6 +1061,7 @@ sflt_setsockopt(struct socket *so, struct sockopt *sopt)
 			lck_rw_lock_shared(sock_filter_lock);
 			sflt_entry_release(entry);
 		}
+<<<<<<< HEAD
 	}
 	lck_rw_unlock_shared(sock_filter_lock);
 
@@ -1141,6 +1169,54 @@ sflt_data_out(struct socket *so, const struct sockaddr *to, mbuf_t *data,
 			 */
 			lck_rw_lock_shared(sock_filter_lock);
 			sflt_entry_release(entry);
+=======
+	} else {
+		/*
+		 * Clear the removing flag. We will perform the detach here or
+		 * request a delayed detach.  Since we do an extra ref release
+		 * below, bump up the usecount if we haven't done so.
+		 */
+		entry->sfe_flags &= ~SFEF_UNREGISTERING;
+		if (!(entry->sfe_flags & SFEF_DETACHXREF)) {
+			entry->sfe_socket->so_usecount++;
+			entry->sfe_flags |= SFEF_DETACHXREF;
+		}
+	}
+
+	if (entry->sfe_socket->so_filteruse != 0) {
+		entry->sfe_flags |= SFEF_DETACHUSEZERO;
+		lck_mtx_unlock(sock_filter_lock);
+
+		if (unregistering) {
+#if DEBUG
+			printf("sflt_detach_private unregistering SFEF_DETACHUSEZERO "
+				"so%p so_filteruse %u so_usecount %d\n",
+				entry->sfe_socket, entry->sfe_socket->so_filteruse, 
+				entry->sfe_socket->so_usecount);
+#endif
+			socket_unlock(entry->sfe_socket, 0);	
+		}
+
+		return;
+	} else {
+		/*
+		 * Check if we are removing the last attached filter and
+		 * the parent filter is being unregistered.
+		 */
+		entry->sfe_filter->sf_usecount--;
+		if ((entry->sfe_filter->sf_usecount == 0) &&
+			(entry->sfe_filter->sf_flags & SFF_DETACHING) != 0)
+			detached = 1;
+	}
+	lck_mtx_unlock(sock_filter_lock);
+		
+	/* Remove from the socket list */
+	for (next_ptr = &entry->sfe_socket->so_filt; *next_ptr;
+		 next_ptr = &((*next_ptr)->sfe_next_onsocket)) {
+		if (*next_ptr == entry) {
+			*next_ptr = entry->sfe_next_onsocket;
+			break;
+>>>>>>> origin/10.5
 		}
 	}
 	lck_rw_unlock_shared(sock_filter_lock);
@@ -1435,6 +1511,7 @@ sflt_unregister(sflt_handle handle)
 			TAILQ_REMOVE(&filter->sf_proto->pr_filter_head,
 			    filter, sf_protosw_next);
 		}
+<<<<<<< HEAD
 
 		/* Detach from any sockets */
 		struct socket_filter_entry *entry = NULL;
@@ -1442,6 +1519,29 @@ sflt_unregister(sflt_handle handle)
 		for (entry = filter->sf_entry_head; entry;
 		    entry = entry->sfe_next_onfilter) {
 			sflt_detach_locked(entry);
+=======
+		entry_head = filter->sf_entry_head;
+		filter->sf_entry_head = NULL;
+		filter->sf_flags |= SFF_DETACHING;
+	
+		for (next_entry = entry_head; next_entry;
+		    next_entry = next_entry->sfe_next_onfilter) {
+			/*
+			 * Mark this as "unregistering"; upon dropping the
+			 * lock, another thread may win the race and attempt
+			 * to detach a socket from it (e.g. as part of close)
+			 * before we get a chance to detach.  Setting this
+			 * flag practically tells the other thread to go away.
+			 * If the other thread wins, this causes an extra
+			 * reference hold on the socket so that it won't be
+			 * deallocated until after we finish with the detach
+			 * for it below.  If we win the race, the extra
+			 * reference hold is also taken to compensate for the
+			 * extra reference release when detach is called
+			 * with a "1" for its second parameter.
+			 */
+			next_entry->sfe_flags |= SFEF_UNREGISTERING;
+>>>>>>> origin/10.5
 		}
 
 		/* Release the filter */

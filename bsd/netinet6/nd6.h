@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -92,6 +96,7 @@ struct	llinfo_nd6 {
 	struct	if_llreach *ln_llreach;	/* link-layer reachability record */
 };
 
+<<<<<<< HEAD
 /* Values for ln_flags */
 #define	ND6_LNF_TIMER_SKIP	0x1	/* modified by nd6_timer() */
 #define	ND6_LNF_IN_USE		0x2	/* currently in llinfo_nd6 list */
@@ -99,6 +104,10 @@ struct	llinfo_nd6 {
 
 #define	ND6_LLINFO_PURGE	-3
 #define	ND6_LLINFO_NOSTATE	-2
+=======
+#define ND6_LLINFO_PURGE	-3
+#define ND6_LLINFO_NOSTATE	-2
+>>>>>>> origin/10.5
 /*
  * We don't need the WAITDELETE state any more, but we keep the definition
  * in a comment line instead of removing it. This is necessary to avoid
@@ -152,6 +161,9 @@ struct nd_ifinfo_compat {
 	u_int8_t randomseed0[8]; /* upper 64 bits of SHA1 digest */
 	u_int8_t randomseed1[8]; /* lower 64 bits (usually the EUI64 IFID) */
 	u_int8_t randomid[8];	/* current random ID */
+	/* keep track of routers and prefixes on this link */
+	int32_t nprefixes;
+	int32_t ndefrouters;
 };
 
 #define	ND6_IFF_PERFORMNUD		0x1
@@ -807,10 +819,13 @@ extern int nd6_storelladdr(struct ifnet *, struct rtentry *, struct mbuf *,
     struct sockaddr *, u_char *);
 extern int nd6_need_cache(struct ifnet *);
 extern void nd6_drain(void *);
+<<<<<<< HEAD
 extern void nd6_post_msg(u_int32_t, struct nd_prefix_list *, u_int32_t,
     u_int32_t, char *, u_int32_t);
 extern int nd6_setifinfo(struct ifnet *, u_int32_t, u_int32_t);
 extern void ln_setexpire(struct llinfo_nd6 *, uint64_t);
+=======
+>>>>>>> origin/10.6
 
 /* nd6_nbr.c */
 extern void nd6_nbr_init(void);

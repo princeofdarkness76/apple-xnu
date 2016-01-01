@@ -84,11 +84,25 @@ enum {
 
 typedef struct memorystatus_priority_entry {
 	pid_t pid;
+<<<<<<< HEAD
 	int32_t priority;
 	uint64_t user_data;
 	int32_t limit;
 	uint32_t state;
 } memorystatus_priority_entry_t;
+=======
+	uint32_t flags;
+	int32_t hiwat_pages;
+	int32_t hiwat_reserved1;
+	int32_t hiwat_reserved2;
+	int32_t hiwat_reserved3;
+} jetsam_priority_entry_t;
+
+/*
+** maximum killable processes to keep track of
+*/
+#define kMaxPriorityEntries 64 
+>>>>>>> origin/10.6
 
 typedef struct memorystatus_kernel_stats {
 	uint32_t free_pages;
@@ -154,6 +168,7 @@ typedef struct memorystatus_freeze_entry {
 
 /* Cause */
 enum {
+<<<<<<< HEAD
 	kMemorystatusKilled = 1,
 	kMemorystatusKilledHiwat,
  	kMemorystatusKilledVnodes,
@@ -163,8 +178,14 @@ enum {
   	kMemorystatusKilledPerProcessLimit,
 	kMemorystatusKilledDiagnostic,
 	kMemorystatusKilledIdleExit
+=======
+	kJetsamFlagsFrontmost =		(1 << 0),
+	kJetsamFlagsKilled =		(1 << 1),
+	kJetsamFlagsKilledHiwat =	(1 << 2)
+>>>>>>> origin/10.6
 };
 
+<<<<<<< HEAD
 /* Temporary, to prevent the need for a linked submission of ReportCrash */
 /* Remove when <rdar://problem/13210532> has been integrated */
 enum {
@@ -422,6 +443,11 @@ extern boolean_t memorystatus_bg_pressure_eligible(proc_t p);
 #endif /* CONFIG_MEMORYSTATUS */
 
 #endif /* VM_PRESSURE_EVENTS */
+=======
+#ifdef KERNEL
+extern void kern_memorystatus_init(void) __attribute__((section("__TEXT, initcode")));
+extern int jetsam_kill_top_proc(void);
+>>>>>>> origin/10.6
 
 #endif /* XNU_KERNEL_PRIVATE */
 

@@ -7,6 +7,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -18,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -126,9 +148,13 @@ static void	buf_reassign(buf_t bp, vnode_t newvp);
 static errno_t	buf_acquire_locked(buf_t bp, int flags, int slpflag, int slptimeo);
 static int	buf_iterprepare(vnode_t vp, struct buflists *, int flags);
 static void	buf_itercomplete(vnode_t vp, struct buflists *, int flags);
+<<<<<<< HEAD
 static boolean_t buffer_cache_gc(int);
 static buf_t	buf_brelse_shadow(buf_t bp);
 static void	buf_free_meta_store(buf_t bp);
+=======
+boolean_t buffer_cache_gc(int);
+>>>>>>> origin/10.6
 
 static buf_t	buf_create_shadow_internal(buf_t bp, boolean_t force_copy,
 					   uintptr_t external_storage, void (*iodone)(buf_t, void *), void *arg, int priv);
@@ -249,6 +275,7 @@ static int need_iobuffer;
 /* number of per vnode, "in flight" buffer writes */
 #define	BUFWRITE_THROTTLE	9
 
+
 /*
  * Time in seconds before a buffer on a list is 
  * considered as a stale buffer 
@@ -278,9 +305,20 @@ blistenterhead(struct bufhashhdr * head, buf_t bp)
 static __inline__ void 
 binshash(buf_t bp, struct bufhashhdr *dp)
 {
+<<<<<<< HEAD
 #if DIAGNOSTIC
 	buf_t	nbp;
 #endif /* DIAGNOSTIC */
+=======
+	struct buf *nbp;
+
+	simple_lock(&bufhashlist_slock);
+
+#if 0
+	if((bad = incore(bp->b_vp, bp->b_lblkno)))
+		panic("binshash: already incore bp 0x%x, bad 0x%x\n", bp, bad);
+#endif /* 0 */
+>>>>>>> origin/10.2
 
 	BHASHENTCHECK(bp);
 
@@ -480,10 +518,30 @@ void bufattr_setcpx(bufattr_t bap, cpx_t cpx)
 	bap->ba_cpx = cpx;
 }
 
+<<<<<<< HEAD
 void
 buf_setcpoff (buf_t bp, uint64_t foffset) {
 	bp->b_attr.ba_cp_file_off = foffset;
 }
+=======
+	/*
+	 * If buffer does not have data valid, start a read.
+	 * Note that if buffer is B_INVAL, getblk() won't return it.
+	 * Therefore, it's valid if it's I/O has completed or been delayed.
+	 */
+	if (!ISSET(bp->b_flags, (B_DONE | B_DELWRI))) {
+		/* Start I/O for the buffer (keeping credentials). */
+		SET(bp->b_flags, B_READ | async);
+		if (cred != NOCRED && bp->b_rcred == NOCRED) {
+			/*
+			 * NFS has embedded ucred.
+			 * Can not crhold() here as that causes zone corruption
+			 */
+			bp->b_rcred = crdup(cred);
+		}
+
+		VOP_STRATEGY(bp);
+>>>>>>> origin/10.2
 
 uint64_t
 bufattr_cpoff(bufattr_t bap) {
@@ -657,6 +715,41 @@ bufattr_quickcomplete(bufattr_t bap) {
     if ( (bap->ba_flags & BA_QUICK_COMPLETE) )
         return 1;
     return 0;
+}
+
+#ifdef CONFIG_PROTECT
+void *
+buf_getcpaddr(buf_t bp) {
+	return bp->b_cpentry;
+}
+
+void 
+buf_setcpaddr(buf_t bp, void *cp_entry_addr) {
+	bp->b_cpentry = (struct cprotect *) cp_entry_addr;
+}
+
+#else
+void *
+buf_getcpaddr(buf_t bp __unused) {
+	return NULL;
+}
+
+void 
+buf_setcpaddr(buf_t bp __unused, void *cp_entry_addr __unused) {
+	return;
+}
+#endif /* CONFIG_PROTECT */
+
+int
+bufattr_throttled(bufattr_t bap) {
+	if ( (bap->ba_flags & BA_THROTTLED_IO) )
+		return 1;
+	return 0;
+}
+
+bufattr_t
+buf_attr(buf_t bp) {
+	return &bp->b_attr;
 }
 
 errno_t
@@ -2396,7 +2489,11 @@ buf_bwrite(buf_t bp)
 		/* Release the buffer. */
 		// XXXdbg - only if the unused bit is set
 		if (!ISSET(bp->b_flags, B_NORELSE)) {
+<<<<<<< HEAD
 		    buf_brelse(bp);
+=======
+		    brelse(bp);
+>>>>>>> origin/10.2
 		} else {
 		    CLR(bp->b_flags, B_NORELSE);
 		}
@@ -2518,9 +2615,21 @@ bdwrite_internal(buf_t bp, int return_error)
 	if (nbdwrite < 0)
 		panic("bdwrite: Negative nbdwrite");
 
+<<<<<<< HEAD
 	if (nbdwrite > ((nbuf/4)*3)) {
 		bawrite(bp);
 		return;
+=======
+	// can't do a bawrite() if the LOCKED bit is set because the
+	// buffer is part of a transaction and can't go to disk until
+	// the LOCKED bit is cleared.
+	if (!ISSET(bp->b_flags, B_LOCKED) && nbdwrite > ((nbuf/4)*3)) {
+		if (return_error)
+			return (EAGAIN);
+		else
+			bawrite(bp);
+		return (0);
+>>>>>>> origin/10.2
 	}
 >>>>>>> origin/10.1
 	 
@@ -2770,6 +2879,7 @@ buf_brelse(buf_t bp)
 
 	trace(TR_BRELSE, pack(bp->b_vp, bp->b_bufsize), bp->b_lblkno);
 
+<<<<<<< HEAD
 	/*
 	 * if we're invalidating a buffer that has the B_FILTER bit
 	 * set then call the b_iodone function so it gets cleaned
@@ -2798,6 +2908,32 @@ buf_brelse(buf_t bp)
 	upl = bp->b_upl;
 
 	if ( !ISSET(bp->b_flags, B_META) && UBCINFOEXISTS(bp->b_vp) && bp->b_bufsize) {
+=======
+	// if we're invalidating a buffer that has the B_CALL bit
+	// set then call the b_iodone function so it gets cleaned
+	// up properly.
+	//
+	if (ISSET(bp->b_flags, B_META) && ISSET(bp->b_flags, B_INVAL)) {
+		if (ISSET(bp->b_flags, B_CALL) && !ISSET(bp->b_flags, B_DELWRI)) {
+			panic("brelse: CALL flag set but not DELWRI! bp 0x%x\n", bp);
+		}
+		if (ISSET(bp->b_flags, B_CALL)) {	/* if necessary, call out */
+			void	(*iodone_func)(struct buf *) = bp->b_iodone;
+
+			CLR(bp->b_flags, B_CALL);	/* but note callout done */
+			bp->b_iodone = NULL;
+
+			if (iodone_func == NULL) {
+				panic("brelse: bp @ 0x%x has NULL b_iodone!\n", bp);
+			}
+			(*iodone_func)(bp);
+		}
+	}
+	
+	/* IO is done. Cleanup the UPL state */
+	if (!ISSET(bp->b_flags, B_META)
+		&& UBCINFOEXISTS(bp->b_vp) && bp->b_bufsize) {
+>>>>>>> origin/10.2
 		kern_return_t kret;
 		int           upl_flags;
 
@@ -3664,6 +3800,13 @@ allocbuf(buf_t bp, int size)
 			} else
 				kmem_alloc_kobject(kernel_map, (vm_offset_t *)&bp->b_datap, desired_size, VM_KERN_MEMORY_FILE);
 		}
+<<<<<<< HEAD
+=======
+	}
+
+	if (ISSET(bp->b_flags, B_META) && (bp->b_data == 0))
+		panic("allocbuf: bp->b_data is NULL, buf @ 0x%x", bp);
+>>>>>>> origin/10.2
 
 		if (bp->b_datap == 0)
 		        panic("allocbuf: NULL b_datap");
@@ -3878,8 +4021,20 @@ add_newbufs:
 		}
 	}
 found:
+<<<<<<< HEAD
 	if (ISSET(bp->b_flags, B_LOCKED) || ISSET(bp->b_lflags, BL_BUSY))
 	        panic("getnewbuf: bp @ %p is LOCKED or BUSY! (flags 0x%x)\n", bp, bp->b_flags);
+=======
+	if (ISSET(bp->b_flags, B_LOCKED)) {
+	    panic("getnewbuf: bp @ 0x%x is LOCKED! (flags 0x%x)\n", bp, bp->b_flags);
+	}
+	
+	if (bp->b_hash.le_prev == (struct buf **)0xdeadbeef) 
+		panic("getnewbuf: le_prev is deadbeef, buf @ 0x%x", bp);
+
+	if(ISSET(bp->b_flags, B_BUSY))
+		panic("getnewbuf reusing BUSY buf @ 0x%x", bp);
+>>>>>>> origin/10.2
 
 	/* Clean it */
 	if (bcleanbuf(bp, FALSE)) {
@@ -4025,7 +4180,17 @@ bcleanbuf(buf_t bp, boolean_t discard)
 		bp->b_bcount = 0;
 		bp->b_dirtyoff = bp->b_dirtyend = 0;
 		bp->b_validoff = bp->b_validend = 0;
+<<<<<<< HEAD
 		bzero(&bp->b_attr, sizeof(struct bufattr));
+=======
+#ifdef CONFIG_PROTECT
+		bp->b_cpentry = 0;
+#endif
+<<<<<<< HEAD
+>>>>>>> origin/10.6
+=======
+		bzero(&bp->b_attr, sizeof(struct bufattr));
+>>>>>>> origin/10.7
 
 		lck_mtx_lock_spin(buf_mtxp);
 	}
@@ -4273,9 +4438,18 @@ buf_biodone(buf_t bp)
 		INCR_PENDING_IO(-(pending_io_t)buf_count(bp), mp->mnt_pending_read_size);
 	}
 
+<<<<<<< HEAD
 	if (kdebug_enable) {
 		int code    = DKIO_DONE;
 		int io_tier = GET_BUFATTR_IO_TIER(bap);
+=======
+	if (bp->b_vp && bp->b_vp->v_mount && (bp->b_flags & B_READ) == 0) {
+		update_last_io_time(bp->b_vp->v_mount);
+	}
+
+        if (kdebug_enable) {
+	        int    code = DKIO_DONE;
+>>>>>>> origin/10.5
 
 		if (bp->b_flags & B_READ)
 		        code |= DKIO_READ;
@@ -4308,11 +4482,16 @@ buf_biodone(buf_t bp)
 	 * and we need to reset the THROTTLED/PASSIVE
 	 * indicators
 	 */
+<<<<<<< HEAD
 	CLR(bp->b_flags, (B_WASDIRTY | B_PASSIVE));
 	CLR(bap->ba_flags, (BA_META | BA_NOCACHE | BA_DELAYIDLESLEEP));
 
 	SET_BUFATTR_IO_TIER(bap, 0);
 
+=======
+	CLR(bp->b_flags, (B_WASDIRTY | B_THROTTLED_IO | B_PASSIVE));
+	CLR(bp->b_attr.ba_flags, (BA_THROTTLED_IO));
+>>>>>>> origin/10.7
 	DTRACE_IO1(done, buf_t, bp);
 
 	if (!ISSET(bp->b_flags, B_READ) && !ISSET(bp->b_flags, B_RAW))
@@ -4368,8 +4547,16 @@ buf_biodone(buf_t bp)
 	}
 
 	if (ISSET(bp->b_flags, B_CALL)) {	/* if necessary, call out */
+		void	(*iodone_func)(struct buf *) = bp->b_iodone;
+
 		CLR(bp->b_flags, B_CALL);	/* but note callout done */
-		(*bp->b_iodone)(bp);
+		bp->b_iodone = NULL;
+
+		if (iodone_func == NULL) {
+			panic("biodone: bp @ 0x%x has NULL b_iodone!\n", bp);			
+		} else { 
+			(*iodone_func)(bp);
+		}
 	} else if (ISSET(bp->b_flags, B_ASYNC))	/* if async, release it */
 		brelse(bp);
 	else {		                        /* or just wakeup the buffer */	
@@ -4532,11 +4719,16 @@ alloc_io_buf(vnode_t vp, int priv)
 	bp->b_lflags = BL_BUSY | BL_IOBUF;
 	bp->b_redundancy_flags = 0;
 	bp->b_blkno = bp->b_lblkno = 0;
+<<<<<<< HEAD
 #ifdef JOE_DEBUG
 	bp->b_owner = current_thread();
 	bp->b_tag   = 6;
 #endif
 	bp->b_iodone = NULL;
+=======
+
+	bp->b_iodone = 0;
+>>>>>>> origin/10.2
 	bp->b_error = 0;
 	bp->b_resid = 0;
 	bp->b_bcount = 0;
@@ -4544,7 +4736,17 @@ alloc_io_buf(vnode_t vp, int priv)
 	bp->b_upl = NULL;
 	bp->b_fsprivate = (void *)NULL;
 	bp->b_vp = vp;
+<<<<<<< HEAD
 	bzero(&bp->b_attr, sizeof(struct bufattr));
+=======
+#ifdef CONFIG_PROTECT
+	bp->b_cpentry = 0;
+#endif
+<<<<<<< HEAD
+>>>>>>> origin/10.6
+=======
+	bzero(&bp->b_attr, sizeof(struct bufattr));
+>>>>>>> origin/10.7
 
 	if (vp && (vp->v_type == VBLK || vp->v_type == VCHR))
 		bp->b_dev = vp->v_rdev;
@@ -4810,9 +5012,17 @@ buffer_cache_gc(int all)
 	boolean_t did_large_zfree = FALSE;
 	boolean_t need_wakeup = FALSE;
 	int now = buf_timestamp();
+<<<<<<< HEAD
 	uint32_t found = 0;
 	struct bqueues privq;
 	int thresh_hold = BUF_STALE_THRESHHOLD;
+=======
+	uint32_t count = 0;
+	int thresh_hold = BUF_STALE_THRESHHOLD;
+
+	if (all)
+		thresh_hold = 0;
+>>>>>>> origin/10.6
 
 	if (all)
 		thresh_hold = 0;
@@ -4900,7 +5110,14 @@ buffer_cache_gc(int all)
 				did_large_zfree = TRUE;
 			}    
 
+<<<<<<< HEAD
 			trace(TR_BRELSE, pack(bp->b_vp, bp->b_bufsize), bp->b_lblkno);
+=======
+	/* Only collect buffers unused in the last N seconds. Note: ordered by timestamp. */
+	while ((bp != NULL) && ((now - bp->b_timestamp) > thresh_hold) && (all || (count < BUF_MAX_GC_COUNT))) {
+		int result, size;
+		boolean_t is_zalloc;
+>>>>>>> origin/10.6
 
 			/* Free Storage */
 			buf_free_meta_store(bp);
@@ -4930,11 +5147,17 @@ buffer_cache_gc(int all)
 			bp->b_tag   = 13;
 #endif
 		}
+<<<<<<< HEAD
 
 		/* And do a big bulk move to the empty queue */
 		TAILQ_CONCAT(&bufqueues[BQ_EMPTY], &privq, b_freelist);
 
 	} while (all && (found == BUF_MAX_GC_BATCH_SIZE));
+=======
+		bp = TAILQ_FIRST(&bufqueues[BQ_META]);
+		count++;
+	} 
+>>>>>>> origin/10.6
 
 	lck_mtx_unlock(buf_mtxp);
 
@@ -5076,4 +5299,79 @@ doit:
 	(void) thread_funnel_set(kernel_flock, funnel_state);
 }
 
+<<<<<<< HEAD
 >>>>>>> origin/10.1
+=======
+
+static int
+bp_cmp(void *a, void *b)
+{
+    struct buf *bp_a = *(struct buf **)a,
+               *bp_b = *(struct buf **)b;
+    daddr_t res;
+
+    // don't have to worry about negative block
+    // numbers so this is ok to do.
+    //
+    res = (bp_a->b_blkno - bp_b->b_blkno);
+
+    return (int)res;
+}
+
+#define NFLUSH 32
+
+int
+bflushq(int whichq, struct mount *mp)
+{
+	struct buf *bp, *next;
+	int         i, buf_count, s;
+	int         counter=0, total_writes=0;
+	static struct buf *flush_table[NFLUSH];
+
+	if (whichq < 0 || whichq >= BQUEUES) {
+	    return;
+	}
+
+
+  restart:
+	bp = TAILQ_FIRST(&bufqueues[whichq]);
+	for(buf_count=0; bp; bp=next) {
+	    next = bp->b_freelist.tqe_next;
+			
+	    if (bp->b_vp == NULL || bp->b_vp->v_mount != mp) {
+		continue;
+	    }
+
+	    if ((bp->b_flags & B_DELWRI) && (bp->b_flags & B_BUSY) == 0) {
+		if (whichq != BQ_LOCKED && (bp->b_flags & B_LOCKED)) {
+		    panic("bflushq: bp @ 0x%x is locked!\n", bp);
+		}
+		
+		bremfree(bp);
+		bp->b_flags |= B_BUSY;
+		flush_table[buf_count] = bp;
+		buf_count++;
+		total_writes++;
+
+		if (buf_count >= NFLUSH) {
+		    qsort(flush_table, buf_count, sizeof(struct buf *), bp_cmp);
+
+		    for(i=0; i < buf_count; i++) {
+			bawrite(flush_table[i]);
+		    }
+
+		    goto restart;
+		}
+	    }
+	}
+
+	if (buf_count > 0) {
+	    qsort(flush_table, buf_count, sizeof(struct buf *), bp_cmp);
+	    for(i=0; i < buf_count; i++) {
+		bawrite(flush_table[i]);
+	    }
+	}
+
+	return total_writes;
+}
+>>>>>>> origin/10.2

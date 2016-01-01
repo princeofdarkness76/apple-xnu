@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD:bsd/sys/kern_overrides.h
  * Copyright (c) 2013 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 2004-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6:osfmk/kern/etimer.h
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -44,8 +48,16 @@ __BEGIN_DECLS
 
 #define SYS_OVERRIDE_FLAGS_MASK		(SYS_OVERRIDE_DISABLE | SYS_OVERRIDE_IO_THROTTLE | SYS_OVERRIDE_CPU_THROTTLE)
 
+<<<<<<< HEAD:bsd/sys/kern_overrides.h
 #ifdef BSD_KERNEL_PRIVATE
 void init_system_override(void);
+=======
+extern void etimer_set_deadline(uint64_t deadline);
+#if defined(i386) || defined(x86_64)
+extern uint64_t setPop(uint64_t time);
+#else
+extern int setPop(uint64_t time);
+>>>>>>> origin/10.6:osfmk/kern/etimer.h
 #endif
 
 #ifndef KERNEL

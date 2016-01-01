@@ -34,6 +34,10 @@
 
 #include <i386/cpu_data.h>
 #include <i386/machine_routines.h>
+<<<<<<< HEAD
+=======
+#include <i386/perfmon.h>
+>>>>>>> origin/10.5
 #include <i386/lapic.h>
 #include <i386/mp.h>
 #include <i386/trap.h>

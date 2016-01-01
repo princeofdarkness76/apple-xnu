@@ -1,6 +1,11 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +20,24 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +45,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /*
  * @OSF_COPYRIGHT@
@@ -151,10 +188,17 @@ host_info(host_t host, host_flavor_t flavor, host_info_t info, mach_msg_type_num
 	if (host == HOST_NULL)
 		return (KERN_INVALID_ARGUMENT);
 
+<<<<<<< HEAD
 	switch (flavor) {
 	case HOST_BASIC_INFO: {
 		register host_basic_info_t basic_info;
 		register int master_id;
+=======
+	case HOST_BASIC_INFO:
+	{
+		register host_basic_info_t	basic_info;
+		register int				master_num;
+>>>>>>> origin/10.5
 
 		/*
 		 *	Basic information about this host.
@@ -167,12 +211,21 @@ host_info(host_t host, host_flavor_t flavor, host_info_t info, mach_msg_type_num
 		basic_info->memory_size = machine_info.memory_size;
 		basic_info->max_cpus = machine_info.max_cpus;
 		basic_info->avail_cpus = processor_avail_count;
+<<<<<<< HEAD
 		master_id = master_processor->cpu_id;
 		basic_info->cpu_type = slot_type(master_id);
 		basic_info->cpu_subtype = slot_subtype(master_id);
 
 		if (*count >= HOST_BASIC_INFO_COUNT) {
 			basic_info->cpu_threadtype = slot_threadtype(master_id);
+=======
+		master_num = master_processor->cpu_num;
+		basic_info->cpu_type = slot_type(master_num);
+		basic_info->cpu_subtype = slot_subtype(master_num);
+
+		if (*count >= HOST_BASIC_INFO_COUNT) {
+			basic_info->cpu_threadtype = slot_threadtype(master_num);
+>>>>>>> origin/10.5
 			basic_info->physical_cpu = machine_info.physical_cpu;
 			basic_info->physical_cpu_max = machine_info.physical_cpu_max;
 			basic_info->logical_cpu = machine_info.logical_cpu;
@@ -365,7 +418,15 @@ host_statistics(host_t host, host_flavor_t flavor, host_info_t info, mach_msg_ty
 			}
 		}
 		stat32->inactive_count = VM_STATISTICS_TRUNCATE_TO_32_BIT(vm_page_inactive_count);
+<<<<<<< HEAD
 		stat32->wire_count = VM_STATISTICS_TRUNCATE_TO_32_BIT(vm_page_wire_count + vm_page_throttled_count + vm_lopage_free_count);
+=======
+#if CONFIG_EMBEDDED
+		stat32->wire_count = VM_STATISTICS_TRUNCATE_TO_32_BIT(vm_page_wire_count);
+#else
+		stat32->wire_count = VM_STATISTICS_TRUNCATE_TO_32_BIT(vm_page_wire_count + vm_page_throttled_count + vm_lopage_free_count);
+#endif
+>>>>>>> origin/10.6
 		stat32->zero_fill_count = VM_STATISTICS_TRUNCATE_TO_32_BIT(host_vm_stat.zero_fill_count);
 		stat32->reactivations = VM_STATISTICS_TRUNCATE_TO_32_BIT(host_vm_stat.reactivations);
 		stat32->pageins = VM_STATISTICS_TRUNCATE_TO_32_BIT(host_vm_stat.pageins);
@@ -465,7 +526,12 @@ host_statistics(host_t host, host_flavor_t flavor, host_info_t info, mach_msg_ty
 		return (KERN_SUCCESS);
 	}
 
+<<<<<<< HEAD
 	case HOST_EXPIRED_TASK_INFO: {
+=======
+	case HOST_EXPIRED_TASK_INFO:
+	{
+>>>>>>> origin/10.8
 		if (*count < TASK_POWER_INFO_COUNT) {
 			return (KERN_FAILURE);
 		}
@@ -476,7 +542,10 @@ host_statistics(host_t host, host_flavor_t flavor, host_info_t info, mach_msg_ty
 		tinfo->task_platform_idle_wakeups = dead_task_statistics.task_platform_idle_wakeups;
 
 		tinfo->task_timer_wakeups_bin_1 = dead_task_statistics.task_timer_wakeups_bin_1;
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.8
 		tinfo->task_timer_wakeups_bin_2 = dead_task_statistics.task_timer_wakeups_bin_2;
 
 		tinfo->total_user = dead_task_statistics.total_user_time;
@@ -484,7 +553,13 @@ host_statistics(host_t host, host_flavor_t flavor, host_info_t info, mach_msg_ty
 
 		return (KERN_SUCCESS);
 	}
+<<<<<<< HEAD
 	default: return (KERN_INVALID_ARGUMENT);
+=======
+
+	default:
+		return (KERN_INVALID_ARGUMENT);
+>>>>>>> origin/10.8
 	}
 }
 
@@ -534,6 +609,30 @@ host_statistics64(host_t host, host_flavor_t flavor, host_info64_t info, mach_ms
 				host_vm_stat.swapins += stat->swapins;
 				host_vm_stat.swapouts += stat->swapouts;
 			}
+<<<<<<< HEAD
+=======
+			stat->inactive_count = vm_page_inactive_count;
+#if CONFIG_EMBEDDED
+			stat->wire_count = vm_page_wire_count;
+#else
+			stat->wire_count = vm_page_wire_count + vm_page_throttled_count + vm_lopage_free_count;
+#endif
+			stat->zero_fill_count = host_vm_stat.zero_fill_count;
+			stat->reactivations = host_vm_stat.reactivations;
+			stat->pageins = host_vm_stat.pageins;
+			stat->pageouts = host_vm_stat.pageouts;
+			stat->faults = host_vm_stat.faults;
+			stat->cow_faults = host_vm_stat.cow_faults;
+			stat->lookups = host_vm_stat.lookups;
+			stat->hits = host_vm_stat.hits;
+		
+			/* rev1 added "purgable" info */
+			stat->purgeable_count = vm_page_purgeable_count;
+			stat->purges = vm_page_purged_count;
+		
+			/* rev2 added "speculative" info */
+			stat->speculative_count = vm_page_speculative_count;
+>>>>>>> origin/10.6
 
 			simple_unlock(&processor_list_lock);
 		}
@@ -657,6 +756,7 @@ get_sched_statistics(struct _processor_statistics_np * out, uint32_t * count)
 
 	processor = processor_list;
 	while (processor) {
+<<<<<<< HEAD
 		struct processor_sched_statistics * stats = &processor->processor_data.sched_stats;
 
 		out->ps_cpuid = processor->cpu_id;
@@ -671,6 +771,22 @@ get_sched_statistics(struct _processor_statistics_np * out, uint32_t * count)
 		out->ps_runq_count_sum = SCHED(processor_runq_stats_count_sum)(processor);
 		out->ps_idle_transitions = stats->idle_transitions;
 		out->ps_quantum_timer_expirations = stats->quantum_timer_expirations;
+=======
+		struct processor_sched_statistics *stats = &processor->processor_data.sched_stats;
+
+		out->ps_cpuid 			= processor->cpu_id;
+		out->ps_csw_count 		= stats->csw_count;
+		out->ps_preempt_count 		= stats->preempt_count;
+		out->ps_preempted_rt_count 	= stats->preempted_rt_count;
+		out->ps_preempted_by_rt_count 	= stats->preempted_by_rt_count;
+		out->ps_rt_sched_count		= stats->rt_sched_count;
+		out->ps_interrupt_count 	= stats->interrupt_count;
+		out->ps_ipi_count 		= stats->ipi_count;
+		out->ps_timer_pop_count 	= stats->timer_pop_count;
+		out->ps_runq_count_sum 		= SCHED(processor_runq_stats_count_sum)(processor);
+		out->ps_idle_transitions	= stats->idle_transitions;
+		out->ps_quantum_timer_expirations	= stats->quantum_timer_expirations;
+>>>>>>> origin/10.7
 
 		out++;
 		processor = processor->processor_list;

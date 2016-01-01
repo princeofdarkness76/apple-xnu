@@ -1,8 +1,18 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +24,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -172,6 +202,7 @@ SYSCTL_INT(_net_inet_tcp, TCPCTL_V6MSSDFLT, v6mssdflt,
 	"Default TCP Maximum Segment Size for IPv6");
 #endif
 
+<<<<<<< HEAD
 extern int tcp_do_autorcvbuf;
 
 int tcp_sysctl_fastopenkey(struct sysctl_oid *, void *, int ,
@@ -187,6 +218,23 @@ int	tcp_tfo_halfcnt = 0;
 int	tcp_tfo_backlog = 10;
 SYSCTL_INT(_net_inet_tcp, OID_AUTO, fastopen_backlog, CTLFLAG_RW | CTLFLAG_LOCKED,
     &tcp_tfo_backlog, 0, "Backlog queue for half-open TFO connections");
+=======
+/*
+ * Minimum MSS we accept and use. This prevents DoS attacks where
+ * we are forced to a ridiculous low MSS like 20 and send hundreds
+ * of packets instead of one. The effect scales with the available
+ * bandwidth and quickly saturates the CPU and network interface
+ * with packet generation and sending. Set to zero to disable MINMSS
+ * checking. This setting prevents us from sending too small packets.
+ */
+int	tcp_minmss = TCP_MINMSS;
+SYSCTL_INT(_net_inet_tcp, OID_AUTO, minmss, CTLFLAG_RW,
+    &tcp_minmss , 0, "Minmum TCP Maximum Segment Size");
+
+static int	tcp_do_rfc1323 = 1;
+SYSCTL_INT(_net_inet_tcp, TCPCTL_DO_RFC1323, rfc1323, CTLFLAG_RW, 
+    &tcp_do_rfc1323 , 0, "Enable rfc1323 (high performance TCP) extensions");
+>>>>>>> origin/10.3
 
 int	tcp_fastopen = TCP_FASTOPEN_CLIENT | TCP_FASTOPEN_SERVER;
 SYSCTL_INT(_net_inet_tcp, OID_AUTO, fastopen, CTLFLAG_RW | CTLFLAG_LOCKED,
@@ -472,6 +520,9 @@ tcp_init(struct protosw *pp, struct domain *dp)
 	tcp_keepcnt = TCPTV_KEEPCNT;
 	tcp_maxpersistidle = TCPTV_KEEP_IDLE;
 	tcp_msl = TCPTV_MSL;
+	read_random(&tcp_now, sizeof(tcp_now));
+	tcp_now  = tcp_now & 0x7fffffffffffffff; /* Starts tcp internal 500ms clock at a random value */
+
 
 	microuptime(&tcp_uptime);
 	read_random(&tcp_now, sizeof(tcp_now));
@@ -480,6 +531,7 @@ tcp_init(struct protosw *pp, struct domain *dp)
 	tcp_tfo_init();
 
 	LIST_INIT(&tcb);
+<<<<<<< HEAD
 	tcbinfo.ipi_listhead = &tcb;
 
 	pcbinfo = &tcbinfo;
@@ -564,6 +616,34 @@ tcp_init(struct protosw *pp, struct domain *dp)
 	    "tcp_rxt_seg_zone");
 	zone_change(tcp_rxt_seg_zone, Z_CALLERACCT, FALSE);
 	zone_change(tcp_rxt_seg_zone, Z_EXPAND, TRUE);
+=======
+	tcbinfo.listhead = &tcb;
+#ifndef __APPLE__
+	TUNABLE_INT_FETCH("net.inet.tcp.tcbhashsize", &hashsize);
+#endif
+	if (!powerof2(hashsize)) {
+		printf("WARNING: TCB hash size not a power of 2\n");
+		hashsize = 512; /* safe default */
+	}
+	tcp_tcbhashsize = hashsize;
+	tcbinfo.hashsize = hashsize;
+	tcbinfo.hashbase = hashinit(hashsize, M_PCB, &tcbinfo.hashmask);
+	tcbinfo.porthashbase = hashinit(hashsize, M_PCB,
+					&tcbinfo.porthashmask);
+#ifdef __APPLE__
+	str_size = (vm_size_t) sizeof(struct inp_tp);
+	tcbinfo.ipi_zone = (void *) zinit(str_size, 120000*str_size, 8192, "tcpcb");
+#else
+	tcbinfo.ipi_zone = zinit("tcpcb", sizeof(struct inp_tp), maxsockets,
+				 ZONE_INTERRUPT, 0);
+#endif
+
+	tcp_reass_maxseg = nmbclusters / 16;
+#ifndef __APPLE__
+	TUNABLE_INT_FETCH("net.inet.tcp.reass.maxsegments",
+	    &tcp_reass_maxseg);
+#endif
+>>>>>>> origin/10.3
 
 #if INET6
 #define TCP_MINPROTOHDR (sizeof(struct ip6_hdr) + sizeof(struct tcphdr))
@@ -716,8 +796,21 @@ tcp_maketemplate(tp)
  * NOTE: If m != NULL, then ti must point to *inside* the mbuf.
  */
 void
+<<<<<<< HEAD
 tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
     tcp_seq ack, tcp_seq seq, int flags, struct tcp_respond_args *tra)
+=======
+tcp_respond(
+	struct tcpcb *tp,
+	void *ipgen,
+	register struct tcphdr *th,
+	register struct mbuf *m,
+	tcp_seq ack,
+	tcp_seq seq,
+	int flags,
+	unsigned int ifscope
+	)
+>>>>>>> origin/10.5
 {
 	int tlen;
 	int win = 0;
@@ -731,7 +824,10 @@ tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
 	struct ip6_hdr *ip6;
 	int isipv6;
 #endif /* INET6 */
+<<<<<<< HEAD
 	struct ifnet *outif;
+=======
+>>>>>>> origin/10.5
 
 #if INET6
 	isipv6 = IP_VHL_V(((struct ip *)ipgen)->ip_vhl) == 6;
@@ -856,7 +952,16 @@ tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
 		mac_netinet_tcp_reply(m);
 	}
 #endif
+<<<<<<< HEAD
 
+=======
+	
+#if CONFIG_IP_EDGEHOLE
+	if (tp && tp->t_inpcb)
+		ip_edgehole_mbuf_tag(tp->t_inpcb, m);
+#endif
+	
+>>>>>>> origin/10.5
 	nth->th_seq = htonl(seq);
 	nth->th_ack = htonl(ack);
 	nth->th_x2 = 0;
@@ -902,6 +1007,7 @@ tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
 		return;
 	}
 #endif
+<<<<<<< HEAD
 
 	if (tp != NULL) {
 		u_int32_t svc_flags = 0;
@@ -923,8 +1029,15 @@ tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
 		m->m_pkthdr.pkt_proto = IPPROTO_TCP;
 	}
 
+=======
+#if PKT_PRIORITY
+	if (tp != NULL) 
+		set_traffic_class(m, tp->t_inpcb->inp_socket, MBUF_TC_NONE);
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 #if INET6
 	if (isipv6) {
+<<<<<<< HEAD
 		struct ip6_out_args ip6oa = { tra->ifscope, { 0 },
 		    IP6OAF_SELECT_SRCIF | IP6OAF_BOUND_SRCADDR, 0 };
 
@@ -981,6 +1094,23 @@ tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
 			inp_route_copyin(tp->t_inpcb, &sro);
 		} else {
 			ROUTE_RELEASE(&sro);
+=======
+		(void)ip6_output(m, NULL, ro6, 0, NULL, NULL, 0);
+		if (ro6 == &sro6 && ro6->ro_rt) {
+			rtfree(ro6->ro_rt);
+			ro6->ro_rt = NULL;
+		}
+	} else
+#endif /* INET6 */
+	{
+		struct ip_out_args ipoa = { ifscope };
+
+		(void) ip_output(m, NULL, ro, IP_OUTARGS, NULL, &ipoa);
+
+		if (ro == &sro && ro->ro_rt) {
+			rtfree(ro->ro_rt);
+			ro->ro_rt = NULL;
+>>>>>>> origin/10.5
 		}
 	}
 }
@@ -1051,6 +1181,7 @@ tcp_newtcpcb(inp)
 	tp->snd_cwnd = TCP_CC_CWND_INIT_BYTES;
 	tp->snd_ssthresh = TCP_MAXWIN << TCP_MAX_WINSHIFT;
 	tp->snd_ssthresh_prev = TCP_MAXWIN << TCP_MAX_WINSHIFT;
+<<<<<<< HEAD
 	tp->t_rcvtime = tcp_now;
 	tp->tentry.timer_start = tcp_now;
 	tp->t_persist_timeout = tcp_max_persist_timeout;
@@ -1062,6 +1193,10 @@ tcp_newtcpcb(inp)
 	tp->t_twentry.tqe_next = NULL;
 	tp->t_twentry.tqe_prev = NULL;
 
+=======
+	tp->t_rcvtime = 0;
+	tp->t_bw_rtttime = 0;
+>>>>>>> origin/10.5
 	/*
 	 * IPv4 TTL initialization is necessary for an IPv6 socket as well,
 	 * because the socket may be bound to an IPv6 wildcard address,
@@ -1236,6 +1371,7 @@ tcp_close(tp)
 	struct rtentry *rt;
 	int dosavessthresh;
 
+<<<<<<< HEAD
 	/* tcp_close was called previously, bail */
 	if (inp->inp_ppcb == NULL) 
 		return(NULL);
@@ -1243,6 +1379,12 @@ tcp_close(tp)
 	tcp_canceltimers(tp);
 	KERNEL_DEBUG(DBG_FNC_TCP_CLOSE | DBG_FUNC_START, tp,0,0,0,0);
 
+=======
+	if ( inp->inp_ppcb == NULL) /* tcp_close was called previously, bail */
+		return;
+
+#ifndef __APPLE__
+>>>>>>> origin/10.3
 	/*
 	 * If another thread for this tcp is currently in ip (indicated by
 	 * the TF_SENDINPROG flag), defer the cleanup until after it returns
@@ -1260,6 +1402,11 @@ tcp_close(tp)
 		tp->t_flags |= TF_CLOSING;
 		return (NULL);
 	}
+<<<<<<< HEAD
+=======
+#endif
+	
+>>>>>>> origin/10.3
 
 	DTRACE_TCP4(state__change, void, NULL, struct inpcb *, inp,
 		struct tcpcb *, tp, int32_t, TCPS_CLOSED);
@@ -1585,7 +1732,12 @@ tcp_freeq(tp)
 	while((q = LIST_FIRST(&tp->t_segq)) != NULL) {
 		LIST_REMOVE(q, tqe_q);
 		m_freem(q->tqe_m);
+<<<<<<< HEAD
 		zfree(tcp_reass_zone, q);
+=======
+		FREE(q, M_TSEGQ);
+		tcp_reass_qsize--;
+>>>>>>> origin/10.3
 		rv = 1;
 	}
 	tp->t_reassqlen = 0;
@@ -1605,6 +1757,7 @@ tcp_drain()
 	struct inpcb *inp;
 	struct tcpcb *tp;
 
+<<<<<<< HEAD
 	if (!lck_rw_try_lock_exclusive(tcbinfo.ipi_lock)) 
 		return;
 
@@ -1622,6 +1775,28 @@ tcp_drain()
 
 			if (do_tcpdrain)	
 				tcp_freeq(tp);
+=======
+	/*
+	 * Walk the tcpbs, if existing, and flush the reassembly queue,
+	 * if there is one...
+	 * XXX: The "Net/3" implementation doesn't imply that the TCP
+	 *      reassembly queue should be flushed, but in a situation
+	 * 	where we're really low on mbufs, this is potentially
+	 *  	usefull.	
+	 */
+		for (inpb = LIST_FIRST(tcbinfo.listhead); inpb;
+	    		inpb = LIST_NEXT(inpb, inp_list)) {
+				if ((tcpb = intotcpcb(inpb))) {
+					while ((te = LIST_FIRST(&tcpb->t_segq))
+					       != NULL) {
+					LIST_REMOVE(te, tqe_q);
+					m_freem(te->tqe_m);
+					FREE(te, M_TSEGQ);
+					tcp_reass_qsize--;
+				}
+			}
+		}
+>>>>>>> origin/10.3
 
 			so_drain_extended_bk_idle(inp->inp_socket);
 
@@ -2523,7 +2698,7 @@ tcp_mtudisc(
 
 /*
  * Look-up the routing entry to the peer of this inpcb.  If no route
- * is found and it cannot be allocated the return NULL.  This routine
+ * is found and it cannot be allocated then return NULL.  This routine
  * is called by TCP routines that access the rmx structure and by tcp_mss
  * to get the interface MTU.  If a route is found, this routine will
  * hold the rtentry lock; the caller is responsible for unlocking.
@@ -2566,11 +2741,18 @@ tcp_rtlookup(inp, input_ifscope)
 			 * input_ifscope is IFSCOPE_NONE).
 			 */
 			ifscope = (inp->inp_flags & INP_BOUND_IF) ?
+<<<<<<< HEAD
 			    inp->inp_boundifp->if_index : input_ifscope;
 
 			rtalloc_scoped(ro, ifscope);
 			if ((rt = ro->ro_rt) != NULL)
 				RT_LOCK(rt);
+=======
+			    inp->inp_boundif : input_ifscope;
+
+			rtalloc_scoped_ign_locked(ro, 0UL, ifscope);
+			rt = ro->ro_rt;
+>>>>>>> origin/10.5
 		}
 	}
 	if (rt != NULL)
@@ -2592,6 +2774,7 @@ tcp_rtlookup(inp, input_ifscope)
 	else
 		tp->t_flags |= TF_PMTUD;
 
+<<<<<<< HEAD
 #if CONFIG_IFEF_NOWINDOWSCALE
 	if (tcp_obey_ifef_nowindowscale &&
 	    tp->t_state == TCPS_SYN_SENT && rt != NULL && rt->rt_ifp != NULL &&
@@ -2621,6 +2804,17 @@ tcp_rtlookup(inp, input_ifscope)
 	/*
 	 * Caller needs to call RT_UNLOCK(rt).
 	 */
+=======
+#ifdef IFEF_NOWINDOWSCALE
+	if (tp->t_state == TCPS_SYN_SENT && rt != NULL && rt->rt_ifp != NULL &&
+		(rt->rt_ifp->if_eflags & IFEF_NOWINDOWSCALE) != 0)
+	{
+		// Timestamps are not enabled on this interface
+		tp->t_flags &= ~(TF_REQ_SCALE);
+	}
+#endif
+
+>>>>>>> origin/10.5
 	return rt;
 }
 
@@ -2972,6 +3166,7 @@ tcp_sbspace(struct tcpcb *tp)
 	if (space < 0) 
 		space = 0;
 
+<<<<<<< HEAD
 #if CONTENT_FILTER
 	/* Compensate for data being processed by content filters */
 	pending = cfil_sock_data_space(sb);
@@ -2980,6 +3175,17 @@ tcp_sbspace(struct tcpcb *tp)
 		space = 0;
 	else
 		space -= pending;
+=======
+#if TRAFFIC_MGT
+	if (tp->t_inpcb->inp_socket->so_traffic_mgt_flags & TRAFFIC_MGT_SO_BG_REGULATE) {
+		if (tcp_background_io_enabled &&
+			tp->t_inpcb->inp_socket->so_traffic_mgt_flags & TRAFFIC_MGT_SO_BG_SUPPRESSED) {
+			tp->t_flags |= TF_RXWIN0SENT;
+			return 0; /* Triggers TCP window closing by responding there is no space */
+		}
+	}
+#endif /* TRAFFIC_MGT */
+>>>>>>> origin/10.6
 
 	/* Avoid increasing window size if the current window
 	 * is already very low, we could be in "persist" mode and

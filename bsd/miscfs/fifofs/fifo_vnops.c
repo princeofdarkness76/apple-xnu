@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -306,11 +328,17 @@ fifo_read(struct vnop_read_args *ap)
 #endif
 	if (uio_resid(uio) == 0)
 		return (0);
+<<<<<<< HEAD
 
 	rflags = (ap->a_ioflag & IO_NDELAY) ? MSG_NBIO : 0;
 
 	startresid = uio_resid(uio);
 
+=======
+	if (ap->a_ioflag & IO_NDELAY)
+		rso->so_state |= SS_NBIO;
+	startresid = uio->uio_resid;
+>>>>>>> origin/10.3
 	/* fifo conformance - if we have a reader open on the fifo but no 
 	 * writers then we need to make sure we do not block.  We do that by 
 	 * checking the receive buffer and if empty set error to EWOULDBLOCK.
@@ -318,17 +346,32 @@ fifo_read(struct vnop_read_args *ap)
 	 */
 	error = 0;
 	if (ap->a_vp->v_fifoinfo->fi_writers < 1) {
+<<<<<<< HEAD
 		socket_lock(rso, 1);
 		error = (rso->so_rcv.sb_cc == 0) ? EWOULDBLOCK : 0;
 		socket_unlock(rso, 1);
+=======
+		 error = (rso->so_rcv.sb_cc == 0) ? EWOULDBLOCK : 0;
+>>>>>>> origin/10.3
 	}
 
 	/* skip soreceive to avoid blocking when we have no writers */
 	if (error != EWOULDBLOCK) {
+<<<<<<< HEAD
 		error = soreceive(rso, (struct sockaddr **)0, uio, (struct mbuf **)0,
 	    					(struct mbuf **)0, &rflags);
 		if (error == 0 && ap->a_vp->v_knotes.slh_first != NULL)
 			KNOTE(&ap->a_vp->v_knotes, 0);
+=======
+		VOP_UNLOCK(ap->a_vp, 0, p);
+		thread_funnel_switch(KERNEL_FUNNEL, NETWORK_FUNNEL);
+
+		error = soreceive(rso, (struct sockaddr **)0, uio, (struct mbuf **)0,
+	    					(struct mbuf **)0, (int *)0);
+
+		thread_funnel_switch(NETWORK_FUNNEL, KERNEL_FUNNEL);
+		vn_lock(ap->a_vp, LK_EXCLUSIVE | LK_RETRY, p);
+>>>>>>> origin/10.3
 	}
 	else {
 		/* clear EWOULDBLOCK and return EOF (zero) */

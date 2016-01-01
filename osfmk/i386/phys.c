@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -201,12 +223,17 @@ kvtophys(
 
 extern pt_entry_t *debugger_ptep;
 extern vm_map_offset_t debugger_window_kva;
+<<<<<<< HEAD
 extern int _bcopy(const void *, void *, vm_size_t);
 extern int _bcopy2(const void *, void *);
 extern int _bcopy4(const void *, void *);
 extern int _bcopy8(const void *, void *);
 
 __private_extern__ int ml_copy_phys(addr64_t src64, addr64_t dst64, vm_size_t bytes) {
+=======
+
+__private_extern__ void ml_copy_phys(addr64_t src64, addr64_t dst64, vm_size_t bytes) {
+>>>>>>> origin/10.7
 	void *src, *dst;
 	int err = 0;
 
@@ -219,6 +246,12 @@ __private_extern__ int ml_copy_phys(addr64_t src64, addr64_t dst64, vm_size_t by
 	src = (void *) ((uintptr_t)src_map->prv_CADDR | ((uint32_t)src64 & INTEL_OFFMASK));
 	dst = (void *) ((uintptr_t)dst_map->prv_CADDR | ((uint32_t)dst64 & INTEL_OFFMASK));
 #elif defined(__x86_64__)
+<<<<<<< HEAD
+=======
+	src = PHYSMAP_PTOV(src64);
+	dst = PHYSMAP_PTOV(dst64);
+
+>>>>>>> origin/10.7
 	addr64_t debug_pa = 0;
 
 	/* If either destination or source are outside the
@@ -228,6 +261,7 @@ __private_extern__ int ml_copy_phys(addr64_t src64, addr64_t dst64, vm_size_t by
 
 	if (physmap_enclosed(src64) == FALSE) {
 		src = (void *)(debugger_window_kva | (src64 & INTEL_OFFMASK));
+<<<<<<< HEAD
 		dst = PHYSMAP_PTOV(dst64);
 		debug_pa = src64 & PG_FRAME;
 	} else if (physmap_enclosed(dst64) == FALSE) {
@@ -237,6 +271,12 @@ __private_extern__ int ml_copy_phys(addr64_t src64, addr64_t dst64, vm_size_t by
 	} else {
 		src = PHYSMAP_PTOV(src64);
 		dst = PHYSMAP_PTOV(dst64);
+=======
+		debug_pa = src64 & PG_FRAME;
+	} else if (physmap_enclosed(dst64) == FALSE) {
+		dst = (void *)(debugger_window_kva | (dst64 & INTEL_OFFMASK));
+		debug_pa = dst64 & PG_FRAME;
+>>>>>>> origin/10.7
 	}
 	/* DRK: debugger only routine, we don't bother checking for an
 	 * identical mapping.
@@ -266,14 +306,29 @@ __private_extern__ int ml_copy_phys(addr64_t src64, addr64_t dst64, vm_size_t by
 	 * 1-byte and other copies are handled by the regular _bcopy.
 	 */
 	switch (bytes) {
+<<<<<<< HEAD
 	case 2:
 		err = _bcopy2(src, dst);
 		break;
 	case 4:
 		err = _bcopy4(src, dst);
+=======
+	case 1:
+		*((uint8_t *) dst) = *((volatile uint8_t *) src);
+		break;
+	case 2:
+		*((uint16_t *) dst) = *((volatile uint16_t *) src);
+		break;
+	case 4:
+		*((uint32_t *) dst) = *((volatile uint32_t *) src);
+>>>>>>> origin/10.7
 		break;
 	case 8:
+<<<<<<< HEAD
 		err = _bcopy8(src, dst);
+=======
+		*((uint64_t *) dst) = *((volatile uint64_t *) src);
+>>>>>>> origin/10.7
 		break;
 	case 1:
 	default:

@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -113,6 +135,7 @@ struct zone {
 	vm_size_t	max_size;	/* how large can this zone grow */
 	vm_size_t	elem_size;	/* size of an element */
 	vm_size_t	alloc_size;	/* size used for more memory */
+<<<<<<< HEAD
 	uint64_t	page_count __attribute__((aligned(8)));   /* number of pages used by this zone */
 	uint64_t	sum_count;	/* count of allocs (life of zone) */
 	uint32_t
@@ -138,6 +161,28 @@ struct zone {
 	int		index;		/* index into zone_info arrays for this zone */
 	struct zone	*next_zone;	/* Link for all-zones list */
 	const char	*zone_name;	/* a name for the zone */
+=======
+	char		*zone_name;	/* a name for the zone */
+	unsigned int
+	/* boolean_t */ exhaustible :1,	/* (F) merely return if empty? */
+	/* boolean_t */	collectable :1,	/* (F) garbage collect empty pages */
+	/* boolean_t */	expandable :1,	/* (T) expand zone (with message)? */
+	/* boolean_t */ allows_foreign :1,/* (F) allow non-zalloc space */
+	/* boolean_t */	doing_alloc :1,	/* is zone expanding now? */
+	/* boolean_t */	waiting :1,	/* is thread waiting for expansion? */
+	/* boolean_t */	async_pending :1,	/* asynchronous allocation pending? */
+	/* boolean_t */	doing_gc :1,	/* garbage collect in progress? */
+<<<<<<< HEAD
+	/* boolean_t */ noencrypt :1;
+=======
+	/* boolean_t */ noencrypt :1,
+	/* boolean_t */	no_callout:1,
+	/* boolean_t */	async_prio_refill:1;
+	int		index;		/* index into zone_info arrays for this zone */
+>>>>>>> origin/10.7
+	struct zone *	next_zone;	/* Link for all-zones list */
+	call_entry_data_t	call_async_alloc;	/* callout for asynchronous alloc */
+>>>>>>> origin/10.3
 #if	ZONE_DEBUG
 	queue_head_t	active_zones;	/* active elements */
 #endif	/* ZONE_DEBUG */
@@ -145,12 +190,17 @@ struct zone {
 #if CONFIG_ZLEAKS
 	uint32_t zleak_capture;		/* per-zone counter for capturing every N allocations */
 #endif /* CONFIG_ZLEAKS */
+<<<<<<< HEAD
 	uint32_t zp_count;              /* counter for poisoning every N frees */
 	vm_size_t	prio_refill_watermark;
 	thread_t	zone_replenish_thread;
 #if	CONFIG_GZALLOC
 	gzalloc_data_t	gz;
 #endif /* CONFIG_GZALLOC */
+=======
+	vm_size_t	prio_refill_watermark;
+	thread_t	zone_replenish_thread;
+>>>>>>> origin/10.7
 };
 
 /*
@@ -274,14 +324,21 @@ extern void		zone_prio_refill_configure(zone_t, vm_size_t);
 #define Z_COLLECT	2	/* Make zone collectable	*/
 #define Z_EXPAND	3	/* Make zone expandable		*/
 #define	Z_FOREIGN	4	/* Allow collectable zone to contain foreign elements */
+<<<<<<< HEAD
 #define Z_CALLERACCT	5	/* Account alloc/free against the caller */
 #define Z_NOENCRYPT	6	/* Don't encrypt zone during hibernation */
 #define Z_NOCALLOUT 	7	/* Don't asynchronously replenish the zone via
 				 * callouts
 				 */
+<<<<<<< HEAD
 #define Z_ALIGNMENT_REQUIRED 8
 #define Z_GZALLOC_EXEMPT 9	/* Not tracked in guard allocation mode */
+=======
+#define Z_NOENCRYPT	6	/* Don't encrypt zone during hibernation */
+>>>>>>> origin/10.6
 
+=======
+>>>>>>> origin/10.7
 /* Preallocate space for zone from zone map */
 extern void		zprealloc(
 					zone_t		zone,

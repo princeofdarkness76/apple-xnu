@@ -46,6 +46,14 @@ enum purgeable_q_type {
 	PURGEABLE_Q_TYPE_MAX
 };
 
+<<<<<<< HEAD
+=======
+#if (CONFIG_TOKEN_QUEUE_SMALL == 1)
+typedef uint16_t token_idx_t;
+typedef uint16_t token_cnt_t;
+#define TOKEN_COUNT_MAX UINT16_MAX
+#else
+>>>>>>> origin/10.5
 typedef uint32_t token_idx_t;
 typedef uint32_t token_cnt_t;
 #define TOKEN_COUNT_MAX UINT32_MAX
@@ -67,8 +75,11 @@ struct purgeable_q {
 typedef struct purgeable_q * purgeable_q_t;
 
 extern struct purgeable_q purgeable_queues[PURGEABLE_Q_TYPE_MAX];
+<<<<<<< HEAD
 extern queue_head_t purgeable_nonvolatile_queue;
 extern int purgeable_nonvolatile_count;
+=======
+>>>>>>> origin/10.5
 extern int32_t token_new_pagecount;
 #define TOKEN_NEW_PAGECOUNT_MAX INT32_MAX
 extern int available_for_purge;
@@ -82,7 +93,11 @@ extern int available_for_purge;
  * mostly used on a user context and we don't want any contention with the
  * pageout daemon.
  */
+<<<<<<< HEAD
 decl_lck_mtx_data(extern,vm_purgeable_queue_lock)
+=======
+decl_mutex_data(,vm_purgeable_queue_lock)
+>>>>>>> origin/10.5
 
 /* add a new token to queue. called by vm_object_purgeable_control */
 /* enter with page queue locked */
@@ -97,6 +112,7 @@ void vm_purgeable_token_delete_last(purgeable_q_t queue);
  * enter with page queue locked
  */
 void vm_purgeable_q_advance_all(void);
+<<<<<<< HEAD
 
 /* the object purger. purges the next eligible object from memory. */
 /* returns TRUE if an object was purged, otherwise FALSE. */
@@ -104,6 +120,11 @@ boolean_t vm_purgeable_object_purge_one(int force_purge_below_group, int flags);
 
 /* purge all volatile objects now */
 void vm_purgeable_object_purge_all(void);
+=======
+
+/* the object purger. purges the next eligible object from memory. */
+void vm_purgeable_object_purge_one(void);
+>>>>>>> origin/10.5
 
 /* insert purgeable object into queue */
 void vm_purgeable_object_add(vm_object_t object, purgeable_q_t queue, int group);

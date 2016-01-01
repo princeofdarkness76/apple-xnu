@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -59,6 +81,7 @@ typedef	kern_return_t		IOReturn;
 #define sub_iokit_smbus                   err_sub(11)
 #define sub_iokit_ahci                    err_sub(12)
 #define sub_iokit_powermanagement         err_sub(13)
+<<<<<<< HEAD
 #define sub_iokit_hidsystem             err_sub(14)
 #define sub_iokit_scsi                    err_sub(16)
 #define sub_iokit_usbaudio                err_sub(17)
@@ -74,6 +97,12 @@ typedef	kern_return_t		IOReturn;
 #define sub_iokit_hsic                    err_sub(0x147)
 #define sub_iokit_sdio                    err_sub(0x174)
 #define sub_iokit_wlan                    err_sub(0x208)
+=======
+//#define sub_iokit_hidsystem             err_sub(14)
+#define sub_iokit_scsi                    err_sub(16)
+//#define sub_iokit_pccard                err_sub(21)
+#define sub_iokit_thunderbolt             err_sub(29)
+>>>>>>> origin/10.6
 
 #define sub_iokit_vendor_specific         err_sub(-2)
 #define sub_iokit_reserved                err_sub(-1)

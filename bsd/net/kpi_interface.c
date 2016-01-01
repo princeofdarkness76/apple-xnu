@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2004-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2004-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -90,6 +94,9 @@ static errno_t ifnet_list_get_common(ifnet_family_t, boolean_t, ifnet_t **,
 static errno_t ifnet_set_lladdr_internal(ifnet_t, const void *, size_t,
     u_char, int);
 static errno_t ifnet_awdl_check_eflags(ifnet_t, u_int32_t *, u_int32_t *);
+
+static errno_t
+ifnet_list_get_common(ifnet_family_t, boolean_t, ifnet_t **, u_int32_t *);
 
 /*
  * Temporary work around until we have real reference counting
@@ -652,11 +659,75 @@ ifnet_set_idle_flags(ifnet_t ifp, u_int32_t new_flags, u_int32_t mask)
 	return (err);
 }
 
+<<<<<<< HEAD
 u_int32_t
 ifnet_idle_flags(ifnet_t ifp)
 {
 	return ((ifp == NULL) ? 0 : ifp->if_idle_flags);
 }
+=======
+errno_t
+ifnet_set_idle_flags(ifnet_t ifp, u_int32_t new_flags, u_int32_t mask)
+{
+#if IFNET_ROUTE_REFCNT
+	int lock, before, after;
+
+	if (ifp == NULL)
+		return (EINVAL);
+
+	lck_mtx_lock(rnh_lock);
+
+	lock = (ifp->if_lock != NULL);
+	if (lock)
+		ifnet_lock_exclusive(ifp);
+
+	before = ifp->if_idle_flags;
+	ifp->if_idle_flags = (new_flags & mask) | (ifp->if_idle_flags & ~mask);
+	after = ifp->if_idle_flags;
+
+	if ((after - before) < 0 && ifp->if_idle_flags == 0 &&
+	    ifp->if_want_aggressive_drain != 0) {
+		ifp->if_want_aggressive_drain = 0;
+		if (ifnet_aggressive_drainers == 0)
+			panic("%s: ifp=%p negative aggdrain!", __func__, ifp);
+		if (--ifnet_aggressive_drainers == 0)
+			rt_aggdrain(0);
+	} else if ((after - before) > 0 && ifp->if_want_aggressive_drain == 0) {
+		ifp->if_want_aggressive_drain++;
+		if (++ifnet_aggressive_drainers == 0)
+			panic("%s: ifp=%p wraparound aggdrain!", __func__, ifp);
+		else if (ifnet_aggressive_drainers == 1)
+			rt_aggdrain(1);
+	}
+
+	if (lock)
+		ifnet_lock_done(ifp);
+
+	lck_mtx_unlock(rnh_lock);
+
+	return (0);
+#else
+#pragma unused(ifp, new_flags, mask)
+	return (ENOTSUP);
+#endif /* IFNET_ROUTE_REFCNT */
+}
+
+u_int32_t
+ifnet_idle_flags(ifnet_t ifp)
+{
+#if IFNET_ROUTE_REFCNT
+	return ((ifp == NULL) ? 0 : ifp->if_idle_flags);
+#else
+#pragma unused(ifp)
+	return (0);
+#endif /* IFNET_ROUTE_REFCNT */
+}
+
+static const ifnet_offload_t offload_mask = IFNET_CSUM_IP | IFNET_CSUM_TCP |
+			IFNET_CSUM_UDP | IFNET_CSUM_FRAGMENT | IFNET_IP_FRAGMENT |
+			IFNET_CSUM_SUM16 | IFNET_VLAN_TAGGING | IFNET_VLAN_MTU |
+			IFNET_MULTIPAGES | IFNET_TSO_IPV4 | IFNET_TSO_IPV6;
+>>>>>>> origin/10.6
 
 errno_t
 ifnet_set_link_quality(ifnet_t ifp, int quality)
@@ -2092,11 +2163,14 @@ ifnet_list_get_all(ifnet_family_t family, ifnet_t **list, u_int32_t *count)
 	return (ifnet_list_get_common(family, TRUE, list, count));
 }
 
+<<<<<<< HEAD
 struct ifnet_list {
 	SLIST_ENTRY(ifnet_list)	ifl_le;
 	struct ifnet		*ifl_ifp;
 };
 
+=======
+>>>>>>> origin/10.5
 static errno_t
 ifnet_list_get_common(ifnet_family_t family, boolean_t get_all, ifnet_t **list,
     u_int32_t *count)
@@ -2105,6 +2179,7 @@ ifnet_list_get_common(ifnet_family_t family, boolean_t get_all, ifnet_t **list,
 	SLIST_HEAD(, ifnet_list) ifl_head;
 	struct ifnet_list *ifl, *ifl_tmp;
 	struct ifnet *ifp;
+<<<<<<< HEAD
 	int cnt = 0;
 	errno_t err = 0;
 
@@ -2113,10 +2188,36 @@ ifnet_list_get_common(ifnet_family_t family, boolean_t get_all, ifnet_t **list,
 	if (list == NULL || count == NULL) {
 		err = EINVAL;
 		goto done;
+=======
+	u_int32_t cmax = 0;
+	*count = 0;
+	errno_t	result = 0;
+
+	if (list == NULL || count == NULL)
+		return (EINVAL);
+
+	ifnet_head_lock_shared();
+	TAILQ_FOREACH(ifp, &ifnet, if_link) {
+		if ((ifp->if_eflags & IFEF_DETACHING) && !get_all)
+			continue;
+		if (family == IFNET_FAMILY_ANY || ifp->if_family == family)
+			cmax++;
+	}
+
+	if (cmax == 0)
+		result = ENXIO;
+
+	if (result == 0) {
+		MALLOC(*list, ifnet_t*, sizeof(ifnet_t) * (cmax + 1),
+		    M_TEMP, M_NOWAIT);
+		if (*list == NULL)
+			result = ENOMEM;
+>>>>>>> origin/10.5
 	}
 	*count = 0;
 	*list = NULL;
 
+<<<<<<< HEAD
 	ifnet_head_lock_shared();
 	TAILQ_FOREACH(ifp, &ifnet_head, if_link) {
 		if (family == IFNET_FAMILY_ANY || ifp->if_family == family) {
@@ -2126,6 +2227,19 @@ ifnet_list_get_common(ifnet_family_t family, boolean_t get_all, ifnet_t **list,
 				ifnet_head_done();
 				err = ENOMEM;
 				goto done;
+=======
+	if (result == 0) {
+		TAILQ_FOREACH(ifp, &ifnet, if_link) {
+			if ((ifp->if_eflags & IFEF_DETACHING) && !get_all)
+				continue;
+			if (*count + 1 > cmax)
+				break;
+			if (family == IFNET_FAMILY_ANY ||
+			    ((ifnet_family_t)ifp->if_family) == family) {
+				(*list)[*count] = (ifnet_t)ifp;
+				ifnet_reference((*list)[*count]);
+				(*count)++;
+>>>>>>> origin/10.5
 			}
 			ifl->ifl_ifp = ifp;
 			ifnet_reference(ifp);
@@ -2135,6 +2249,7 @@ ifnet_list_get_common(ifnet_family_t family, boolean_t get_all, ifnet_t **list,
 	}
 	ifnet_head_done();
 
+<<<<<<< HEAD
 	if (cnt == 0) {
 		err = ENXIO;
 		goto done;
@@ -2160,6 +2275,9 @@ done:
 	}
 
 	return (err);
+=======
+	return (result);
+>>>>>>> origin/10.5
 }
 
 void
@@ -2170,8 +2288,14 @@ ifnet_list_free(ifnet_t *interfaces)
 	if (interfaces == NULL)
 		return;
 
+<<<<<<< HEAD
 	for (i = 0; interfaces[i]; i++)
 		ifnet_release(interfaces[i]);
+=======
+	for (i = 0; interfaces[i]; i++) {
+		ifnet_release(interfaces[i]);
+	}
+>>>>>>> origin/10.5
 
 	FREE(interfaces, M_TEMP);
 }
@@ -2982,3 +3106,82 @@ ifnet_maxpacketpreamblelen(void)
 {
 	return (MAX_IF_PACKET_PREAMBLE_LEN);
 }
+
+/******************************************************************************/
+/* interface cloner                                                           */
+/******************************************************************************/
+
+errno_t 
+ifnet_clone_attach(struct ifnet_clone_params *cloner_params, if_clone_t *ifcloner)
+{
+	errno_t error = 0;
+	struct if_clone *ifc = NULL;
+	size_t namelen;
+	
+	if (cloner_params == NULL || ifcloner == NULL || cloner_params->ifc_name == NULL ||
+		cloner_params->ifc_create == NULL || cloner_params->ifc_destroy == NULL ||
+		(namelen = strlen(cloner_params->ifc_name)) >= IFNAMSIZ) {
+		error = EINVAL;
+		goto fail;
+	}
+	
+	if (if_clone_lookup(cloner_params->ifc_name, NULL) != NULL) {
+		printf("ifnet_clone_attach: already a cloner for %s\n", cloner_params->ifc_name);
+		error = EEXIST;
+		goto fail;
+	}
+
+	/* Make room for name string */
+	ifc = _MALLOC(sizeof(struct if_clone) + IFNAMSIZ + 1, M_CLONE, M_WAITOK | M_ZERO);
+	if (ifc == NULL) {
+		printf("ifnet_clone_attach: _MALLOC failed\n");
+		error = ENOBUFS;
+		goto fail;
+	}
+	strlcpy((char *)(ifc + 1), cloner_params->ifc_name, IFNAMSIZ + 1);
+	ifc->ifc_name = (char *)(ifc + 1);
+	ifc->ifc_namelen = namelen;
+	ifc->ifc_maxunit = IF_MAXUNIT;
+	ifc->ifc_create = cloner_params->ifc_create;
+	ifc->ifc_destroy = cloner_params->ifc_destroy;
+
+	error = if_clone_attach(ifc);
+	if (error != 0) {
+		printf("ifnet_clone_attach: if_clone_attach failed %d\n", error);
+		goto fail;
+	}
+	*ifcloner = ifc;
+	
+	return 0;
+fail:
+	if (ifc != NULL)
+		FREE(ifc, M_CLONE);
+	return error;	
+}
+
+errno_t 
+ifnet_clone_detach(if_clone_t ifcloner)
+{
+	errno_t error = 0;
+	struct if_clone *ifc = ifcloner;
+	
+	if (ifc == NULL || ifc->ifc_name == NULL)
+		return EINVAL;
+	
+	if ((if_clone_lookup(ifc->ifc_name, NULL)) == NULL) {
+		printf("ifnet_clone_attach: no cloner for %s\n", ifc->ifc_name);
+		error = EINVAL;
+		goto fail;
+	}
+
+	if_clone_detach(ifc);
+	
+	FREE(ifc, M_CLONE);
+
+	return 0;
+fail:
+	return error;	
+}
+
+
+

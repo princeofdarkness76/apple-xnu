@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -91,6 +113,7 @@
 #include <sys/tty.h>
 #include <sys/signalvar.h>
 #include <sys/syslog.h>
+<<<<<<< HEAD
 #include <sys/sysctl.h>
 #include <sys/sysproto.h>
 #include <sys/kauth.h>
@@ -120,6 +143,8 @@
 #endif
 
 #include <libkern/crypto/sha1.h>
+=======
+>>>>>>> origin/10.3
 
 /*
  * Structure associated with user cacheing.
@@ -148,6 +173,8 @@ struct proclist zombproc;
 extern struct tty cons;
 
 extern int cs_debug;
+
+int cs_debug;	/* declared further down in this file */
 
 #if DEBUG
 #define __PROC_INTERNAL_DEBUG 1
@@ -180,6 +207,11 @@ struct fixjob_iterargs {
 };
 
 int fixjob_callback(proc_t, void *);
+
+/* Name to give to core files */
+__private_extern__ char corefilename[MAXPATHLEN+1] = {"/cores/core.%P"};
+
+static void orphanpg(struct pgrp *pg);
 
 /*
  * Initialize global process hashing structures.
@@ -280,7 +312,11 @@ out:
  * Is p an inferior of t ?
  */
 int
+<<<<<<< HEAD
 isinferior(proc_t p, proc_t t)
+=======
+isinferior(struct proc *p, register struct proc *t)
+>>>>>>> origin/10.3
 {
 	int retval = 0;
 	int nchecked = 0;
@@ -521,11 +557,27 @@ proc_drop_zombref(proc_t p)
 	proc_list_unlock();
 }
 
+<<<<<<< HEAD
 
 void
 proc_refdrain(proc_t p)
+=======
+/*
+ * Adjust pgrp jobc counters when specified process changes process group.
+ * We count the number of processes in each process group that "qualify"
+ * the group for terminal job control (those with a parent in a different
+ * process group of the same session).  If that count reaches zero, the
+ * process group becomes orphaned.  Check both the specified process'
+ * process group and that of its children.
+ * entering == 0 => p is leaving specified group.
+ * entering == 1 => p is entering specified group.
+ */
+void
+fixjobc(struct proc *p, struct pgrp *pgrp, int entering)
+>>>>>>> origin/10.3
 {
 
+<<<<<<< HEAD
 	proc_list_lock();
 
 	p->p_listflag |= P_LIST_DRAIN;
@@ -539,10 +591,48 @@ proc_refdrain(proc_t p)
 	proc_list_unlock();
 
 
+=======
+	/*
+	 * Check p's parent to see whether p qualifies its own process
+	 * group; if so, adjust count for p's process group.
+	 */
+	if ((hispgrp = p->p_pptr->p_pgrp) != pgrp &&
+	    hispgrp->pg_session == mysession) {
+		if (entering)
+			pgrp->pg_jobc++;
+		else if (--pgrp->pg_jobc == 0)
+			orphanpg(pgrp);
+	}
+
+	/*
+	 * Check this process' children to see whether they qualify
+	 * their process groups; if so, adjust counts for children's
+	 * process groups.
+	 */
+	for (p = p->p_children.lh_first; p != 0; p = p->p_sibling.le_next)
+		if ((hispgrp = p->p_pgrp) != pgrp &&
+		    hispgrp->pg_session == mysession &&
+		    p->p_stat != SZOMB) {
+			if (entering)
+				hispgrp->pg_jobc++;
+			else if (--hispgrp->pg_jobc == 0)
+				orphanpg(hispgrp);
+>>>>>>> origin/10.3
+}
 }
 
+<<<<<<< HEAD
 proc_t 
 proc_parentholdref(proc_t p)
+=======
+/* 
+ * A process group has become orphaned;
+ * if there are any stopped processes in the group,
+ * hang-up all process in that group.
+ */
+static void
+orphanpg(struct pgrp *pg)
+>>>>>>> origin/10.3
 {
 	proc_t parent = PROC_NULL;
 	proc_t pp;
@@ -639,10 +729,15 @@ proc_checkdeadrefs(__unused proc_t p)
 	if (p->p_refcount != 0)
 		panic("proc being freed and pending refcount %p:%d\n", p, p->p_refcount);
 	if (p->p_parentref != 0)
+<<<<<<< HEAD
 		panic("proc being freed and pending parentrefs %p:%d\n", p, p->p_parentref);
+=======
+		panic("proc being freed and pending parentrefs %x:%x\n", (unsigned int)p, (unsigned int)p->p_parentref);
+>>>>>>> origin/10.5
 #endif
 }
 
+/* XXX should be __private_extern__ */
 int
 proc_pid(proc_t p)
 {
@@ -651,8 +746,14 @@ proc_pid(proc_t p)
 	return -1;
 }
 
+<<<<<<< HEAD
 int
 proc_ppid(proc_t p)
+=======
+/* XXX Why does this function exist?  Need to kill it off... */
+struct proc *
+current_proc_EXTERNAL(void)
+>>>>>>> origin/10.3
 {
 	if (p != NULL)
 		return (p->p_ppid);
@@ -940,6 +1041,7 @@ proc_pidversion(proc_t p)
 	return(p->p_idversion);
 }
 
+<<<<<<< HEAD
 uint64_t
 proc_uniqueid(proc_t p)
 {
@@ -975,12 +1077,15 @@ proc_did_throttle(proc_t p)
 	return (p->did_throttle);
 }
 
+=======
+>>>>>>> origin/10.5
 int
 proc_getcdhash(proc_t p, unsigned char *cdhash)
 {
 	return vn_getcdhash(p->p_textvp, p->p_textoff, cdhash);
 }
 
+<<<<<<< HEAD
 void
 proc_getexecutableuuid(proc_t p, unsigned char *uuidbuf, unsigned long size)
 {
@@ -1005,6 +1110,8 @@ proc_getexecutablevnode(proc_t p)
 }
 
 
+=======
+>>>>>>> origin/10.5
 void
 bsd_set_dependency_capable(task_t task)
 {
@@ -1843,7 +1950,27 @@ csops_internal(pid_t pid, int ops, user_addr_t uaddr, user_size_t usersize, user
 		case CS_OPS_PIDOFFSET:
 			toff = pt->p_textoff;
 			proc_rele(pt);
+<<<<<<< HEAD
 			error = copyout(&toff, uaddr, sizeof(toff));
+=======
+
+			buf = (char *)kalloc(usize);
+			if (buf == NULL) 
+				return(ENOMEM);
+			bzero(buf, usize);
+
+			error = vnode_getwithvid(tvp, vid);
+			if (error == 0) {
+				int len; 
+				len = usize;
+				error = vn_getpath(tvp, buf, &len);
+				vnode_put(tvp);
+				if (error == 0) {
+					error = copyout(buf, uaddr, usize);
+				}
+				kfree(buf, usize);
+			}
+>>>>>>> origin/10.5
 			return(error);
 
 		case CS_OPS_CDHASH:
@@ -2741,6 +2868,110 @@ proc_knote_drain(struct proc *p)
 	proc_klist_unlock();
 }
 
+<<<<<<< HEAD
+=======
+unsigned long cs_procs_killed = 0;
+unsigned long cs_procs_invalidated = 0;
+int cs_force_kill = 0;
+int cs_force_hard = 0;
+int cs_debug = 0;
+SYSCTL_INT(_vm, OID_AUTO, cs_force_kill, CTLFLAG_RW, &cs_force_kill, 0, "");
+SYSCTL_INT(_vm, OID_AUTO, cs_force_hard, CTLFLAG_RW, &cs_force_hard, 0, "");
+SYSCTL_INT(_vm, OID_AUTO, cs_debug, CTLFLAG_RW, &cs_debug, 0, "");
+
+int
+cs_allow_invalid(struct proc *p)
+{
+#if MACH_ASSERT
+	lck_mtx_assert(&p->p_mlock, LCK_MTX_ASSERT_NOTOWNED);
+#endif
+#if CONFIG_MACF && CONFIG_ENFORCE_SIGNED_CODE
+	/* There needs to be a MAC policy to implement this hook, or else the
+	 * kill bits will be cleared here every time. If we have 
+	 * CONFIG_ENFORCE_SIGNED_CODE, we can assume there is a policy
+	 * implementing the hook. 
+	 */
+	if( 0 != mac_proc_check_run_cs_invalid(p)) {
+		if(cs_debug) printf("CODE SIGNING: cs_allow_invalid() "
+				    "not allowed: pid %d\n", 
+				    p->p_pid);
+		return 0;
+	}
+	if(cs_debug) printf("CODE SIGNING: cs_allow_invalid() "
+			    "allowed: pid %d\n", 
+			    p->p_pid);
+	proc_lock(p);
+	p->p_csflags &= ~(CS_KILL | CS_HARD | CS_VALID);
+	proc_unlock(p);
+	vm_map_switch_protect(get_task_map(p->task), FALSE);
+#endif
+	return (p->p_csflags & (CS_KILL | CS_HARD)) == 0;
+}
+
+int
+cs_invalid_page(
+	addr64_t vaddr)
+{
+	struct proc	*p;
+	int		retval;
+
+	p = current_proc();
+
+	/*
+	 * XXX revisit locking when proc is no longer protected
+	 * by the kernel funnel...
+	 */
+
+	/* XXX for testing */
+	proc_lock(p);
+	if (cs_force_kill)
+		p->p_csflags |= CS_KILL;
+	if (cs_force_hard)
+		p->p_csflags |= CS_HARD;
+
+	/* CS_KILL triggers us to send a kill signal. Nothing else. */
+	if (p->p_csflags & CS_KILL) {
+		p->p_csflags |= CS_KILLED;
+		proc_unlock(p);
+		if (cs_debug) {
+			printf("CODE SIGNING: cs_invalid_page(0x%llx): "
+			       "p=%d[%s] honoring CS_KILL, final status 0x%x\n",
+			       vaddr, p->p_pid, p->p_comm, p->p_csflags);
+		}
+		cs_procs_killed++;
+		psignal(p, SIGKILL);
+		proc_lock(p);
+	}
+	
+	/* CS_HARD means fail the mapping operation so the process stays valid. */
+	if (p->p_csflags & CS_HARD) {
+		proc_unlock(p);
+		if (cs_debug) {
+			printf("CODE SIGNING: cs_invalid_page(0x%llx): "
+			       "p=%d[%s] honoring CS_HARD\n",
+			       vaddr, p->p_pid, p->p_comm);
+		}
+		retval = 1;
+	} else {
+		if (p->p_csflags & CS_VALID) {
+			p->p_csflags &= ~CS_VALID;
+			
+			proc_unlock(p);
+			cs_procs_invalidated++;
+			printf("CODE SIGNING: cs_invalid_page(0x%llx): "
+			       "p=%d[%s] clearing CS_VALID\n",
+			       vaddr, p->p_pid, p->p_comm);
+		} else {
+			proc_unlock(p);
+		}
+		
+		retval = 0;
+	}
+
+	return retval;
+}
+
+>>>>>>> origin/10.6
 void 
 proc_setregister(proc_t p)
 {
@@ -2772,7 +3003,12 @@ proc_selfpgrpid()
 
 /* return control and action states */
 int
+<<<<<<< HEAD
 proc_getpcontrol(int pid, int * pcontrolp)
+=======
+cs_invalid_page(
+	addr64_t vaddr)
+>>>>>>> origin/10.5
 {
 	proc_t p;
 
@@ -2793,6 +3029,7 @@ proc_dopcontrol(proc_t p)
 
 	proc_lock(p);
 
+<<<<<<< HEAD
 	pcontrol = PROC_CONTROL_STATE(p);
 
 	if (PROC_ACTION_STATE(p) == 0) {
@@ -3150,7 +3387,113 @@ proc_chrooted(proc_t p)
 		proc_fdlock(p);
 		retval = (p->p_fd->fd_rdir != NULL) ? 1 : 0;
 		proc_fdunlock(p);
+=======
+	/* CS_KILL triggers us to send a kill signal. Nothing else. */
+	if (p->p_csflags & CS_KILL) {
+		proc_unlock(p);
+		if (cs_debug) {
+			printf("CODE SIGNING: cs_invalid_page(0x%llx): "
+			       "p=%d[%s] honoring CS_KILL\n",
+			       vaddr, p->p_pid, p->p_comm);
+		}
+		cs_procs_killed++;
+		psignal(p, SIGKILL);
+		proc_lock(p);
+	}
+	
+	/* CS_HARD means fail the mapping operation so the process stays valid. */
+	if (p->p_csflags & CS_HARD) {
+		proc_unlock(p);
+		if (cs_debug) {
+			printf("CODE SIGNING: cs_invalid_page(0x%llx): "
+			       "p=%d[%s] honoring CS_HARD\n",
+			       vaddr, p->p_pid, p->p_comm);
+		}
+		retval = 1;
+	} else {
+		if (p->p_csflags & CS_VALID) {
+			p->p_csflags &= ~CS_VALID;
+			
+			proc_unlock(p);
+			cs_procs_invalidated++;
+			printf("CODE SIGNING: cs_invalid_page(0x%llx): "
+			       "p=%d[%s] clearing CS_VALID\n",
+			       vaddr, p->p_pid, p->p_comm);
+		} else {
+			proc_unlock(p);
+		}
+		
+		retval = 0;
+>>>>>>> origin/10.5
 	}
 
 	return retval;
+}
+
+/*
+ * proc_core_name(name, uid, pid)
+ * Expand the name described in corefilename, using name, uid, and pid.
+ * corefilename is a printf-like string, with three format specifiers:
+ *	%N	name of process ("name")
+ *	%P	process id (pid)
+ *	%U	user id (uid)
+ * For example, "%N.core" is the default; they can be disabled completely
+ * by using "/dev/null", or all core files can be stored in "/cores/%U/%N-%P".
+ * This is controlled by the sysctl variable kern.corefile (see above).
+ */
+__private_extern__ char *
+proc_core_name(const char *name, uid_t uid, pid_t pid)
+{
+	const char *format, *appendstr;
+	char *temp;
+	char id_buf[11];		/* Buffer for pid/uid -- max 4B */
+	size_t i, l, n;
+
+	format = corefilename;
+	MALLOC(temp, char *, MAXPATHLEN, M_TEMP, M_NOWAIT | M_ZERO);
+	if (temp == NULL)
+		return (NULL);
+	for (i = 0, n = 0; n < MAXPATHLEN && format[i]; i++) {
+		switch (format[i]) {
+		case '%':	/* Format character */
+			i++;
+			switch (format[i]) {
+			case '%':
+				appendstr = "%";
+				break;
+			case 'N':	/* process name */
+				appendstr = name;
+				break;
+			case 'P':	/* process id */
+				sprintf(id_buf, "%u", pid);
+				appendstr = id_buf;
+				break;
+			case 'U':	/* user id */
+				sprintf(id_buf, "%u", uid);
+				appendstr = id_buf;
+				break;
+			default:
+				appendstr = "";
+			  	log(LOG_ERR,
+				    "Unknown format character %c in `%s'\n",
+				    format[i], format);
+			}
+			l = strlen(appendstr);
+			if ((n + l) >= MAXPATHLEN)
+				goto toolong;
+			bcopy(appendstr, temp + n, l);
+			n += l;
+			break;
+		default:
+			temp[n++] = format[i];
+		}
+	}
+	if (format[i] != '\0')
+		goto toolong;
+	return (temp);
+toolong:
+	log(LOG_ERR, "pid %ld (%s), uid (%lu): corename is too long\n",
+	    (long)pid, name, (u_long)uid);
+	FREE(temp, M_TEMP);
+	return (NULL);
 }

@@ -217,7 +217,11 @@ mcache_init(void)
 		    (btp->bt_bktsize + 1) * sizeof (void *), 0, 0, MCR_SLEEP);
 	}
 
+<<<<<<< HEAD
 	PE_parse_boot_argn("mcache_flags", &mcache_flags, sizeof(mcache_flags));
+=======
+	PE_parse_boot_argn("mcache_flags", &mcache_flags, sizeof (mcache_flags));
+>>>>>>> origin/10.5
 	mcache_flags &= MCF_FLAGS_MASK;
 
 	mcache_audit_cache = mcache_create("audit", sizeof (mcache_audit_t),

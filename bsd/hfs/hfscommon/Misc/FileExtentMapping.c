@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -360,10 +382,19 @@ static OSErr CreateExtentRecord(
 	err = noErr;
 	*hint = 0;
 
+<<<<<<< HEAD
 	MALLOC (btIterator, struct BTreeIterator*, sizeof(struct BTreeIterator), M_TEMP, M_WAITOK);
 	if (btIterator == NULL) {
 		return memFullErr;  // translates to ENOMEM
 	}
+=======
+	// XXXdbg - preflight that there's enough space
+	err = BTCheckFreeSpace(GetFileControlBlock(vcb->extentsRefNum));
+	if (err)
+		return err;
+
+	MALLOC(btIterator, BTreeIterator *, sizeof(*btIterator), M_TEMP, M_WAITOK);
+>>>>>>> origin/10.2
 	bzero(btIterator, sizeof(*btIterator));
 
 	/*
@@ -413,9 +444,13 @@ static OSErr CreateExtentRecord(
 
 	(void) BTFlushPath(GetFileControlBlock(vcb->extentsRefNum));
 	
+<<<<<<< HEAD
 	hfs_systemfile_unlock(vcb, lockflags);
 
 	FREE (btIterator, M_TEMP);	
+=======
+	FREE(btIterator, M_TEMP);	
+>>>>>>> origin/10.2
 	return err;
 }
 
@@ -431,10 +466,19 @@ static OSErr DeleteExtentRecord(
 	
 	err = noErr;
 
+<<<<<<< HEAD
 	MALLOC (btIterator, struct BTreeIterator*, sizeof(struct BTreeIterator), M_TEMP, M_WAITOK);
 	if (btIterator == NULL) {
 		return memFullErr;  // translates to ENOMEM
 	}
+=======
+	// XXXdbg - preflight that there's enough space
+	err = BTCheckFreeSpace(GetFileControlBlock(vcb->extentsRefNum));
+	if (err)
+		return err;
+
+	MALLOC(btIterator, BTreeIterator *, sizeof(*btIterator), M_TEMP, M_WAITOK);
+>>>>>>> origin/10.2
 	bzero(btIterator, sizeof(*btIterator));
 	
 	/* HFS+ / HFSX */
@@ -464,8 +508,12 @@ static OSErr DeleteExtentRecord(
 	err = BTDeleteRecord(GetFileControlBlock(vcb->extentsRefNum), btIterator);
 	(void) BTFlushPath(GetFileControlBlock(vcb->extentsRefNum));
 	
+<<<<<<< HEAD
 
 	FREE(btIterator, M_TEMP);
+=======
+	FREE(btIterator, M_TEMP);	
+>>>>>>> origin/10.2
 	return err;
 }
 
@@ -513,6 +561,9 @@ OSErr MapFileBlockC (
 
 	allocBlockSize = vcb->blockSize;
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.5
 	sectorSize = VCBTOHFS(vcb)->hfs_logical_block_size;
 
 =======
@@ -533,6 +584,7 @@ OSErr MapFileBlockC (
 	//
 	//	Determine the end of the available space.  It will either be the end of the extent,
 	//	or the file's PEOF, whichever is smaller.
+	
 	//
 	dataEnd = (off_t)((off_t)(nextFABN) * (off_t)(allocBlockSize));   // Assume valid data through end of this extent
 	if (((off_t)fcb->ff_blocks * (off_t)allocBlockSize) < dataEnd)    // Is PEOF shorter?
@@ -583,8 +635,12 @@ OSErr MapFileBlockC (
 		if (tmpOff <= 0) {
 			return EINVAL;
 		}
+<<<<<<< HEAD
 
 		if (tmpOff > (off_t)(numberOfBytes)) {
+=======
+		if (tmpOff > (off_t)(numberOfBytes))
+>>>>>>> origin/10.7
 			*availableBytes = numberOfBytes;  // more there than they asked for, so pin the output
 		}
 		else {
@@ -1305,7 +1361,12 @@ OSErr ExtendFileC (
 						  startBlock,
 						  howmany(MIN(bytesToAdd, availbytes), volumeBlockSize),
 						  howmany(MIN(maximumBytes, availbytes), volumeBlockSize),
+<<<<<<< HEAD
 						  ba_flags,
+=======
+						  (wantContig ? HFS_ALLOC_FORCECONTIG : 0) | 
+						  (useMetaZone ? HFS_ALLOC_METAZONE : 0),
+>>>>>>> origin/10.6
 						  &actualStartBlock,
 						  &actualNumBlocks);
 			}
@@ -2073,11 +2134,21 @@ static OSErr UpdateExtentRecord (ExtendedVCB *vcb, FCB  *fcb, int deleted,
 		//	Need to find and change a record in Extents BTree
 		//
 		btFCB = GetFileControlBlock(vcb->extentsRefNum);
+<<<<<<< HEAD
 		
 		MALLOC (btIterator, struct BTreeIterator*, sizeof(struct BTreeIterator), M_TEMP, M_WAITOK);
 		if (btIterator == NULL) {
 			return memFullErr;  // translates to ENOMEM
 		}
+=======
+
+		// XXXdbg - preflight that there's enough space
+		err = BTCheckFreeSpace(btFCB);
+		if (err)
+			return err;
+
+		MALLOC(btIterator, BTreeIterator *, sizeof(*btIterator), M_TEMP, M_WAITOK);
+>>>>>>> origin/10.2
 		bzero(btIterator, sizeof(*btIterator));
 
 		/*
@@ -2137,13 +2208,33 @@ static OSErr UpdateExtentRecord (ExtendedVCB *vcb, FCB  *fcb, int deleted,
 			if (err == noErr)
 				err = BTReplaceRecord(btFCB, btIterator, &btRecord, btRecordSize);
 			(void) BTFlushPath(btFCB);
+<<<<<<< HEAD
+=======
+		}
+		else {		//	HFS Plus volume
+			HFSPlusExtentRecord	foundData;		// The extent data actually found
+
+			BlockMoveData(extentFileKey, &btIterator->key, sizeof(HFSPlusExtentKey));
+>>>>>>> origin/10.2
 
 		}
 #endif
 
 		hfs_systemfile_unlock(vcb, lockflags);
 
+<<<<<<< HEAD
 		FREE(btIterator, M_TEMP);
+=======
+			err = BTSearchRecord(btFCB, btIterator, &btRecord, &btRecordSize, btIterator);
+	
+			if (err == noErr) {
+				BlockMoveData(extentData, &foundData, sizeof(HFSPlusExtentRecord));
+				err = BTReplaceRecord(btFCB, btIterator, &btRecord, btRecordSize);
+			}
+			(void) BTFlushPath(btFCB);
+		}
+		FREE(btIterator, M_TEMP);	
+>>>>>>> origin/10.2
 	}
 	
 	return err;
@@ -2243,17 +2334,29 @@ static Boolean ExtentsAreIntegral(
 Boolean NodesAreContiguous(
 	ExtendedVCB	*vcb,
 	FCB			*fcb,
+<<<<<<< HEAD
 	u_int32_t	nodeSize)
 {
 	u_int32_t			mask;
 	u_int32_t			startBlock;
 	u_int32_t			blocksChecked;
 	u_int32_t			hint;
+=======
+	UInt32		nodeSize)
+{
+	UInt32				mask;
+	UInt32				startBlock;
+	UInt32				blocksChecked;
+	UInt32				hint;
+>>>>>>> origin/10.2
 	HFSPlusExtentKey	key;
 	HFSPlusExtentRecord	extents;
 	OSErr				result;
 	Boolean				lastExtentReached;
+<<<<<<< HEAD
 	int  lockflags;
+=======
+>>>>>>> origin/10.2
 	
 
 	if (vcb->blockSize >= nodeSize)
@@ -2266,20 +2369,28 @@ Boolean NodesAreContiguous(
 	if ( !ExtentsAreIntegral(extents, mask, &blocksChecked, &lastExtentReached) )
 		return FALSE;
 
+<<<<<<< HEAD
 	if ( lastExtentReached || 
 		 (int64_t)((int64_t)blocksChecked * (int64_t)vcb->blockSize) >= (int64_t)fcb->ff_size)
+=======
+	if (lastExtentReached || (SInt64)((SInt64)blocksChecked * (SInt64)vcb->blockSize) >= fcb->ff_size)
+>>>>>>> origin/10.2
 		return TRUE;
 
 	startBlock = blocksChecked;
 
+<<<<<<< HEAD
 	lockflags = hfs_systemfile_lock(vcb, SFL_EXTENTS, HFS_EXCLUSIVE_LOCK);
 
+=======
+>>>>>>> origin/10.2
 	// check the overflow extents (if any)
 	while ( !lastExtentReached )
 	{
 		result = FindExtentRecord(vcb, kDataForkType, fcb->ff_cp->c_fileid, startBlock, FALSE, &key, extents, &hint);
 		if (result) break;
 
+<<<<<<< HEAD
 		if ( !ExtentsAreIntegral(extents, mask, &blocksChecked, &lastExtentReached) ) {
 			hfs_systemfile_unlock(vcb, lockflags);
 			return FALSE;
@@ -2287,6 +2398,14 @@ Boolean NodesAreContiguous(
 		startBlock += blocksChecked;
 	}
 	hfs_systemfile_unlock(vcb, lockflags);
+=======
+		if ( !ExtentsAreIntegral(extents, mask, &blocksChecked, &lastExtentReached) )
+			return FALSE;
+
+		startBlock += blocksChecked;
+	}
+
+>>>>>>> origin/10.2
 	return TRUE;
 }
 

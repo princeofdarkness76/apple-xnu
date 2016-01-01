@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -193,8 +219,27 @@
 #define	SIOCIFGCLONERS	_IOWR('i', 129, struct if_clonereq) /* get cloners */
 #endif /* !KERNEL || KERNEL_PRIVATE */
 #ifdef KERNEL_PRIVATE
+<<<<<<< HEAD
+<<<<<<< HEAD
 #define	SIOCIFGCLONERS32 _IOWR('i', 129, struct if_clonereq32) /* get cloners */
 #define	SIOCIFGCLONERS64 _IOWR('i', 129, struct if_clonereq64) /* get cloners */
+=======
+=======
+#define	SIOCIFCREATE	_IOWR('i', 120, struct ifreq)	/* create clone if */
+#define	SIOCIFDESTROY	 _IOW('i', 121, struct ifreq)	/* destroy clone if */
+#if 0
+#define	SIOCIFGCLONERS	_IOWR('i', 129, struct if_clonereq) /* get cloners */
+#endif 0
+#define	SIOCSETVLAN	 _IOW('i', 126, struct ifreq)	/* set VLAN config */
+#define	SIOCGETVLAN	_IOWR('i', 127, struct ifreq)	/* get VLAN config */
+
+>>>>>>> origin/10.3
+/* 
+ * temporary control calls to attach/detach IP to/from an ethernet interface
+ */
+#define	SIOCPROTOATTACH	_IOWR('i', 80, struct ifreq)	/* attach proto to interface */
+#define	SIOCPROTODETACH	_IOWR('i', 81, struct ifreq)	/* detach proto from interface */
+>>>>>>> origin/10.2
 #endif /* KERNEL_PRIVATE */
 
 #define	SIOCGIFASYNCMAP _IOWR('i', 124, struct ifreq)	/* get ppp asyncmap */
@@ -214,6 +259,7 @@
 
 #ifdef PRIVATE
 #define	SIOCGIFGETRTREFCNT _IOWR('i', 137, struct ifreq) /* get interface route refcnt */
+<<<<<<< HEAD
 #define	SIOCGIFLINKQUALITYMETRIC _IOWR('i', 138, struct ifreq) /* get LQM */
 #define SIOCSIFOPPORTUNISTIC	 _IOWR('i', 139, struct ifreq)	/* deprecated; use SIOCSIFTHROTTLE */
 #define SIOCGIFOPPORTUNISTIC	 _IOWR('i', 140, struct ifreq)	/* deprecated; use SIOCGIFTHROTTLE */
@@ -276,4 +322,9 @@
 #define	SIOCSECNMODE		_IOW('i', 177, struct ifreq)
 #endif /* PRIVATE */
 
+=======
+#endif /* PRIVATE */
+
+
+>>>>>>> origin/10.6
 #endif /* !_SYS_SOCKIO_H_ */

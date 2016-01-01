@@ -30,6 +30,7 @@
 #define _SYS_CODESIGN_H_
 
 /* code signing attributes of a process */
+<<<<<<< HEAD
 #define	CS_VALID		0x0000001	/* dynamically valid */
 #define CS_ADHOC		0x0000002	/* ad hoc signed */
 #define CS_GET_TASK_ALLOW	0x0000004	/* has get-task-allow entitlement */
@@ -59,6 +60,17 @@
 
 /* MAC flags used by F_ADDFILESIGS_* */
 #define MAC_VNODE_CHECK_DYLD_SIM 0x1   /* tells the MAC framework that dyld-sim is being loaded */
+<<<<<<< HEAD
+=======
+#define	CS_VALID		0x0001	/* dynamically valid */
+#define	CS_HARD			0x0100	/* don't load invalid pages */
+#define	CS_KILL			0x0200	/* kill process if it becomes invalid */
+#define CS_EXEC_SET_HARD	0x1000	/* set CS_HARD on any exec'ed process */
+#define CS_EXEC_SET_KILL	0x2000	/* set CS_KILL on any exec'ed process */
+#define CS_KILLED		0x10000	/* was killed by kernel for invalidity */
+>>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.10
 
 /* csops  operations */
 #define	CS_OPS_STATUS		0	/* return status */

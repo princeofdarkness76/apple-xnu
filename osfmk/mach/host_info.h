@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +16,24 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +41,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /*
  * @OSF_COPYRIGHT@
@@ -185,8 +218,12 @@ typedef struct host_priority_info	*host_priority_info_t;
 /* host_statistics64() */
 #define HOST_VM_INFO64		4	/* 64-bit virtual memory stats */
 #define HOST_EXTMOD_INFO64	5	/* External modification stats */
+<<<<<<< HEAD
 #define HOST_EXPIRED_TASK_INFO	6	/* Statistics for expired tasks */
 
+=======
+#define HOST_EXPIRED_TASK_INFO        6        /* Statistics for expired tasks */
+>>>>>>> origin/10.8
 
 struct host_load_info {
 	integer_t	avenrun[3];	/* scaled by LOAD_SCALE */
@@ -270,6 +307,7 @@ struct _processor_statistics_np  {
 
 	uint32_t		ps_idle_transitions;
 	uint32_t		ps_quantum_timer_expirations;
+<<<<<<< HEAD
 };
 
 struct host_debug_info_internal {
@@ -278,6 +316,8 @@ struct host_debug_info_internal {
 		 config_csr:1,
 		 config_coalitions:1,
 		 config_unused:60;
+=======
+>>>>>>> origin/10.7
 };
 
 typedef struct host_debug_info_internal *host_debug_info_internal_t;

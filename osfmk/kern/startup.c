@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -112,6 +138,7 @@
 #include <vm/vm_shared_region.h>
 #include <machine/pmap.h>
 #include <machine/commpage.h>
+<<<<<<< HEAD
 #include <libkern/version.h>
 #include <sys/codesign.h>
 #include <sys/kdebug.h>
@@ -140,6 +167,10 @@
 #include <kdp/kdp.h>
 #endif
 
+#if MACH_KDP
+#include <kdp/kdp.h>
+#endif
+
 #if CONFIG_MACF
 #include <security/mac_mach_internal.h>
 #endif
@@ -152,11 +183,17 @@
 #include <kperf/kperf.h>
 #endif
 
+<<<<<<< HEAD
 #if HYPERVISOR
 #include <kern/hv_support.h>
 #endif
 
+=======
+#include <sys/version.h>
+>>>>>>> origin/10.2
 
+=======
+>>>>>>> origin/10.8
 #include <i386/pmCPU.h>
 static void		kernel_bootstrap_thread(void);
 
@@ -192,9 +229,15 @@ extern int serverperfmode;
 /* size of kernel trace buffer, disabled by default */
 unsigned int new_nkdbufs = 0;
 unsigned int wake_nkdbufs = 0;
+<<<<<<< HEAD
 unsigned int write_trace_on_panic = 0;
 unsigned int trace_typefilter = 0;
 boolean_t    trace_serial = FALSE;
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.8
+=======
+>>>>>>> origin/10.10
 
 /* mach leak logging */
 int log_leaks = 0;
@@ -257,6 +300,18 @@ kernel_bootstrap(void)
 	PE_parse_boot_argn("trace_panic", &write_trace_on_panic, sizeof(write_trace_on_panic));
 	PE_parse_boot_argn("trace_typefilter", &trace_typefilter, sizeof(trace_typefilter));
 
+<<<<<<< HEAD
+=======
+	PE_parse_boot_argn("trace_wake", &wake_nkdbufs, sizeof (wake_nkdbufs));
+
+<<<<<<< HEAD
+	/* i386_vm_init already checks for this ; do it aagin anyway */
+        if (PE_parse_boot_argn("serverperfmode", &serverperfmode, sizeof (serverperfmode))) {
+                serverperfmode = 1;
+        }
+>>>>>>> origin/10.8
+=======
+>>>>>>> origin/10.9
 	scale_setup();
 
 	kernel_bootstrap_log("vm_mem_bootstrap");
@@ -450,8 +505,21 @@ kernel_bootstrap_thread(void)
 	device_service_create();
 
 	kth_started = 1;
+<<<<<<< HEAD
+<<<<<<< HEAD
 		
 #if (defined(__i386__) || defined(__x86_64__)) && NCOPY_WINDOWS > 0
+=======
+
+#if MACH_KDP
+	kernel_bootstrap_kprintf("calling kdp_init\n");
+	kdp_init();
+#endif
+=======
+>>>>>>> origin/10.7
+		
+#ifdef i386
+>>>>>>> origin/10.5
 	/*
 	 * Create and initialize the physical copy window for processor 0
 	 * This is required before starting kicking off  IOKit.
@@ -459,6 +527,7 @@ kernel_bootstrap_thread(void)
 	cpu_physwindow_init(0);
 #endif
 
+<<<<<<< HEAD
 
 	
 #if MACH_KDP 
@@ -493,6 +562,17 @@ kernel_bootstrap_thread(void)
 
 #if (defined(__i386__) || defined(__x86_64__)) && CONFIG_VMX
 	vmx_init();
+=======
+	vm_kernel_reserved_entry_init();
+	
+#if MACH_KDP
+	kernel_bootstrap_kprintf("calling kdp_init\n");
+	kdp_init();
+#endif
+
+#if CONFIG_COUNTERS
+	pmc_bootstrap();
+>>>>>>> origin/10.7
 #endif
 
 #if (defined(__i386__) || defined(__x86_64__))
@@ -503,12 +583,16 @@ kernel_bootstrap_thread(void)
 	}
 	if (turn_on_log_leaks && !new_nkdbufs)
 		new_nkdbufs = 200000;
+<<<<<<< HEAD
 	if (trace_typefilter)
 		start_kern_tracing_with_typefilter(new_nkdbufs,
 						   FALSE,
 						   trace_typefilter);
 	else
 		start_kern_tracing(new_nkdbufs, FALSE);
+=======
+	start_kern_tracing(new_nkdbufs, FALSE);
+>>>>>>> origin/10.8
 	if (turn_on_log_leaks)
 		log_leaks = 1;
 
@@ -538,13 +622,24 @@ kernel_bootstrap_thread(void)
 #if (!defined(__i386__) && !defined(__x86_64__))
 	if (turn_on_log_leaks && !new_nkdbufs)
 		new_nkdbufs = 200000;
+<<<<<<< HEAD
 	if (trace_typefilter)
 		start_kern_tracing_with_typefilter(new_nkdbufs, FALSE, trace_typefilter);
 	else
 		start_kern_tracing(new_nkdbufs, FALSE);
+=======
+	start_kern_tracing(new_nkdbufs, FALSE);
+>>>>>>> origin/10.8
 	if (turn_on_log_leaks)
 		log_leaks = 1;
 #endif
+	
+	(void) spllo();		/* Allow interruptions */
+
+    /*
+     *	Fill in the comm area (mapped into every task address space.)
+     */
+    commpage_populate();
 
 	/*
 	 *	Initialize the shared region module.
@@ -587,6 +682,10 @@ kernel_bootstrap_thread(void)
 	/*
 	 *	Start the user bootstrap.
 	 */
+<<<<<<< HEAD
+=======
+	
+>>>>>>> origin/10.2
 #ifdef	MACH_BSD
 	bsd_init();
 #endif
@@ -685,14 +784,22 @@ load_context(
 	load_context_kprintf("processor_up\n");
 	processor_up(processor);
 
+<<<<<<< HEAD
 	PMAP_ACTIVATE_KERNEL(processor->cpu_id);
+=======
+	PMAP_ACTIVATE_KERNEL(processor->cpu_num);
+>>>>>>> origin/10.5
 
 	/*
 	 * Acquire a stack if none attached.  The panic
 	 * should never occur since the thread is expected
 	 * to have reserved stack.
 	 */
+<<<<<<< HEAD
 	load_context_kprintf("thread %p, stack %lx, stackptr %lx\n", thread,
+=======
+	load_context_kprintf("stack %x, stackptr %x\n", 
+>>>>>>> origin/10.5
 			     thread->kernel_stack, thread->machine.kstackptr);
 	if (!thread->kernel_stack) {
 		load_context_kprintf("stack_alloc_try\n");
@@ -720,7 +827,11 @@ load_context(
 	timer_start(&PROCESSOR_DATA(processor, system_state), processor->last_dispatch);
 	PROCESSOR_DATA(processor, current_state) = &PROCESSOR_DATA(processor, system_state);
 
+<<<<<<< HEAD
 	PMAP_ACTIVATE_USER(thread, processor->cpu_id);
+=======
+	PMAP_ACTIVATE_USER(thread, processor->cpu_num);
+>>>>>>> origin/10.5
 
 	load_context_kprintf("machine_load_context\n");
 	machine_load_context(thread);

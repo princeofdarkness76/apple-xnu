@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -95,7 +117,18 @@ extern boolean_t vm_kernel_ready;
 extern kern_return_t kmem_alloc_pages(
 	register vm_object_t		object,
 	register vm_object_offset_t	offset,
+<<<<<<< HEAD
 	register vm_object_size_t	size);
+=======
+	register vm_size_t		size);
+
+extern void kmem_remap_pages(
+	register vm_object_t		object,
+	register vm_object_offset_t	offset,
+	register vm_offset_t		start,
+	register vm_offset_t		end,
+	vm_prot_t			protection);
+>>>>>>> origin/10.2
 
 kern_return_t
 kmem_alloc_contig(
@@ -276,6 +309,13 @@ kernel_memory_allocate(
 		*addrp = 0;
 		return KERN_INVALID_ARGUMENT;
 	}
+<<<<<<< HEAD
+=======
+	map_size = vm_map_round_page(size);
+	map_mask = (vm_map_offset_t) mask;
+	vm_alloc_flags = 0;
+
+>>>>>>> origin/10.6
 
 	/*
 	 * limit the size of a single extent of wired memory
@@ -346,6 +386,7 @@ kernel_memory_allocate(
 		guard_page_list = mem;
 	}
 
+<<<<<<< HEAD
 	if (! (flags & KMA_VAONLY)) {
 	for (i = 0; i < wired_page_count; i++) {
 		uint64_t	unavailable;
@@ -355,11 +396,28 @@ kernel_memory_allocate(
 			        mem = vm_page_grablo();
 			else
 			        mem = vm_page_grab();
+=======
+	/*
+	 *	Since we have not given out this address yet,
+	 *	it is safe to unlock the map. Except of course
+	 *	we must make certain no one coalesces our address
+         *      or does a blind vm_deallocate and removes the object
+	 *	an extra object reference will suffice to protect
+	 * 	against both contingencies.
+	 */
+	vm_object_reference(object);
+	vm_map_unlock(map);
+>>>>>>> origin/10.2
 
 		        if (mem != VM_PAGE_NULL)
 			        break;
 
 			if (flags & KMA_NOPAGEWAIT) {
+<<<<<<< HEAD
+				kr = KERN_RESOURCE_SHORTAGE;
+				goto out;
+			}
+			if ((flags & KMA_LOMEM) && (vm_lopage_needed == TRUE)) {
 				kr = KERN_RESOURCE_SHORTAGE;
 				goto out;
 			}
@@ -372,6 +430,15 @@ kernel_memory_allocate(
 			if (unavailable > max_mem || map_size > (max_mem - unavailable)) {
 				kr = KERN_RESOURCE_SHORTAGE;
 				goto out;
+=======
+				if (object == kernel_object)
+					vm_object_page_remove(object, offset,
+						offset + (vm_object_offset_t)i);
+				vm_object_unlock(object);
+				vm_map_remove(map, addr, addr + size, 0);
+				vm_object_deallocate(object);
+				return KERN_RESOURCE_SHORTAGE;
+>>>>>>> origin/10.2
 			}
 			VM_PAGE_WAIT();
 		}
@@ -458,6 +525,7 @@ kernel_memory_allocate(
 		mem->pmapped = TRUE;
 		mem->wpmapped = TRUE;
 
+<<<<<<< HEAD
 		PMAP_ENTER_OPTIONS(kernel_pmap, map_addr + pg_offset, mem,
 				   kma_prot, VM_PROT_NONE, ((flags & KMA_KSTACK) ? VM_MEM_STACK : 0), TRUE,
 				   PMAP_OPTIONS_NOWAIT, pe_result);
@@ -470,12 +538,21 @@ kernel_memory_allocate(
 
 			vm_object_lock(object);
 		}
+=======
+		PMAP_ENTER(kernel_pmap, map_addr + pg_offset, mem, 
+			   VM_PROT_READ | VM_PROT_WRITE, object->wimg_bits & VM_WIMG_MASK, TRUE);
+
+>>>>>>> origin/10.6
 		if (flags & KMA_NOENCRYPT) {
 			bzero(CAST_DOWN(void *, (map_addr + pg_offset)), PAGE_SIZE);
 
 			pmap_set_noencrypt(mem->phys_page);
 		}
+<<<<<<< HEAD
+<<<<<<< HEAD
 	}
+=======
+>>>>>>> origin/10.6
 	}
 	if ((fill_start + fill_size) < map_size) {
 		if (guard_page_list == NULL)
@@ -507,6 +584,16 @@ kernel_memory_allocate(
 		vm_map_simplify(map, map_addr);
 	else
 		vm_object_deallocate(object);
+=======
+		vm_map_remove(map, addr, addr + size, 0);
+		vm_object_deallocate(object);
+		return (kr);
+	}
+	/* now that the page is wired, we no longer have to fear coalesce */
+	vm_object_deallocate(object);
+	if (object == kernel_object)
+		vm_map_simplify(map, addr);
+>>>>>>> origin/10.2
 
 	/*
 	 *	Return the memory, not zeroed.
@@ -808,6 +895,7 @@ kmem_realloc(
 	vm_size_t		newsize,
 	vm_tag_t		tag)
 {
+<<<<<<< HEAD
 	vm_object_t		object;
 	vm_object_offset_t	offset;
 	vm_map_offset_t		oldmapmin;
@@ -819,6 +907,15 @@ kmem_realloc(
 	vm_map_entry_t		newentry;
 	vm_page_t		mem;
 	kern_return_t		kr;
+=======
+	vm_offset_t	oldmin, oldmax;
+	vm_offset_t	newaddr;
+	vm_offset_t	offset;
+	vm_object_t	object;
+	vm_map_entry_t	oldentry, newentry;
+	vm_page_t	mem;
+	kern_return_t	kr;
+>>>>>>> origin/10.2
 
 	oldmapmin = vm_map_trunc_page(oldaddr,
 				      VM_MAP_PAGE_MASK(map));
@@ -835,7 +932,11 @@ kmem_realloc(
 
 	vm_map_lock(map);
 
+<<<<<<< HEAD
 	if (!vm_map_lookup_entry(map, oldmapmin, &oldentry))
+=======
+	if (!vm_map_lookup_entry(map, oldmin, &oldentry))
+>>>>>>> origin/10.2
 		panic("kmem_realloc");
 	object = VME_OBJECT(oldentry);
 
@@ -850,20 +951,30 @@ kmem_realloc(
 	/* attempt is made to realloc a kmem_alloc'd area       */
 	vm_object_lock(object);
 	vm_map_unlock(map);
+<<<<<<< HEAD
 	if (object->vo_size != oldmapsize)
+=======
+	if (object->size != oldsize)
+>>>>>>> origin/10.2
 		panic("kmem_realloc");
 	object->vo_size = newmapsize;
 	vm_object_unlock(object);
 
 	/* allocate the new pages while expanded portion of the */
 	/* object is still not mapped */
+<<<<<<< HEAD
 	kmem_alloc_pages(object, vm_object_round_page(oldmapsize),
 			 vm_object_round_page(newmapsize-oldmapsize));
+=======
+	kmem_alloc_pages(object, oldsize, newsize-oldsize);
+
+>>>>>>> origin/10.2
 
 	/*
 	 *	Find space for the new region.
 	 */
 
+<<<<<<< HEAD
 	kr = vm_map_find_space(map, &newmapaddr, newmapsize,
 			       (vm_map_offset_t) 0, 0, &newentry);
 	if (kr != KERN_SUCCESS) {
@@ -875,10 +986,26 @@ kmem_realloc(
 			}
 		}
 		object->vo_size = oldmapsize;
+=======
+	kr = vm_map_find_space(map, &newaddr, newsize, (vm_offset_t) 0,
+			       &newentry);
+	if (kr != KERN_SUCCESS) {
+		vm_object_lock(object);
+		for(offset = oldsize; 
+				offset<newsize; offset+=PAGE_SIZE) {
+	    		if ((mem = vm_page_lookup(object, offset)) != VM_PAGE_NULL) {
+				vm_page_lock_queues();
+				vm_page_free(mem);
+				vm_page_unlock_queues();
+			}
+		}
+		object->size = oldsize;
+>>>>>>> origin/10.2
 		vm_object_unlock(object);
 		vm_object_deallocate(object);
 		return kr;
 	}
+<<<<<<< HEAD
 	VME_OBJECT_SET(newentry, object);
 	VME_OFFSET_SET(newentry, 0);
 	VME_ALIAS_SET(newentry, tag);
@@ -906,6 +1033,37 @@ kmem_realloc(
 		return (kr);
 	}
 	vm_object_deallocate(object);
+=======
+	newentry->object.vm_object = object;
+	newentry->offset = 0;
+	assert (newentry->wired_count == 0);
+
+	
+	/* add an extra reference in case we have someone doing an */
+	/* unexpected deallocate */
+	vm_object_reference(object);
+	vm_map_unlock(map);
+
+	if ((kr = vm_map_wire(map, newaddr, newaddr + newsize, 
+				VM_PROT_DEFAULT, FALSE)) != KERN_SUCCESS) {
+		vm_map_remove(map, newaddr, newaddr + newsize, 0);
+		vm_object_lock(object);
+		for(offset = oldsize; 
+				offset<newsize; offset+=PAGE_SIZE) {
+	    		if ((mem = vm_page_lookup(object, offset)) != VM_PAGE_NULL) {
+				vm_page_lock_queues();
+				vm_page_free(mem);
+				vm_page_unlock_queues();
+			}
+		}
+		object->size = oldsize;
+		vm_object_unlock(object);
+		vm_object_deallocate(object);
+		return (kr);
+	}
+	vm_object_deallocate(object);
+
+>>>>>>> origin/10.2
 
 	*newaddrp = CAST_DOWN(vm_offset_t, newmapaddr);
 	return KERN_SUCCESS;
@@ -1052,6 +1210,7 @@ kern_return_t
 kmem_alloc_pages(
 	register vm_object_t		object,
 	register vm_object_offset_t	offset,
+<<<<<<< HEAD
 	register vm_object_size_t	size)
 {
 	vm_object_size_t		alloc_size;
@@ -1059,6 +1218,14 @@ kmem_alloc_pages(
 	alloc_size = vm_object_round_page(size);
         vm_object_lock(object);
 	while (alloc_size) {
+=======
+	register vm_size_t		size)
+{
+
+	size = round_page(size);
+        vm_object_lock(object);
+	while (size) {
+>>>>>>> origin/10.2
 	    register vm_page_t	mem;
 
 
@@ -1073,7 +1240,64 @@ kmem_alloc_pages(
 	    }
 	    mem->busy = FALSE;
 
+<<<<<<< HEAD
 	    alloc_size -= PAGE_SIZE;
+=======
+
+	    offset += PAGE_SIZE;
+	    size -= PAGE_SIZE;
+	    mem->busy = FALSE;
+	}
+	vm_object_unlock(object);
+	return KERN_SUCCESS;
+}
+
+/*
+ *	Remap wired pages in an object into a new region.
+ *	The object is assumed to be mapped into the kernel map or
+ *	a submap.
+ */
+void
+kmem_remap_pages(
+	register vm_object_t		object,
+	register vm_object_offset_t	offset,
+	register vm_offset_t		start,
+	register vm_offset_t		end,
+	vm_prot_t			protection)
+{
+	/*
+	 *	Mark the pmap region as not pageable.
+	 */
+	pmap_pageable(kernel_pmap, start, end, FALSE);
+
+	while (start < end) {
+	    register vm_page_t	mem;
+
+	    vm_object_lock(object);
+
+	    /*
+	     *	Find a page
+	     */
+	    if ((mem = vm_page_lookup(object, offset)) == VM_PAGE_NULL)
+		panic("kmem_remap_pages");
+
+	    /*
+	     *	Wire it down (again)
+	     */
+	    vm_page_lock_queues();
+	    vm_page_wire(mem);
+	    vm_page_unlock_queues();
+	    vm_object_unlock(object);
+
+	    /*
+	     *	Enter it in the kernel pmap.  The page isn't busy,
+	     *	but this shouldn't be a problem because it is wired.
+	     */
+	    PMAP_ENTER(kernel_pmap, start, mem, protection, 
+				VM_WIMG_USE_DEFAULT, TRUE);
+
+	    start += PAGE_SIZE;
+>>>>>>> origin/10.2
 	    offset += PAGE_SIZE;
 	}
 	vm_object_unlock(object);
@@ -1155,6 +1379,7 @@ kmem_suballoc(
 	return (KERN_SUCCESS);
 }
 
+
 /*
  *	kmem_init:
  *
@@ -1202,7 +1427,10 @@ kmem_init(
 			      kr);
 		}	
 	}
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.6
 	/*
 	 * Set the default global user wire limit which limits the amount of
 	 * memory that can be locked via mlock().  We set this to the total

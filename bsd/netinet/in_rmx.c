@@ -1,6 +1,15 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +24,24 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +49,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /*
  * Copyright 1994, 1995 Massachusetts Institute of Technology
@@ -101,9 +142,16 @@ static struct radix_node *in_matroute_args(void *, struct radix_node_head *,
 static void in_clsroute(struct radix_node *, struct radix_node_head *);
 static int in_rtqkill(struct radix_node *, void *);
 
+<<<<<<< HEAD
 static int in_ifadownkill(struct radix_node *, void *);
 
 #define	RTPRF_OURS		RTF_PROTO3	/* set on routes we manage */
+=======
+static struct radix_node *in_matroute_args(void *, struct radix_node_head *,
+    rn_matchf_t *f, void *);
+
+#define RTPRF_OURS		RTF_PROTO3	/* set on routes we manage */
+>>>>>>> origin/10.5
 
 /*
  * Do what we need to do when inserting a route.
@@ -177,6 +225,7 @@ in_addroute(void *v_arg, void *n_arg, struct radix_node_head *head,
 		 * ARP entry and delete it if so.
 		 */
 		rt2 = rtalloc1_scoped_locked(rt_key(rt), 0,
+<<<<<<< HEAD
 		    RTF_CLONING | RTF_PRCLONING, sin_get_ifscope(rt_key(rt)));
 		if (rt2 != NULL) {
 			char dbufc[MAX_IPv4_STR_LEN];
@@ -212,6 +261,18 @@ in_addroute(void *v_arg, void *n_arg, struct radix_node_head *head,
 				(void) rtrequest_locked(RTM_DELETE, rt_key(rt2),
 				    rt2->rt_gateway, rt_mask(rt2),
 				    rt2->rt_flags, NULL);
+=======
+		    RTF_CLONING | RTF_PRCLONING, sa_get_ifscope(rt_key(rt)));
+		if (rt2) {
+			if (rt2->rt_flags & RTF_LLINFO &&
+				rt2->rt_flags & RTF_HOST &&
+				rt2->rt_gateway &&
+				rt2->rt_gateway->sa_family == AF_LINK) {
+				rtrequest_locked(RTM_DELETE,
+					  (struct sockaddr *)rt_key(rt2),
+					  rt2->rt_gateway,
+					  rt_mask(rt2), rt2->rt_flags, 0);
+>>>>>>> origin/10.5
 				ret = rn_addroute(v_arg, n_arg, head,
 				    treenodes);
 			} else {
@@ -271,6 +332,7 @@ in_deleteroute(void *v_arg, void *netmask_arg, struct radix_node_head *head)
 
 /*
  * Validate (unexpire) an expiring AF_INET route.
+<<<<<<< HEAD
  */
 struct radix_node *
 in_validate(struct radix_node *rn)
@@ -311,6 +373,43 @@ static struct radix_node *
 in_matroute(void *v_arg, struct radix_node_head *head)
 {
 	return (in_matroute_args(v_arg, head, NULL, NULL));
+=======
+ */
+struct radix_node *
+in_validate(struct radix_node *rn)
+{
+	struct rtentry *rt = (struct rtentry *)rn;
+
+	/* This is first reference? */
+	if (rt != NULL && rt->rt_refcnt == 0 && (rt->rt_flags & RTPRF_OURS)) {
+		rt->rt_flags &= ~RTPRF_OURS;
+		rt->rt_rmx.rmx_expire = 0;
+	}
+	return (rn);
+}
+
+/*
+ * Similar to in_matroute_args except without the leaf-matching parameters.
+ */
+static struct radix_node *
+in_matroute(void *v_arg, struct radix_node_head *head)
+{
+	return (in_matroute_args(v_arg, head, NULL, NULL));
+}
+
+/*
+ * This code is the inverse of in_clsroute: on first reference, if we
+ * were managing the route, stop doing so and set the expiration timer
+ * back off again.
+ */
+static struct radix_node *
+in_matroute_args(void *v_arg, struct radix_node_head *head,
+    rn_matchf_t *f, void *w)
+{
+	struct radix_node *rn = rn_match_args(v_arg, head, f, w);
+
+	return (in_validate(rn));
+>>>>>>> origin/10.5
 }
 
 /*
@@ -426,6 +525,7 @@ in_clsroute(struct radix_node *rn, struct radix_node_head *head)
 
 		timenow = net_uptime();
 		rt->rt_flags |= RTPRF_OURS;
+<<<<<<< HEAD
 		rt_setexpire(rt, timenow + rtq_reallyold);
 
 		if (verbose) {
@@ -437,6 +537,10 @@ in_clsroute(struct radix_node *rn, struct radix_node_head *head)
 
 		/* We have at least one entry; arm the timer if not already */
 		in_sched_rtqtimo(NULL);
+=======
+		rt->rt_rmx.rmx_expire =
+		    rt_expiry(rt, timenow.tv_sec, rtq_reallyold);
+>>>>>>> origin/10.6
 	}
 }
 
@@ -519,6 +623,7 @@ in_rtqkill(struct radix_node *rn, void *rock)
 			}
 			rtfree_locked(rt);
 		} else {
+<<<<<<< HEAD
 			uint64_t expire = (rt->rt_expire - timenow);
 
 			if (ap->updating && expire > rtq_reallyold) {
@@ -533,6 +638,13 @@ in_rtqkill(struct radix_node *rn, void *rock)
 					    rt->rt_flags, RTF_BITS,
 					    (rt->rt_expire - timenow), expire);
 				}
+=======
+			if (ap->updating &&
+			    (unsigned)(rt->rt_rmx.rmx_expire - timenow.tv_sec) >
+			    rt_expiry(rt, 0, rtq_reallyold)) {
+				rt->rt_rmx.rmx_expire = rt_expiry(rt,
+				    timenow.tv_sec, rtq_reallyold);
+>>>>>>> origin/10.6
 			}
 			ap->nextstop = lmin(ap->nextstop, rt->rt_expire);
 			RT_UNLOCK(rt);

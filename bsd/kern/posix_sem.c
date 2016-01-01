@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2007 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -63,6 +89,7 @@
 #include <sys/tty.h>
 #include <sys/malloc.h>
 #include <sys/semaphore.h>
+<<<<<<< HEAD
 #include <sys/sysproto.h>
 #include <sys/proc_info.h>
 
@@ -72,6 +99,10 @@
 #endif
 
 #include <security/audit/audit.h>
+=======
+
+#include <bsm/audit_kernel.h>
+>>>>>>> origin/10.3
 
 #include <mach/mach_types.h>
 #include <mach/vm_prot.h>
@@ -381,6 +412,9 @@ sem_open(proc_t p, struct sem_open_args *uap, user_addr_t *retval)
 	AUDIT_ARG(mode, uap->mode);
 	AUDIT_ARG(value32, uap->value);
 
+	AUDIT_ARG(fflags, uap->oflag);
+	AUDIT_ARG(mode, uap->mode);
+	AUDIT_ARG(value, uap->value);
 	pinfo = PSEMINFO_NULL;
 
 	/*
@@ -399,7 +433,11 @@ sem_open(proc_t p, struct sem_open_args *uap, user_addr_t *retval)
 		goto bad;
 	}
 	AUDIT_ARG(text, pnbuf);
+<<<<<<< HEAD
 	if ( (pathlen > PSEMNAMLEN) ) {
+=======
+	if (pathlen > PSEMNAMLEN) {
+>>>>>>> origin/10.3
 		error = ENAMETOOLONG;
 		goto bad;
 	}
@@ -517,7 +555,11 @@ sem_open(proc_t p, struct sem_open_args *uap, user_addr_t *retval)
 		}
 #endif 
 		AUDIT_ARG(posix_ipc_perm, pinfo->psem_uid,
+<<<<<<< HEAD
 			pinfo->psem_gid, pinfo->psem_mode);
+=======
+			  pinfo->psem_gid, pinfo->psem_mode);
+>>>>>>> origin/10.3
 		error = EEXIST;
 		goto bad_locked;
 	}
@@ -559,6 +601,7 @@ sem_open(proc_t p, struct sem_open_args *uap, user_addr_t *retval)
 			goto bad_locked;
 		}	
 		AUDIT_ARG(posix_ipc_perm, pinfo->psem_uid,
+<<<<<<< HEAD
 			pinfo->psem_gid, pinfo->psem_mode);
 #if CONFIG_MACF
 		error = mac_posixsem_check_open(kauth_cred_get(), pinfo);
@@ -569,6 +612,11 @@ sem_open(proc_t p, struct sem_open_args *uap, user_addr_t *retval)
 		if ( (error = psem_access(pinfo, fmode, kauth_cred_get())) ) {
 			goto bad_locked;
 		}
+=======
+			  pinfo->psem_gid, pinfo->psem_mode);
+		if (error = psem_access(pinfo, fmode, p->p_ucred, p))
+			goto bad1;
+>>>>>>> origin/10.3
 	}
 
 	if (!incache) {
@@ -755,7 +803,10 @@ sem_unlink(__unused proc_t p, struct sem_unlink_args *uap, __unused int32_t *ret
 		error = 0;
 		goto bad;
 	}
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.3
 	AUDIT_ARG(posix_ipc_perm, pinfo->psem_uid, pinfo->psem_gid,
 		  pinfo->psem_mode);
 
@@ -785,11 +836,20 @@ sem_close(proc_t p, struct sem_close_args *uap, __unused int32_t *retval)
 	int error = 0;
 
 	AUDIT_ARG(fd, fd); /* XXX This seems wrong; uap->sem is a pointer */
+<<<<<<< HEAD
 
 	proc_fdlock(p);
 	error = fp_lookup(p,fd, &fp, 1);
 	if (error) {
 		proc_fdunlock(p);
+=======
+	if ((u_int)fd >= fdp->fd_nfiles ||
+			(fp = fdp->fd_ofiles[fd]) == NULL ||
+			(fdp->fd_ofileflags[fd] & UF_RESERVED))
+		return (EBADF);
+	fdrelse(p, fd);
+	if( error = closef(fp, p))
+>>>>>>> origin/10.3
 		return(error);
 	}
 	procfdtbl_markclosefd(p, fd);

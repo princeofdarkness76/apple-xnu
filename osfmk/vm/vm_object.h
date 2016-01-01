@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -119,6 +141,7 @@ struct vm_object_fault_info {
         vm_behavior_t	behavior;
         vm_map_offset_t	lo_offset;
 	vm_map_offset_t	hi_offset;
+<<<<<<< HEAD
 	unsigned int
 	/* boolean_t */	no_cache:1,
 	/* boolean_t */	stealth:1,
@@ -128,6 +151,11 @@ struct vm_object_fault_info {
 	/* boolean_t */ batch_pmap_op:1,
 		__vm_object_fault_info_unused_bits:26;
 	int		pmap_options;
+=======
+	boolean_t	no_cache;
+	boolean_t	stealth;
+	boolean_t	mark_zf_absent;
+>>>>>>> origin/10.6
 };
 
 
@@ -353,6 +381,7 @@ struct vm_object {
 		code_signed:1,		/* pages are signed and should be
 					   validated; the signatures are stored
 					   with the pager */
+<<<<<<< HEAD
 		hashed:1,		/* object/pager entered in hash */
 		transposed:1,		/* object was transposed with another */
 		mapping_in_progress:1,	/* pager being mapped/unmapped */
@@ -376,6 +405,12 @@ struct vm_object {
 	uint32_t		phantom_object_id;
 #endif
 #if CONFIG_IOSCHED || UPL_DEBUG
+=======
+		mapping_in_progress:1,	/* pager being mapped/unmapped */
+		not_in_use:22;		/* for expansion */
+
+#ifdef	UPL_DEBUG
+>>>>>>> origin/10.5
 	queue_head_t		uplq;		/* List of outstanding upls */
 #endif
 
@@ -969,6 +1004,38 @@ extern void vm_io_reprioritize_init(void);
 		/*XXX if ((interruptible) && (_wr != THREAD_AWAKENED))*/\
 			/*XXX break; */					\
 	}								\
+	MACRO_END
+
+
+#define vm_object_mapping_begin(object) 				\
+	MACRO_BEGIN							\
+	vm_object_lock_assert_exclusive((object));			\
+	assert(! (object)->mapping_in_progress);			\
+	(object)->mapping_in_progress = TRUE;				\
+	MACRO_END
+
+#define vm_object_mapping_end(object)					\
+	MACRO_BEGIN							\
+	vm_object_lock_assert_exclusive((object));			\
+	assert((object)->mapping_in_progress);				\
+	(object)->mapping_in_progress = FALSE;				\
+	vm_object_wakeup((object),					\
+			 VM_OBJECT_EVENT_MAPPING_IN_PROGRESS);		\
+	MACRO_END
+
+#define vm_object_mapping_wait(object, interruptible)			\
+	MACRO_BEGIN							\
+	vm_object_lock_assert_exclusive((object));			\
+	while ((object)->mapping_in_progress) {				\
+		wait_result_t	_wr;					\
+									\
+		_wr = vm_object_sleep((object),				\
+				      VM_OBJECT_EVENT_MAPPING_IN_PROGRESS, \
+				      (interruptible));			\
+		/*XXX if ((interruptible) && (_wr != THREAD_AWAKENED))*/\
+			/*XXX break; */					\
+	}								\
+	assert(!(object)->mapping_in_progress);				\
 	MACRO_END
 
 

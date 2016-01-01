@@ -48,11 +48,16 @@
 #include <sys/tty.h>
 #include <sys/vnode.h>
 #include <sys/sysctl.h>
+<<<<<<< HEAD
 #include <machine/cons.h>
 #include <pexpert/pexpert.h>
 #include <sys/socketvar.h>
 #include <pexpert/pexpert.h>
 #include <netinet/tcp_var.h>
+=======
+#include <dev/ppc/cons.h>
+#include <pexpert/pexpert.h>
+>>>>>>> origin/10.5
 
 extern uint32_t kern_maxvnodes;
 extern vm_map_t mb_map;
@@ -65,7 +70,11 @@ extern uint32_t   tcp_recvspace;
 void            bsd_bufferinit(void);
 
 unsigned int	bsd_mbuf_cluster_reserve(boolean_t *);
+<<<<<<< HEAD
 void bsd_scale_setup(int);
+=======
+void bsd_srv_setup(int);
+>>>>>>> origin/10.6
 void bsd_exec_setup(int);
 
 /*
@@ -90,6 +99,7 @@ SYSCTL_INT (_kern, OID_AUTO, maxnbuf, CTLFLAG_RW | CTLFLAG_LOCKED, &max_nbuf_hea
 __private_extern__ int customnbuf = 0;
 int             serverperfmode = 0;	/* Flag indicates a server boot when set */
 int             ncl = 0;
+static unsigned int mbuf_poolsz;
 
 #if SOCKETS
 static unsigned int mbuf_poolsz;
@@ -161,7 +171,15 @@ bsd_startupearly(void)
 
 #if SOCKETS
 	{
+<<<<<<< HEAD
 		static const unsigned int	maxspace = 128 * 1024;
+=======
+#if CONFIG_USESOCKTHRESHOLD
+		static const unsigned int	maxspace = 64 * 1024;
+#else
+		static const unsigned int	maxspace = 128 * 1024;
+#endif
+>>>>>>> origin/10.5
 		int             scale;
 
 		nmbclusters = bsd_mbuf_cluster_reserve(NULL) / MCLBYTES;
@@ -232,6 +250,7 @@ bsd_bufferinit(void)
 	bufinit();
 }
 
+<<<<<<< HEAD
 /* 512 MB (K32) or 2 GB (K64) hard limit on size of the mbuf pool */
 #if !defined(__LP64__)
 #define	MAX_MBUF_POOL	(512 << MBSHIFT)
@@ -239,6 +258,11 @@ bsd_bufferinit(void)
 #define	MAX_MBUF_POOL	(2ULL << GBSHIFT)
 #endif /* !__LP64__ */
 #define	MAX_NCL		(MAX_MBUF_POOL >> MCLSHIFT)
+=======
+/* 512 MB hard limit on size of the mbuf pool */
+#define MAX_MBUF_POOL   (512 << MBSHIFT)
+#define MAX_NCL         (MAX_MBUF_POOL >> MCLSHIFT)
+>>>>>>> origin/10.5
 
 #if SOCKETS
 /*
@@ -251,6 +275,7 @@ bsd_bufferinit(void)
 unsigned int
 bsd_mbuf_cluster_reserve(boolean_t *overridden)
 {
+<<<<<<< HEAD
 	int mbuf_pool = 0;
 	static boolean_t was_overridden = FALSE;
 
@@ -276,9 +301,23 @@ bsd_mbuf_cluster_reserve(boolean_t *overridden)
 
         if (sane_size > (64 * 1024 * 1024) || ncl != 0) {
 
+<<<<<<< HEAD
 		if (ncl || serverperfmode)
 			was_overridden = TRUE;
+=======
+	/* If called more than once, return the previously calculated size */
+        if (mbuf_poolsz != 0)
+                goto done;
 
+	PE_parse_boot_argn("ncl", &ncl, sizeof (ncl));
+>>>>>>> origin/10.5
+
+        if (sane_size > (64 * 1024 * 1024) || ncl) {
+=======
+		if (ncl || srv)
+			was_overridden = TRUE;
+
+>>>>>>> origin/10.6
 	        if ((nmbclusters = ncl) == 0) {
 			/* Auto-configure the mbuf pool size */
 			nmbclusters = mbuf_default_ncl(serverperfmode, sane_size);
@@ -291,6 +330,7 @@ bsd_mbuf_cluster_reserve(boolean_t *overridden)
 			if (nmbclusters > MAX_NCL)
 				nmbclusters = MAX_NCL;
 		}
+<<<<<<< HEAD
 
 		/* Round it down to nearest multiple of PAGE_SIZE */
 		nmbclusters = P2ROUNDDOWN(nmbclusters, NCLPG);
@@ -301,6 +341,20 @@ done:
 		*overridden = was_overridden;
 
 	return (mbuf_poolsz);
+=======
+		/* Make sure it's not odd in case ncl is manually set */
+		if (nmbclusters & 0x1)
+			--nmbclusters;
+
+                /* And obey the upper limit */
+                if (nmbclusters > MAX_NCL)
+                	nmbclusters = MAX_NCL;
+
+	}
+	mbuf_poolsz = nmbclusters << MCLSHIFT;
+done:
+	return (nmbclusters * MCLBYTES);
+>>>>>>> origin/10.5
 }
 #endif
 

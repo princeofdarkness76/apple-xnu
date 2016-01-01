@@ -1,4 +1,5 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2007 Apple Inc. All Rights Reserved.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -12,16 +13,42 @@
  * circumvent, violate, or enable the circumvention or violation of, any
  * terms of an Apple operating system software license agreement.
  * 
+<<<<<<< HEAD
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  * 
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -99,9 +126,16 @@
 #include <sys/cprotect.h>
 #endif
 
+<<<<<<< HEAD
 #include <sys/syscall.h>
 #include <sys/kdebug.h>
 #include <sys/bsdtask_info.h>
+=======
+#include <bsm/audit_kernel.h>
+#include <bsm/audit_kevents.h>
+
+#include <mach/mach_types.h>
+>>>>>>> origin/10.3
 
 #include <security/audit/audit.h>
 #include <bsm/audit_kevents.h>
@@ -180,6 +214,15 @@ mmap(proc_t p, struct mmap_args *uap, user_addr_t *retval)
 	AUDIT_ARG(len, user_size);
 	AUDIT_ARG(fd, uap->fd);
 
+<<<<<<< HEAD
+=======
+	user_addr = (vm_offset_t)uap->addr;
+	user_size = (vm_size_t) uap->len;
+	AUDIT_ARG(addr, (void *)user_addr);
+	AUDIT_ARG(len, (int) user_size);
+	AUDIT_ARG(fd, uap->fd);
+
+>>>>>>> origin/10.3
 	prot = (uap->prot & VM_PROT_ALL);
 #if 3777787
 	/*
@@ -359,6 +402,14 @@ mmap(proc_t p, struct mmap_args *uap, user_addr_t *retval)
 			vnode_setattr(vp, &va, ctx);
 		}
 
+<<<<<<< HEAD
+=======
+		if (vp->v_type != VREG && vp->v_type != VCHR)
+			return (EINVAL);
+
+		AUDIT_ARG(vnpath, vp, ARG_VNODE1);
+
+>>>>>>> origin/10.3
 		/*
 		 * XXX hack to handle use of /dev/zero to map anon memory (ala
 		 * SunOS).
@@ -618,6 +669,7 @@ map_file_retry:
 						 VM_INHERIT_SHARE : 
 						 VM_INHERIT_DEFAULT);
 
+<<<<<<< HEAD
 		/* If a non-binding address was specified for this file backed
 		 * mapping, retry the mapping with a zero base
 		 * in the event the mapping operation failed due to
@@ -626,6 +678,11 @@ map_file_retry:
 		if ((result == KERN_NO_SPACE) && ((flags & MAP_FIXED) == 0) && user_addr && (num_retries++ == 0)) {
 			user_addr = vm_map_page_size(user_map);
 			goto map_file_retry;
+=======
+		if (result != KERN_SUCCESS)  {
+				(void)vnode_put(vp);
+				goto out;
+>>>>>>> origin/10.5
 		}
 	}
 
@@ -755,10 +812,17 @@ munmap(__unused proc_t p, struct munmap_args *uap, __unused int32_t *retval)
 	AUDIT_ARG(addr, user_addr);
 	AUDIT_ARG(len, user_size);
 
+<<<<<<< HEAD
 	if (user_addr & vm_map_page_mask(user_map)) {
 		/* UNIX SPEC: user address is not page-aligned, return EINVAL */
 		return EINVAL;
 	}
+=======
+	AUDIT_ARG(addr, (void *)user_addr);
+	AUDIT_ARG(len, (int) user_size);
+
+	pageoff = (user_addr & PAGE_MASK);
+>>>>>>> origin/10.3
 
 	if (user_addr + user_size < user_addr)
 		return(EINVAL);
@@ -791,10 +855,22 @@ mprotect(__unused proc_t p, struct mprotect_args *uap, __unused int32_t *retval)
 	AUDIT_ARG(len, uap->len);
 	AUDIT_ARG(value32, uap->prot);
 
+<<<<<<< HEAD
 	user_map = current_map();
 	user_addr = (mach_vm_offset_t) uap->addr;
 	user_size = (mach_vm_size_t) uap->len;
 	prot = (vm_prot_t)(uap->prot & (VM_PROT_ALL | VM_PROT_TRUSTED));
+<<<<<<< HEAD
+=======
+	AUDIT_ARG(addr, uap->addr);
+	AUDIT_ARG(len, uap->len);
+	AUDIT_ARG(value, uap->prot);
+	user_addr = (vm_offset_t) uap->addr;
+	user_size = (vm_size_t) uap->len;
+	prot = (vm_prot_t)(uap->prot & VM_PROT_ALL);
+>>>>>>> origin/10.3
+=======
+>>>>>>> origin/10.6
 
 	if (user_addr & vm_map_page_mask(user_map)) {
 		/* UNIX SPEC: user address is not page-aligned, return EINVAL */
@@ -840,12 +916,18 @@ mprotect(__unused proc_t p, struct mprotect_args *uap, __unused int32_t *retval)
 		 * mac_proc_check_mprotect() hook above. Otherwise, Codesigning will be
 		 * compromised because the check would always succeed and thusly any
 		 * process could sign dynamically. */
+<<<<<<< HEAD
 		result = vm_map_sign(
 			user_map, 
 			vm_map_trunc_page(user_addr,
 					  vm_map_page_mask(user_map)),
 			vm_map_round_page(user_addr+user_size,
 					  vm_map_page_mask(user_map)));
+=======
+		result = vm_map_sign(user_map, 
+				     vm_map_trunc_page(user_addr), 
+				     vm_map_round_page(user_addr+user_size));
+>>>>>>> origin/10.6
 		switch (result) {
 			case KERN_SUCCESS:
 				break;
@@ -887,7 +969,14 @@ minherit(__unused proc_t p, struct minherit_args *uap, __unused int32_t *retval)
 
 	AUDIT_ARG(addr, uap->addr);
 	AUDIT_ARG(len, uap->len);
+<<<<<<< HEAD
 	AUDIT_ARG(value32, uap->inherit);
+=======
+	AUDIT_ARG(value, uap->inherit);
+	addr = (vm_offset_t)uap->addr;
+	size = uap->len;
+	inherit = uap->inherit;
+>>>>>>> origin/10.3
 
 	addr = (mach_vm_offset_t)uap->addr;
 	size = (mach_vm_size_t)uap->len;
@@ -1091,6 +1180,11 @@ mlock(__unused proc_t p, struct mlock_args *uap, __unused int32_t *retvalval)
 
 	AUDIT_ARG(addr, uap->addr);
 	AUDIT_ARG(len, uap->len);
+<<<<<<< HEAD
+=======
+	addr = (vm_offset_t) uap->addr;
+	size = uap->len;
+>>>>>>> origin/10.3
 
 	addr = (vm_map_offset_t) uap->addr;
 	size = (vm_map_size_t)uap->len;
@@ -1127,7 +1221,31 @@ munlock(__unused proc_t p, struct munlock_args *uap, __unused int32_t *retval)
 	kern_return_t	result;
 
 	AUDIT_ARG(addr, uap->addr);
+<<<<<<< HEAD
 	AUDIT_ARG(addr, uap->len);
+=======
+	AUDIT_ARG(len, uap->len);
+	addr = (vm_offset_t) uap->addr;
+	size = uap->len;
+
+	pageoff = (addr & PAGE_MASK);
+	addr -= pageoff;
+	size += pageoff;
+	size = (vm_size_t) round_page_32(size);
+
+	/* disable wrap around */
+	if (addr + size < addr)
+		return (EINVAL);
+
+#ifdef notyet 
+/* Hmm.. What am I going to do with this? */
+#ifndef pmap_wired_count
+	error = suser(p->p_ucred, &p->p_acflag);
+	if (error)
+		return (error);
+#endif
+#endif /* notyet */
+>>>>>>> origin/10.3
 
 	addr = (mach_vm_offset_t) uap->addr;
 	size = (mach_vm_size_t)uap->len;
@@ -1233,9 +1351,166 @@ mremap_encrypted(__unused struct proc *p, struct mremap_encrypted_args *uap, __u
     }
 
 #if 0
+<<<<<<< HEAD
     kprintf("%s vpath %s cryptid 0x%08x cputype 0x%08x cpusubtype 0x%08x range 0x%016llx size 0x%016llx\n",
             __FUNCTION__, vpath, cryptid, cputype, cpusubtype, (uint64_t)user_addr, (uint64_t)user_size);
 #endif
+<<<<<<< HEAD
+=======
+	extern int print_map_addr;
+#endif /* 0 */
+=======
+}
+/* END DEFUNCT */
+
+/* CDY need to fix interface to allow user to map above 32 bits */
+/* USV: No! need to obsolete map_fd()! mmap() already supports 64 bits */
+kern_return_t
+map_fd(
+	int		fd,
+	vm_offset_t	offset,
+	vm_offset_t	*va,
+	boolean_t	findspace,
+	vm_size_t	size)
+{
+	kern_return_t ret;
+	boolean_t funnel_state;
+
+	AUDIT_MACH_SYSCALL_ENTER(AUE_MAPFD);
+	AUDIT_ARG(addr, va);
+	AUDIT_ARG(fd, fd);
+
+	funnel_state = thread_funnel_set(kernel_flock, TRUE);
+
+	ret = map_fd_funneled( fd, (vm_object_offset_t)offset, 
+							va, findspace, size);
+
+	(void) thread_funnel_set(kernel_flock, FALSE);
+
+	AUDIT_MACH_SYSCALL_EXIT(ret);
+	return ret;
+}
+
+kern_return_t
+map_fd_funneled(
+	int			fd,
+	vm_object_offset_t	offset,
+	vm_offset_t		*va,
+	boolean_t		findspace,
+	vm_size_t		size)
+{
+	kern_return_t	result;
+	struct file	*fp;
+	struct vnode	*vp;
+	void *	pager;
+	vm_offset_t	map_addr=0;
+	vm_size_t	map_size;
+	vm_map_copy_t	tmp;
+	int		err=0;
+	vm_map_t	my_map;
+	struct proc	*p =(struct proc *)current_proc();
+>>>>>>> origin/10.3
+
+	/*
+	 *	Find the inode; verify that it's a regular file.
+	 */
+
+	err = fdgetf(p, fd, &fp);
+	if (err)
+		return(err);
+	
+	if (fp->f_type != DTYPE_VNODE)
+		return(KERN_INVALID_ARGUMENT);
+
+	if (!(fp->f_flag & FREAD))
+		return (KERN_PROTECTION_FAILURE);
+
+	vp = (struct vnode *)fp->f_data;
+
+	if (vp->v_type != VREG)
+		return (KERN_INVALID_ARGUMENT);
+
+	AUDIT_ARG(vnpath, vp, ARG_VNODE1);
+
+	if (offset & PAGE_MASK_64) {
+		printf("map_fd: file offset not page aligned(%d : %s)\n",p->p_pid, p->p_comm);
+		return (KERN_INVALID_ARGUMENT);
+	}
+	map_size = round_page(size);
+
+	/*
+	 * Allow user to map in a zero length file.
+	 */
+	if (size == 0)
+		return (KERN_SUCCESS);
+	/*
+	 *	Map in the file.
+	 */
+	UBCINFOCHECK("map_fd_funneled", vp);
+	pager = (void *) ubc_getpager(vp);
+	if (pager == NULL)
+		return (KERN_FAILURE);
+
+
+	my_map = current_map();
+
+	result = vm_map_64(
+			my_map,
+			&map_addr, map_size, (vm_offset_t)0, TRUE,
+			pager, offset, TRUE,
+			VM_PROT_DEFAULT, VM_PROT_ALL,
+			VM_INHERIT_DEFAULT);
+	if (result != KERN_SUCCESS)
+		return (result);
+
+
+	if (!findspace) {
+		vm_offset_t	dst_addr;
+		vm_map_copy_t	tmp;
+
+		if (copyin(va, &dst_addr, sizeof (dst_addr))	||
+					trunc_page(dst_addr) != dst_addr) {
+			(void) vm_map_remove(
+					my_map,
+					map_addr, map_addr + map_size,
+					VM_MAP_NO_FLAGS);
+			return (KERN_INVALID_ADDRESS);
+		}
+
+		result = vm_map_copyin(
+				my_map,
+				map_addr, map_size, TRUE,
+				&tmp);
+		if (result != KERN_SUCCESS) {
+			
+			(void) vm_map_remove(
+					my_map,
+					map_addr, map_addr + map_size,
+					VM_MAP_NO_FLAGS);
+			return (result);
+		}
+
+		result = vm_map_copy_overwrite(
+					my_map,
+					dst_addr, tmp, FALSE);
+		if (result != KERN_SUCCESS) {
+			vm_map_copy_discard(tmp);
+			return (result);
+		}
+	} else {
+		if (copyout(&map_addr, va, sizeof (map_addr))) {
+			(void) vm_map_remove(
+					my_map,
+					map_addr, map_addr + map_size,
+					VM_MAP_NO_FLAGS);
+			return (KERN_INVALID_ADDRESS);
+		}
+	}
+
+<<<<<<< HEAD
+	ubc_setcred(vp, current_proc());
+	ubc_map(vp);
+>>>>>>> origin/10.2
 
     /* set up decrypter first */
     crypt_file_data_t crypt_data = {
@@ -1278,5 +1553,13 @@ mremap_encrypted(__unused struct proc *p, struct mremap_encrypted_args *uap, __u
         return (EPERM);
     }
     return 0;
+=======
+	ubc_setthreadcred(vp, current_proc(), current_thread());
+	(void)vnode_put(vp);
+	err = 0;
+bad:
+	fp_drop(p, fd, fp, 0);
+	return (err);
+>>>>>>> origin/10.5
 }
 #endif /* CONFIG_CODE_DECRYPTION */

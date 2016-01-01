@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -367,6 +389,8 @@ thread_init(void)
 			thread_max * sizeof(struct thread),
 			THREAD_CHUNK * sizeof(struct thread),
 			"threads");
+<<<<<<< HEAD
+<<<<<<< HEAD
 
 	thread_qos_override_zone = zinit(
 		sizeof(struct thread_qos_override),
@@ -378,6 +402,26 @@ thread_init(void)
 	zone_change(thread_qos_override_zone, Z_CALLERACCT, FALSE);
 	zone_change(thread_qos_override_zone, Z_NOENCRYPT, TRUE);
 
+=======
+	zone_change(thread_zone, Z_NOENCRYPT, TRUE);
+	
+>>>>>>> origin/10.6
+=======
+
+<<<<<<< HEAD
+>>>>>>> origin/10.7
+=======
+	thread_qos_override_zone = zinit(
+		sizeof(struct thread_qos_override),
+		4 * thread_max * sizeof(struct thread_qos_override),
+		PAGE_SIZE,
+		"thread qos override");
+	zone_change(thread_qos_override_zone, Z_EXPAND, TRUE);
+	zone_change(thread_qos_override_zone, Z_COLLECT, TRUE);
+	zone_change(thread_qos_override_zone, Z_CALLERACCT, FALSE);
+	zone_change(thread_qos_override_zone, Z_NOENCRYPT, TRUE);
+
+>>>>>>> origin/10.10
 	lck_grp_attr_setdefault(&thread_lck_grp_attr);
 	lck_grp_init(&thread_lck_grp, "thread", &thread_lck_grp_attr);
 	lck_attr_setdefault(&thread_lck_attr);
@@ -686,9 +730,12 @@ thread_terminate_daemon(void)
 
 		task->task_timer_wakeups_bin_1 += thread->thread_timer_wakeups_bin_1;
 		task->task_timer_wakeups_bin_2 += thread->thread_timer_wakeups_bin_2;
+<<<<<<< HEAD
 		task->task_gpu_ns += ml_gpu_stat(thread);
 		
 		thread_update_qos_cpu_time(thread, FALSE);
+=======
+>>>>>>> origin/10.8
 		queue_remove(&task->threads, thread, thread_t, task_threads);
 		task->thread_count--;
 
@@ -906,6 +953,7 @@ thread_create_internal(
 
 	if (machine_thread_create(new_thread, parent_task) != KERN_SUCCESS) {
 #ifdef MACH_BSD
+<<<<<<< HEAD
 		void *ut = new_thread->uthread;
 
 		new_thread->uthread = NULL;
@@ -913,6 +961,15 @@ thread_create_internal(
 		uthread_cleanup(parent_task, ut, parent_task->bsd_info, FALSE);
 		uthread_cred_free(ut);
 		uthread_zone_free(ut);
+=======
+		{
+			extern void uthread_free(task_t, void *, void *, void *);
+			void *ut = new_thread->uthread;
+
+			new_thread->uthread = NULL;
+			uthread_free(parent_task, (void *)new_thread, ut, parent_task->bsd_info);
+		}
+>>>>>>> origin/10.3
 #endif  /* MACH_BSD */
 
 		zfree(thread_zone, new_thread);
@@ -953,6 +1010,7 @@ thread_create_internal(
 
 #ifdef MACH_BSD
 		{
+<<<<<<< HEAD
 			void *ut = new_thread->uthread;
 
 			new_thread->uthread = NULL;
@@ -960,6 +1018,13 @@ thread_create_internal(
 			/* cred free may not be necessary */
 			uthread_cred_free(ut);
 			uthread_zone_free(ut);
+=======
+			extern void uthread_free(task_t, void *, void *, void *);
+			void *ut = new_thread->uthread;
+
+			new_thread->uthread = NULL;
+			uthread_free(parent_task, (void *)new_thread, ut, parent_task->bsd_info);
+>>>>>>> origin/10.3
 		}
 #endif  /* MACH_BSD */
 		ipc_thread_disable(new_thread);
@@ -2185,10 +2250,19 @@ thread_tid(
 	return (thread != THREAD_NULL? thread->thread_id: 0);
 }
 
+<<<<<<< HEAD
 uint16_t	thread_set_tag(thread_t th, uint16_t tag) {
 	return thread_set_tag_internal(th, tag);
 }
 uint16_t	thread_get_tag(thread_t th) {
+=======
+uint16_t
+thread_set_tag(thread_t th, uint16_t tag) {
+	return thread_set_tag_internal(th, tag);
+}
+uint16_t
+thread_get_tag(thread_t th) {
+>>>>>>> origin/10.8
 	return thread_get_tag_internal(th);
 }
 

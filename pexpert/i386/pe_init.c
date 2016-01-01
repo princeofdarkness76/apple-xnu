@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -170,11 +192,16 @@ void PE_init_iokit(void)
     /*
      * Initialize the spinning wheel (progress indicator).
      */
+<<<<<<< HEAD
     vc_progress_initialize(&default_progress, 
 			    default_progress_data1x,
 			    default_progress_data2x, 
 			    default_progress_data3x, 
 			    (unsigned char *) appleClut8);
+=======
+    vc_progress_initialize( &default_progress, default_progress_data1x, default_progress_data2x,
+                            (unsigned char *) appleClut8 );
+>>>>>>> origin/10.7
 
     StartIOKit( PE_state.deviceTreeHead, PE_state.bootArgs, gPEEFIRuntimeServices, NULL);
 }
@@ -195,6 +222,7 @@ void PE_init_platform(boolean_t vm_initialized, void * _args)
         PE_state.video.v_height	    = args->Video.v_height;
         PE_state.video.v_depth	    = args->Video.v_depth;
         PE_state.video.v_display    = args->Video.v_display;
+        PE_state.video.v_scale      = (kBootArgsFlagHiDPI & args->flags) ? 2 : 1;
         strlcpy(PE_state.video.v_pixelFormat, "PPPPPPPP",
 		sizeof(PE_state.video.v_pixelFormat));
 
@@ -209,7 +237,13 @@ void PE_init_platform(boolean_t vm_initialized, void * _args)
     }
 
     if (!vm_initialized) {
+<<<<<<< HEAD
 
+=======
+		/* Hack! FIXME.. */ 
+        outb(0x21, 0xff);   /* Maskout all interrupts Pic1 */
+        outb(0xa1, 0xff);   /* Maskout all interrupts Pic2 */
+>>>>>>> origin/10.6
         if (PE_state.deviceTreeHead) {
             DTInit(PE_state.deviceTreeHead);
         }
@@ -317,12 +351,17 @@ int (*PE_poll_input)(unsigned int options, char * c)
 boolean_t
 PE_reboot_on_panic(void)
 {
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.7
 	boot_args *args = (boot_args *)PE_state.bootArgs;
 
 	if (args->flags & kBootArgsFlagRebootOnPanic)
 		return TRUE;
 	else
 		return FALSE;
+<<<<<<< HEAD
 }
 
 /* rdar://problem/21244753 */
@@ -341,4 +380,9 @@ PE_i_can_has_debugger(uint32_t *debug_flags)
 		*debug_flags = debug_boot_arg;
 	}
 	return TRUE;
+=======
+	return FALSE;
+>>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.7
 }

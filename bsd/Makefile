@@ -41,6 +41,10 @@ INSTINC_SUBDIRS_ARM64 = \
 
 EXPINC_SUBDIRS = \
 	bsm \
+<<<<<<< HEAD
+=======
+	crypto \
+>>>>>>> origin/10.3
 	dev \
 	hfs \
 	libkern \

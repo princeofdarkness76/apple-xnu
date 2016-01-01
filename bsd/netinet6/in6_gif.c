@@ -95,6 +95,22 @@
 
 #include <net/net_osdep.h>
 
+<<<<<<< HEAD
+=======
+extern u_long  route_generation;
+
+static __inline__ void*
+_cast_non_const(const void * ptr) {
+	union {
+		const void*		cval;
+		void*			val;
+	} ret;
+	
+	ret.cval = ptr;
+	return (ret.val);
+}
+
+>>>>>>> origin/10.5
 int
 in6_gif_output(
 	struct ifnet *ifp,
@@ -190,12 +206,22 @@ in6_gif_output(
 	ip6->ip6_flow &= ~htonl(0xff << 20);
 	ip6->ip6_flow |= htonl((u_int32_t)otos << 20);
 
+<<<<<<< HEAD
 	if (ROUTE_UNUSABLE(&sc->gif_ro6) ||
 	    dst->sin6_family != sin6_dst->sin6_family ||
 	    !IN6_ARE_ADDR_EQUAL(&dst->sin6_addr, &sin6_dst->sin6_addr) ||
 	    (sc->gif_ro6.ro_rt != NULL && sc->gif_ro6.ro_rt->rt_ifp == ifp)) {
 		/* cache route doesn't match or recursive route */
 		bzero(dst, sizeof (*dst));
+=======
+	if (dst->sin6_family != sin6_dst->sin6_family ||
+	    !IN6_ARE_ADDR_EQUAL(&dst->sin6_addr, &sin6_dst->sin6_addr) ||
+	    (sc->gif_ro6.ro_rt != NULL &&
+	    (sc->gif_ro6.ro_rt->generation_id != route_generation ||
+	    sc->gif_ro6.ro_rt->rt_ifp == ifp))) {
+		/* cache route doesn't match */
+		bzero(dst, sizeof(*dst));
+>>>>>>> origin/10.5
 		dst->sin6_family = sin6_dst->sin6_family;
 		dst->sin6_len = sizeof (struct sockaddr_in6);
 		dst->sin6_addr = sin6_dst->sin6_addr;
@@ -214,7 +240,10 @@ in6_gif_output(
 		RT_LOCK(sc->gif_ro6.ro_rt);
 		/* if it constitutes infinite encapsulation, punt. */
 		if (sc->gif_ro6.ro_rt->rt_ifp == ifp) {
+<<<<<<< HEAD
 			RT_UNLOCK(sc->gif_ro6.ro_rt);
+=======
+>>>>>>> origin/10.5
 			m_freem(m);
 			return (ENETUNREACH); /* XXX */
 		}

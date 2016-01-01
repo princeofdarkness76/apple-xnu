@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -71,6 +93,7 @@ typedef	void	mach_munge_t(void *);
 #endif
 
 typedef struct {
+<<<<<<< HEAD
 	int			mach_trap_arg_count; /* Number of trap arguments (Arch independant) */
 	kern_return_t		(*mach_trap_function)(void *);
 #if CONFIG_REQUIRES_U32_MUNGING || (__arm__ && (__BIGGEST_ALIGNMENT__ > 4))
@@ -78,6 +101,19 @@ typedef struct {
 #endif
 	int			mach_trap_u32_words; /* number of 32-bit words to copyin for U32 */
 #if	MACH_ASSERT
+=======
+	int			mach_trap_arg_count;
+	int			(*mach_trap_function)(void);
+#if defined(__i386__)
+	boolean_t		mach_trap_stack;
+#else
+	mach_munge_t		*mach_trap_arg_munge32; /* system call arguments for 32-bit */
+	mach_munge_t		*mach_trap_arg_munge64; /* system call arguments for 64-bit */
+#endif
+#if	!MACH_ASSERT
+	int			mach_trap_unused;
+#else
+>>>>>>> origin/10.5
 	const char*		mach_trap_name;
 #endif /* MACH_ASSERT */
 } mach_trap_t;
@@ -88,6 +124,7 @@ typedef struct {
 extern const mach_trap_t	mach_trap_table[];
 extern int			mach_trap_count;
 
+<<<<<<< HEAD
 #if CONFIG_REQUIRES_U32_MUNGING || (__arm__ && (__BIGGEST_ALIGNMENT__ > 4))
 
 #if	!MACH_ASSERT
@@ -101,6 +138,17 @@ extern int			mach_trap_count;
 
 #else /* !CONFIG_REQUIRES_U32_MUNGING || (__arm__ && (__BIGGEST_ALIGNMENT__ > 4)) */
 
+=======
+#if defined(__i386__)
+#if	!MACH_ASSERT
+#define	MACH_TRAP(name, arg_count, munge32, munge64)	\
+		{ (arg_count), (int (*)(void)) (name), FALSE, 0 }
+#else
+#define MACH_TRAP(name, arg_count, munge32, munge64)		\
+		{ (arg_count), (int (*)(void)) (name), FALSE, #name }
+#endif /* !MACH_ASSERT */
+#else  /* !defined(__i386__) */
+>>>>>>> origin/10.5
 #if	!MACH_ASSERT
 #define	MACH_TRAP(name, arg_count, u32_arg_words, munge32)	\
 	{ (arg_count), (kern_return_t (*)(void *)) (name), (u32_arg_words)  }

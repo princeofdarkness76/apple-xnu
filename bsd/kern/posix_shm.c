@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2007 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -64,6 +90,7 @@
 #include <sys/tty.h>
 #include <sys/malloc.h>
 #include <sys/mman.h>
+<<<<<<< HEAD
 #include <sys/stat.h>
 #include <sys/sysproto.h>
 #include <sys/proc_info.h>
@@ -72,6 +99,10 @@
 #if CONFIG_MACF
 #include <security/mac_framework.h>
 #endif
+=======
+
+#include <bsm/audit_kernel.h>
+>>>>>>> origin/10.3
 
 #include <mach/mach_types.h>
 #include <mach/mach_vm.h>
@@ -389,7 +420,10 @@ shm_open(proc_t p, struct shm_open_args *uap, int32_t *retval)
 
 	AUDIT_ARG(fflags, uap->oflag);
 	AUDIT_ARG(mode, uap->mode);
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.3
 	pinfo = PSHMINFO_NULL;
 
 	/*
@@ -493,6 +527,7 @@ shm_open(proc_t p, struct shm_open_args *uap, int32_t *retval)
 		goto bad;
 	}
 
+<<<<<<< HEAD
 	if (!error) {
 		incache = 0;
 		if (fmode & O_CREAT) {
@@ -513,6 +548,42 @@ shm_open(proc_t p, struct shm_open_args *uap, int32_t *retval)
 			mac_posixshm_label_associate(kauth_cred_get(), pinfo, nameptr);
 #endif
 		}
+=======
+	if (fmode & O_CREAT) {
+		if ((fmode & O_EXCL) && incache) {
+			AUDIT_ARG(posix_ipc_perm, pinfo->pshm_uid,
+				  pinfo->pshm_gid, pinfo->pshm_mode);
+
+			/* shm obj exists and opened O_EXCL */
+#if notyet
+                        if (pinfo->pshm_flags & PSHM_INDELETE) {
+                        }
+#endif 
+                        error = EEXIST;
+                        goto bad1;
+                } 
+                if (!incache) {
+                    /*  create a new one */
+                    pinfo = (struct pshminfo *)_MALLOC(sizeof(struct pshminfo), M_SHM, M_WAITOK);
+                    bzero(pinfo, sizeof(struct pshminfo));
+			pinfo_alloc = 1;
+                    pinfo->pshm_flags = PSHM_DEFINED | PSHM_INCREATE;
+                    pinfo->pshm_usecount = 1;
+                    pinfo->pshm_mode = cmode;
+                    pinfo->pshm_uid = p->p_ucred->cr_uid;
+                    pinfo->pshm_gid = p->p_ucred->cr_gid;
+                } else {
+                    /*  already exists */
+                        if( pinfo->pshm_flags & PSHM_INDELETE) {
+                            error = ENOENT;
+                            goto bad1;
+                        }	
+			AUDIT_ARG(posix_ipc_perm, pinfo->pshm_uid,
+				  pinfo->pshm_gid, pinfo->pshm_mode);
+                        if (error = pshm_access(pinfo, fmode, p->p_ucred, p))
+                            goto bad1;
+                }
+>>>>>>> origin/10.3
 	} else {
 		incache = 1;
 		if (fmode & O_CREAT) {
@@ -1118,6 +1189,8 @@ shm_unlink(__unused proc_t p, struct shm_unlink_args *uap,
 		goto bad;
 	}
 
+	AUDIT_ARG(posix_ipc_perm, pinfo->pshm_uid, pinfo->pshm_gid,
+		  pinfo->pshm_mode);
 	pinfo->pshm_flags |= PSHM_INDELETE;
 	pshm_cache_delete(pcache);
 	pinfo->pshm_flags |= PSHM_REMOVED;

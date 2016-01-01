@@ -2784,7 +2784,31 @@ nstat_idle_check(
 		
 		if (!(control->ncs_flags & NSTAT_FLAG_REQCOUNTS))
 		{
+<<<<<<< HEAD
 			while(*srcpp != NULL)
+=======
+			if ((*srcpp)->provider->nstat_gone((*srcpp)->cookie))
+			{
+				// Pull it off the list
+				dead = *srcpp;
+				*srcpp = (*srcpp)->next;
+				
+				// send a last description
+				nstat_control_send_description(control, dead, 0ULL);
+				
+				// send the source removed notification
+				nstat_msg_src_removed	removed;
+				removed.hdr.type = NSTAT_MSG_TYPE_SRC_REMOVED;
+				removed.hdr.context = 0;
+				removed.srcref = dead->srcref;
+				(void)ctl_enqueuedata(control->kctl, control->unit, &removed, sizeof(removed), CTL_DATA_EOR);
+				
+				// Put this on the list to release later
+				dead->next = dead_list;
+				dead_list = dead;
+			}
+			else
+>>>>>>> origin/10.7
 			{
 				if ((*srcpp)->provider->nstat_gone((*srcpp)->cookie))
 				{
@@ -2868,6 +2892,7 @@ nstat_control_cleanup_source(
 	
 	if (state)
 	{
+<<<<<<< HEAD
 		result = nstat_control_send_removed(state, src);
 		if (result != 0)
 		{
@@ -2876,6 +2901,13 @@ nstat_control_cleanup_source(
 				printf("%s - nstat_control_send_removed() %d\n",
 				    __func__, result);
 		}
+=======
+		nstat_msg_src_removed	removed;
+		removed.hdr.type = NSTAT_MSG_TYPE_SRC_REMOVED;
+		removed.hdr.context = 0;
+		removed.srcref = src->srcref;
+		(void)ctl_enqueuedata(state->kctl, state->unit, &removed, sizeof(removed), CTL_DATA_EOR);
+>>>>>>> origin/10.7
 	}
 	// Cleanup the source if we found it.
 	src->provider->nstat_release(src->cookie, locked);
@@ -3626,6 +3658,7 @@ nstat_control_handle_query_request(
 			if (nstat_control_reporting_allowed(state, src)
 			    && (!partial || !all_srcs || src->seq != state->ncs_seq))
 			{
+<<<<<<< HEAD
 				if (all_srcs &&
 					(req.hdr.flags & NSTAT_MSG_HDR_FLAG_SUPPORTS_AGGREGATE) != 0)
 				{
@@ -3658,6 +3691,9 @@ nstat_control_handle_query_request(
 					src->seq = state->ncs_seq;
 					src_count++;
 				}
+=======
+				result = ctl_enqueuedata(state->kctl, state->unit, &counts, sizeof(counts), CTL_DATA_EOR);
+>>>>>>> origin/10.7
 			}
 		}
 		

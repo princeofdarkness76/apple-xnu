@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -91,6 +113,7 @@ const vm_offset_t vm_min_kernel_address = VM_MIN_KERNEL_AND_KEXT_ADDRESS;
 const vm_offset_t vm_max_kernel_address = VM_MAX_KERNEL_ADDRESS;
 
 boolean_t vm_kernel_ready = FALSE;
+<<<<<<< HEAD
 boolean_t kmem_ready = FALSE;
 boolean_t kmem_alloc_ready = FALSE;
 boolean_t zlog_ready = FALSE;
@@ -108,6 +131,9 @@ vm_mem_bootstrap_log(const char *message)
 #define ZONE_MAP_MIN (12 * 1024 * 1024) 
 #define ZONE_MAP_MAX (256 * 1024 * 1024) 
 >>>>>>> origin/10.1
+=======
+boolean_t zlog_ready = FALSE;
+>>>>>>> origin/10.5
 
 /*
  *	vm_mem_bootstrap initializes the virtual memory system.
@@ -164,7 +190,12 @@ vm_mem_bootstrap(void)
 	vm_mem_bootstrap_log("pmap_init");
 	pmap_init();
 	
+<<<<<<< HEAD
+<<<<<<< HEAD
 	kmem_alloc_ready = TRUE;
+=======
+	zlog_ready = TRUE;
+>>>>>>> origin/10.5
 
 	if (PE_parse_boot_argn("zsize", &zsizearg, sizeof (zsizearg)))
 		zsize = zsizearg * 1024ULL * 1024ULL;
@@ -201,6 +232,17 @@ vm_mem_bootstrap(void)
 	vm_page_module_init();
 
 	vm_mem_bootstrap_log("kalloc_init");
+=======
+	if (PE_parse_boot_arg("zsize", &zsize))
+		zsize = zsize * 1024 * 1024;
+	else {
+		zsize = mem_size >> 2;			/* Get target zone size as 1/4 of physical memory */
+	}
+	if(zsize < ZONE_MAP_MIN) zsize = ZONE_MAP_MIN;	/* Clamp to min */
+	if(zsize > ZONE_MAP_MAX) zsize = ZONE_MAP_MAX;	/* Clamp to max */
+	zone_init(zsize);						/* Allocate address space for zones */
+	
+>>>>>>> origin/10.2
 	kalloc_init();
 
 	vm_mem_bootstrap_log("vm_fault_init");

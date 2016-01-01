@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -47,6 +69,7 @@ extern boolean_t mach_timer_coalescing_enabled;
 extern void timer_call_queue_init(mpqueue_head_t *);
 #endif
 
+<<<<<<< HEAD
 /*
  * NOTE: for now, bsd/dev/dtrace/dtrace_glue.c has its own definition
  * of this data structure, and the two had better match.
@@ -59,6 +82,7 @@ typedef struct timer_call {
 	boolean_t		async_dequeue;	/* this field is protected by
 						   call_entry queue's lock */
 	uint64_t		ttd; /* Time to deadline at creation */
+<<<<<<< HEAD
 } timer_call_data_t, *timer_call_t;
 
 #define EndOfAllTime		0xFFFFFFFFFFFFFFFFULL
@@ -84,6 +108,29 @@ typedef void		(*timer_call_func_t)(
 #define TIMER_CALL_SYS_NORMAL		TIMEOUT_URGENCY_SYS_NORMAL
 #define TIMER_CALL_SYS_CRITICAL		TIMEOUT_URGENCY_SYS_CRITICAL
 #define TIMER_CALL_SYS_BACKGROUND	TIMEOUT_URGENCY_SYS_BACKGROUND
+=======
+=======
+} *timer_call_t;
+
+typedef void				*timer_call_param_t;
+typedef void				(*timer_call_func_t)(
+									timer_call_param_t		param0,
+									timer_call_param_t		param1);
+#define TIMER_CALL_CRITICAL	0x01
+#define TIMER_CALL_LOCAL	0x02
+>>>>>>> origin/10.8
+extern boolean_t	timer_call_enter(
+						timer_call_t	call,
+						uint64_t		deadline);
+
+extern boolean_t	timer_call_enter1(
+						timer_call_t		call,
+						timer_call_param_t	param1,
+						uint64_t			deadline);
+
+extern boolean_t	timer_call_cancel(
+						timer_call_t	call);
+>>>>>>> origin/10.5
 
 #define TIMER_CALL_USER_MASK		TIMEOUT_URGENCY_USER_MASK
 #define TIMER_CALL_USER_NORMAL		TIMEOUT_URGENCY_USER_NORMAL
@@ -145,6 +192,7 @@ typedef struct {
 	uint32_t interrupt_timer_coalescing_ilat_threshold_abstime;
 	uint32_t timer_resort_threshold_abstime;
 
+<<<<<<< HEAD
 	int32_t timer_coalesce_rt_shift;
 	int32_t timer_coalesce_bg_shift;
 	int32_t timer_coalesce_kt_shift;
@@ -162,6 +210,14 @@ typedef struct {
 	boolean_t latency_tier_rate_limited[NUM_LATENCY_QOS_TIERS];
 } timer_coalescing_priority_params_t;
 extern timer_coalescing_priority_params_t tcoal_prio_params;
+=======
+extern void		timer_call_initialize(void);
+
+extern void		timer_call_setup(
+					timer_call_t		call,
+					timer_call_func_t	func,
+					timer_call_param_t	param0);
+>>>>>>> origin/10.5
 
 #endif /* XNU_KERNEL_PRIVATE */
 

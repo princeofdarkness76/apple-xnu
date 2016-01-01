@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -145,8 +171,16 @@
 /*
  * CR4
  */
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
 #define CR4_SEE		0x00008000	/* Secure Enclave Enable XXX */
 #define CR4_SMAP	0x00200000	/* Supervisor-Mode Access Protect */
+=======
+>>>>>>> origin/10.7
+=======
+#define CR4_SMAP	0x00200000	/* Supervisor-Mode Access Protect */
+>>>>>>> origin/10.10
 #define CR4_SMEP	0x00100000	/* Supervisor-Mode Execute Protect */
 #define CR4_OSXSAVE	0x00040000	/* OS supports XSAVE */
 #define CR4_PCIDE	0x00020000	/* PCID Enable */
@@ -164,6 +198,7 @@
 #define	CR4_TSD		0x00000004	/* Time Stamp Disable */
 #define	CR4_PVI		0x00000002	/* Protected-mode Virtual Interrupts */
 #define	CR4_VME		0x00000001	/* Virtual-8086 Mode Extensions */
+<<<<<<< HEAD
 
 /*
  * XCR0 - XFEATURE_ENABLED_MASK (a.k.a. XFEM) register
@@ -182,7 +217,35 @@
 
 #define	PMAP_PCID_PRESERVE (1ULL << 63)
 #define	PMAP_PCID_MASK (0xFFF)
+=======
+#define CR4_OSXSAVE 0x00040000	/* OS supports XSAVE */
+#define CR4_SMXE    0x00004000	/* Enable SMX operation */
+#define CR4_VMXE    0x00002000	/* Enable VMX operation */
+#define CR4_OSXMM   0x00000400  /* SSE/SSE2 exceptions supported in OS */
+#define CR4_OSFXS   0x00000200  /* SSE/SSE2 OS supports FXSave */
+#define CR4_PCE     0x00000100  /* Performance-Monitor Count Enable */
+#define CR4_PGE     0x00000080  /* Page Global Enable */
+#define	CR4_MCE     0x00000040	/* Machine Check Exceptions */
+#define CR4_PAE     0x00000020  /* Physical Address Extensions */
+#define	CR4_PSE     0x00000010	/* Page Size Extensions */
+#define	CR4_DE      0x00000008	/* Debugging Extensions */
+#define	CR4_TSD     0x00000004	/* Time Stamp Disable */
+#define	CR4_PVI     0x00000002	/* Protected-mode Virtual Interrupts */
+#define	CR4_VME     0x00000001	/* Virtual-8086 Mode Extensions */
+>>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.7
 
+/*
+ * XCR0 - XFEATURE_ENABLED_MASK (a.k.a. XFEM) register
+ */
+#define XCR0_X87 	(1ULL << 0)	/* x87, FPU/MMX (always set) */
+#define XCR0_SSE	(1ULL << 1)	/* SSE supported by XSAVE/XRESTORE */
+#define	XCR0_YMM	(1ULL << 2)	/* YMM state available */
+#define XFEM_X87	XCR0_X87
+#define XFEM_SSE	XCR0_SSE
+#define	XFEM_YMM	XCR0_YMM
+#define XCR0 (0)
 #ifndef	ASSEMBLER
 
 #include <sys/cdefs.h>
@@ -364,6 +427,10 @@ static inline void flush_tlb_raw(void)
 {
 	set_cr3_raw(get_cr3_raw());
 }
+<<<<<<< HEAD
+=======
+#endif
+>>>>>>> origin/10.8
 extern int rdmsr64_carefully(uint32_t msr, uint64_t *val);
 extern int wrmsr64_carefully(uint32_t msr, uint64_t val);
 #endif	/* MACH_KERNEL_PRIVATE */
@@ -402,9 +469,12 @@ static inline void stac(void)
 
 #define rdtsc(lo,hi) \
 	__asm__ volatile("lfence; rdtsc; lfence" : "=a" (lo), "=d" (hi))
+<<<<<<< HEAD
 
 #define rdtsc_nofence(lo,hi) \
 	__asm__ volatile("rdtsc" : "=a" (lo), "=d" (hi))
+=======
+>>>>>>> origin/10.5
 
 #define write_tsc(lo,hi) wrmsr(0x10, lo, hi)
 
@@ -437,9 +507,25 @@ static inline void wrmsr64(uint32_t msr, uint64_t val)
 
 static inline uint64_t rdtsc64(void)
 {
+<<<<<<< HEAD
 	uint64_t lo, hi;
 	rdtsc(lo, hi);
 	return ((hi) << 32) | (lo);
+=======
+	uint64_t ret;
+	__asm__ volatile("lfence; rdtsc; lfence" : "=A" (ret));
+	return ret;
+}
+
+static inline uint64_t rdtscp64(uint32_t *aux)
+{
+	uint64_t ret;
+	__asm__ volatile("rdtscp; mov %%ecx, %1"
+				: "=A" (ret), "=m" (*aux)
+				:
+				: "ecx");
+	return ret;
+>>>>>>> origin/10.5
 }
 
 static inline uint64_t rdtscp64(uint32_t *aux)
@@ -489,6 +575,10 @@ __END_DECLS
 
 #define MSR_IA32_PERFCTR0			0xc1
 #define MSR_IA32_PERFCTR1			0xc2
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 #define MSR_IA32_PERFCTR3			0xc3
 #define MSR_IA32_PERFCTR4			0xc4
 
@@ -496,6 +586,17 @@ __END_DECLS
 
 #define MSR_IA32_MPERF				0xE7
 #define MSR_IA32_APERF				0xE8
+=======
+
+#define MSR_PLATFORM_INFO			0xce
+
+<<<<<<< HEAD
+#define MSR_PMG_CST_CONFIG_CONTROL		0xe2
+>>>>>>> origin/10.6
+=======
+#define MSR_IA32_MPERF				0xE7
+#define MSR_IA32_APERF				0xE8
+>>>>>>> origin/10.8
 
 #define MSR_IA32_BBL_CR_CTL			0x119
 
@@ -509,8 +610,16 @@ __END_DECLS
 
 #define MSR_IA32_EVNTSEL0			0x186
 #define MSR_IA32_EVNTSEL1			0x187
+<<<<<<< HEAD
+<<<<<<< HEAD
 #define MSR_IA32_EVNTSEL2			0x188
 #define MSR_IA32_EVNTSEL3			0x189
+=======
+>>>>>>> origin/10.6
+=======
+#define MSR_IA32_EVNTSEL2			0x188
+#define MSR_IA32_EVNTSEL3			0x189
+>>>>>>> origin/10.10
 
 #define MSR_FLEX_RATIO				0x194
 #define MSR_IA32_PERF_STS			0x198
@@ -519,7 +628,14 @@ __END_DECLS
 
 #define MSR_IA32_MISC_ENABLE			0x1a0
 
+<<<<<<< HEAD
+<<<<<<< HEAD
 
+=======
+#define MSR_IA32_ENERGY_PERFORMANCE_BIAS	0x1b0
+>>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.8
 #define MSR_IA32_PACKAGE_THERM_STATUS		0x1b1
 #define MSR_IA32_PACKAGE_THERM_INTERRUPT	0x1b2
 
@@ -547,6 +663,8 @@ __END_DECLS
 #define MSR_IA32_MTRR_FIX4K_F0000		0x26e
 #define MSR_IA32_MTRR_FIX4K_F8000		0x26f
 
+<<<<<<< HEAD
+<<<<<<< HEAD
 #define MSR_IA32_PERF_FIXED_CTR0		0x309
 
 #define MSR_IA32_PERF_FIXED_CTR_CTRL		0x38D
@@ -554,6 +672,8 @@ __END_DECLS
 #define MSR_IA32_PERF_GLOBAL_CTRL		0x38F
 #define MSR_IA32_PERF_GLOBAL_OVF_CTRL	0x390
 
+=======
+>>>>>>> origin/10.8
 #define MSR_IA32_PKG_C3_RESIDENCY		0x3F8
 #define MSR_IA32_PKG_C6_RESIDENCY		0x3F9
 #define MSR_IA32_PKG_C7_RESIDENCY		0x3FA
@@ -562,11 +682,17 @@ __END_DECLS
 #define MSR_IA32_CORE_C6_RESIDENCY 		0x3FD
 #define MSR_IA32_CORE_C7_RESIDENCY 		0x3FE
 
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.8
 #define MSR_IA32_MC0_CTL			0x400
 #define MSR_IA32_MC0_STATUS			0x401
 #define MSR_IA32_MC0_ADDR			0x402
 #define MSR_IA32_MC0_MISC			0x403
 
+<<<<<<< HEAD
 #define MSR_IA32_VMX_BASE					0x480
 #define MSR_IA32_VMX_BASIC					MSR_IA32_VMX_BASE
 #define MSR_IA32_VMX_PINBASED_CTLS			MSR_IA32_VMX_BASE+1
@@ -608,6 +734,46 @@ __END_DECLS
 #define MSR_IA32_IA_PERF_LIMIT_REASONS		0x690
 #define MSR_IA32_GT_PERF_LIMIT_REASONS		0x6B0
 
+=======
+#define MSR_IA32_VMX_BASE			0x480
+#define MSR_IA32_VMX_BASIC			MSR_IA32_VMX_BASE
+#define MSR_IA32_VMXPINBASED_CTLS		MSR_IA32_VMX_BASE+1
+#define MSR_IA32_PROCBASED_CTLS			MSR_IA32_VMX_BASE+2
+#define MSR_IA32_VMX_EXIT_CTLS			MSR_IA32_VMX_BASE+3
+#define MSR_IA32_VMX_ENTRY_CTLS			MSR_IA32_VMX_BASE+4
+#define MSR_IA32_VMX_MISC			MSR_IA32_VMX_BASE+5
+#define MSR_IA32_VMX_CR0_FIXED0			MSR_IA32_VMX_BASE+6
+#define MSR_IA32_VMX_CR0_FIXED1			MSR_IA32_VMX_BASE+7
+#define MSR_IA32_VMX_CR4_FIXED0			MSR_IA32_VMX_BASE+8
+#define MSR_IA32_VMX_CR4_FIXED1			MSR_IA32_VMX_BASE+9
+
+#define MSR_IA32_DS_AREA			0x600
+
+<<<<<<< HEAD
+#define MSR_IA32_PACKAGE_POWER_SKU_UNIT		0x606
+#define MSR_IA32_PACKAGE_ENERY_STATUS		0x611
+#define MSR_IA32_PRIMARY_PLANE_ENERY_STATUS	0x639
+#define MSR_IA32_SECONDARY_PLANE_ENERY_STATUS	0x641
+>>>>>>> origin/10.6
+=======
+#define MSR_IA32_PKG_POWER_SKU_UNIT		0x606
+#define MSR_IA32_PKG_C2_RESIDENCY		0x60D
+#define MSR_IA32_PKG_ENERGY_STATUS		0x611
+
+#define MSR_IA32_DDR_ENERGY_STATUS		0x619
+#define MSR_IA32_LLC_FLUSHED_RESIDENCY_TIMER	0x61D
+#define MSR_IA32_RING_PERF_STATUS		0x621
+
+#define MSR_IA32_PKG_C8_RESIDENCY		0x630
+#define MSR_IA32_PKG_C9_RESIDENCY		0x631
+#define MSR_IA32_PKG_C10_RESIDENCY		0x632
+
+#define MSR_IA32_PP0_ENERGY_STATUS		0x639
+#define MSR_IA32_PP1_ENERGY_STATUS		0x641
+#define MSR_IA32_IA_PERF_LIMIT_REASONS		0x690
+#define MSR_IA32_GT_PERF_LIMIT_REASONS		0x6B0
+
+>>>>>>> origin/10.8
 #define MSR_IA32_TSC_DEADLINE			0x6e0
 
 #define	MSR_IA32_EFER				0xC0000080
@@ -625,5 +791,14 @@ __END_DECLS
 #define MSR_IA32_GS_BASE			0xC0000101
 #define MSR_IA32_KERNEL_GS_BASE			0xC0000102
 #define MSR_IA32_TSC_AUX			0xC0000103
+<<<<<<< HEAD
+
+#define MSR_IA32_BIOS_SIGN_ID	0x08B
+
+#define MSR_FLEX_RATIO		0x194
+#define MSR_PLATFORM_INFO	0x0ce
+#define MSR_CORE_THREAD_COUNT	0x035
+=======
+>>>>>>> origin/10.6
 
 #endif	/* _I386_PROC_REG_H_ */

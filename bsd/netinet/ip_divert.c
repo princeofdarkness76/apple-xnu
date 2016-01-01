@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -327,6 +353,7 @@ div_output(struct socket *so, struct mbuf *m, struct sockaddr_in *sin,
 	struct inpcb *const inp = sotoinpcb(so);
 	struct ip *const ip = mtod(m, struct ip *);
 	int error = 0;
+<<<<<<< HEAD
 	mbuf_svc_class_t msc = MBUF_SC_UNSPEC;
 
 	if (control != NULL) {
@@ -334,6 +361,18 @@ div_output(struct socket *so, struct mbuf *m, struct sockaddr_in *sin,
 
 		m_freem(control);		/* XXX */
 		control = NULL;
+=======
+#if PKT_PRIORITY
+	mbuf_traffic_class_t mtc = MBUF_TC_NONE;
+#endif /* PKT_PRIORITY */
+
+	if (control != NULL) {
+#if PKT_PRIORITY
+		mtc = mbuf_traffic_class_from_control(control);
+#endif /* PKT_PRIORITY */
+
+		m_freem(control);		/* XXX */
+>>>>>>> origin/10.6
 	}
 	/* Loopback avoidance and state recovery */
 	if (sin) {
@@ -369,10 +408,14 @@ div_output(struct socket *so, struct mbuf *m, struct sockaddr_in *sin,
 
 	/* Reinject packet into the system as incoming or outgoing */
 	if (!sin || sin->sin_addr.s_addr == 0) {
+<<<<<<< HEAD
 		struct ip_out_args ipoa =
 		    { IFSCOPE_NONE, { 0 }, IPOAF_SELECT_SRCIF, 0 };
 		struct route ro;
 		struct ip_moptions *imo;
+=======
+		struct ip_out_args ipoa = { IFSCOPE_NONE };
+>>>>>>> origin/10.5
 
 		/*
 		 * Don't allow both user specified and setsockopt options,
@@ -394,21 +437,39 @@ div_output(struct socket *so, struct mbuf *m, struct sockaddr_in *sin,
 		/* Copy the cached route and take an extra reference */
 		inp_route_copyout(inp, &ro);
 
+<<<<<<< HEAD
 		set_packet_service_class(m, so, msc, 0);
 
 		imo = inp->inp_moptions;
 		if (imo != NULL)
 			IMO_ADDREF(imo);
+=======
+#if PKT_PRIORITY
+		set_traffic_class(m, so, mtc);
+#endif /* PKT_PRIORITY */
+
+>>>>>>> origin/10.6
 		socket_unlock(so, 0);
 #if CONFIG_MACF_NET
 		mac_mbuf_label_associate_inpcb(inp, m);
 #endif
+<<<<<<< HEAD
 		/* Send packet to output processing */
 		error = ip_output(m, inp->inp_options, &ro,
 			(so->so_options & SO_DONTROUTE) |
 			IP_ALLOWBROADCAST | IP_RAWOUTPUT | IP_OUTARGS,
 			imo, &ipoa);
 
+=======
+#if CONFIG_IP_EDGEHOLE
+		ip_edgehole_mbuf_tag(inp, m);
+#endif
+		error = ip_output(m,
+			    inp->inp_options, &inp->inp_route,
+			(so->so_options & SO_DONTROUTE) |
+			IP_ALLOWBROADCAST | IP_RAWOUTPUT | IP_OUTARGS,
+			inp->inp_moptions, &ipoa);
+>>>>>>> origin/10.5
 		socket_lock(so, 0);
 		if (imo != NULL)
 			IMO_REMREF(imo);
@@ -433,7 +494,11 @@ div_output(struct socket *so, struct mbuf *m, struct sockaddr_in *sin,
 				goto cantsend;
 			}
 			m->m_pkthdr.rcvif = ifa->ifa_ifp;
+<<<<<<< HEAD
 			IFA_REMREF(ifa);
+=======
+			ifafree(ifa);
+>>>>>>> origin/10.5
 		}
 #if CONFIG_MACF_NET
 		mac_mbuf_label_associate_socket(so, m);

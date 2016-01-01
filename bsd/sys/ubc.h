@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -56,12 +78,37 @@ int	ubc_setsize(struct vnode *, off_t);
 
 #ifdef KERNEL_PRIVATE
 
+<<<<<<< HEAD
 enum {
 	UBC_SETSIZE_NO_FS_REENTRY = 1
+=======
+struct ubc_info {
+	memory_object_t			ui_pager;	/* pager */
+	memory_object_control_t	ui_control;	/* VM control for the pager */
+	long					ui_flags;	/* flags */
+	struct vnode 			*ui_vnode;	/* The vnode for this ubc_info */
+	struct ucred 			*ui_ucred;	/* holds credentials for NFS paging */
+	int						ui_refcount;/* ref count on the ubc_info */
+	off_t					ui_size;	/* file size for the vnode */
+	long					ui_mapped;	/* is it currently mapped */
+	void					*ui_owner;	/* for recursive ubc_busy */
+>>>>>>> origin/10.2
 };
 typedef uint32_t ubc_setsize_opts_t;
 
+<<<<<<< HEAD
 errno_t ubc_setsize_ex(vnode_t vp, off_t nsize, ubc_setsize_opts_t opts);
+=======
+/* Defines for ui_flags */
+#define	UI_NONE			0x00000000		/* none */
+#define	UI_HASPAGER		0x00000001		/* has a pager associated */
+#define	UI_INITED		0x00000002		/* newly initialized vnode */
+#define UI_HASOBJREF	0x00000004		/* hold a reference on object */
+#define UI_WASMAPPED	0x00000008		/* vnode was mapped */
+#define	UI_DONTCACHE	0x00000010		/* do not cache object */
+#define	UI_BUSY			0x00000020		/* for VM synchronization */
+#define	UI_WANTED		0x00000040		/* for VM synchronization */
+>>>>>>> origin/10.2
 
 #endif // KERNEL_PRIVATE
 
@@ -80,6 +127,7 @@ int	ubc_setcred(struct vnode *, struct proc *) __deprecated;
 /* code signing */
 struct cs_blob;
 struct cs_blob *ubc_cs_blob_get(vnode_t, cpu_type_t, off_t);
+<<<<<<< HEAD
 
 /* apis to handle generation count for cs blob */
 void cs_blob_reset_cache(void);
@@ -91,6 +139,8 @@ int cs_blob_get(proc_t, void **, size_t *);
 const char *cs_identity_get(proc_t);
 
 #endif
+=======
+>>>>>>> origin/10.5
 
 /* cluster IO routines */
 int	advisory_read(vnode_t, off_t, off_t, int);

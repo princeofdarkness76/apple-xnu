@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -51,6 +73,10 @@
 
 task_t	bsd_init_task = TASK_NULL;
 boolean_t init_task_died;
+<<<<<<< HEAD
+=======
+char	init_task_failure_data[1024];
+>>>>>>> origin/10.10
 extern unsigned int not_in_kdp; /* Skip acquiring locks if we're in kdp */
  
 thread_t get_firstthread(task_t);
@@ -280,8 +306,13 @@ int get_task_numactivethreads(task_t task)
 	int num_active_thr=0;
 	task_lock(task);
 
+<<<<<<< HEAD
 	for (inc  = (thread_t)(void *)queue_first(&task->threads);
 			!queue_end(&task->threads, (queue_entry_t)inc); inc = (thread_t)(void *)queue_next(&inc->task_threads)) 
+=======
+	for (inc  = (thread_t)queue_first(&task->threads);
+			!queue_end(&task->threads, (queue_entry_t)inc); inc = (thread_t)queue_next(&inc->task_threads)) 
+>>>>>>> origin/10.5
 	{
 		if(inc->active)
 			num_active_thr++;

@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -137,6 +159,7 @@ extern	void xrstor64o(void);
 
 #define XMASK ((uint32_t) (XFEM_X87 | XFEM_SSE | XFEM_YMM))
 
+<<<<<<< HEAD
 static inline void xsetbv(uint32_t mask_hi, uint32_t mask_lo) {
 	__asm__ __volatile__("xsetbv" :: "a"(mask_lo), "d"(mask_hi), "c" (XCR0));
 }
@@ -150,6 +173,34 @@ static inline void xrstor(struct x86_fx_thread_state *a) {
 }
 
 #if	DEBUG
+=======
+/* DRK: TODO replace opcodes with mnemonics when assembler support available */
+
+static inline void xsetbv(uint32_t mask_hi, uint32_t mask_lo) {
+	__asm__ __volatile__(".short 0x010F\n\t.byte 0xD1" :: "a"(mask_lo), "d"(mask_hi), "c" (XCR0));
+}
+
+static inline void xsave(void *a) {
+	/* MOD 0x4, operand ECX 0x1 */
+	__asm__ __volatile__(".short 0xAE0F\n\t.byte 0x21" :: "a"(XMASK), "d"(0), "c" (a));
+}
+
+static inline void xrstor(void *a) {
+	/* MOD 0x5, operand ECX 0x1 */
+	__asm__ __volatile__(".short 0xAE0F\n\t.byte 0x29" :: "a"(XMASK), "d"(0), "c" (a));
+}
+
+static inline void xsave64(void *a) {
+	/* Out of line call that executes in 64-bit mode on K32 */
+	__asm__ __volatile__("call _xsave64o" :: "a"(XMASK), "d"(0), "c" (a));
+}
+
+static inline void xrstor64(void *a) {
+	/* Out of line call that executes in 64-bit mode on K32 */
+	__asm__ __volatile__("call _xrstor64o" :: "a"(XMASK), "d"(0), "c" (a));
+}
+
+>>>>>>> origin/10.6
 static inline unsigned short
 fnstsw(void)
 {
@@ -157,7 +208,10 @@ fnstsw(void)
 	__asm__ volatile("fnstsw %0" : "=ma" (status));
 	return(status);
 }
+<<<<<<< HEAD
 #endif
+=======
+>>>>>>> origin/10.6
 
 /*
  * Configure the initial FPU state presented to new threads.
@@ -186,11 +240,19 @@ configure_mxcsr_capability_mask(struct x86_avx_thread_state *fps)
 	/* Clear vector register store */
 	bzero(&fps->fx_XMM_reg[0][0], sizeof(fps->fx_XMM_reg));
 	bzero(&fps->x_YMMH_reg[0][0], sizeof(fps->x_YMMH_reg));
+<<<<<<< HEAD
 
 	fps->fp_valid = TRUE;
 	fps->fp_save_layout = fpu_YMM_present ? XSAVE32: FXSAVE32;
 	fpu_load_registers(fps);
 
+=======
+
+	fps->fp_valid = TRUE;
+	fps->fp_save_layout = fpu_YMM_present ? XSAVE32: FXSAVE32;
+	fpu_load_registers(fps);
+
+>>>>>>> origin/10.6
 	/* Poison values to trap unsafe usage */
 	fps->fp_valid = 0xFFFFFFFF;
 	fps->fp_save_layout = FP_UNUSED;
@@ -241,10 +303,24 @@ init_fpu(void)
 	 * AVX/YMM registers
 	 */
 	if (cpuid_features() & CPUID_FEATURE_XSAVE) {
+<<<<<<< HEAD
 		cpuid_xsave_leaf_t *xsp = &cpuid_info()->cpuid_xsave_leaf[0];
 		if (xsp->extended_state[0] & (uint32_t)XFEM_YMM) {
 			assert(xsp->extended_state[0] & (uint32_t) XFEM_SSE);
 			/* XSAVE container size for all features */
+=======
+		cpuid_xsave_leaf_t *xsp = &cpuid_info()->cpuid_xsave_leaf;
+		if (xsp->extended_state[0] & (uint32_t)XFEM_YMM) {
+			assert(xsp->extended_state[0] & (uint32_t) XFEM_SSE);
+			/* XSAVE container size for all features */
+<<<<<<< HEAD
+			assert(xsp->extended_state[2] == sizeof(struct x86_avx_thread_state));
+>>>>>>> origin/10.6
+=======
+			if (xsp->extended_state[2] != sizeof(struct x86_avx_thread_state))
+				kprintf("sizeof(struct x86_avx_thread_state)=%lu != xsp->extended_state[2]=%u\n",
+					sizeof(struct x86_avx_thread_state), xsp->extended_state[2]);
+>>>>>>> origin/10.10
 			fp_register_state_size = sizeof(struct x86_avx_thread_state);
 			fpu_YMM_present = TRUE;
 			set_cr4(get_cr4() | CR4_OSXSAVE);
@@ -252,11 +328,99 @@ init_fpu(void)
 			/* Re-evaluate CPUID, once, to reflect OSXSAVE */
 			if (OSCompareAndSwap(0, 1, &cpuid_reevaluated))
 				cpuid_set_info();
+<<<<<<< HEAD
 			/* Verify that now selected state can be accommodated */
 			assert(xsp->extended_state[1] == fp_register_state_size);
 		}
+=======
+			/* DRK: consider verifying AVX offset with cpuid(d, ECX:2) */
+		}
 	}
 	else
+		fpu_YMM_present = FALSE;
+
+	fpinit();
+
+	/*
+	 * Trap wait instructions.  Turn off FPU for now.
+	 */
+	set_cr0(get_cr0() | CR0_TS | CR0_MP);
+}
+
+/*
+ * Allocate and initialize FP state for current thread.
+ * Don't load state.
+ */
+static void *
+fp_state_alloc(void)
+{
+	void *ifps = zalloc(ifps_zone);
+
+#if	DEBUG	
+	if (!(ALIGNED(ifps,64))) {
+		panic("fp_state_alloc: %p, %u, %p, %u", ifps, (unsigned) ifps_zone->elem_size, (void *) ifps_zone->free_elements, (unsigned) ifps_zone->alloc_size);
+>>>>>>> origin/10.6
+	}
+#endif
+	return ifps;
+}
+
+static inline void
+fp_state_free(void *ifps)
+{
+	zfree(ifps_zone, ifps);
+}
+
+void clear_fpu(void)
+{
+	set_ts();
+}
+
+
+static void fpu_load_registers(void *fstate) {
+	struct x86_fx_thread_state *ifps = fstate;
+	fp_save_layout_t layout = ifps->fp_save_layout;
+
+	assert(layout == FXSAVE32 || layout == FXSAVE64 || layout == XSAVE32 || layout == XSAVE64);
+	assert(ALIGNED(ifps, 64));
+	assert(ml_get_interrupts_enabled() == FALSE);
+
+#if	DEBUG	
+	if (layout == XSAVE32 || layout == XSAVE64) {
+		struct x86_avx_thread_state *iavx = fstate;
+		unsigned i;
+		/* Verify reserved bits in the XSAVE header*/
+		if (iavx->_xh.xsbv & ~7)
+			panic("iavx->_xh.xsbv: 0x%llx", iavx->_xh.xsbv);
+		for (i = 0; i < sizeof(iavx->_xh.xhrsvd); i++)
+			if (iavx->_xh.xhrsvd[i])
+				panic("Reserved bit set");
+	}
+	if (fpu_YMM_present) {
+		if (layout != XSAVE32 && layout != XSAVE64)
+			panic("Inappropriate layout: %u\n", layout);
+	}
+#endif	/* DEBUG */
+
+#if defined(__i386__)
+	if (layout == FXSAVE32) {
+		/* Restore the compatibility/legacy mode XMM+x87 state */
+		fxrstor(ifps);
+	}
+	else if (layout == FXSAVE64) {
+		fxrstor64(ifps);
+	}
+	else if (layout == XSAVE32) {
+		xrstor(ifps);
+	}
+	else if (layout == XSAVE64) {
+		xrstor64(ifps);
+	}
+#elif defined(__x86_64__)
+	if ((layout == XSAVE64) || (layout == XSAVE32))
+		xrstor(ifps);
+	else
+<<<<<<< HEAD
 		fpu_YMM_present = FALSE;
 
 	fpinit();
@@ -338,7 +502,47 @@ static void fpu_store_registers(void *fstate, boolean_t is64) {
 	else {
 		fxsave(ifps);
 		ifps->fp_save_layout = is64 ? FXSAVE64 : FXSAVE32;
+=======
+		fxrstor(ifps);
+#endif
+}
+
+static void fpu_store_registers(void *fstate, boolean_t is64) {
+	struct x86_fx_thread_state *ifps = fstate;
+	assert(ALIGNED(ifps, 64));
+#if defined(__i386__)
+	if (!is64) {
+		if (fpu_YMM_present) {
+			xsave(ifps);
+			ifps->fp_save_layout = XSAVE32;
+		}
+		else {
+			/* save the compatibility/legacy mode XMM+x87 state */
+			fxsave(ifps);
+			ifps->fp_save_layout = FXSAVE32;
+		}
 	}
+	else {
+		if (fpu_YMM_present) {
+			xsave64(ifps);
+			ifps->fp_save_layout = XSAVE64;
+		}
+		else {
+			fxsave64(ifps);
+			ifps->fp_save_layout = FXSAVE64;
+		}
+	}
+#elif defined(__x86_64__)
+	if (fpu_YMM_present) {
+		xsave(ifps);
+		ifps->fp_save_layout = is64 ? XSAVE64 : XSAVE32;
+>>>>>>> origin/10.6
+	}
+	else {
+		fxsave(ifps);
+		ifps->fp_save_layout = is64 ? FXSAVE64 : FXSAVE32;
+	}
+#endif
 }
 
 /*
@@ -363,11 +567,20 @@ fpu_module_init(void)
 			  64 * fp_register_state_size,
 			  "x86 fpsave state");
 
+<<<<<<< HEAD
+=======
+#if	ZONE_DEBUG
+>>>>>>> origin/10.6
 	/* To maintain the required alignment, disable
 	 * zone debugging for this zone as that appends
 	 * 16 bytes to each element.
 	 */
+<<<<<<< HEAD
 	zone_change(ifps_zone, Z_ALIGNMENT_REQUIRED, TRUE);
+=======
+	zone_debug_disable(ifps_zone);
+#endif	
+>>>>>>> origin/10.6
 	/* Determine MXCSR reserved bits and configure initial FPU state*/
 	configure_mxcsr_capability_mask(&initial_fp_state);
 }
@@ -381,7 +594,11 @@ fpu_save_context(thread_t thread)
 	struct x86_fx_thread_state *ifps;
 
 	assert(ml_get_interrupts_enabled() == FALSE);
+<<<<<<< HEAD
 	ifps = (thread)->machine.ifps;
+=======
+	ifps = (thread)->machine.pcb->ifps;
+>>>>>>> origin/10.6
 #if	DEBUG
 	if (ifps && ((ifps->fp_valid != FALSE) && (ifps->fp_valid != TRUE))) {
 		panic("ifps->fp_valid: %u\n", ifps->fp_valid);
@@ -395,7 +612,11 @@ fpu_save_context(thread_t thread)
 		 */
 		clear_ts();
 		/* registers are in FPU - save to memory */
+<<<<<<< HEAD
 		fpu_store_registers(ifps, (thread_is_64bit(thread) && is_saved_state64(thread->machine.iss)));
+=======
+		fpu_store_registers(ifps, (thread_is_64bit(thread) && is_saved_state64(thread->machine.pcb->iss)));
+>>>>>>> origin/10.6
 		ifps->fp_valid = TRUE;
 	}
 	set_ts();
@@ -431,15 +652,28 @@ fpu_set_fxstate(
 	struct x86_fx_thread_state *new_ifps;
 	x86_float_state64_t	*state;
 	pcb_t	pcb;
+<<<<<<< HEAD
+<<<<<<< HEAD
 	size_t	state_size = sizeof(struct x86_fx_thread_state);
 	boolean_t	old_valid, fresh_state = FALSE;
 
+=======
+	size_t	state_size = (((f == x86_AVX_STATE32) || (f == x86_AVX_STATE64)) && (fpu_YMM_present == TRUE)) ? sizeof(struct x86_avx_thread_state) : sizeof(struct x86_fx_thread_state);
+=======
+	size_t	state_size = sizeof(struct x86_fx_thread_state);
+>>>>>>> origin/10.7
+	boolean_t	old_valid;
+>>>>>>> origin/10.6
 	if (fp_kind == FP_NO)
 		return KERN_FAILURE;
 
 	if ((f == x86_AVX_STATE32 || f == x86_AVX_STATE64) &&
 	    !ml_fpu_avx_enabled())
 		return KERN_FAILURE;
+
+	if ((f == x86_AVX_STATE32 || f == x86_AVX_STATE64) &&
+	    !ml_fpu_avx_enabled())
+	    return KERN_FAILURE;
 
 	state = (x86_float_state64_t *)tstate;
 
@@ -470,6 +704,7 @@ fpu_set_fxstate(
 		simple_lock(&pcb->lock);
 
 		ifps = pcb->ifps;
+<<<<<<< HEAD
 		if (ifps == 0) {
 			if (new_ifps == 0) {
 				simple_unlock(&pcb->lock);
@@ -493,14 +728,84 @@ fpu_set_fxstate(
 			panic("fpu_set_fxstate inconsistency, thread: %p not stopped", thr_act);
 		}
 #endif
+=======
+	    if (ifps == 0) {
+		if (new_ifps == 0) {
+		    simple_unlock(&pcb->lock);
+		    new_ifps = fp_state_alloc();
+		    goto Retry;
+		}
+		ifps = new_ifps;
+		new_ifps = 0;
+		pcb->ifps = ifps;
+	    }
+	    /*
+	     * now copy over the new data.
+	     */
+	    old_valid = ifps->fp_valid;
+
+#if	DEBUG	    
+	    if ((old_valid == FALSE) && (thr_act != current_thread())) {
+		    panic("fpu_set_fxstate inconsistency, thread: %p not stopped", thr_act);
+	    }
+#endif
+	    /*
+	     * Clear any reserved bits in the MXCSR to prevent a GPF
+	     * when issuing an FXRSTOR.
+	     */
+
+	    state->fpu_mxcsr &= mxcsr_capability_mask;
+
+	    bcopy((char *)&state->fpu_fcw, (char *)ifps, state_size);
+
+	    if (fpu_YMM_present) {
+		struct x86_avx_thread_state *iavx = (void *) ifps;
+		uint32_t fpu_nyreg = 0;
+
+		if (f == x86_AVX_STATE32)
+			fpu_nyreg = 8;
+		else if (f == x86_AVX_STATE64)
+			fpu_nyreg = 16;
+
+		if (fpu_nyreg) {
+			x86_avx_state64_t *ystate = (x86_avx_state64_t *) state;
+			bcopy(&ystate->__fpu_ymmh0, &iavx->x_YMMH_reg[0][0], fpu_nyreg * sizeof(_STRUCT_XMM_REG));
+		}
+
+		iavx->fp_save_layout = thread_is_64bit(thr_act) ? XSAVE64 : XSAVE32;
+		/* Sanitize XSAVE header */
+		bzero(&iavx->_xh.xhrsvd[0], sizeof(iavx->_xh.xhrsvd));
+		if (fpu_nyreg)
+			iavx->_xh.xsbv = (XFEM_YMM | XFEM_SSE | XFEM_X87);
+		else
+			iavx->_xh.xsbv = (XFEM_SSE | XFEM_X87);
+	    }
+	    else
+		ifps->fp_save_layout = thread_is_64bit(thr_act) ? FXSAVE64 : FXSAVE32;
+	    ifps->fp_valid = old_valid;
+
+	    if (old_valid == FALSE) {
+		    boolean_t istate = ml_set_interrupts_enabled(FALSE);
+		    ifps->fp_valid = TRUE;
+		    set_ts();
+		    ml_set_interrupts_enabled(istate);
+	    }
+<<<<<<< HEAD
+>>>>>>> origin/10.6
 		/*
 		 * Clear any reserved bits in the MXCSR to prevent a GPF
 		 * when issuing an FXRSTOR.
 		 */
+<<<<<<< HEAD
+=======
+	    ifps->fx_MXCSR &= mxcsr_capability_mask;
+>>>>>>> origin/10.6
 
 		state->fpu_mxcsr &= mxcsr_capability_mask;
 
 		bcopy((char *)&state->fpu_fcw, (char *)ifps, state_size);
+=======
+>>>>>>> origin/10.7
 
 		if (fpu_YMM_present) {
 			struct x86_avx_thread_state *iavx = (void *) ifps;
@@ -562,7 +867,15 @@ fpu_get_fxstate(
 	x86_float_state64_t	*state;
 	kern_return_t	ret = KERN_FAILURE;
 	pcb_t	pcb;
+<<<<<<< HEAD
+<<<<<<< HEAD
 	size_t	state_size = sizeof(struct x86_fx_thread_state);
+=======
+	size_t	state_size = (((f == x86_AVX_STATE32) || (f == x86_AVX_STATE64)) && (fpu_YMM_present == TRUE)) ? sizeof(struct x86_avx_thread_state) : sizeof(struct x86_fx_thread_state);
+>>>>>>> origin/10.6
+=======
+	size_t	state_size = sizeof(struct x86_fx_thread_state);
+>>>>>>> origin/10.7
 
 	if (fp_kind == FP_NO)
 		return KERN_FAILURE;
@@ -608,6 +921,10 @@ fpu_get_fxstate(
 	}
 	if (ifps->fp_valid) {
         	bcopy((char *)ifps, (char *)&state->fpu_fcw, state_size);
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.7
 		if (fpu_YMM_present) {
 			struct x86_avx_thread_state *iavx = (void *) ifps;
 			uint32_t fpu_nyreg = 0;
@@ -623,6 +940,11 @@ fpu_get_fxstate(
 			}
 		}
 
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.7
 		ret = KERN_SUCCESS;
 	}
 	simple_unlock(&pcb->lock);
@@ -674,11 +996,19 @@ fpu_dup_fxstate(
 		(void)ml_set_interrupts_enabled(intr);
 
 		if (ifps->fp_valid) {
+<<<<<<< HEAD
 			child->machine.ifps = new_ifps;
 			assert((fp_register_state_size == sizeof(struct x86_fx_thread_state)) ||
 			    (fp_register_state_size == sizeof(struct x86_avx_thread_state)));
 			bcopy((char *)(ppcb->ifps),
 			    (char *)(child->machine.ifps), fp_register_state_size);
+=======
+			child->machine.pcb->ifps = new_ifps;
+			assert((fp_register_state_size == sizeof(struct x86_fx_thread_state)) ||
+			    (fp_register_state_size == sizeof(struct x86_avx_thread_state)));
+			bcopy((char *)(ppcb->ifps),
+			    (char *)(child->machine.pcb->ifps), fp_register_state_size);
+>>>>>>> origin/10.6
 
 			/* Mark the new fp saved state as non-live. */
 			/* Temporarily disabled: radar 4647827
@@ -852,7 +1182,11 @@ void
 fpexterrflt(void)
 {
 	thread_t	thr_act = current_thread();
+<<<<<<< HEAD
 	struct x86_fx_thread_state *ifps = thr_act->machine.ifps;
+=======
+	struct x86_fx_thread_state *ifps = thr_act->machine.pcb->ifps;
+>>>>>>> origin/10.6
 	boolean_t	intr;
 
 	intr = ml_set_interrupts_enabled(FALSE);
@@ -895,7 +1229,11 @@ void
 fp_save(
 	thread_t	thr_act)
 {
+<<<<<<< HEAD
 	pcb_t pcb = THREAD_TO_PCB(thr_act);
+=======
+	pcb_t pcb = thr_act->machine.pcb;
+>>>>>>> origin/10.6
 	struct x86_fx_thread_state *ifps = pcb->ifps;
 
 	assert(ifps != 0);
@@ -917,6 +1255,7 @@ void
 fp_load(
 	thread_t	thr_act)
 {
+<<<<<<< HEAD
 	pcb_t pcb = THREAD_TO_PCB(thr_act);
 	struct x86_fx_thread_state *ifps = pcb->ifps;
 
@@ -928,6 +1267,14 @@ fp_load(
 	}
 #endif
 
+=======
+	pcb_t pcb = thr_act->machine.pcb;
+	struct x86_fx_thread_state *ifps = pcb->ifps;
+
+	assert(ifps);
+	assert(ifps->fp_valid == FALSE || ifps->fp_valid == TRUE);
+
+>>>>>>> origin/10.6
 	if (ifps->fp_valid == FALSE) {
 		fpinit();
 	} else {
@@ -945,7 +1292,11 @@ void
 fpSSEexterrflt(void)
 {
 	thread_t	thr_act = current_thread();
+<<<<<<< HEAD
 	struct x86_fx_thread_state *ifps = thr_act->machine.ifps;
+=======
+	struct x86_fx_thread_state *ifps = thr_act->machine.pcb->ifps;
+>>>>>>> origin/10.6
 	boolean_t	intr;
 
 	intr = ml_set_interrupts_enabled(FALSE);
@@ -976,7 +1327,11 @@ fpSSEexterrflt(void)
 void
 fp_setvalid(boolean_t value) {
         thread_t	thr_act = current_thread();
+<<<<<<< HEAD
 	struct x86_fx_thread_state *ifps = thr_act->machine.ifps;
+=======
+	struct x86_fx_thread_state *ifps = thr_act->machine.pcb->ifps;
+>>>>>>> origin/10.6
 
 	if (ifps) {
 	        ifps->fp_valid = value;

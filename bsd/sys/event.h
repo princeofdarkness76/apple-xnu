@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2003-2015 Apple Inc. All rights reserved.
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
@@ -17,11 +18,23 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -329,6 +342,7 @@ enum {
 /*
  * If NOTE_EXITSTATUS is present, provide additional info about exiting process.
  */
+<<<<<<< HEAD
 enum {
 	eNoteExitReparentedDeprecated __deprecated_enum_msg("This kqueue(2) EVFILT_PROC flag is no longer sent") = 0x00080000 
 };
@@ -357,6 +371,9 @@ enum {
 #define NOTE_EXIT_MEMORY_FCTHRASHING	0x02000000	/* jetsam condition: lowest jetsam priority proc killed due to filecache thrashing */
 
 #endif
+=======
+#define NOTE_EXIT_REPARENTED	0x00080000	/* exited while reparented */
+>>>>>>> origin/10.8
 
 /*
  * data/hint fflags for EVFILT_VM, shared with userspace.
@@ -571,12 +588,15 @@ extern int	knote_unlink_waitq(struct knote *kn, struct waitq *wq);
 extern void	knote_fdclose(struct proc *p, int fd);
 extern void	knote_markstayqueued(struct knote *kn);
 extern void	knote_clearstayqueued(struct knote *kn);
+<<<<<<< HEAD
 
 extern int	kevent_qos_internal(struct proc *p, int fd, 
 			    user_addr_t changelist, int nchanges,
 			    user_addr_t eventlist, int nevents,
 			    user_addr_t data_out, user_size_t *data_available,
 			    unsigned int flags, int32_t *retval);
+=======
+>>>>>>> origin/10.10
 #endif /* !KERNEL_PRIVATE */
 
 #else 	/* KERNEL */

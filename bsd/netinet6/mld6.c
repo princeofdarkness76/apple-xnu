@@ -180,7 +180,11 @@ static int	mld_initial_join(struct in6_multi *, struct mld_ifinfo *,
 #ifdef MLD_DEBUG
 static const char *	mld_rec_type_to_str(const int);
 #endif
+<<<<<<< HEAD
 static uint32_t	mld_set_version(struct mld_ifinfo *, const int);
+=======
+static void	mld_set_version(struct mld_ifinfo *, const int);
+>>>>>>> origin/10.7
 static void	mld_flush_relq(struct mld_ifinfo *, struct mld_in6m_relhead *);
 static void	mld_dispatch_queue(struct mld_ifinfo *, struct ifqueue *, int);
 static int	mld_v1_input_query(struct ifnet *, const struct ip6_hdr *,
@@ -239,6 +243,19 @@ static int current_state_timers_running6;
 	lck_mtx_assert(&mld_mtx, LCK_MTX_ASSERT_NOTOWNED)
 #define	MLD_UNLOCK()			\
 	lck_mtx_unlock(&mld_mtx)
+
+#define	MLD_ADD_DETACHED_IN6M(_head, _in6m) {				\
+	SLIST_INSERT_HEAD(_head, _in6m, in6m_dtle);			\
+}
+
+#define	MLD_REMOVE_DETACHED_IN6M(_head) {				\
+	struct in6_multi *_in6m, *_inm_tmp;				\
+	SLIST_FOREACH_SAFE(_in6m, _head, in6m_dtle, _inm_tmp) {		\
+		SLIST_REMOVE(_head, _in6m, in6_multi, in6m_dtle);	\
+		IN6M_REMREF(_in6m);					\
+	}								\
+	VERIFY(SLIST_EMPTY(_head));					\
+}
 
 #define	MLD_ADD_DETACHED_IN6M(_head, _in6m) {				\
 	SLIST_INSERT_HEAD(_head, _in6m, in6m_dtle);			\
@@ -797,11 +814,65 @@ mli_remref(struct mld_ifinfo *mli)
 	VERIFY(SLIST_EMPTY(&mli->mli_relinmhead));
 	MLI_UNLOCK(mli);
 
+<<<<<<< HEAD
+<<<<<<< HEAD
 	/* Now that we're dropped all locks, release detached records */
 	MLD_REMOVE_DETACHED_IN6M(&in6m_dthead);
+=======
+	/* fill in the ip6 header */
+	ip6 = mtod(mh, struct ip6_hdr *);
+	ip6->ip6_flow = 0;
+	ip6->ip6_vfc &= ~IPV6_VERSION_MASK;
+	ip6->ip6_vfc |= IPV6_VERSION;
+	/* ip6_plen will be set later */
+	ip6->ip6_nxt = IPPROTO_ICMPV6;
+	/* ip6_hlim will be set by im6o.im6o_multicast_hlim */
+	ip6->ip6_src = ia->ia_addr.sin6_addr;
+	ip6->ip6_dst = dst ? *dst : in6m->in6m_addr;
+
+	/* fill in the MLD header */
+	md->m_len = sizeof(struct mld6_hdr);
+	mldh = mtod(md, struct mld6_hdr *);
+	mldh->mld6_type = type;
+	mldh->mld6_code = 0;
+	mldh->mld6_cksum = 0;
+	/* XXX: we assume the function will not be called for query messages */
+	mldh->mld6_maxdelay = 0;
+	mldh->mld6_reserved = 0;
+	mldh->mld6_addr = in6m->in6m_addr;
+	if (IN6_IS_ADDR_MC_LINKLOCAL(&mldh->mld6_addr))
+		mldh->mld6_addr.s6_addr16[1] = 0; /* XXX */
+	mldh->mld6_cksum = in6_cksum(mh, IPPROTO_ICMPV6, sizeof(struct ip6_hdr),
+				     sizeof(struct mld6_hdr));
+
+	/* construct multicast option */
+	bzero(&im6o, sizeof(im6o));
+	im6o.im6o_multicast_ifp = ifp;
+	im6o.im6o_multicast_hlim = 1;
+
+	/*
+	 * Request loopback of the report if we are acting as a multicast
+	 * router, so that the process-level routing daemon can hear it.
+	 */
+#if MROUTING
+	im6o.im6o_multicast_loop = (ip6_mrouter != NULL);
+#else
+	im6o.im6o_multicast_loop = 0;
+#endif
+
+	/* increment output statictics */
+	icmp6stat.icp6s_outhist[type]++;
+>>>>>>> origin/10.6
 
 	MLD_PRINTF(("%s: freeing mld_ifinfo for ifp 0x%llx(%s)\n",
 	    __func__, (uint64_t)VM_KERNEL_ADDRPERM(ifp), if_name(ifp)));
+=======
+	/* Now that we're dropped all locks, release detached records */
+	MLD_REMOVE_DETACHED_IN6M(&in6m_dthead);
+
+	MLD_PRINTF(("%s: freeing mld_ifinfo for ifp %p(%s%d)\n",
+	    __func__, ifp, ifp->if_name, ifp->if_unit));
+>>>>>>> origin/10.7
 
 	mli_free(mli);
 }
@@ -1563,6 +1634,7 @@ mld_timeout(void *arg)
 	struct ifnet		*ifp;
 	struct mld_ifinfo	*mli;
 	struct in6_multi	*inm;
+<<<<<<< HEAD
 	int			 uri_sec = 0;
 	SLIST_HEAD(, in6_multi)	in6m_dthead;
 
@@ -1574,6 +1646,12 @@ mld_timeout(void *arg)
 	 * returnable via net_uptime().
 	 */
 	net_update_uptime();
+=======
+	int			 uri_fasthz = 0;
+	SLIST_HEAD(, in6_multi)	in6m_dthead;
+
+	SLIST_INIT(&in6m_dthead);
+>>>>>>> origin/10.7
 
 	MLD_LOCK();
 
@@ -1709,6 +1787,7 @@ out_locked:
 
 	/* Now that we're dropped all locks, release detached records */
 	MLD_REMOVE_DETACHED_IN6M(&in6m_dthead);
+<<<<<<< HEAD
 }
 
 static void
@@ -1722,6 +1801,8 @@ mld_sched_timeout(void)
 		mld_timeout_run = 1;
 		timeout(mld_timeout, NULL, hz);
 	}
+=======
+>>>>>>> origin/10.7
 }
 
 /*

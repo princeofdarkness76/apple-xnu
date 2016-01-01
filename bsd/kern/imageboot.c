@@ -84,6 +84,7 @@ imageboot_needed(void)
 	if (root_path == NULL)
 		panic("%s: M_NAMEI zone exhausted", __FUNCTION__);
 
+<<<<<<< HEAD
 	/* Check for first layer */
 	if (!(PE_parse_boot_argn("rp0", root_path, MAXPATHLEN) || 
 			PE_parse_boot_argn("rp", root_path, MAXPATHLEN) ||
@@ -99,6 +100,10 @@ imageboot_needed(void)
 	}
 
 	result = 1;
+=======
+	if(PE_parse_boot_argn("rp", root_path, MAXPATHLEN) == TRUE) {
+		/* Got it, now verify scheme */
+>>>>>>> origin/10.5
 
 	/* Check for second layer */
 	if (!(PE_parse_boot_argn("rp1", root_path, MAXPATHLEN) ||
@@ -269,6 +274,7 @@ imageboot_setup()
 	MALLOC_ZONE(root_path, caddr_t, MAXPATHLEN, M_NAMEI, M_WAITOK);
 	assert(root_path != NULL);
 
+<<<<<<< HEAD
 	/*
 	 * Look for outermost disk image to root from.  If we're doing a nested boot,
 	 * there's some sense in which the outer image never needs to be the root filesystem,
@@ -279,6 +285,11 @@ imageboot_setup()
 	if((PE_parse_boot_argn("rp", root_path, MAXPATHLEN) == FALSE) &&
 		(PE_parse_boot_argn("rp0", root_path, MAXPATHLEN) == FALSE)) {
 		panic("%s: no valid path to image.\n", __FUNCTION__);
+=======
+	if(PE_parse_boot_argn("rp", root_path, MAXPATHLEN) == FALSE) {
+		error = ENOENT;
+		goto done;
+>>>>>>> origin/10.5
 	}
 
 	printf("%s: root image url is %s\n", __FUNCTION__, root_path);
@@ -297,6 +308,7 @@ imageboot_setup()
 	
 	printf("%s: second level root image url is %s\n", __FUNCTION__, root_path);
 
+<<<<<<< HEAD
 	/*
 	 * If we fail to set up second image, it's not a given that we
 	 * can safely root off the first.  
@@ -304,6 +316,58 @@ imageboot_setup()
 	error = imageboot_mount_image(root_path, 1);
 	if (error) {
 		panic("Failed on second stage of imageboot.");	
+=======
+	if (error == 0 && rootvnode != NULL) {
+		vnode_t newdp, old_rootvnode;
+		mount_t new_rootfs, old_rootfs;
+
+		/*
+		 * Get the vnode for '/'.
+		 * Set fdp->fd_fd.fd_cdir to reference it.
+		 */
+		if (VFS_ROOT(TAILQ_LAST(&mountlist,mntlist), &newdp, vfs_context_kernel()))
+			panic("%s: cannot find root vnode", __FUNCTION__);
+
+		old_rootvnode = rootvnode;
+		old_rootfs = rootvnode->v_mount;
+
+		mount_list_remove(old_rootfs);
+
+		mount_lock(old_rootfs);
+#ifdef CONFIG_IMGSRC_ACCESS
+		old_rootfs->mnt_kern_flag |= MNTK_BACKS_ROOT;
+#endif /* CONFIG_IMGSRC_ACCESS */
+		old_rootfs->mnt_flag &= ~MNT_ROOTFS;
+		mount_unlock(old_rootfs);
+
+		rootvnode = newdp;
+
+		new_rootfs = rootvnode->v_mount;
+		mount_lock(new_rootfs);
+		new_rootfs->mnt_flag |= MNT_ROOTFS;
+		mount_unlock(new_rootfs);
+
+		vnode_ref(newdp);
+		vnode_put(newdp);
+		filedesc0.fd_cdir = newdp;
+		DBG_TRACE("%s: root switched\n", __FUNCTION__);
+
+#ifdef CONFIG_IMGSRC_ACCESS
+		if (PE_imgsrc_mount_supported()) {
+			imgsrc_rootvnode = old_rootvnode;
+		} else {
+			vnode_getalways(old_rootvnode);
+			vnode_rele(old_rootvnode);
+			vnode_put(old_rootvnode);
+		}
+#else 
+		vnode_getalways(old_rootvnode);
+		vnode_rele(old_rootvnode);
+		vnode_put(old_rootvnode);
+#endif /* CONFIG_IMGSRC_ACCESS */
+
+
+>>>>>>> origin/10.6
 	}
 
 done:

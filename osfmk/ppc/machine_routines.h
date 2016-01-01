@@ -141,6 +141,8 @@ struct ml_processor_info_t {
 	boolean_t			supports_nap;
 	unsigned long		l2cr_value;
 	time_base_enable_t	time_base_enable;
+	uint32_t			power_mode_0;
+	uint32_t			power_mode_1;
 };
 
 typedef struct ml_processor_info_t ml_processor_info_t;
@@ -192,10 +194,66 @@ unsigned int ml_throttle(
 	unsigned int);
 #endif
 
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
 void ml_get_timebase(unsigned long long *timstamp);
 void ml_sense__nmi(void);
+=======
+=======
+void ml_init_lock_timeout(void);
+
+>>>>>>> origin/10.3
+=======
+boolean_t machine_timeout_suspended(void);
+>>>>>>> origin/10.6
+#endif /* MACH_KERNEL_PRIVATE */
+
+void ml_thread_policy(
+	thread_t thread,
+	unsigned policy_id,
+	unsigned policy_info);
+
+#define MACHINE_GROUP				0x00000001
+#define MACHINE_NETWORK_GROUP		0x10000000 
+#define MACHINE_NETWORK_WORKLOOP	0x00000001
+#define MACHINE_NETWORK_NETISR		0x00000002
+
+/* Initialize the maximum number of CPUs */
+void ml_init_max_cpus(
+	unsigned long max_cpus);
+
+/* Return the maximum number of CPUs set by ml_init_max_cpus() */
+int ml_get_max_cpus(
+	void);
+
+/* Return the current number of CPUs */
+int ml_get_current_cpus(
+	void);
+
+/* Struct for ml_cpu_get_info */
+struct ml_cpu_info {
+	unsigned long		vector_unit;
+	unsigned long		cache_line_size;
+	unsigned long		l1_icache_size;
+	unsigned long		l1_dcache_size;
+	unsigned long		l2_settings;
+	unsigned long		l2_cache_size;
+	unsigned long		l3_settings;
+	unsigned long		l3_cache_size;
+};
+
+typedef struct ml_cpu_info ml_cpu_info_t;
+
+/* Get processor info */
+void ml_cpu_get_info(ml_cpu_info_t *cpu_info);
+>>>>>>> origin/10.2
 
 int ml_enable_cache_level(int cache_level, int enable);
 void ml_set_processor_speed(unsigned long speed);
+void ml_set_processor_voltage(unsigned long voltage);
+unsigned int ml_scom_write(uint32_t reg, uint64_t data);
+unsigned int ml_scom_read(uint32_t reg, uint64_t *data);
+uint32_t ml_hdec_ratio(void);
 
 #endif /* _PPC_MACHINE_ROUTINES_H_ */

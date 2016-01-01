@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -220,6 +246,7 @@ ast_taken(
 			/*
 			 * Check for preemption. Conditions may have changed from when the AST_PREEMPT was originally set.
 			 */
+<<<<<<< HEAD
 			thread_lock(thread);
 			if (reasons & AST_PREEMPT)
 				reasons = csw_check(current_processor(), reasons & AST_QUANTUM);
@@ -228,6 +255,13 @@ ast_taken(
 			assert(waitq_wait_possible(thread));
 
 			if (reasons & AST_PREEMPT) {
+=======
+			if (reasons & AST_PREEMPT)
+				reasons = csw_check(current_processor());
+
+			if (	(reasons & AST_PREEMPT)				&&
+					wait_queue_assert_possible(thread)		) {		
+>>>>>>> origin/10.5
 				counter(c_ast_taken_block++);
 				thread_block_reason((thread_continue_t)thread_exception_return, NULL, reasons & AST_PREEMPTION);
 			}
@@ -244,11 +278,20 @@ void
 ast_check(
 	processor_t processor)
 {
+<<<<<<< HEAD
 	thread_t thread = processor->active_thread;
 
 	if (processor->state == PROCESSOR_RUNNING ||
 	    processor->state == PROCESSOR_SHUTDOWN) {
 		ast_t preempt;
+=======
+	thread_t			thread = processor->active_thread;
+
+	processor->current_pri = thread->sched_pri;
+	if (	processor->state == PROCESSOR_RUNNING		||
+			processor->state == PROCESSOR_SHUTDOWN		) {
+		ast_t			preempt;
+>>>>>>> origin/10.5
 
 		/*
 		 *	Propagate thread ast to processor.
@@ -260,6 +303,7 @@ ast_check(
 		/*
 		 *	Context switch check.
 		 */
+<<<<<<< HEAD
 		thread_lock(thread);
 
 		processor->current_pri = thread->sched_pri;
@@ -267,6 +311,9 @@ ast_check(
 		processor->current_sfi_class = thread->sfi_class = sfi_thread_classify(thread);
 
 		if ((preempt = csw_check(processor, AST_NONE)) != AST_NONE)
+=======
+		if ((preempt = csw_check(processor)) != AST_NONE)
+>>>>>>> origin/10.5
 			ast_on(preempt);
 
 		thread_unlock(thread);

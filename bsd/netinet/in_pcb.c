@@ -1,6 +1,11 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +20,24 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +45,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /*
  * Copyright (c) 1982, 1986, 1991, 1993, 1995
@@ -235,6 +272,7 @@ static u_int32_t inp_hash_seed = 0;
 
 static int infc_cmp(const struct inpcb *, const struct inpcb *);
 
+<<<<<<< HEAD
 /* Flags used by inp_fc_getinp */
 #define	INPFC_SOLOCKED	0x1
 #define	INPFC_REMOVE	0x2
@@ -248,6 +286,24 @@ decl_lck_mtx_data(static, inp_fc_lck);
 RB_HEAD(inp_fc_tree, inpcb) inp_fc_tree;
 RB_PROTOTYPE(inp_fc_tree, inpcb, infc_link, infc_cmp);
 RB_GENERATE(inp_fc_tree, inpcb, infc_link, infc_cmp);
+=======
+static __inline int infc_cmp(const struct inpcb *,
+    const struct inpcb *);
+lck_grp_t *inp_lck_grp;
+lck_grp_attr_t *inp_lck_grp_attr;
+lck_attr_t *inp_lck_attr;
+decl_lck_mtx_data(, inp_fc_lck);
+
+RB_HEAD(inp_fc_tree, inpcb) inp_fc_tree;
+RB_PROTOTYPE(inp_fc_tree, inpcb, infc_link, infc_cmp);
+RB_GENERATE(inp_fc_tree, inpcb, infc_link, infc_cmp);
+
+/*
+ * Use this inp as a key to find an inp in the flowhash tree.
+ * Accesses to it are protected by inp_fc_lck.
+ */
+struct inpcb key_inp;
+>>>>>>> origin/10.8
 
 /*
  * Use this inp as a key to find an inp in the flowhash tree.
@@ -273,15 +329,19 @@ in_pcbinit(void)
 	lck_mtx_init(&inpcb_lock, inpcb_lock_grp, inpcb_lock_attr);
 	lck_mtx_init(&inpcb_timeout_lock, inpcb_lock_grp, inpcb_lock_attr);
 
+<<<<<<< HEAD
 	/*
 	 * Initialize data structures required to deliver
 	 * flow advisories.
 	 */
 	lck_mtx_init(&inp_fc_lck, inpcb_lock_grp, inpcb_lock_attr);
+=======
+>>>>>>> origin/10.8
 	lck_mtx_lock(&inp_fc_lck);
 	RB_INIT(&inp_fc_tree);
 	bzero(&key_inp, sizeof(key_inp));
 	lck_mtx_unlock(&inp_fc_lck);
+<<<<<<< HEAD
 }
 
 #define	INPCB_HAVE_TIMER_REQ(req)	(((req).intimer_lazy > 0) || \
@@ -515,6 +575,8 @@ in_pcbinfo_detach(struct inpcbinfo *ipi)
 	lck_mtx_unlock(&inpcb_lock);
 
 	return (error);
+=======
+>>>>>>> origin/10.8
 }
 
 /*
@@ -557,6 +619,7 @@ in_pcballoc(struct socket *so, struct inpcbinfo *pcbinfo, struct proc *p)
 		return (mac_error);
 	}
 	mac_inpcb_label_associate(so, inp);
+<<<<<<< HEAD
 #endif /* CONFIG_MACF_NET */
 	/* make sure inp_stat is always 64-bit aligned */
 	inp->inp_stat = (struct inp_stat *)P2ROUNDUP(inp->inp_stat_store,
@@ -594,6 +657,12 @@ in_pcballoc(struct socket *so, struct inpcbinfo *pcbinfo, struct proc *p)
 		/* NOTREACHED */
 	}
 	
+=======
+#endif
+#if CONFIG_IP_EDGEHOLE
+	ip_edgehole_attach(inp);
+#endif
+>>>>>>> origin/10.5
 	so->so_pcb = (caddr_t)inp;
 
 	if (so->so_proto->pr_flags & PR_PCBLOCK) {
@@ -656,6 +725,10 @@ in_pcblookup_local_and_cleanup(struct inpcbinfo *pcbinfo, struct in_addr laddr,
 	return (inp);
 }
 
+<<<<<<< HEAD
+=======
+#ifdef __APPLE_API_PRIVATE
+>>>>>>> origin/10.5
 static void
 in_pcb_conflict_post_msg(u_int16_t port)
 {
@@ -945,6 +1018,7 @@ in_pcbbind(struct inpcb *inp, struct sockaddr *nam, struct proc *p)
 		}
 	}
 	socket_lock(so, 0);
+<<<<<<< HEAD
 
 	/*
 	 * We unlocked socket's protocol lock for a long time.
@@ -980,6 +1054,16 @@ in_pcbbind(struct inpcb *inp, struct sockaddr *nam, struct proc *p)
 		return (EAGAIN);
 	}
 	lck_rw_done(pcbinfo->ipi_lock);
+=======
+	inp->inp_lport = lport;
+	if (in_pcbinshash(inp, 1) != 0) {
+		inp->inp_laddr.s_addr = INADDR_ANY;
+		inp->inp_lport = 0;
+		lck_rw_done(pcbinfo->mtx);
+		return (EAGAIN);
+	}
+	lck_rw_done(pcbinfo->mtx);
+>>>>>>> origin/10.5
 	sflt_notify(so, sock_evt_bound, NULL);
 	return (0);
 }
@@ -1022,6 +1106,7 @@ in_pcbladdr(struct inpcb *inp, struct sockaddr *nam, struct in_addr *laddr,
 		return (EAFNOSUPPORT);
 	if (SIN(nam)->sin_port == 0)
 		return (EADDRNOTAVAIL);
+<<<<<<< HEAD
 
 	/*
 	 * If the destination address is INADDR_ANY,
@@ -1041,6 +1126,91 @@ in_pcbladdr(struct inpcb *inp, struct sockaddr *nam, struct in_addr *laddr,
 			} else if (ia->ia_ifp->if_flags & IFF_BROADCAST) {
 				SIN(nam)->sin_addr =
 				    SIN(&ia->ia_broadaddr)->sin_addr;
+=======
+	
+	lck_mtx_lock(rt_mtx);
+	
+	if (!TAILQ_EMPTY(&in_ifaddrhead)) {
+		/*
+		 * If the destination address is INADDR_ANY,
+		 * use the primary local address.
+		 * If the supplied address is INADDR_BROADCAST,
+		 * and the primary interface supports broadcast,
+		 * choose the broadcast address for that interface.
+		 */
+#define	satosin(sa)	((struct sockaddr_in *)(sa))
+#define sintosa(sin)	((struct sockaddr *)(sin))
+#define ifatoia(ifa)	((struct in_ifaddr *)(ifa))
+		if (sin->sin_addr.s_addr == INADDR_ANY)
+		    sin->sin_addr = IA_SIN(TAILQ_FIRST(&in_ifaddrhead))->sin_addr;
+		else if (sin->sin_addr.s_addr == (u_long)INADDR_BROADCAST &&
+		  (TAILQ_FIRST(&in_ifaddrhead)->ia_ifp->if_flags & IFF_BROADCAST))
+		    sin->sin_addr = satosin(&TAILQ_FIRST(&in_ifaddrhead)->ia_broadaddr)->sin_addr;
+	}
+	if (inp->inp_laddr.s_addr == INADDR_ANY) {
+		struct route *ro;
+		unsigned int ifscope;
+
+		ia = (struct in_ifaddr *)0;
+		ifscope = (inp->inp_flags & INP_BOUND_IF) ?
+		    inp->inp_boundif : IFSCOPE_NONE;
+		/*
+		 * If route is known or can be allocated now,
+		 * our src addr is taken from the i/f, else punt.
+		 * Note that we should check the address family of the cached
+		 * destination, in case of sharing the cache with IPv6.
+		 */
+		ro = &inp->inp_route;
+		if (ro->ro_rt &&
+			(ro->ro_dst.sa_family != AF_INET ||
+			satosin(&ro->ro_dst)->sin_addr.s_addr !=
+			sin->sin_addr.s_addr ||
+		    inp->inp_socket->so_options & SO_DONTROUTE || 
+		    ro->ro_rt->generation_id != route_generation)) {
+			rtfree_locked(ro->ro_rt);
+			ro->ro_rt = (struct rtentry *)0;
+		}
+		if ((inp->inp_socket->so_options & SO_DONTROUTE) == 0 && /*XXX*/
+		    (ro->ro_rt == (struct rtentry *)0 ||
+		    ro->ro_rt->rt_ifp == 0)) {
+			/* No route yet, so try to acquire one */
+			bzero(&ro->ro_dst, sizeof(struct sockaddr_in));
+			ro->ro_dst.sa_family = AF_INET;
+			ro->ro_dst.sa_len = sizeof(struct sockaddr_in);
+			((struct sockaddr_in *) &ro->ro_dst)->sin_addr =
+				sin->sin_addr;
+			rtalloc_scoped_ign_locked(ro, 0UL, ifscope);
+		}
+		/*
+		 * If we found a route, use the address
+		 * corresponding to the outgoing interface
+		 * unless it is the loopback (in case a route
+		 * to our address on another net goes to loopback).
+		 */
+		if (ro->ro_rt && !(ro->ro_rt->rt_ifp->if_flags & IFF_LOOPBACK)) {
+			ia = ifatoia(ro->ro_rt->rt_ifa);
+			if (ia)
+				ifaref(&ia->ia_ifa);
+		}
+		if (ia == 0) {
+			u_short fport = sin->sin_port;
+
+			sin->sin_port = 0;
+			ia = ifatoia(ifa_ifwithdstaddr(sintosa(sin)));
+			if (ia == 0) {
+				ia = ifatoia(ifa_ifwithnet_scoped(sintosa(sin),
+				    ifscope));
+			}
+			sin->sin_port = fport;
+			if (ia == 0) {
+				ia = TAILQ_FIRST(&in_ifaddrhead);
+				if (ia)
+					ifaref(&ia->ia_ifa);
+			}
+			if (ia == 0) {
+				lck_mtx_unlock(rt_mtx);
+				return (EADDRNOTAVAIL);
+>>>>>>> origin/10.5
 			}
 			IFA_UNLOCK(&ia->ia_ifa);
 			ia = NULL;
@@ -1063,6 +1233,7 @@ in_pcbladdr(struct inpcb *inp, struct sockaddr *nam, struct in_addr *laddr,
 	if (ifscope == IFSCOPE_NONE && (inp->inp_flags & INP_BOUND_IF))
 		ifscope = inp->inp_boundifp->if_index;
 
+<<<<<<< HEAD
 	/*
 	 * If route is known or can be allocated now,
 	 * our src addr is taken from the i/f, else punt.
@@ -1284,6 +1455,13 @@ in_pcbconnect(struct inpcb *inp, struct sockaddr *nam, struct proc *p,
 	if ((so->so_flags & SOF_ABORTED) != 0)
 		return (ECONNREFUSED);
 
+=======
+	socket_unlock(inp->inp_socket, 0);
+	pcb = in_pcblookup_hash(inp->inp_pcbinfo, sin->sin_addr, sin->sin_port,
+	    inp->inp_laddr.s_addr ? inp->inp_laddr : ifaddr->sin_addr,
+	    inp->inp_lport, 0, NULL);
+	socket_lock(inp->inp_socket, 0);
+>>>>>>> origin/10.6
 	if (pcb != NULL) {
 		in_pcb_checkstate(pcb, WNT_RELEASE, pcb == inp ? 1 : 0);
 		return (EADDRINUSE);
@@ -1371,6 +1549,7 @@ in_pcbdetach(struct inpcb *inp)
 {
 	struct socket *so = inp->inp_socket;
 
+<<<<<<< HEAD
 	if (so->so_pcb == NULL) {
 		/* PCB has been disposed */
 		panic("%s: inp=%p so=%p proto=%d so_pcb is null!\n", __func__,
@@ -1378,6 +1557,12 @@ in_pcbdetach(struct inpcb *inp)
 		/* NOTREACHED */
 	}
 	
+=======
+
+	if (so->so_pcb == 0) /* we've been called twice, ignore */
+		return;
+
+>>>>>>> origin/10.3
 #if IPSEC
 	if (inp->inp_sp != NULL) {
 		(void) ipsec4_delete_pcbpolicy(inp);
@@ -1480,11 +1665,18 @@ in_pcbdispose(struct inpcb *inp)
 			lck_mtx_unlock(&inp->inpcb_mtx);
 			lck_mtx_destroy(&inp->inpcb_mtx, ipi->ipi_lock_grp);
 		}
+<<<<<<< HEAD
 		/* makes sure we're not called twice from so_close */
 		so->so_flags |= SOF_PCBCLEARING;
 		so->so_saved_pcb = (caddr_t)inp;
 		so->so_pcb = NULL;
 		inp->inp_socket = NULL;
+=======
+		so->so_flags |= SOF_PCBCLEARING; /* makes sure we're not called twice from so_close */
+		so->so_saved_pcb = (caddr_t) inp;
+		so->so_pcb = 0; 
+		inp->inp_socket = 0;
+>>>>>>> origin/10.5
 #if CONFIG_MACF_NET
 		mac_inpcb_label_destroy(inp);
 #endif /* CONFIG_MACF_NET */
@@ -1688,6 +1880,7 @@ in_losing(struct inpcb *inp)
 void
 in_rtchange(struct inpcb *inp, int errno)
 {
+<<<<<<< HEAD
 #pragma unused(errno)
 	boolean_t release = FALSE;
 	struct rtentry *rt;
@@ -1706,6 +1899,17 @@ in_rtchange(struct inpcb *inp, int errno)
 		}
 		if (ia != NULL)
 			IFA_REMREF(&ia->ia_ifa);
+=======
+	if (inp->inp_route.ro_rt) {
+		if (ifa_foraddr(inp->inp_laddr.s_addr) == NULL) 
+			return; /* we can't remove the route now. not sure if still ok to use src */
+		rtfree(inp->inp_route.ro_rt);
+		inp->inp_route.ro_rt = 0;
+		/*
+		 * A new route can be allocated the next time
+		 * output is attempted.
+		 */
+>>>>>>> origin/10.3
 	}
 	if (rt == NULL || release)
 		ROUTE_RELEASE(&inp->inp_route);
@@ -2235,10 +2439,17 @@ in_pcbremlists(struct inpcb *inp)
 	}
 
 	if (inp->inp_flags2 & INP2_IN_FCTREE) {
+<<<<<<< HEAD
 		inp_fc_getinp(inp->inp_flowhash, (INPFC_SOLOCKED|INPFC_REMOVE));
 		VERIFY(!(inp->inp_flags2 & INP2_IN_FCTREE));
 	}
 
+=======
+		inp_fc_getinp(inp->inp_flowhash,
+			(INPFC_SOLOCKED|INPFC_REMOVE));
+		VERIFY(!(inp->inp_flags2 & INP2_IN_FCTREE));
+	}
+>>>>>>> origin/10.8
 	inp->inp_pcbinfo->ipi_count--;
 }
 
@@ -2363,6 +2574,7 @@ stopusing:
 void
 inpcb_to_compat(struct inpcb *inp, struct inpcb_compat *inp_compat)
 {
+<<<<<<< HEAD
 	bzero(inp_compat, sizeof (*inp_compat));
 	inp_compat->inp_fport = inp->inp_fport;
 	inp_compat->inp_lport = inp->inp_lport;
@@ -2439,13 +2651,40 @@ inp_route_copyout(struct inpcb *inp, struct route *dst)
 	lck_mtx_assert(&inp->inpcb_mtx, LCK_MTX_ASSERT_OWNED);
 
 	/*
+<<<<<<< HEAD
 	 * If the route in the PCB is stale or not for IPv4, blow it away;
 	 * this is possible in the case of IPv4-mapped address case.
 	 */
 	if (ROUTE_UNUSABLE(src) || rt_key(src->ro_rt)->sa_family != AF_INET)
 		ROUTE_RELEASE(src);
+=======
+	 * If the route in the PCB is not for IPv4, blow it away;
+	 * this is possible in the case of IPv4-mapped address case.
+	 */
+	if (src->ro_rt != NULL && rt_key(src->ro_rt)->sa_family != AF_INET) {
+		rtfree(src->ro_rt);
+		src->ro_rt = NULL;
+	}
+
+	/* Copy everything (rt, dst, flags) from PCB */
+	bcopy(src, dst, sizeof (*dst));
+>>>>>>> origin/10.6
 
 	route_copyout(dst, src, sizeof (*dst));
+=======
+	struct socket *so = inp->inp_socket;
+	struct inpcbinfo *pcbinfo = inp->inp_pcbinfo;
+	
+	if (so != &pcbinfo->nat_dummy_socket)
+		panic("in_pcb_detach_port: not a dummy_sock: so=%p, inp=%p\n", so, inp);
+	inp->inp_gencnt = ++pcbinfo->ipi_gencnt;
+	/*### access ipi in in_pcbremlists */
+	in_pcbremlists(inp);
+	
+	inp->inp_socket = 0;
+	zfree(pcbinfo->ipi_zone, inp);
+    	pcbinfo->nat_dummy_socket.so_pcb = (caddr_t)pcbinfo->nat_dummy_pcb; /* restores dummypcb */
+>>>>>>> origin/10.5
 }
 
 void
@@ -2630,13 +2869,22 @@ try_again:
 	inp->inp_flowhash = flowhash;
 
 	/* Insert the inp into inp_fc_tree */
+<<<<<<< HEAD
 	lck_mtx_lock_spin(&inp_fc_lck);
+=======
+
+	lck_mtx_lock(&inp_fc_lck);
+>>>>>>> origin/10.8
 	tmp_inp = RB_FIND(inp_fc_tree, &inp_fc_tree, inp);
 	if (tmp_inp != NULL) {
 		/*
 		 * There is a different inp with the same flowhash.
 		 * There can be a collision on flow hash but the
+<<<<<<< HEAD
 		 * probability is low.  Let's recompute the
+=======
+		 * probability is low. Let's recompute the
+>>>>>>> origin/10.8
 		 * flowhash.
 		 */
 		lck_mtx_unlock(&inp_fc_lck);
@@ -2644,11 +2892,15 @@ try_again:
 		inp_hash_seed = RandomULong();
 		goto try_again;
 	}
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.8
 	RB_INSERT(inp_fc_tree, &inp_fc_tree, inp);
 	inp->inp_flags2 |= INP2_IN_FCTREE;
 	lck_mtx_unlock(&inp_fc_lck);
 
+<<<<<<< HEAD
 	return (flowhash);
 }
 
@@ -2662,6 +2914,9 @@ inp_flowadv(uint32_t flowhash)
 	if (inp == NULL)
 		return;
 	inp_fc_feedback(inp);
+=======
+	return flowhash;
+>>>>>>> origin/10.8
 }
 
 /*
@@ -2671,10 +2926,17 @@ static inline int
 infc_cmp(const struct inpcb *inp1, const struct inpcb *inp2)
 {
 	return (memcmp(&(inp1->inp_flowhash), &(inp2->inp_flowhash),
+<<<<<<< HEAD
 	    sizeof(inp1->inp_flowhash)));
 }
 
 static struct inpcb *
+=======
+		sizeof(inp1->inp_flowhash)));
+}
+
+struct inpcb *
+>>>>>>> origin/10.8
 inp_fc_getinp(u_int32_t flowhash, u_int32_t flags)
 {
 	struct inpcb *inp = NULL;
@@ -2697,7 +2959,10 @@ inp_fc_getinp(u_int32_t flowhash, u_int32_t flags)
 		inp->inp_flags2 &= ~INP2_IN_FCTREE;
 		return (NULL);
 	}
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.8
 	if (in_pcb_checkstate(inp, WNT_ACQUIRE, locked) == WNT_STOPUSING)
 		inp = NULL;
 	lck_mtx_unlock(&inp_fc_lck);
@@ -2705,7 +2970,11 @@ inp_fc_getinp(u_int32_t flowhash, u_int32_t flags)
 	return (inp);
 }
 
+<<<<<<< HEAD
 static void
+=======
+void
+>>>>>>> origin/10.8
 inp_fc_feedback(struct inpcb *inp)
 {
 	struct socket *so = inp->inp_socket;
@@ -2773,9 +3042,16 @@ inp_set_fc_state(struct inpcb *inp, int advcode)
 		return (0);
 
 	inp->inp_flags &= ~(INP_FLOW_CONTROLLED | INP_FLOW_SUSPENDED);
+<<<<<<< HEAD
 	if ((tmp_inp = inp_fc_getinp(inp->inp_flowhash,
 	    INPFC_SOLOCKED)) != NULL) {
 		if (in_pcb_checkstate(tmp_inp, WNT_RELEASE, 1) == WNT_STOPUSING)
+=======
+	if ((tmp_inp = inp_fc_getinp(inp->inp_flowhash, INPFC_SOLOCKED)) 
+		!= NULL) {
+		if (in_pcb_checkstate(tmp_inp, WNT_RELEASE, 1)
+			== WNT_STOPUSING)
+>>>>>>> origin/10.8
 			return (0);
 		VERIFY(tmp_inp == inp);
 		switch (advcode) {
@@ -2793,7 +3069,11 @@ inp_set_fc_state(struct inpcb *inp, int advcode)
 		}
 		return (1);
 	}
+<<<<<<< HEAD
 	return (0);
+=======
+	return(0);
+>>>>>>> origin/10.8
 }
 
 /*

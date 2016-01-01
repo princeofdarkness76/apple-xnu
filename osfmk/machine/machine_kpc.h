@@ -25,11 +25,18 @@
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
+<<<<<<< HEAD:osfmk/machine/machine_kpc.h
 #ifndef _MACHINE_MACHINE_KPC_H
 #define _MACHINE_MACHINE_KPC_H
 
 #if defined (__x86_64__)
 #include "x86_64/machine_kpc.h"
+=======
+#if defined (__ppc__) || defined (__ppc64__)
+#include "ppc/_structs.h"
+#elif defined (__i386__) || defined (__x86_64__)
+#include "i386/_structs.h"
+>>>>>>> origin/10.5:bsd/machine/_structs.h
 #else
 #error architecture not supported
 #endif

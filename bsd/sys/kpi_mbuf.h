@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2008-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2008-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -1418,6 +1422,68 @@ extern void mbuf_del_drvaux(mbuf_t mbuf);
  */
 extern void mbuf_stats(struct mbuf_stat *stats);
 
+#ifdef KERNEL_PRIVATE
+/*
+	@enum mbuf_priority_t
+	@abstract Priority of a packet.
+	@discussion Some mbufs represent packets containing application data.
+		The priority of the application data is represented by the
+		mbuf priority, as determined by the system.
+	@constant MBUF_PRIORITY_NORMAL Indicates the packet contains
+		normal priority data.
+	@constant MBUF_PRIORITY_BACKGROUND Indicates the packet contains
+		background priority data.
+ */
+typedef enum {
+	MBUF_PRIORITY_NORMAL		= 0,
+	MBUF_PRIORITY_BACKGROUND	= 1
+} mbuf_priority_t;
+
+/*
+	@function mbuf_get_priority
+	@discussion Get the priority value of the packet.
+	@param mbuf The mbuf to obtain the priority value from.
+	@result The priority value of the packet.
+ */
+extern mbuf_priority_t mbuf_get_priority(mbuf_t mbuf);
+
+/*
+	@enum mbuf_traffic_class_t
+	@abstract Traffic class of a packet
+	@discussion Property that represent the category of traffic of a packet. 
+		This information may be used by the driver and at the link level.
+	@constant MBUF_TC_BE Best effort, normal class.
+	@constant MBUF_TC_BK Background, low priority or bulk traffic.
+	@constant MBUF_TC_VI Interactive video, constant bit rate, low latency.
+	@constant MBUF_TC_VO Interactive voice, constant bit rate, lowest latency.
+*/
+typedef enum {
+#ifdef XNU_KERNEL_PRIVATE
+	MBUF_TC_NONE	= -1,
+#endif
+	MBUF_TC_BE 		= 0,
+	MBUF_TC_BK		= 1,
+	MBUF_TC_VI		= 2,
+	MBUF_TC_VO		= 3
+} mbuf_traffic_class_t;
+
+/*
+	@function mbuf_get_traffic_class
+	@discussion Get the traffic class of an mbuf packet
+	@param mbuf The mbuf to get the traffic class of.
+	@result The traffic class
+*/
+extern mbuf_traffic_class_t mbuf_get_traffic_class(mbuf_t mbuf);
+
+/*
+	@function mbuf_set_traffic_class
+	@discussion Set the traffic class of an mbuf packet.
+	@param mbuf The mbuf to set the traffic class on.
+	@ac The traffic class
+	@result 0 on success, EINVAL if bad paramater is passed
+*/
+extern errno_t mbuf_set_traffic_class(mbuf_t mbuf, mbuf_traffic_class_t tc);
+#endif /* KERNEL_PRIVATE */
 
 /*!
 	@enum mbuf_traffic_class_t

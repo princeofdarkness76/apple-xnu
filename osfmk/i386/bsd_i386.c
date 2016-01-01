@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -82,6 +104,17 @@ unsigned int get_msr_nbits(void);
 
 unsigned int get_msr_rbits(void);
 
+<<<<<<< HEAD
+=======
+kern_return_t
+thread_compose_cthread_desc(unsigned int addr, pcb_t pcb);
+
+void IOSleep(int);
+extern void throttle_lowpri_io(boolean_t);
+
+void thread_set_cthreadself(thread_t thread, uint64_t pself, int isLP64);
+
+>>>>>>> origin/10.5
 /*
  * thread_userstack:
  *
@@ -317,6 +350,8 @@ machdep_syscall(x86_saved_state_t *state)
 
 	throttle_lowpri_io(1);
 
+	throttle_lowpri_io(TRUE);
+
 	thread_exception_return();
 	/* NOTREACHED */
 }
@@ -358,6 +393,192 @@ machdep_syscall64(x86_saved_state_t *state)
 	default:
 		panic("machdep_syscall64: too many args");
 	}
+<<<<<<< HEAD
+=======
+	if (current_thread()->funnel_lock)
+		(void) thread_funnel_set(current_thread()->funnel_lock, FALSE);
+
+	throttle_lowpri_io(TRUE);
+
+	thread_exception_return();
+	/* NOTREACHED */
+}
+
+
+kern_return_t
+thread_compose_cthread_desc(unsigned int addr, pcb_t pcb)
+{
+  struct real_descriptor desc;
+
+  mp_disable_preemption();
+
+  desc.limit_low = 1;
+  desc.limit_high = 0;
+  desc.base_low = addr & 0xffff;
+  desc.base_med = (addr >> 16) & 0xff;
+  desc.base_high = (addr >> 24) & 0xff;
+  desc.access = ACC_P|ACC_PL_U|ACC_DATA_W;
+  desc.granularity = SZ_32|SZ_G;
+  pcb->cthread_desc = desc;
+  *ldt_desc_p(USER_CTHREAD) = desc;
+
+  mp_enable_preemption();
+
+  return(KERN_SUCCESS);
+}
+
+kern_return_t
+thread_set_cthread_self(uint32_t self)
+{
+	current_thread()->machine.pcb->cthread_self = (uint64_t) self;
+
+	return (KERN_SUCCESS);
+}
+
+kern_return_t
+thread_get_cthread_self(void)
+{
+	return ((kern_return_t)current_thread()->machine.pcb->cthread_self);
+}
+
+kern_return_t
+thread_fast_set_cthread_self(uint32_t self)
+{
+	pcb_t			pcb;
+	x86_saved_state32_t	*iss;
+
+	pcb = (pcb_t)current_thread()->machine.pcb;
+	thread_compose_cthread_desc(self, pcb);
+	pcb->cthread_self = (uint64_t) self; /* preserve old func too */
+	iss = saved_state32(pcb->iss);
+	iss->gs = USER_CTHREAD;
+
+	return (USER_CTHREAD);
+}
+
+void 
+thread_set_cthreadself(thread_t thread, uint64_t pself, int isLP64)
+{
+	if (isLP64 == 0) {
+		pcb_t			pcb;
+		x86_saved_state32_t	*iss;
+
+		pcb = (pcb_t)thread->machine.pcb;
+		thread_compose_cthread_desc(pself, pcb);
+		pcb->cthread_self = (uint64_t) pself; /* preserve old func too */
+		iss = saved_state32(pcb->iss);
+		iss->gs = USER_CTHREAD;
+	} else {
+		pcb_t			pcb;
+		x86_saved_state64_t	*iss;
+
+		pcb = thread->machine.pcb;
+
+	/* check for canonical address, set 0 otherwise  */
+		if (!IS_USERADDR64_CANONICAL(pself))
+			pself = 0ULL;
+		pcb->cthread_self = pself;
+
+		/* XXX for 64-in-32 */
+		iss = saved_state64(pcb->iss);
+		iss->gs = USER_CTHREAD;
+		thread_compose_cthread_desc((uint32_t) pself, pcb);
+	}
+}
+
+
+kern_return_t
+thread_fast_set_cthread_self64(uint64_t self)
+{
+<<<<<<< HEAD
+	pcb_t			pcb;
+	x86_saved_state64_t	*iss;
+
+	pcb = current_thread()->machine.pcb;
+=======
+	pcb_t pcb = current_thread()->machine.pcb;
+	cpu_data_t              *cdp;
+>>>>>>> origin/10.6
+
+	/* check for canonical address, set 0 otherwise  */
+	if (!IS_USERADDR64_CANONICAL(self))
+		self = 0ULL;
+	pcb->cthread_self = self;
+<<<<<<< HEAD
+	current_cpu_datap()->cpu_uber.cu_user_gs_base = self;
+
+	/* XXX for 64-in-32 */
+	iss = saved_state64(pcb->iss);
+	iss->gs = USER_CTHREAD;
+	thread_compose_cthread_desc((uint32_t) self, pcb);
+
+=======
+	mp_disable_preemption();
+	cdp = current_cpu_datap();
+#if defined(__x86_64__)
+	if ((cdp->cpu_uber.cu_user_gs_base != pcb->cthread_self) ||
+	    (pcb->cthread_self != rdmsr64(MSR_IA32_KERNEL_GS_BASE)))
+		wrmsr64(MSR_IA32_KERNEL_GS_BASE, self);
+#endif
+	cdp->cpu_uber.cu_user_gs_base = self;
+	mp_enable_preemption();
+>>>>>>> origin/10.6
+	return (USER_CTHREAD);
+}
+
+/*
+ * thread_set_user_ldt routine is the interface for the user level
+ * settable ldt entry feature.  allowing a user to create arbitrary
+ * ldt entries seems to be too large of a security hole, so instead
+ * this mechanism is in place to allow user level processes to have
+ * an ldt entry that can be used in conjunction with the FS register.
+ *
+ * Swapping occurs inside the pcb.c file along with initialization
+ * when a thread is created. The basic functioning theory is that the
+ * pcb->uldt_selector variable will contain either 0 meaning the
+ * process has not set up any entry, or the selector to be used in
+ * the FS register. pcb->uldt_desc contains the actual descriptor the
+ * user has set up stored in machine usable ldt format.
+ *
+ * Currently one entry is shared by all threads (USER_SETTABLE), but
+ * this could be changed in the future by changing how this routine
+ * allocates the selector. There seems to be no real reason at this
+ * time to have this added feature, but in the future it might be
+ * needed.
+ *
+ * address is the linear address of the start of the data area size
+ * is the size in bytes of the area flags should always be set to 0
+ * for now. in the future it could be used to set R/W permisions or
+ * other functions. Currently the segment is created as a data segment
+ * up to 1 megabyte in size with full read/write permisions only.
+ *
+ * this call returns the segment selector or -1 if any error occurs
+ */
+kern_return_t
+thread_set_user_ldt(uint32_t address, uint32_t size, uint32_t flags)
+{
+	pcb_t pcb;
+	struct fake_descriptor temp;
+	int mycpu;
+
+	if (flags != 0)
+		return -1;		// flags not supported
+	if (size > 0xFFFFF)
+		return -1;		// size too big, 1 meg is the limit
+
+	mp_disable_preemption();
+	mycpu = cpu_number();
+
+	// create a "fake" descriptor so we can use fix_desc()
+	// to build a real one...
+	//   32 bit default operation size
+	//   standard read/write perms for a data segment
+	pcb = (pcb_t)current_thread()->machine.pcb;
+	temp.offset = address;
+	temp.lim_or_seg = size;
+	temp.size_or_wdct = SZ_32;
+	temp.access = ACC_P|ACC_PL_U|ACC_DATA_W;
+>>>>>>> origin/10.5
 
 	DEBUG_KPRINT_SYSCALL_MDEP("machdep_syscall: retval=%llu\n", regs->rax);
 
@@ -479,6 +700,7 @@ mach_call_munger(x86_saved_state_t *state)
 
 	regs->eax = retval;
 
+<<<<<<< HEAD
 	throttle_lowpri_io(1);
 
 #if PROC_REF_DEBUG
@@ -486,6 +708,9 @@ mach_call_munger(x86_saved_state_t *state)
 		panic("system call returned with uu_proc_refcount != 0");
 	}
 #endif
+=======
+	throttle_lowpri_io(TRUE);
+>>>>>>> origin/10.5
 
 	thread_exception_return();
 	/* NOTREACHED */
@@ -572,6 +797,8 @@ mach_call_munger64(x86_saved_state_t *state)
 		panic("system call returned with uu_proc_refcount != 0");
 	}
 #endif
+
+	throttle_lowpri_io(TRUE);
 
 	thread_exception_return();
 	/* NOTREACHED */

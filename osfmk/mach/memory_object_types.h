@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -409,7 +431,11 @@ typedef struct memory_object_attr_info	memory_object_attr_info_data_t;
 <<<<<<< HEAD
 =======
 #define MAX_UPL_TRANSFER 256
+<<<<<<< HEAD
 >>>>>>> origin/10.1
+=======
+#define MAX_UPL_SIZE    4096
+>>>>>>> origin/10.5
 
 struct upl_page_info {
 	ppnum_t		phys_addr;	/* physical page index number */
@@ -423,9 +449,15 @@ struct upl_page_info {
 		speculative:1,  /* page is valid, but not yet accessed */
 		cs_validated:1,	/* CODE SIGNING: page was validated */
 		cs_tainted:1,	/* CODE SIGNING: page is tainted */
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 		cs_nx:1,	/* CODE SIGNING: page is NX */
 		needed:1,	/* page should be left in cache on abort */
 		mark:1,		/* a mark flag for the creator to use as they wish */
+=======
+>>>>>>> origin/10.5
 		:0;		/* force to long boundary */
 #else
 		opaque;		/* use upl_page_xxx() accessor funcs */
@@ -475,6 +507,7 @@ typedef uint64_t upl_control_flags_t;
 #define UPL_PAGE_TICKET_SHIFT   16
 
 /* ... flags resume here */
+<<<<<<< HEAD
 #define UPL_BLOCK_ACCESS	0x00100000ULL
 #define UPL_ENCRYPT		0x00200000ULL
 #define UPL_NOZEROFILL		0x00400000ULL
@@ -496,6 +529,24 @@ typedef uint64_t upl_control_flags_t;
 
 /* UPL flags known by this kernel */
 #define UPL_VALID_FLAGS		0xFFFFFFFFFFULL
+=======
+#define UPL_BLOCK_ACCESS	0x00100000
+#define UPL_ENCRYPT		0x00200000
+#define UPL_NOZEROFILL		0x00400000
+#define UPL_WILL_MODIFY		0x00800000 /* caller will modify the pages */
+
+#define UPL_NEED_32BIT_ADDR	0x01000000
+#define UPL_UBC_MSYNC		0x02000000
+#define UPL_UBC_PAGEOUT		0x04000000
+#define UPL_UBC_PAGEIN		0x08000000
+#define UPL_REQUEST_SET_DIRTY	0x10000000
+#define UPL_REQUEST_NO_FAULT	0x20000000 /* fail if pages not all resident */
+#define UPL_NOZEROFILLIO	0x40000000 /* allow non zerofill pages present */
+#define UPL_REQUEST_FORCE_COHERENCY	0x80000000
+
+/* UPL flags known by this kernel */
+#define UPL_VALID_FLAGS		0xFFFFFFFF
+>>>>>>> origin/10.9
 
 
 /* upl abort error flags */
@@ -594,14 +645,30 @@ typedef uint64_t upl_control_flags_t;
 #define UPL_COMMIT_SET_DIRTY		0x4
 #define UPL_COMMIT_INACTIVATE		0x8
 #define UPL_COMMIT_NOTIFY_EMPTY		0x10
+<<<<<<< HEAD
 /* deprecated: #define UPL_COMMIT_ALLOW_ACCESS		0x20 */
 #define UPL_COMMIT_CS_VALIDATED		0x40
 #define UPL_COMMIT_CLEAR_PRECIOUS	0x80
 #define UPL_COMMIT_SPECULATE		0x100
 #define UPL_COMMIT_FREE_ABSENT		0x200
+<<<<<<< HEAD
+<<<<<<< HEAD
 #define UPL_COMMIT_WRITTEN_BY_KERNEL	0x400
 
 #define UPL_COMMIT_KERNEL_ONLY_FLAGS	(UPL_COMMIT_CS_VALIDATED | UPL_COMMIT_FREE_ABSENT)
+=======
+#define UPL_COMMIT_ALLOW_ACCESS		0x20
+#define UPL_COMMIT_CS_VALIDATED		0x40
+
+#define UPL_COMMIT_KERNEL_ONLY_FLAGS	(UPL_COMMIT_CS_VALIDATED)
+>>>>>>> origin/10.5
+=======
+=======
+#define UPL_COMMIT_WRITTEN_BY_KERNEL	0x400
+>>>>>>> origin/10.9
+
+#define UPL_COMMIT_KERNEL_ONLY_FLAGS	(UPL_COMMIT_CS_VALIDATED | UPL_COMMIT_FREE_ABSENT)
+>>>>>>> origin/10.6
 
 /* flags for return of state from vm_map_get_upl,  vm_upl address space */
 /* based call */
@@ -683,12 +750,15 @@ typedef uint64_t upl_control_flags_t;
 	(((upl)[(index)].phys_addr != 0) ?       \
 	 ((upl)[(index)].pageout = FALSE) : FALSE)
 
+<<<<<<< HEAD
 #define UPL_REPRIO_INFO_BLKNO(upl, index) \
 	(((upl)->upl_reprio_info[(index)]) & UPL_REPRIO_INFO_MASK) 
 
 #define UPL_REPRIO_INFO_LEN(upl, index) \
 	((((upl)->upl_reprio_info[(index)]) >> UPL_REPRIO_INFO_SHIFT) & UPL_REPRIO_INFO_MASK)
 
+=======
+>>>>>>> origin/10.5
 /* modifier macros for upl_t */
 
 #define UPL_SET_CS_VALIDATED(upl, index, value) \
@@ -697,6 +767,10 @@ typedef uint64_t upl_control_flags_t;
 #define UPL_SET_CS_TAINTED(upl, index, value) \
 	((upl)[(index)].cs_tainted = ((value) ? TRUE : FALSE))
 
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 #define UPL_SET_CS_NX(upl, index, value) \
 	((upl)[(index)].cs_nx = ((value) ? TRUE : FALSE))
 
@@ -704,6 +778,8 @@ typedef uint64_t upl_control_flags_t;
 	((upl)->upl_reprio_info[(index)]) = (((uint64_t)(blkno) & UPL_REPRIO_INFO_MASK) | \
 	(((uint64_t)(len) & UPL_REPRIO_INFO_MASK) << UPL_REPRIO_INFO_SHIFT))
 
+=======
+>>>>>>> origin/10.5
 /* The call prototyped below is used strictly by UPL_GET_INTERNAL_PAGE_LIST */
 
 extern vm_size_t	upl_offset_to_pagelist;

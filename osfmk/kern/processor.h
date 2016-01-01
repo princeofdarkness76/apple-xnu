@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -85,14 +111,25 @@
 struct processor_set {
 	queue_head_t		active_queue;	/* active processors */
 	queue_head_t		idle_queue;		/* idle processors */
+<<<<<<< HEAD
 	queue_head_t		idle_secondary_queue;		/* idle secondary processors */
 
 	int					online_processor_count;
+=======
+
+	processor_t			low_pri, low_count;
+>>>>>>> origin/10.5
 
 	int					cpu_set_low, cpu_set_hi;
 	int					cpu_set_count;
 
+<<<<<<< HEAD
 #if __SMP__
+=======
+	int					cpu_set_low, cpu_set_hi;
+	int					cpu_set_count;
+
+>>>>>>> origin/10.6
 	decl_simple_lock_data(,sched_lock)	/* lock for above */
 #endif
 
@@ -160,9 +197,13 @@ struct processor {
 	processor_set_t		processor_set;	/* assigned set */
 
 	int					current_pri;	/* priority of current thread */
+<<<<<<< HEAD
 	sched_mode_t		current_thmode;	/* sched mode of current thread */
 	sfi_class_id_t		current_sfi_class;	/* SFI class of current thread */
 	int					cpu_id;			/* platform numeric id */
+=======
+	int					cpu_num;		/* platform numeric id */
+>>>>>>> origin/10.5
 
 	timer_call_data_t	quantum_timer;	/* timer for quantum expiration */
 	uint64_t			quantum_end;	/* time when current quantum ends */
@@ -199,8 +240,11 @@ decl_simple_lock_data(extern,processor_list_lock)
 extern uint32_t			processor_avail_count;
 
 extern processor_t		master_processor;
+<<<<<<< HEAD
 
 extern boolean_t		sched_stats_active;
+=======
+>>>>>>> origin/10.5
 
 /*
  *	Processor state is accessed by locking the scheduling lock
@@ -252,7 +296,11 @@ extern boolean_t		sched_stats_active;
 #define PROCESSOR_OFF_LINE		0	/* Not available */
 #define PROCESSOR_SHUTDOWN		1	/* Going off-line */
 #define PROCESSOR_START			2	/* Being started */
+<<<<<<< HEAD
 /*                     			3	   Formerly Inactive (unavailable) */
+=======
+#define PROCESSOR_INACTIVE		3	/* Inactive (unavailable) */
+>>>>>>> origin/10.5
 #define	PROCESSOR_IDLE			4	/* Idle (available) */
 #define PROCESSOR_DISPATCHING	5	/* Dispatching (idle -> active) */
 #define	PROCESSOR_RUNNING		6	/* Normal execution */
@@ -271,6 +319,7 @@ extern processor_t	current_processor(void);
 #define pset_lock_init(p)		do { (void)p; } while(0)
 #endif
 
+<<<<<<< HEAD
 extern void		processor_bootstrap(void);
 
 extern void		processor_init(
@@ -281,6 +330,42 @@ extern void		processor_init(
 extern void		processor_set_primary(
 					processor_t		processor,
 					processor_t		primary);
+=======
+#define processor_lock(p)		simple_lock(&(p)->lock)
+#define processor_unlock(p)		simple_unlock(&(p)->lock)
+#define processor_lock_init(p)	simple_lock_init(&(p)->lock, 0)
+
+/* Update hints */
+
+#define pset_pri_hint(ps, p, pri)		\
+MACRO_BEGIN												\
+	if ((p) != (ps)->low_pri) {							\
+		if ((pri) < (ps)->low_pri->current_pri)			\
+			(ps)->low_pri = (p);						\
+		else											\
+		if ((ps)->low_pri->state < PROCESSOR_IDLE)		\
+			(ps)->low_pri = (p);						\
+	}													\
+MACRO_END
+
+#define pset_count_hint(ps, p, cnt)		\
+MACRO_BEGIN												\
+	if ((p) != (ps)->low_count) {						\
+		if ((cnt) < (ps)->low_count->runq.count)		\
+			(ps)->low_count = (p);						\
+		else											\
+		if ((ps)->low_count->state < PROCESSOR_IDLE)	\
+			(ps)->low_count = (p);						\
+	}													\
+MACRO_END
+
+extern void		processor_bootstrap(void) __attribute__((section("__TEXT, initcode")));
+
+extern void		processor_init(
+					processor_t		processor,
+					int				cpu_num,
+					processor_set_t	processor_set) __attribute__((section("__TEXT, initcode")));
+>>>>>>> origin/10.5
 
 extern kern_return_t	processor_shutdown(
 							processor_t		processor);
@@ -307,6 +392,8 @@ extern kern_return_t	processor_info_count(
 #define pset_deallocate(x)
 #define pset_reference(x)
 
+<<<<<<< HEAD
+<<<<<<< HEAD
 extern void				machine_run_count(
 							uint32_t	count);
 
@@ -324,6 +411,24 @@ extern kern_return_t	processor_set_things(
 			void **thing_list,
 			mach_msg_type_number_t *count,
 			int type);
+=======
+extern void		machine_run_count(
+					uint32_t	count);
+
+extern boolean_t	machine_cpu_is_inactive(
+						int				num);
+>>>>>>> origin/10.5
+=======
+extern void				machine_run_count(
+							uint32_t	count);
+
+extern boolean_t		machine_processor_is_inactive(
+							processor_t			processor);
+
+extern processor_t		machine_choose_processor(
+							processor_set_t		pset,
+							processor_t			processor);
+>>>>>>> origin/10.6
 
 #else	/* MACH_KERNEL_PRIVATE */
 
@@ -339,6 +444,7 @@ __END_DECLS
 
 #endif	/* MACH_KERNEL_PRIVATE */
 
+<<<<<<< HEAD
 #ifdef KERNEL_PRIVATE
 __BEGIN_DECLS
 extern processor_t	cpu_to_processor(int cpu);
@@ -346,4 +452,6 @@ __END_DECLS
 
 #endif /* KERNEL_PRIVATE */
 
+=======
+>>>>>>> origin/10.5
 #endif	/* _KERN_PROCESSOR_H_ */

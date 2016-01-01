@@ -1,8 +1,18 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +24,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -103,11 +133,14 @@
 #include <netinet/ip_dummynet.h>
 #include <netinet/ip_var.h>
 
+<<<<<<< HEAD
 #include <netinet/ip6.h>       /* for ip6_input, ip6_output prototypes */
 #include <netinet6/ip6_var.h>
 
 static struct ip_fw default_rule;
 
+=======
+>>>>>>> origin/10.6
 /*
  * We keep a private variable for the simulation time, but we could
  * probably use an existing one ("softticks" in sys/kern/kern_timer.c)
@@ -731,11 +764,62 @@ transmit_event(struct dn_pipe *pipe, struct mbuf **head, struct mbuf **tail)
 	u_int64_t schedule_time;
 
 	lck_mtx_assert(dn_mutex, LCK_MTX_ASSERT_OWNED);
+<<<<<<< HEAD
         ASSERT(serialize >= 0);
 	if (serialize == 0) {
 		while ((m = pipe->head) != NULL) {
 			pkt = dn_tag_get(m);
 			if (!DN_KEY_LEQ(pkt->dn_output_time, curr_time))
+=======
+	
+    while ( (m = pipe->head) ) {
+		pkt = dn_tag_get(m);
+		if ( !DN_KEY_LEQ(pkt->output_time, curr_time) )
+			break;
+		/*
+		 * first unlink, then call procedures, since ip_input() can invoke
+		 * ip_output() and viceversa, thus causing nested calls
+		 */
+		pipe->head = m->m_nextpkt ;
+		m->m_nextpkt = NULL;
+	
+		/* XXX: drop the lock for now to avoid LOR's */
+		lck_mtx_unlock(dn_mutex);
+		switch (pkt->dn_dir) {
+			case DN_TO_IP_OUT: {
+				struct route tmp_rt = pkt->ro;
+				(void)ip_output(m, NULL, NULL, pkt->flags, NULL, NULL);
+				if (tmp_rt.ro_rt) {
+					rtfree(tmp_rt.ro_rt);
+					tmp_rt.ro_rt = NULL;
+				}
+				break ;
+			}
+			case DN_TO_IP_IN :
+				proto_inject(PF_INET, m);
+				break ;
+		
+#if BRIDGE
+			case DN_TO_BDG_FWD :
+				/*
+				 * The bridge requires/assumes the Ethernet header is
+				 * contiguous in the first mbuf header.  Insure this is true.
+				 */
+				if (BDG_LOADED) {
+				if (m->m_len < ETHER_HDR_LEN &&
+					(m = m_pullup(m, ETHER_HDR_LEN)) == NULL) {
+					printf("dummynet/bridge: pullup fail, dropping pkt\n");
+					break;
+				}
+				m = bdg_forward_ptr(m, pkt->ifp);
+				} else {
+				/* somebody unloaded the bridge module. Drop pkt */
+				/* XXX rate limit */
+				printf("dummynet: dropping bridged packet trapped in pipe\n");
+				}
+				if (m)
+				m_freem(m);
+>>>>>>> origin/10.5
 				break;
 
 			pipe->head = m->m_nextpkt;
@@ -1127,6 +1211,7 @@ dummynet_send(struct mbuf *m)
 		case DN_TO_IP_IN :
 			proto_inject(PF_INET, m);
 			break ;
+<<<<<<< HEAD
 #ifdef INET6
 		case DN_TO_IP6_OUT: {
 			/* routes already in the packet's dn_{ro6,pmtu} */
@@ -1137,6 +1222,9 @@ dummynet_send(struct mbuf *m)
 			proto_inject(PF_INET6, m);
 			break;
 #endif /* INET6 */	
+=======
+	
+>>>>>>> origin/10.6
 		default:
 			printf("dummynet: bad switch %d!\n", pkt->dn_dir);
 			m_freem(m);
@@ -1650,6 +1738,7 @@ dummynet_io(struct mbuf *m, int pipe_nr, int dir, struct ip_fw_args *fwa, int cl
 			if (fwa->fwa_dst == (struct sockaddr_in *)&fwa->fwa_ro->ro_dst) /* dst points into ro */
 				fwa->fwa_dst = (struct sockaddr_in *)&(pkt->dn_ro.ro_dst) ;
 	
+<<<<<<< HEAD
 			bcopy (fwa->fwa_dst, &pkt->dn_dst, sizeof(pkt->dn_dst));
 		}
     } else if (dir == DN_TO_IP6_OUT) {
@@ -1685,6 +1774,13 @@ dummynet_io(struct mbuf *m, int pipe_nr, int dir, struct ip_fw_args *fwa, int cl
 		if (fwa->fwa_ipoa != NULL)
 			pkt->dn_ipoa = *(fwa->fwa_ipoa);
     }
+=======
+	pkt->dn_dst = fwa->dst;
+	pkt->flags = fwa->flags;
+	if (fwa->ipoa != NULL)
+		pkt->ipoa = *(fwa->ipoa);
+	}
+>>>>>>> origin/10.5
     if (q->head == NULL)
 	q->head = m;
     else
@@ -1797,10 +1893,20 @@ dropit:
 	struct m_tag *tag = m_tag_locate(m, KERNEL_MODULE_TAG_ID, KERNEL_TAG_TYPE_DUMMYNET, NULL); \
 	if (tag) {						\
 		struct dn_pkt_tag *n = (struct dn_pkt_tag *)(tag+1);	\
+<<<<<<< HEAD
 		ROUTE_RELEASE(&n->dn_ro);			\
 	}							\
 	m_tag_delete(_m, tag);					\
 	m_freem(_m);						\
+=======
+		if (n->ro.ro_rt) {				\
+			rtfree(n->ro.ro_rt);	\
+			n->ro.ro_rt = NULL;	\
+		}				\
+	}									\
+	m_tag_delete(_m, tag);			\
+	m_freem(_m);					\
+>>>>>>> origin/10.5
 } while (0)
 
 /*

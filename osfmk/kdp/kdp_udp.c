@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -47,7 +73,10 @@
 #include <kdp/kdp_en_debugger.h>
 #include <kdp/kdp_callout.h>
 #include <kdp/kdp_udp.h>
+<<<<<<< HEAD
 #include <kdp/kdp_core.h>
+=======
+>>>>>>> origin/10.5
 #if CONFIG_SERIAL_KDP
 #include <kdp/kdp_serial.h>
 #endif
@@ -66,6 +95,8 @@
 #undef KERNEL_PRIVATE
 #include <net/if_media.h> 
 #define KERNEL_PRIVATE
+
+#include <sys/msgbuf.h>
 
 #include <string.h>
 
@@ -88,6 +119,10 @@ extern char    *inet_ntoa_r(struct kdp_in_addr ina, char *buf,
 
 extern int kdp_getc(void);
 extern int reattach_wait;
+
+extern int serial_getc(void);
+extern void serial_putc(char);
+extern int serial_init(void);
 
 static u_short ip_id;                          /* ip packet ctr, for ids */
 
@@ -260,9 +295,15 @@ static void kdp_serial_send(void *rpkt, unsigned int rpkt_len);
 #define KDP_SERIAL_ENABLED()  (0)
 #endif
 
+<<<<<<< HEAD
 static uint32_t kdp_current_ip_address = 0;
 static struct kdp_ether_addr kdp_current_mac_address = {{0, 0, 0, 0, 0, 0}};
 static void *kdp_current_ifp;
+=======
+static u_long kdp_current_ip_address = 0;
+static struct ether_addr kdp_current_mac_address = {{0, 0, 0, 0, 0, 0}};
+static void *kdp_current_ifp = 0;
+>>>>>>> origin/10.3
 
 static void kdp_handler( void *);
 
@@ -323,11 +364,47 @@ static void 		kdp_process_arp_reply(struct kdp_ether_arp *);
 static boolean_t 	kdp_arp_resolve(uint32_t, struct kdp_ether_addr *);
 
 static volatile unsigned	kdp_reentry_deadline;
+<<<<<<< HEAD
 
 static uint32_t kdp_crashdump_feature_mask = KDP_FEATURE_LARGE_CRASHDUMPS | KDP_FEATURE_LARGE_PKT_SIZE;
 uint32_t kdp_feature_large_crashdumps, kdp_feature_large_pkt_size;
 
 char kdp_kernelversion_string[256];
+=======
+#if	defined(__LP64__)
+uint32_t kdp_crashdump_feature_mask = KDP_FEATURE_LARGE_CRASHDUMPS;
+static uint32_t	kdp_feature_large_crashdumps;
+#endif
+
+static boolean_t	gKDPDebug = FALSE;
+#define KDP_DEBUG(...) if (gKDPDebug) printf(__VA_ARGS__);
+
+int kdp_snapshot = 0;
+static int stack_snapshot_ret = 0;
+static unsigned stack_snapshot_bytes_traced = 0;
+
+static void *stack_snapshot_buf;
+static uint32_t stack_snapshot_bufsize;
+static int stack_snapshot_pid;
+static uint32_t stack_snapshot_flags;
+static uint32_t stack_snapshot_dispatch_offset;
+
+static unsigned int old_debugger;
+
+void
+kdp_snapshot_preflight(int pid, void * tracebuf, uint32_t tracebuf_size,
+    uint32_t flags, uint32_t dispatch_offset);
+
+void
+kdp_snapshot_postflight(void);
+
+extern int
+kdp_stackshot(int pid, void *tracebuf, uint32_t tracebuf_size,
+    uint32_t flags, uint32_t dispatch_offset, uint32_t *pbytesTraced);
+
+int
+kdp_stack_snapshot_geterror(void);
+>>>>>>> origin/10.6
 
 static boolean_t	gKDPDebug = FALSE;
 #define KDP_DEBUG(...) if (gKDPDebug) printf(__VA_ARGS__);
@@ -405,14 +482,26 @@ kdp_register_send_receive(
 {
 	unsigned int	debug = 0;
 
+<<<<<<< HEAD
+=======
+	debug_log_init();
+
+	kdp_timer_callout_init();
+
+>>>>>>> origin/10.5
 	PE_parse_boot_argn("debug", &debug, sizeof (debug));
 
 
 	if (!debug)
 		return;
 
+<<<<<<< HEAD
 	kdp_en_send_pkt   = send;
 	kdp_en_recv_pkt   = receive;
+=======
+	kdp_en_send_pkt = send;
+	kdp_en_recv_pkt = receive;
+>>>>>>> origin/10.5
 
 	if (debug & DB_KDP_BP_DIS)
 		kdp_flag |= KDP_BP_DIS;   
@@ -435,9 +524,12 @@ kdp_register_send_receive(
 	if (PE_parse_boot_argn("_panicd_ip", panicd_ip_str, sizeof (panicd_ip_str)))
 		panicd_specified = TRUE;
 
+<<<<<<< HEAD
 	if ((debug & DB_REBOOT_POST_CORE) && (panicd_specified == TRUE))
 		kdp_flag |= REBOOT_POST_CORE;
 
+=======
+>>>>>>> origin/10.5
 	if (PE_parse_boot_argn("_router_ip", router_ip_str, sizeof (router_ip_str)))
 		router_specified = TRUE;
 
@@ -465,8 +557,53 @@ kdp_unregister_send_receive(
 	if (current_debugger == KDP_CUR_DB)
 		current_debugger = NO_CUR_DB;
 	kdp_flag &= ~KDP_READY;
+<<<<<<< HEAD
 	kdp_en_send_pkt   = NULL;
 	kdp_en_recv_pkt   = NULL;
+=======
+	kdp_en_send_pkt = NULL;
+	kdp_en_recv_pkt = NULL;
+}
+
+/* Cache stack snapshot parameters in preparation for a trace */
+void
+kdp_snapshot_preflight(int pid, void * tracebuf, uint32_t tracebuf_size, uint32_t flags, uint32_t dispatch_offset)
+{
+	stack_snapshot_pid = pid;
+	stack_snapshot_buf = tracebuf;
+	stack_snapshot_bufsize = tracebuf_size;
+	stack_snapshot_flags = flags;
+	stack_snapshot_dispatch_offset = dispatch_offset;
+	kdp_snapshot++;
+	/* Mark this debugger as active, since the polled mode driver that 
+	 * ordinarily does this may not be enabled (yet), or since KDB may be
+	 * the primary debugger.
+	 */
+	old_debugger = current_debugger;
+	if (old_debugger != KDP_CUR_DB) {
+		current_debugger = KDP_CUR_DB;
+	}
+}
+
+void
+kdp_snapshot_postflight(void)
+{
+	kdp_snapshot--;
+	if ((kdp_en_send_pkt == NULL) || (old_debugger == KDB_CUR_DB))
+		current_debugger = old_debugger;
+}
+
+int
+kdp_stack_snapshot_geterror(void)
+{
+	return stack_snapshot_ret;
+}
+
+int
+kdp_stack_snapshot_bytes_traced(void)
+{
+	return stack_snapshot_bytes_traced;
+>>>>>>> origin/10.6
 }
 
 static void
@@ -571,9 +708,14 @@ kdp_reply(
 	pkt.len += (unsigned int)sizeof (struct kdp_ether_header);
     
 	// save reply for possible retransmission
+<<<<<<< HEAD
 	assert(pkt.len <= KDP_MAXPACKET);
 	if (!sideband)
 		bcopy((char *)&pkt, (char *)&saved_reply, sizeof(saved_reply));
+=======
+	if (!sideband)
+		bcopy((char *)&pkt, (char *)&saved_reply, sizeof(pkt));
+>>>>>>> origin/10.6
 
 	kdp_send_data(&pkt.data[pkt.off], pkt.len);
 
@@ -700,8 +842,21 @@ done:
         return;
 }
 
+<<<<<<< HEAD
 void *
 kdp_get_interface(void)
+=======
+/* We don't interpret this pointer, we just give it to the
+bsd stack so it can decide when to set the MAC and IP info. */
+void
+kdp_set_interface(void *ifp)
+{
+	kdp_current_ifp = ifp;
+}
+
+void *
+kdp_get_interface()
+>>>>>>> origin/10.3
 {
 	return kdp_current_ifp;
 }
@@ -1310,6 +1465,20 @@ kdp_debugger_loop(
 {
     int			index;
 
+<<<<<<< HEAD
+=======
+    /* Was a system trace requested ? */
+    if (kdp_snapshot && (!panic_active()) && (panic_caller == 0)) {
+	    stack_snapshot_ret = kdp_stackshot(stack_snapshot_pid,
+	    stack_snapshot_buf, stack_snapshot_bufsize,
+	    stack_snapshot_flags, stack_snapshot_dispatch_offset, 
+		&stack_snapshot_bytes_traced);
+	    return;
+    }
+
+    disable_preemption();
+
+>>>>>>> origin/10.6
     if (saved_state == 0) 
 	printf("kdp_raise_exception with NULL state\n");
 
@@ -1332,9 +1501,12 @@ kdp_debugger_loop(
     kdp.kdp_cpu = cpu_number();
     kdp.kdp_thread = current_thread();
 
+<<<<<<< HEAD
     if (kdp_en_setmode)  
         (*kdp_en_setmode)(TRUE); /* enabling link mode */
 
+=======
+>>>>>>> origin/10.5
     if (pkt.input)
 	kdp_panic("kdp_raise_exception");
 
@@ -1422,9 +1594,19 @@ kdp_reset(void)
 	kdp.reply_port = kdp.exception_port = 0;
 	kdp.is_halted = kdp.is_conn = FALSE;
 	kdp.exception_seq = kdp.conn_seq = 0;
+<<<<<<< HEAD
+<<<<<<< HEAD
 	kdp.session_key = 0;
 	pkt.input = manual_pkt.input = FALSE;
 	pkt.len = pkt.off = manual_pkt.len = 0;
+=======
+        kdp.session_key = 0;
+>>>>>>> origin/10.6
+=======
+	kdp.session_key = 0;
+	pkt.input = manual_pkt.input = FALSE;
+	pkt.len = pkt.off = manual_pkt.len = 0;
+>>>>>>> origin/10.7
 }
 
 struct corehdr *
@@ -1522,11 +1704,21 @@ static int kdp_send_crashdump_seek(char *corename, uint64_t seek_off)
 {
 	int panic_error;
 
+<<<<<<< HEAD
+=======
+#if defined(__LP64__)
+>>>>>>> origin/10.6
 	if (kdp_feature_large_crashdumps) {
 		panic_error = kdp_send_crashdump_pkt(KDP_SEEK, corename, 
 						     sizeof(seek_off),
 						     &seek_off);
+<<<<<<< HEAD
 	} else {
+=======
+	} else
+#endif
+	{
+>>>>>>> origin/10.6
 		uint32_t off = (uint32_t) seek_off;
 		panic_error = kdp_send_crashdump_pkt(KDP_SEEK, corename, 
 						     sizeof(off), &off);
@@ -1538,7 +1730,11 @@ static int kdp_send_crashdump_seek(char *corename, uint64_t seek_off)
 		return panic_error;
 	}
 
+<<<<<<< HEAD
 	return KERN_SUCCESS;
+=======
+	return 0;
+>>>>>>> origin/10.6
 }
 
 int kdp_send_crashdump_data(unsigned int request, char *corename,
@@ -1546,17 +1742,33 @@ int kdp_send_crashdump_data(unsigned int request, char *corename,
 {
 	int panic_error = 0;
 
+<<<<<<< HEAD
 	while ((length > 0) || !txstart) {
 		uint64_t chunk = MIN(kdp_crashdump_pkt_size, length);
 
 		panic_error = kdp_send_crashdump_pkt(request, corename, chunk,
 							txstart);
+=======
+	while (length > 0) {
+		uint64_t chunk = MIN(SEGSIZE, length);
+		
+		panic_error = kdp_send_crashdump_pkt(request, corename, chunk,
+						     (caddr_t) txstart);
+>>>>>>> origin/10.6
 		if (panic_error < 0) {
 			printf ("kdp_send_crashdump_pkt failed with error %d\n", panic_error);
 			return panic_error;
 		}
+<<<<<<< HEAD
 		if (!txstart) break;
 		txstart = (void *)(((uintptr_t) txstart) + chunk);
+=======
+
+		if (!(panic_block % 2000))
+			kdb_printf_unbuffered(".");
+
+		txstart += chunk;
+>>>>>>> origin/10.6
 		length  -= chunk;
 	}
 	return KERN_SUCCESS;
@@ -1602,6 +1814,7 @@ TRANSMIT_RETRY:
 	th = create_panic_header(request, corename, (unsigned)length, panic_block);
 
 	if (request == KDP_DATA) {
+<<<<<<< HEAD
 		/* as all packets are kdp_crashdump_pkt_size in length, the last packet
 		 * may end up with trailing bits. make sure that those
 		 * bits aren't confusing. */
@@ -1620,6 +1833,17 @@ TRANSMIT_RETRY:
 					memset((caddr_t) th->th_data + (length - resid), 'X', (size_t)resid);
 				}
 			}
+=======
+		/* as all packets are SEGSIZE in length, the last packet
+		 * may end up with trailing bits. make sure that those
+		 * bits aren't confusing. */
+		if (length < SEGSIZE)
+			memset(th->th_data + length, 'X', 
+                               SEGSIZE - (uint32_t) length);
+
+		if (!kdp_machine_vm_read((mach_vm_address_t)(intptr_t)panic_data, (caddr_t) th->th_data, length)) {
+			memset ((caddr_t) th->th_data, 'X', (size_t)length);
+>>>>>>> origin/10.6
 		}
 	}
 	else if (request == KDP_SEEK) {
@@ -1736,9 +1960,21 @@ kdp_get_xnu_version(char *versionbuf)
 	char *vptr;
 
 	strlcpy(vstr, "custom", 10);
+<<<<<<< HEAD
+<<<<<<< HEAD
 	if (kdp_machine_vm_read((mach_vm_address_t)(uintptr_t)version, versionbuf, 128)) {
 		versionbuf[127] = '\0';
 		versionpos = strnstr(versionbuf, "xnu-", 115);
+=======
+	if (strlcpy(versionbuf, version, 95) < 95) {
+		versionpos = strnstr(versionbuf, "xnu-", 90);
+>>>>>>> origin/10.5
+=======
+
+	if (kdp_machine_vm_read((mach_vm_address_t)(uintptr_t)version, versionbuf, 128)) {
+               versionbuf[127] = '\0';
+               versionpos = strnstr(versionbuf, "xnu-", 115);
+>>>>>>> origin/10.6
 		if (versionpos) {
 			strncpy(vstr, versionpos, sizeof(vstr));
 			vstr[sizeof(vstr)-1] = '\0';
@@ -1755,6 +1991,124 @@ kdp_get_xnu_version(char *versionbuf)
 	strlcpy(versionbuf, vstr, KDP_MAXPACKET);
 	return retval;
 }
+
+<<<<<<< HEAD
+void
+kdp_set_dump_info(const uint32_t flags, const char *filename, 
+                  const char *destipstr, const char *routeripstr,
+                  const uint32_t port)
+{
+	uint32_t cmd;
+
+	if (destipstr && (destipstr[0] != '\0')) {
+		strlcpy(panicd_ip_str, destipstr, sizeof(panicd_ip_str));
+		panicd_specified = 1;
+	}
+
+	if (routeripstr && (routeripstr[0] != '\0')) {
+		strlcpy(router_ip_str, routeripstr, sizeof(router_ip_str));
+		router_specified = 1;
+	}
+
+	if (filename && (filename[0] != '\0')) {
+		strlcpy(corename_str, filename, sizeof(corename_str));
+		corename_specified = TRUE;
+	} else {
+		corename_specified = FALSE;
+	}
+
+	if (port) 
+		panicd_port = port;
+
+        /* on a disconnect, should we stay in KDP or not? */
+        noresume_on_disconnect = (flags & KDP_DUMPINFO_NORESUME) ? 1 : 0;
+
+	if ((flags & KDP_DUMPINFO_DUMP) == 0)
+		return;
+
+	/* the rest of the commands can modify kdp_flags */
+	cmd = flags & KDP_DUMPINFO_MASK;
+        if (cmd == KDP_DUMPINFO_DISABLE) {
+		kdp_flag &= ~KDP_PANIC_DUMP_ENABLED;
+		panicd_specified       = 0;
+		kdp_trigger_core_dump  = 0;
+		return;
+        }
+
+	kdp_flag &= ~REBOOT_POST_CORE;
+	if (flags & KDP_DUMPINFO_REBOOT)
+            kdp_flag |= REBOOT_POST_CORE;
+
+	kdp_flag &= ~PANIC_LOG_DUMP;
+	if (cmd == KDP_DUMPINFO_PANICLOG)
+            kdp_flag |= PANIC_LOG_DUMP;
+	
+	kdp_flag &= ~SYSTEM_LOG_DUMP;
+	if (cmd == KDP_DUMPINFO_SYSTEMLOG)
+            kdp_flag |= SYSTEM_LOG_DUMP;
+
+	/* trigger a dump */
+	kdp_flag |= DBG_POST_CORE;
+
+	flag_dont_abort_panic_dump = (flags & KDP_DUMPINFO_NOINTR) ? 
+		TRUE : FALSE;
+
+	reattach_wait          = 1;
+	logPanicDataToScreen   = 1;
+	disableConsoleOutput   = 0;
+	disable_debug_output   = 0;
+	kdp_trigger_core_dump  = 1;
+}
+
+void
+kdp_get_dump_info(uint32_t *flags, char *filename, char *destipstr, 
+                  char *routeripstr, uint32_t *port)
+{
+	if (destipstr) {
+		if (panicd_specified)
+			strlcpy(destipstr, panicd_ip_str, 
+                                sizeof(panicd_ip_str));
+		else 
+			destipstr[0] = '\0';
+	}
+
+	if (routeripstr) {
+		if (router_specified)
+			strlcpy(routeripstr, router_ip_str,
+                                sizeof(router_ip_str));
+		else
+			routeripstr[0] = '\0';
+	}
+
+	if (filename) {
+		if (corename_specified)
+			strlcpy(filename, corename_str, 
+                                sizeof(corename_str));
+		else 
+			filename[0] = '\0';
+
+	}
+
+	if (port) 
+		*port = panicd_port;
+
+	if (flags) {
+		*flags = 0;
+                if (!panicd_specified) 
+			*flags |= KDP_DUMPINFO_DISABLE;
+                else if (kdp_flag & PANIC_LOG_DUMP)
+			*flags |= KDP_DUMPINFO_PANICLOG;
+		else
+			*flags |= KDP_DUMPINFO_CORE;
+
+		if (noresume_on_disconnect)
+			*flags |= KDP_DUMPINFO_NORESUME;
+	}
+}
+
+=======
+extern char *inet_aton(const char *cp, struct in_addr *pin);
+>>>>>>> origin/10.5
 
 void
 kdp_set_dump_info(const uint32_t flags, const char *filename, 
@@ -1888,6 +2242,7 @@ kdp_panic_dump(void)
 		
 	printf("Entering system dump routine\n");
 
+<<<<<<< HEAD
 	/* try a local disk dump */
 	if (kdp_has_polled_corefile()) {
 	    flag_panic_dump_in_progress = TRUE;
@@ -1901,6 +2256,10 @@ kdp_panic_dump(void)
 		if (!kdp_has_polled_corefile()) {
 		    kdb_printf("Error: No transport device registered for kernel crashdump\n");
 		}
+=======
+	if (!kdp_en_recv_pkt || !kdp_en_send_pkt) {
+		printf("Error: No transport device registered for kernel crashdump\n");
+>>>>>>> origin/10.6
 		return;
 	}
 
@@ -1919,12 +2278,16 @@ kdp_panic_dump(void)
 	kdp_get_xnu_version((char *) &pkt.data[0]);
 
         if (!corename_specified) {
+<<<<<<< HEAD
             coresuffix[0] = 0;
+=======
+>>>>>>> origin/10.6
             /* Panic log bit takes precedence over core dump bit */
             if ((panicstr != (char *) 0) && (kdp_flag & PANIC_LOG_DUMP))
 		strlcpy(coreprefix, "paniclog", sizeof(coreprefix));
             else if (kdp_flag & SYSTEM_LOG_DUMP) 
 		strlcpy(coreprefix, "systemlog", sizeof(coreprefix));
+<<<<<<< HEAD
 	    else {
 		strlcpy(coreprefix, "core", sizeof(coreprefix));
 		strlcpy(coresuffix, ".gz", sizeof(coresuffix));
@@ -1933,17 +2296,33 @@ kdp_panic_dump(void)
             abstime = mach_absolute_time();
 	    pkt.data[20] = '\0';
 	    snprintf (corename_str, sizeof(corename_str), "%s-%s-%d.%d.%d.%d-%x%s", 
+=======
+	    else
+		strlcpy(coreprefix, "core", sizeof(coreprefix));
+  
+            abstime = mach_absolute_time();
+	    pkt.data[20] = '\0';
+	    snprintf (corename_str, sizeof(corename_str), "%s-%s-%d.%d.%d.%d-%x", 
+>>>>>>> origin/10.6
 		      coreprefix, &pkt.data[0],
 		      (current_ip & 0xff000000) >> 24,
 		      (current_ip & 0xff0000) >> 16,
 		      (current_ip & 0xff00) >> 8,
 		      (current_ip & 0xff),
+<<<<<<< HEAD
 		      (unsigned int) (abstime & 0xffffffff),
 		      coresuffix);
         }
 
 	if (0 == inet_aton(panicd_ip_str, (struct kdp_in_addr *) &panic_server_ip)) {
 		kdb_printf("inet_aton() failed interpreting %s as a panic server IP\n", panicd_ip_str);
+=======
+		      (unsigned int) (abstime & 0xffffffff));
+        }
+
+	if (0 == inet_aton(panicd_ip_str, (struct in_addr *) &panic_server_ip)) {
+		printf("inet_aton() failed interpreting %s as a panic server IP\n", panicd_ip_str);
+>>>>>>> origin/10.6
 	}
 	else
 		kdb_printf("Attempting connection to panic server configured at IP %s, port %d\n", panicd_ip_str, panicd_port);
@@ -1979,20 +2358,35 @@ kdp_panic_dump(void)
 	    destination_mac.ether_addr_octet[4] & 0xff,
 	    destination_mac.ether_addr_octet[5] & 0xff);
 
+<<<<<<< HEAD
 	kdb_printf("Kernel map size is %llu\n", (unsigned long long) get_vmmap_size(kernel_map));
 	kdb_printf("Sending write request for %s\n", corename_str);  
 
 	if ((panic_error = kdp_send_crashdump_pkt(KDP_WRQ, corename_str, 0 , NULL)) < 0) {
 		kdb_printf ("kdp_send_crashdump_pkt failed with error %d\n", panic_error);
+=======
+	printf("Kernel map size is %llu\n", (unsigned long long) get_vmmap_size(kernel_map));
+	printf("Sending write request for %s\n", corename_str);  
+
+	if ((panic_error = kdp_send_crashdump_pkt(KDP_WRQ, corename_str, 0 , NULL)) < 0) {
+		printf ("kdp_send_crashdump_pkt failed with error %d\n", panic_error);
+>>>>>>> origin/10.6
 		goto panic_dump_exit;
 	}
 
 	/* Just the panic log requested */
 	if ((panicstr != (char *) 0) && (kdp_flag & PANIC_LOG_DUMP)) {
+<<<<<<< HEAD
 		kdb_printf_unbuffered("Transmitting panic log, please wait: ");
 		kdp_send_crashdump_data(KDP_DATA, corename_str, 
 					debug_buf_ptr - debug_buf_addr,
 					debug_buf_addr);
+=======
+		printf("Transmitting panic log, please wait: ");
+		kdp_send_crashdump_data(KDP_DATA, corename_str, 
+					debug_buf_ptr - debug_buf,
+					debug_buf);
+>>>>>>> origin/10.6
 		kdp_send_crashdump_pkt (KDP_EOF, NULL, 0, ((void *) 0));
 		printf("Please file a bug report on this panic, if possible.\n");
 		goto panic_dump_exit;
@@ -2003,13 +2397,24 @@ kdp_panic_dump(void)
 		long start_off = msgbufp->msg_bufx;
                 long len;
 
+<<<<<<< HEAD
 		kdb_printf_unbuffered("Transmitting system log, please wait: ");
+=======
+		printf("Transmitting system log, please wait: ");
+>>>>>>> origin/10.6
 		if (start_off >= msgbufp->msg_bufr) {
 			len = msgbufp->msg_size - start_off;
 			kdp_send_crashdump_data(KDP_DATA, corename_str, len, 
 						msgbufp->msg_bufc + start_off);
+<<<<<<< HEAD
 			/* seek to remove trailing bytes */
 			kdp_send_crashdump_seek(corename_str, len);
+=======
+
+			/* seek to remove trailing bytes */
+			if (len & (SEGSIZE - 1))
+				kdp_send_crashdump_seek(corename_str, len);
+>>>>>>> origin/10.6
 			start_off  = 0;
 		}
 
@@ -2024,7 +2429,11 @@ kdp_panic_dump(void)
         }
 
 	/* We want a core dump if we're here */
+<<<<<<< HEAD
 	kern_dump(FALSE);
+=======
+	kern_dump();
+>>>>>>> origin/10.6
 
 panic_dump_exit:
 	abort_panic_transfer();
@@ -2037,6 +2446,10 @@ abort_panic_transfer(void)
 {
 	flag_panic_dump_in_progress = FALSE;
 	flag_dont_abort_panic_dump  = FALSE;
+<<<<<<< HEAD
+=======
+	not_in_kdp = 1;
+>>>>>>> origin/10.6
 	panic_block = 0;
 }
 
@@ -2047,8 +2460,19 @@ static boolean_t needs_serial_init = TRUE;
 static void
 kdp_serial_send(void *rpkt, unsigned int rpkt_len)
 {
+<<<<<<< HEAD
 	//	printf("tx\n");
 	kdp_serialize_packet((unsigned char *)rpkt, rpkt_len, pal_serial_putc);
+=======
+	if (needs_serial_init)
+	{
+	    serial_init();
+	    needs_serial_init = FALSE;
+	}
+	
+	//	printf("tx\n");
+	kdp_serialize_packet((unsigned char *)rpkt, rpkt_len, serial_putc);
+>>>>>>> origin/10.5
 }
 
 static void 
@@ -2057,12 +2481,25 @@ kdp_serial_receive(void *rpkt, unsigned int *rpkt_len, unsigned int timeout)
 	int readkar;
 	uint64_t now, deadline;
 	
+<<<<<<< HEAD
+=======
+	if (needs_serial_init)
+	{
+	    serial_init();
+	    needs_serial_init = FALSE;
+	}
+	
+>>>>>>> origin/10.5
 	clock_interval_to_deadline(timeout, 1000 * 1000 /* milliseconds */, &deadline);
 
 //	printf("rx\n");
 	for(clock_get_uptime(&now); now < deadline; clock_get_uptime(&now))
 	{
+<<<<<<< HEAD
 		readkar = pal_serial_getc();
+=======
+		readkar = serial_getc();
+>>>>>>> origin/10.5
 		if(readkar >= 0)
 		{
 			unsigned char *packet;
@@ -2077,6 +2514,7 @@ kdp_serial_receive(void *rpkt, unsigned int *rpkt_len, unsigned int timeout)
 	*rpkt_len = 0;
 }
 
+<<<<<<< HEAD
 static boolean_t
 kdp_serial_setmode(boolean_t active)
 {
@@ -2094,6 +2532,9 @@ kdp_serial_setmode(boolean_t active)
 
 static void 
 kdp_serial_callout(__unused void *arg, kdp_event_t event)
+=======
+static void kdp_serial_callout(__unused void *arg, kdp_event_t event)
+>>>>>>> origin/10.5
 {
     /* When we stop KDP, set the bit to re-initialize the console serial port
      * the next time we send/receive a KDP packet.  We don't do it on
@@ -2120,6 +2561,7 @@ kdp_serial_callout(__unused void *arg, kdp_event_t event)
 void
 kdp_init(void)
 {
+<<<<<<< HEAD
 	strlcpy(kdp_kernelversion_string, version, sizeof(kdp_kernelversion_string));
 
 	/* Relies on platform layer calling panic_init() before kdp_init() */
@@ -2149,6 +2591,7 @@ kdp_init(void)
 #if	defined(__x86_64__)	
 	kdp_machine_init();
 #endif
+<<<<<<< HEAD
 
 	kdp_timer_callout_init();
 	kdp_crashdump_feature_mask = htonl(kdp_crashdump_feature_mask);
@@ -2168,6 +2611,28 @@ kdp_init(void)
 
 	kdp_register_callout(kdp_serial_callout, NULL);
         kdp_register_link(NULL, kdp_serial_setmode);
+=======
+=======
+>>>>>>> origin/10.7
+#if CONFIG_SERIAL_KDP
+	char kdpname[80];
+	struct in_addr ipaddr;
+	struct ether_addr macaddr;
+
+#if CONFIG_EMBEDDED
+	//serial will be the debugger, unless match name is explicitly provided, and it's not "serial"
+	if(PE_parse_boot_argn("kdp_match_name", kdpname, sizeof(kdpname)) && strncmp(kdpname, "serial", sizeof(kdpname)) != 0)
+		return;
+#else
+	// serial must be explicitly requested
+	if(!PE_parse_boot_argn("kdp_match_name", kdpname, sizeof(kdpname)) || strncmp(kdpname, "serial", sizeof(kdpname)) != 0)
+		return;
+#endif
+	
+	kprintf("Intializing serial KDP\n");
+
+	kdp_register_callout(kdp_serial_callout, NULL);
+>>>>>>> origin/10.5
 	kdp_register_send_receive(kdp_serial_send, kdp_serial_receive);
 	
 	/* fake up an ip and mac for early serial debugging */
@@ -2177,6 +2642,7 @@ kdp_init(void)
 	macaddr.ether_addr_octet[3] = 'i';
 	macaddr.ether_addr_octet[4] = 'a';
 	macaddr.ether_addr_octet[5] = 'l';
+<<<<<<< HEAD
 	ipaddr.s_addr = KDP_SERIAL_IPADDR;
 	kdp_set_ip_and_mac_addresses(&ipaddr, &macaddr);
         
@@ -2266,3 +2732,9 @@ kdp_raise_exception(
 }
 
 
+=======
+	ipaddr.s_addr = 0xABADBABE;
+	kdp_set_ip_and_mac_addresses(&ipaddr, &macaddr);
+#endif /* CONFIG_SERIAL_KDP */
+}
+>>>>>>> origin/10.5

@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -85,6 +107,7 @@ class OSOrderedSet;
 #define APPLE_KEXT_COMPATIBILITY_VIRTUAL  virtual
 #endif
 
+<<<<<<< HEAD
 /*! @parseOnly */
 #define APPLE_KEXT_DEPRECATED  __attribute__((deprecated))
 
@@ -93,6 +116,19 @@ class OSOrderedSet;
 #define APPLE_KEXT_OVERRIDE  				override
 #if defined(__LP64__)
 #define APPLE_KEXT_COMPATIBILITY_OVERRIDE
+=======
+#if defined(__LP64__)
+#define	APPLE_KEXT_LEGACY_ABI	0
+#elif defined(__arm__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 2))
+#define	APPLE_KEXT_LEGACY_ABI	0
+#else
+#define	APPLE_KEXT_LEGACY_ABI	1
+#endif
+
+#if APPLE_KEXT_VTABLE_PADDING
+#define APPLE_KEXT_PAD_METHOD	    virtual
+#define APPLE_KEXT_PAD_IMPL(index)  gMetaClass.reservedCalled(index)
+>>>>>>> origin/10.5
 #else
 #define APPLE_KEXT_COMPATIBILITY_OVERRIDE	APPLE_KEXT_OVERRIDE
 #endif
@@ -290,6 +326,7 @@ public:
     */
 #define OSCheckTypeInst(typeinst, inst) \
     OSMetaClassBase::checkTypeInst(inst, typeinst)
+<<<<<<< HEAD
 
 /*! @function OSSafeRelease
  *  @abstract Release an object if not <code>NULL</code>.
@@ -303,6 +340,9 @@ public:
  */
 #define OSSafeReleaseNULL(inst)   do { if (inst) (inst)->release(); (inst) = NULL; } while (0)
 
+=======
+    
+>>>>>>> origin/10.5
 typedef void (*_ptf_t)(void);
 
 #if APPLE_KEXT_LEGACY_ABI
@@ -346,7 +386,11 @@ _ptmf2ptf(const OSMetaClassBase *self, void (OSMetaClassBase::*func)(void))
 }
 
 #else /* !APPLE_KEXT_LEGACY_ABI */
+<<<<<<< HEAD
 #if   defined(__i386__) || defined(__x86_64__)
+=======
+
+>>>>>>> origin/10.5
 
 // Slightly less arcane and slightly less evil code to do
 // the same for kexts compiled with the standard Itanium C++
@@ -356,20 +400,54 @@ static inline _ptf_t
 _ptmf2ptf(const OSMetaClassBase *self, void (OSMetaClassBase::*func)(void))
 {
     union {
+<<<<<<< HEAD
         void (OSMetaClassBase::*fIn)(void);
         uintptr_t fVTOffset;
         _ptf_t fPFN;
+=======
+	void (OSMetaClassBase::*fIn)(void);
+	uintptr_t fVTOffset;
+	_ptf_t fPFN;
+>>>>>>> origin/10.5
     } map;
 
     map.fIn = func;
 
     if (map.fVTOffset & 1) {
+<<<<<<< HEAD
         // virtual
         union {
             const OSMetaClassBase *fObj;
             _ptf_t **vtablep;
         } u;
         u.fObj = self;
+=======
+	// virtual
+	union {
+	    const OSMetaClassBase *fObj;
+	    _ptf_t **vtablep;
+	} u;
+	u.fObj = self;
+
+	// Virtual member function so dereference vtable
+	return *(_ptf_t *)(((uintptr_t)*u.vtablep) + map.fVTOffset - 1);
+    } else {
+	// Not virtual, i.e. plain member func
+	return map.fPFN;
+    }
+}
+
+
+#endif /* !APPLE_KEXT_LEGACY_ABI */
+
+/*! @function OSMemberFunctionCast
+    @abstract Convert a pointer to a member function to a c-style pointer to function.  No warnings are generated.
+    @param type The type of pointer function desired.
+    @param self The this pointer of the object whose function you wish to cache.
+    @param func The pointer to member function itself, something like &Base::func.
+    @result A pointer to function of the given type.  This function will panic if an attempt is made to call it with a multiply inherited class.
+*/
+>>>>>>> origin/10.5
 
         // Virtual member function so dereference vtable
         return *(_ptf_t *)(((uintptr_t)*u.vtablep) + map.fVTOffset - 1);

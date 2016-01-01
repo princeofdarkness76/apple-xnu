@@ -1,5 +1,13 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2003-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2003-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
+=======
+ * Copyright (c) 2003-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -145,11 +153,18 @@ static int in6_rtqkill(struct radix_node *, void *);
 
 #define	RTPRF_OURS		RTF_PROTO3	/* set on routes we manage */
 
+<<<<<<< HEAD
 /*
  * Accessed by in6_addroute(), in6_deleteroute() and in6_rtqkill(), during
  * which the routing lock (rnh_lock) is held and thus protects the variable.
  */
 static int in6dynroutes;
+=======
+static struct radix_node *in6_matroute_args(void *, struct radix_node_head *,
+    rn_matchf_t *, void *);
+
+#define RTPRF_OURS		RTF_PROTO3	/* set on routes we manage */
+>>>>>>> origin/10.5
 
 /*
  * Do what we need to do when inserting a route.
@@ -358,11 +373,32 @@ in6_deleteroute(void *v_arg, void *netmask_arg, struct radix_node_head *head)
 }
 
 /*
+<<<<<<< HEAD
  * Validate (unexpire) an expiring AF_INET6 route.
  */
 struct radix_node *
 in6_validate(struct radix_node *rn)
 {
+=======
+ * Similar to in6_matroute_args except without the leaf-matching parameters.
+ */
+static struct radix_node *
+in6_matroute(void *v_arg, struct radix_node_head *head)
+{
+	return (in6_matroute_args(v_arg, head, NULL, NULL));
+}
+
+/*
+ * This code is the inverse of in6_clsroute: on first reference, if we
+ * were managing the route, stop doing so and set the expiration timer
+ * back off again.
+ */
+static struct radix_node *
+in6_matroute_args(void *v_arg, struct radix_node_head *head,
+    rn_matchf_t *f, void *w)
+{
+	struct radix_node *rn = rn_match_args(v_arg, head, f, w);
+>>>>>>> origin/10.5
 	struct rtentry *rt = (struct rtentry *)rn;
 
 	RT_LOCK_ASSERT_HELD(rt);
@@ -390,6 +426,7 @@ in6_validate(struct radix_node *rn)
 		}
 	}
 	return (rn);
+<<<<<<< HEAD
 }
 
 /*
@@ -418,6 +455,8 @@ in6_matroute_args(void *v_arg, struct radix_node_head *head,
 		RT_UNLOCK((struct rtentry *)rn);
 	}
 	return (rn);
+=======
+>>>>>>> origin/10.5
 }
 
 SYSCTL_DECL(_net_inet6_ip6);
@@ -513,6 +552,7 @@ in6_clsroute(struct radix_node *rn, struct radix_node_head *head)
 
 		timenow = net_uptime();
 		rt->rt_flags |= RTPRF_OURS;
+<<<<<<< HEAD
 		rt_setexpire(rt, timenow + rtq_reallyold);
 
 		if (verbose) {
@@ -524,6 +564,10 @@ in6_clsroute(struct radix_node *rn, struct radix_node_head *head)
 
 		/* We have at least one entry; arm the timer if not already */
 		in6_sched_rtqtimo(NULL);
+=======
+		rt->rt_rmx.rmx_expire =
+		    rt_expiry(rt, timenow.tv_sec, rtq_reallyold);
+>>>>>>> origin/10.6
 	}
 }
 
@@ -610,6 +654,7 @@ in6_rtqkill(struct radix_node *rn, void *rock)
 			}
 			rtfree_locked(rt);
 		} else {
+<<<<<<< HEAD
 			uint64_t expire = (rt->rt_expire - timenow);
 
 			if (ap->updating && expire > rtq_reallyold) {
@@ -624,6 +669,13 @@ in6_rtqkill(struct radix_node *rn, void *rock)
 					    rt->rt_flags, RTF_BITS,
 					    (rt->rt_expire - timenow), expire);
 				}
+=======
+			if (ap->updating &&
+			    (unsigned)(rt->rt_rmx.rmx_expire - timenow.tv_sec) >
+			    rt_expiry(rt, 0, rtq_reallyold)) {
+				rt->rt_rmx.rmx_expire = rt_expiry(rt,
+				    timenow.tv_sec, rtq_reallyold);
+>>>>>>> origin/10.6
 			}
 			ap->nextstop = lmin(ap->nextstop, rt->rt_expire);
 			RT_UNLOCK(rt);
@@ -738,11 +790,40 @@ in6_rtqdrain(void)
 		log(LOG_DEBUG, "%s: draining routes\n", __func__);
 
 	lck_mtx_lock(rnh_lock);
+<<<<<<< HEAD
 	rnh = rt_tables[AF_INET6];
 	VERIFY(rnh != NULL);
 	bzero(&arg, sizeof (arg));
+=======
+	rnh->rnh_walktree(rnh, in6_mtuexpire, &arg);
+
+	atv.tv_usec = 0;
+	atv.tv_sec = arg.nextstop;
+	if (atv.tv_sec < timenow.tv_sec) {
+#if DIAGNOSTIC
+		log(LOG_DEBUG, "IPv6: invalid mtu expiration time on routing table\n");
+#endif
+		arg.nextstop = timenow.tv_sec + 30;	/*last resort*/
+	}
+	atv.tv_sec -= timenow.tv_sec;
+	lck_mtx_unlock(rnh_lock);
+	timeout(in6_mtutimo, rock, tvtohz(&atv));
+}
+
+void
+in6_rtqdrain()
+{
+	struct radix_node_head *rnh = rt_tables[AF_INET6];
+	struct rtqk_arg arg;
+	arg.found = arg.killed = 0;
+>>>>>>> origin/10.6
 	arg.rnh = rnh;
 	arg.draining = 1;
+<<<<<<< HEAD
+=======
+	arg.updating = 0;
+	lck_mtx_lock(rnh_lock);
+>>>>>>> origin/10.6
 	rnh->rnh_walktree(rnh, in6_rtqkill, &arg);
 	lck_mtx_unlock(rnh_lock);
 }

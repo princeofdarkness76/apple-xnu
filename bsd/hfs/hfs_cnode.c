@@ -1,8 +1,18 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2002-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2002-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
+=======
+ * Copyright (c) 2002-2013 Apple Inc. All rights reserved.
+>>>>>>> origin/10.8
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +24,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -66,9 +96,16 @@ static int hfs_isordered(struct cnode *, struct cnode *);
 extern int hfs_removefile_callback(struct buf *bp, void *hfsmp);
 
 
+<<<<<<< HEAD
 __inline__ int hfs_checkdeleted (struct cnode *cp) {
 	return ((cp->c_flag & (C_DELETED | C_NOEXISTS)) ? ENOENT : 0);	
 }
+=======
+inline int hfs_checkdeleted (struct cnode *cp) {
+	return ((cp->c_flag & (C_DELETED | C_NOEXISTS)) ? ENOENT : 0);
+}
+
+>>>>>>> origin/10.6
 
 /*
  * Function used by a special fcntl() that decorates a cnode/vnode that
@@ -78,6 +115,7 @@ __inline__ int hfs_checkdeleted (struct cnode *cp) {
  * 
  * Returns non-zero on failure. 0 on success 
  */
+<<<<<<< HEAD
 int hfs_set_backingstore (struct vnode *vp, int val) {
 	struct cnode *cp = NULL;
 	int err = 0;
@@ -99,6 +137,25 @@ int hfs_set_backingstore (struct vnode *vp, int val) {
 	else {
 		cp->c_flag &= ~C_BACKINGSTORE;
 	}
+=======
+__private_extern__
+int
+hfs_inactive(ap)
+	struct vop_inactive_args /* {
+		struct vnode *a_vp;
+	} */ *ap;
+{
+	struct vnode *vp = ap->a_vp;
+	struct cnode *cp = VTOC(vp);
+	struct hfsmount *hfsmp = VTOHFS(vp);
+	struct proc *p = ap->a_p;
+	struct timeval tv;
+	int error = 0;
+	int recycle = 0;
+	int forkcount = 0;
+	int truncated = 0;
+	int started_tr = 0, grabbed_lock = 0;
+>>>>>>> origin/10.2
 
 	/* unlock everything */
 	hfs_unlock (cp);
@@ -228,14 +285,34 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 		hfs_filedone(vp, ctx, 0);
 	}
 
+<<<<<<< HEAD
 	/* 
 	 * Remove any directory hints or cached origins
 	 */
 	if (v_type == VDIR) {
 		hfs_reldirhints(cp, 0);
+<<<<<<< HEAD
+=======
+	}
+	
+	if (cp->c_flag & C_HARDLINK) {
+		hfs_relorigins(cp);
+>>>>>>> origin/10.5
 	}
 	if (cp->c_flag & C_HARDLINK) {
 		hfs_relorigins(cp);
+=======
+	/* If needed, get rid of any fork's data for a deleted file */
+	if ((cp->c_flag & C_DELETED) &&
+	    vp->v_type == VREG &&
+	    (VTOF(vp)->ff_blocks != 0)) {			
+		error = VOP_TRUNCATE(vp, (off_t)0, IO_NDELAY, NOCRED, p);
+		truncated = 1;
+		// have to do this to prevent the lost ubc_info panic
+		SET(cp->c_flag, C_TRANSIT);
+		recycle = 1;
+		if (error) goto out;
+>>>>>>> origin/10.2
 	}
 
 	/*
@@ -275,6 +352,7 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 		 * D) not the last fork, vp == c_rsrc_vp
 		 *	Don't enter the block below, just clean up vnode and push it out of core.
 		 */
+<<<<<<< HEAD
 	
 		if ((v_type == VREG || v_type == VLNK) && 
 				((forkcount == 1) || (!VNODE_IS_RSRC(vp)))) {
@@ -303,6 +381,7 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 					}
 				}
 
+<<<<<<< HEAD
 				/*
 				 * At this point, we have decided that this cnode is
 				 * suitable for full removal.  We are about to deallocate
@@ -325,6 +404,21 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 				if (hfsmp->jnl && vnode_islnk(vp)) {
 					buf_iterate(vp, hfs_removefile_callback, BUF_SKIP_NONLOCKED, (void *)hfsmp);
 				}
+=======
+			error = hfs_vgetrsrc(hfsmp, vp, &rvp, FALSE, FALSE);
+			if (error)
+				goto out;
+			/*
+			 * Defer the vnode_put and ubc_setsize on rvp until hfs_unlock().
+			 */
+			cp->c_flag |= C_NEED_RVNODE_PUT | C_NEED_RSRC_SETSIZE;
+			error = hfs_truncate(rvp, (off_t)0, IO_NDELAY, 1, 0, ap->a_context);
+			if (error)
+				goto out;
+			vnode_recycle(rvp);  /* all done with this vnode */
+		}
+	}
+>>>>>>> origin/10.6
 
 
 				/*
@@ -338,11 +432,32 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 				}
 				truncated = 1;
 
+<<<<<<< HEAD
 				/* (SYMLINKS ONLY): Close/End our transaction after truncating the file record */
 				if (started_tr) {
 					hfs_end_transaction(hfsmp);
 					started_tr = false;
 				}
+=======
+		SET(cp->c_flag, C_TRANSIT);
+		cp->c_flag &= ~C_DELETED;
+		cp->c_rdev = 0;
+		
+		// XXXdbg
+		hfs_global_shared_lock_acquire(hfsmp);
+		grabbed_lock = 1;
+		if (hfsmp->jnl) {
+		    if (journal_start_transaction(hfsmp->jnl) != 0) {
+				error = EINVAL;
+				goto out;
+		    }
+		    started_tr = 1;
+		}
+
+		/* Lock catalog b-tree */
+		error = hfs_metafilelocking(hfsmp, kHFSCatalogFileID, LK_EXCLUSIVE, p);
+		if (error) goto out;
+>>>>>>> origin/10.2
 
 			}
 			
@@ -354,6 +469,43 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 			 * to get rid of the resource fork's data. Note that because we are holding the 
 			 * cnode lock, it is impossible for a competing thread to create the resource fork
 			 * vnode from underneath us while we do this.
+=======
+		/* Truncate away our own fork data. (Case A, B, C above) */
+		if (VTOF(vp)->ff_blocks != 0) {
+
+			/* 
+			 * SYMLINKS only:
+			 *
+			 * Encapsulate the entire change (including truncating the link) in 
+			 * nested transactions if we are modifying a symlink, because we know that its
+			 * file length will be at most 4k, and we can fit both the truncation and 
+			 * any relevant bitmap changes into a single journal transaction.  We also want
+			 * the kill_block code to execute in the same transaction so that any dirty symlink
+			 * blocks will not be written. Otherwise, rely on
+			 * hfs_truncate doing its own transactions to ensure that we don't blow up
+			 * the journal.
+			 */ 
+			if ((started_tr == 0) && (v_type == VLNK)) {
+				if (hfs_start_transaction(hfsmp) != 0) {
+					error = EINVAL;
+					goto out;
+				}
+				else {
+					started_tr = 1;
+				}
+			}
+
+ 			/*
+			 * At this point, we have decided that this cnode is
+			 * suitable for full removal.  We are about to deallocate
+			 * its blocks and remove its entry from the catalog. 
+			 * If it was a symlink, then it's possible that the operation
+			 * which created it is still in the current transaction group
+			 * due to coalescing.  Take action here to kill the data blocks
+			 * of the symlink out of the journal before moving to 
+			 * deallocate the blocks.  We need to be in the middle of
+			 * a transaction before calling buf_iterate like this.
+>>>>>>> origin/10.8
 			 * 
 			 * This is invoked via case A above only.
 			 */
@@ -372,6 +524,8 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 					bzero (lookup_rsrc, sizeof (struct cat_lookup_buffer));
 				}
 
+<<<<<<< HEAD
+<<<<<<< HEAD
 				if (cp->c_desc.cd_namelen == 0) {
 					/* Initialize the rsrc descriptor for lookup if necessary*/
 					MAKE_DELETED_NAME (lookup_rsrc->lookup_name, HFS_TEMPLOOKUP_NAMELEN, cp->c_fileid);
@@ -388,6 +542,62 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 				}
 
 				lockflags = hfs_systemfile_lock (hfsmp, SFL_CATALOG, HFS_SHARED_LOCK);
+=======
+		if (cp->c_blocks > 0) {
+			printf("hfs_inactive: deleting non-empty%sfile %d, "
+			       "blks %d\n", VNODE_IS_RSRC(vp) ? " rsrc " : " ",
+			       (int)cp->c_fileid, (int)cp->c_blocks);
+		}
+>>>>>>> origin/10.5
+=======
+			if (hfsmp->jnl && vnode_islnk(vp)) {
+				buf_iterate(vp, hfs_removefile_callback, BUF_SKIP_NONLOCKED, (void *)hfsmp);
+			}
+	
+			/*
+			 * This truncate call (and the one below) is fine from VNOP_RECLAIM's 
+			 * context because we're only removing blocks, not zero-filling new 
+			 * ones.  The C_DELETED check above makes things much simpler. 
+			 */
+			error = hfs_truncate(vp, (off_t)0, IO_NDELAY, 0, 0, ctx);
+			if (error) {
+				goto out;
+			}
+			truncated = 1;
+
+			/* (SYMLINKS ONLY): Close/End our transaction after truncating the file record */
+			if (started_tr) {
+				hfs_end_transaction(hfsmp);
+				started_tr = 0;
+			}
+		}
+		
+		/* 
+		 * Truncate away the resource fork, if we represent the data fork and
+		 * it is the last fork.  That means, by definition, the rsrc fork is not in 
+		 * core.  To avoid bringing a vnode into core for the sole purpose of deleting the
+		 * data in the resource fork, we call cat_lookup directly, then hfs_release_storage
+		 * to get rid of the resource fork's data. Note that because we are holding the 
+		 * cnode lock, it is impossible for a competing thread to create the resource fork
+		 * vnode from underneath us while we do this.
+		 * 
+		 * This is invoked via case A above only.
+		 */
+		if ((cp->c_blocks > 0) && (forkcount == 1) && (vp != cp->c_rsrc_vp)) {
+			struct cat_lookup_buffer *lookup_rsrc = NULL;
+			struct cat_desc *desc_ptr = NULL;
+			lockflags = 0;
+
+			MALLOC(lookup_rsrc, struct cat_lookup_buffer*, sizeof (struct cat_lookup_buffer), M_TEMP, M_WAITOK);
+			if (lookup_rsrc == NULL) {
+				printf("hfs_cnode_teardown: ENOMEM from MALLOC\n");
+				error = ENOMEM;
+				goto out;
+			}
+			else {
+				bzero (lookup_rsrc, sizeof (struct cat_lookup_buffer));
+			}
+>>>>>>> origin/10.8
 
 				error = cat_lookup (hfsmp, desc_ptr, 1, 0, (struct cat_desc *) NULL, 
 						(struct cat_attr*) NULL, &lookup_rsrc->lookup_fork.ff_data, NULL);
@@ -540,10 +750,17 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 			if (error == 0)
 				hfs_volupdate(hfsmp, (v_type == VDIR) ? VOL_RMDIR : VOL_RMFILE, 0);
 		}
+<<<<<<< HEAD
 	} // if <open unlinked>
 
 	hfs_update(vp, reclaim ? HFS_UPDATE_FORCE : 0);
 
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+	}
+	
+>>>>>>> origin/10.8
 	/*
 	 * Since we are about to finish what might be an inactive call, propagate
 	 * any remaining modified or touch bits from the cnode to the vnode.  This
@@ -560,6 +777,20 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 		vnode_setdirty(vp);
 	} else {
 		vnode_cleardirty(vp);
+=======
+	/*
+	 * A file may have had delayed allocations, in which case hfs_update
+	 * would not have updated the catalog record (cat_update).  We need
+	 * to do that now, before we lose our fork data.  We also need to
+	 * force the update, or hfs_update will again skip the cat_update.
+	 */
+	if ((cp->c_flag & C_MODIFIED) ||
+	    cp->c_touch_acctime || cp->c_touch_chgtime || cp->c_touch_modtime) {
+		if ((cp->c_flag & C_MODIFIED) || cp->c_touch_modtime){
+			cp->c_flag |= C_FORCEUPDATE;
+		}
+		hfs_update(vp, 0);
+>>>>>>> origin/10.5
 	}
         
 out:
@@ -570,6 +801,11 @@ out:
         hfs_end_transaction(hfsmp);
         started_tr = false;
     }
+=======
+#if QUOTA
+		(void)hfs_chkiq(cp, -1, NOCRED, 0);
+#endif /* QUOTA */
+>>>>>>> origin/10.2
 
 	return error;
 }
@@ -638,6 +874,7 @@ hfs_vnop_inactive(struct vnop_inactive_args *ap)
 		error = 0;
 		goto inactive_done;
 	}
+<<<<<<< HEAD
 	
 	if ((v_type == VREG || v_type == VLNK)) {
 		hfs_lock_truncate(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT);
@@ -698,6 +935,24 @@ hfs_filedone(struct vnode *vp, vfs_context_t context,
 	blks = leof / blocksize;
 	if (((off_t)blks * (off_t)blocksize) != leof)
 		blks++;
+=======
+
+	if (cp->c_flag & (C_ACCESS | C_CHANGE | C_MODIFIED | C_UPDATE)) {
+		tv = time;
+		VOP_UPDATE(vp, &tv, &tv, 0);
+	}
+out:
+	// XXXdbg - have to do this because a goto could have come here
+	if (started_tr) {
+	    journal_end_transaction(hfsmp->jnl);
+	    started_tr = 0;
+	}
+	if (grabbed_lock) {
+		hfs_global_shared_lock_release(hfsmp);
+	}
+
+	VOP_UNLOCK(vp, 0, p);
+>>>>>>> origin/10.2
 	/*
 	 * Shrink the peof to the smallest size neccessary to contain the leof.
 	 */
@@ -760,8 +1015,43 @@ hfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 	}
 
 	/*
+<<<<<<< HEAD
 	 * Keep track of an inactive hot file.  Don't bother on ssd's since
 	 * the tracking is done differently (it's done at read() time)
+=======
+	 * Check if a deleted resource fork vnode missed a
+	 * VNOP_INACTIVE call and requires truncation.
+	 */
+	if (VNODE_IS_RSRC(vp) &&
+	    (cp->c_flag & C_DELETED) &&
+	    (VTOF(vp)->ff_blocks != 0)) {
+		hfs_unlock(cp);
+		ubc_setsize(vp, 0);
+
+		hfs_lock_truncate(cp, TRUE);
+		(void) hfs_lock(VTOC(vp), HFS_FORCE_LOCK);
+
+		(void) hfs_truncate(vp, (off_t)0, IO_NDELAY, 1, ap->a_context);
+
+		hfs_unlock_truncate(cp, TRUE);
+	}
+	/*
+	 * A file may have had delayed allocations, in which case hfs_update
+	 * would not have updated the catalog record (cat_update).  We need
+	 * to do that now, before we lose our fork data.  We also need to
+	 * force the update, or hfs_update will again skip the cat_update.
+	 */
+	if ((cp->c_flag & C_MODIFIED) ||
+		cp->c_touch_acctime || cp->c_touch_chgtime || cp->c_touch_modtime) {
+		if ((cp->c_flag & C_MODIFIED) || cp->c_touch_modtime){
+			cp->c_flag |= C_FORCEUPDATE;
+		}	
+		hfs_update(vp, 0);
+	}
+
+	/*
+	 * Keep track of an inactive hot file.
+>>>>>>> origin/10.5
 	 */
 	if (!vnode_isdir(vp) &&
 	    !vnode_issystem(vp) &&
@@ -803,10 +1093,18 @@ hfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 		if (vnode_isdir(vp)) {
 			hfs_reldirhints(cp, 0);
 		}
+<<<<<<< HEAD
 		
 		if(cp->c_flag & C_HARDLINK) {
 			hfs_relorigins(cp);
 		}
+=======
+	
+		if (cp->c_flag & C_HARDLINK) {
+			hfs_relorigins(cp);
+		}
+
+>>>>>>> origin/10.5
 	}
 	/* Release the file fork and related data */
 	if (fp) {
@@ -821,12 +1119,30 @@ hfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 	/* 
 	 * If there was only one active fork then we can release the cnode.
 	 */
+<<<<<<< HEAD
 	if (reclaim_cnode) {
 		hfs_chashwakeup(hfsmp, cp, H_ALLOC | H_TRANSIT);
 		hfs_unlock(cp);
 		hfs_reclaim_cnode(hfsmp, cp);
 	} 
 	else  {
+=======
+	if (altfp == NULL) {
+#if QUOTA
+		for (i = 0; i < MAXQUOTAS; i++) {
+			if (cp->c_dquot[i] != NODQUOT) {
+				dqreclaim(vp, cp->c_dquot[i]);
+				cp->c_dquot[i] = NODQUOT;
+			}
+		}
+#endif /* QUOTA */
+		/* 
+		 * Free any left over directory indices
+		 */
+		if (vp->v_type == VDIR)
+			hfs_relnamehints(cp);
+
+>>>>>>> origin/10.2
 		/* 
 		 * cnode in use.  If it is a directory, it could have 
 		 * no live forks. Just release the lock.
@@ -951,13 +1267,24 @@ hfs_getnewvnode(
 	/* Sanity check the vtype and mode */
 	if (vtype == VBAD) {
 		/* Mark the FS as corrupt and bail out */
+<<<<<<< HEAD
 		hfs_mark_inconsistent(hfsmp, HFS_INCONSISTENCY_DETECTED);
 		retval = EINVAL;
 		goto gnv_exit;
 	}
 	
+=======
+		hfs_mark_volume_inconsistent(hfsmp);
+		return (EINVAL);
+	}
+
+	/* Zero out the out_flags */
+	*out_flags = 0;
+
+>>>>>>> origin/10.8
 #ifdef HFS_CHECK_LOCK_ORDER
 	/*
+<<<<<<< HEAD
 	 * The only case where it's permissible to hold the parent cnode
 	 * lock is during a create operation (hfs_makenode) or when
 	 * we don't need the cnode lock (GNV_SKIPLOCK).
@@ -966,6 +1293,42 @@ hfs_getnewvnode(
 	    (flags & (GNV_CREATE | GNV_SKIPLOCK)) == 0 &&
 	    VTOC(dvp)->c_lockowner == current_thread()) {
 		panic("hfs_getnewvnode: unexpected hold of parent cnode %p", VTOC(dvp));
+=======
+	 * Check the hash for an active cnode
+	 */
+	cp = hfs_chashget(dev, cnid, wantrsrc, &vp, &rvp);
+	if (cp != NULL) {
+		/* hide open files that have been deleted */
+		if ((hfsmp->hfs_private_metadata_dir != 0)
+		&&  (cp->c_parentcnid == hfsmp->hfs_private_metadata_dir)
+		&&  (cp->c_nlink == 0)) {
+			retval = ENOENT;
+			goto exit;
+		}
+
+		/* Hide private journal files */
+		if (hfsmp->jnl &&
+			(cp->c_parentcnid == kRootDirID) &&
+			((cp->c_cnid == hfsmp->hfs_jnlfileid) ||
+			(cp->c_cnid == hfsmp->hfs_jnlinfoblkid))) {
+		    retval = ENOENT;
+			goto exit;
+		}
+	 
+		if (wantrsrc && rvp != NULL) {
+			vp = rvp;
+			rvp = NULL;
+			goto done;
+		}
+		if (!wantrsrc && vp != NULL) {
+			/* Hardlinks need an updated catalog descriptor */
+			if (descp && cp->c_flag & C_HARDLINK) {
+				replace_desc(cp, descp);
+			}
+			/* We have a vnode so we're done. */
+			goto done;
+		}
+>>>>>>> origin/10.2
 	}
 #endif /* HFS_CHECK_LOCK_ORDER */
 
@@ -993,6 +1356,7 @@ hfs_getnewvnode(
 
 
 	/* 
+<<<<<<< HEAD
 	 * If we get a cnode/vnode pair out of hfs_chash_getcnode, then update the 
 	 * descriptor in the cnode as needed if the cnode represents a hardlink.  
 	 * We want the caller to get the most up-to-date copy of the descriptor
@@ -1117,6 +1481,16 @@ hfs_getnewvnode(
 	if (*vpp != NULL) {
 		retval = 0;
 		goto gnv_exit;
+=======
+	 * Hardlinks may need an updated catalog descriptor.  However, if
+	 * the cnode has already been marked as open-unlinked (C_DELETED), then don't
+	 * replace its descriptor. 
+	 */
+	if (!(hfs_checkdeleted(cp))) {
+		if ((cp->c_flag & C_HARDLINK) && descp->cd_nameptr && descp->cd_namelen > 0) {
+			replace_desc(cp, descp);
+		}
+>>>>>>> origin/10.6
 	}
 
 	/*
@@ -1399,11 +1773,19 @@ hfs_getnewvnode(
 		 * occurred during the attachment, then cleanup the cnode.
 		 */
 		if ((cp->c_vp == NULL) && (cp->c_rsrc_vp == NULL)) {
+<<<<<<< HEAD
 			hfs_chash_abort(hfsmp, cp);
 			hfs_reclaim_cnode(hfsmp, cp);
 		} 
 		else {
 			hfs_chashwakeup(hfsmp, cp, H_ALLOC | H_ATTACH);
+=======
+			hfs_chash_abort(cp);
+			hfs_reclaim_cnode(cp);
+		} 
+		else {
+			hfs_chashwakeup(cp, H_ALLOC | H_ATTACH);
+>>>>>>> origin/10.5
 			if ((flags & GNV_SKIPLOCK) == 0){
 				hfs_unlock(cp);
 			}
@@ -1419,6 +1801,7 @@ hfs_getnewvnode(
 	if (cp->c_flag & C_HARDLINK) {
 		vnode_setmultipath(vp);
 	}
+<<<<<<< HEAD
 
 	if (cp->c_attr.ca_recflags & kHFSFastDevCandidateMask) {
 		vnode_setfastdevicecandidate(vp);
@@ -1441,12 +1824,15 @@ hfs_getnewvnode(
 		vnode_update_identity (vp, dvp, (const char *)cp->c_desc.cd_nameptr, cp->c_desc.cd_namelen, 0, VNODE_UPDATE_NAME);
 	}
 
+=======
+>>>>>>> origin/10.5
 	/*
 	 * Tag resource fork vnodes as needing an VNOP_INACTIVE
 	 * so that any deferred removes (open unlinked files)
 	 * have the chance to process the resource fork.
 	 */
 	if (VNODE_IS_RSRC(vp)) {
+<<<<<<< HEAD
 		int err;
 
 		KERNEL_DEBUG_CONSTANT(HFSDBG_GETNEWVNODE, VM_KERNEL_ADDRPERM(cp->c_vp), VM_KERNEL_ADDRPERM(cp->c_rsrc_vp), 0, 0, 0);
@@ -1458,6 +1844,13 @@ hfs_getnewvnode(
 		}
 	}
 	hfs_chashwakeup(hfsmp, cp, H_ALLOC | H_ATTACH);
+=======
+		/* Force VL_NEEDINACTIVE on this vnode */
+		vnode_ref(vp);
+		vnode_rele(vp);
+	}
+	hfs_chashwakeup(cp, H_ALLOC | H_ATTACH);
+>>>>>>> origin/10.5
 
 	/*
 	 * Stop tracking an active hot file.
@@ -1868,6 +2261,7 @@ uint32_t hfs_incr_gencount (struct cnode *cp) {
 	return gcount;
 }
 
+<<<<<<< HEAD
 /*
  * There is no need for any locks here (other than an iocount on an
  * associated vnode) because reading and writing an aligned 32 bit
@@ -1881,6 +2275,16 @@ hfs_get_gencount_internal(const uint8_t *finderinfo, mode_t mode)
 
 	/* overlay the FinderInfo to the correct pointer, and advance */
 	finfo = finderinfo;
+=======
+static u_int32_t
+hfs_get_gencount_internal(const uint8_t *finderinfo, mode_t mode)
+{
+	u_int8_t *finfo = NULL;
+	u_int32_t gcount = 0;
+
+	/* overlay the FinderInfo to the correct pointer, and advance */
+	finfo = (u_int8_t*)finderinfo;
+>>>>>>> origin/10.9
 	finfo = finfo + 16;
 
 	/* 
@@ -1892,7 +2296,11 @@ hfs_get_gencount_internal(const uint8_t *finderinfo, mode_t mode)
 	 *       last 32-bit word) so it is safe to have one code path here.
 	 */
 	if (S_ISDIR(mode) || S_ISREG(mode)) {
+<<<<<<< HEAD
 		const struct FndrExtendedFileInfo *extinfo = (const struct FndrExtendedFileInfo *)finfo;
+=======
+		struct FndrExtendedFileInfo *extinfo = (struct FndrExtendedFileInfo *)finfo;
+>>>>>>> origin/10.9
 		gcount = OSSwapBigToHostInt32 (extinfo->write_gen_counter);
 		
 		/* 
@@ -1903,7 +2311,20 @@ hfs_get_gencount_internal(const uint8_t *finderinfo, mode_t mode)
 		if (gcount == 0) {
 			gcount++;	
 		}
+<<<<<<< HEAD
 	}
+=======
+	} else if (S_ISDIR(mode)) {
+		struct FndrExtendedDirInfo *extinfo = (struct FndrExtendedDirInfo *)((u_int8_t*)finderinfo + 16);
+		gcount = OSSwapBigToHostInt32 (extinfo->write_gen_counter);
+
+		if (gcount == 0) {
+			gcount++;	
+		}
+	} else {
+		gcount = 0;
+	}	
+>>>>>>> origin/10.9
 
 	return gcount;
 }
@@ -1918,6 +2339,7 @@ u_int32_t hfs_get_gencount_from_blob (const uint8_t *finfoblob, mode_t mode) {
 	return hfs_get_gencount_internal(finfoblob, mode);
 }
 
+<<<<<<< HEAD
 void hfs_clear_might_be_dirty_flag(cnode_t *cp)
 {
 	/*
@@ -1929,6 +2351,8 @@ void hfs_clear_might_be_dirty_flag(cnode_t *cp)
 	CLR(cp->c_flag, C_MIGHT_BE_DIRTY_FROM_MAPPING);
 }
 
+=======
+>>>>>>> origin/10.9
 /*
  * Touch cnode times based on c_touch_xxx flags
  *

@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2008, 2010 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -31,11 +35,14 @@
 #include <kern/ipc_kobject.h>
 #include <kern/ipc_misc.h>
 
+<<<<<<< HEAD
 #include <mach/mach_port.h>
 #include <mach/vm_map.h>
 #include <vm/vm_map.h>
 #include <vm/vm_kern.h>
 
+=======
+>>>>>>> origin/10.6
 extern void fileport_releasefg(struct fileglob *);
 
 /*
@@ -62,8 +69,13 @@ fileport_alloc(struct fileglob *fg)
 	}
 
 	ipc_kobject_set(fileport, (ipc_kobject_t)fg, IKOT_FILEPORT);
+<<<<<<< HEAD
 	ip_lock(fileport); /* unlocked by ipc_port_nsrequest */
 	notifyport = ipc_port_make_sonce_locked(fileport);
+=======
+	notifyport = ipc_port_make_sonce(fileport);
+	ip_lock(fileport); /* unlocked by ipc_port_nsrequest */
+>>>>>>> origin/10.6
 	ipc_port_nsrequest(fileport, 1, notifyport, &notifyport);
 
 	sendport = ipc_port_make_send(fileport);
@@ -145,6 +157,7 @@ fileport_notify(mach_msg_header_t *msg)
 	} else {
 		ip_unlock(port);
 	}
+<<<<<<< HEAD
 }
 
 /*
@@ -237,4 +250,8 @@ fileport_walk(task_t task,
 	vm_deallocate(ipc_kernel_map,
 	    (vm_address_t)names, ncnt * sizeof (*names));
 	return (KERN_SUCCESS);
+=======
+
+	return;
+>>>>>>> origin/10.6
 }

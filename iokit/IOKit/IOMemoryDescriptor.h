@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -42,7 +64,10 @@
 class IOMemoryMap;
 class IOMapper;
 class IOService;
+<<<<<<< HEAD
 class IODMACommand;
+=======
+>>>>>>> origin/10.8
 
 /*
  * Direction of transfer, with respect to the described memory.
@@ -60,6 +85,7 @@ enum IODirection
     kIODirectionInOut = kIODirectionIn  | kIODirectionOut,
 
     // these flags are valid for the prepare() method only
+<<<<<<< HEAD
     kIODirectionPrepareToPhys32   = 0x00000004,
     kIODirectionPrepareNoFault    = 0x00000008,
     kIODirectionPrepareReserved1  = 0x00000010,
@@ -71,6 +97,13 @@ enum IODirection
      kIODirectionCompleteWithError = 0x00000040,
 #define IODIRECTIONCOMPLETEWITHDATAVALIDDEFINED	1
      kIODirectionCompleteWithDataValid = 0x00000080,
+=======
+    kIODirectionPrepareToPhys32    = 0x00000004,
+    kIODirectionPrepareNoFault     = 0x00000008,
+    kIODirectionPrepareReserved1   = 0x00000010,
+#define IODIRECTIONPREPARENONCOHERENTDEFINED	1
+    kIODirectionPrepareNonCoherent = 0x00000020,
+>>>>>>> origin/10.9
 };
 #ifdef __LP64__
 typedef IOOptionBits IODirection;
@@ -101,8 +134,17 @@ enum {
 
     kIOMemoryAsReference	= 0x00000100,
     kIOMemoryBufferPageable	= 0x00000400,
+<<<<<<< HEAD
+<<<<<<< HEAD
     kIOMemoryMapperNone		= 0x00000800,	// Shared with Buffer MD
     kIOMemoryHostOnly           = 0x00001000,   // Never DMA accessible
+=======
+    kIOMemoryDontMap		= 0x00000800,
+>>>>>>> origin/10.5
+=======
+    kIOMemoryMapperNone		= 0x00000800,	// Shared with Buffer MD
+    kIOMemoryHostOnly           = 0x00001000,   // Never DMA accessible
+>>>>>>> origin/10.8
 #ifdef XNU_KERNEL_PRIVATE
     kIOMemoryRedirected		= 0x00004000,
     kIOMemoryPreparedReadOnly	= 0x00008000,
@@ -112,6 +154,8 @@ enum {
     kIOMemoryReserved6156215	= 0x00020000,
 #endif
     kIOMemoryThreadSafe		= 0x00100000,	// Shared with Buffer MD
+<<<<<<< HEAD
+<<<<<<< HEAD
     kIOMemoryClearEncrypt	= 0x00200000,	// Shared with Buffer MD
 
 #ifdef XNU_KERNEL_PRIVATE
@@ -119,6 +163,11 @@ enum {
     kIOMemoryBufferCacheMask	= 0x70000000,
     kIOMemoryBufferCacheShift	= 28,
 #endif
+=======
+>>>>>>> origin/10.5
+=======
+    kIOMemoryClearEncrypt	= 0x00200000,	// Shared with Buffer MD
+>>>>>>> origin/10.6
 };
 
 #define kIOMapperSystem	((IOMapper *) 0)
@@ -166,6 +215,7 @@ struct IODMAMapSpecification
 	uint32_t    resvB[4];
 };
 
+<<<<<<< HEAD
 struct IODMAMapPageList
 {
     uint32_t                pageOffset;
@@ -177,11 +227,16 @@ struct IODMAMapPageList
 enum
 {
     kIODMAMapReadAccess           = 0x00000001,
+=======
+enum
+{
+>>>>>>> origin/10.8
     kIODMAMapWriteAccess          = 0x00000002,
     kIODMAMapPhysicallyContiguous = 0x00000010,
     kIODMAMapDeviceMemory         = 0x00000020,
     kIODMAMapPagingPath           = 0x00000040,
     kIODMAMapIdentityMap          = 0x00000080,
+<<<<<<< HEAD
 
     kIODMAMapPageListFullyOccupied = 0x00000100,
     kIODMAMapFixedAddress          = 0x00000200,
@@ -232,6 +287,10 @@ struct IOMDDMAWalkSegmentArgs {
 typedef UInt8 IOMDDMAWalkSegmentState[128];
 
 #endif /* KERNEL_PRIVATE */
+=======
+};
+
+>>>>>>> origin/10.8
 
 enum 
 {
@@ -287,8 +346,19 @@ protected:
     IOOptionBits 	_tag;
 
 public:
+<<<<<<< HEAD
 typedef IOOptionBits DMACommandOps;
 #ifndef __LP64__
+=======
+
+/*! @function getBackingID
+    @abstract Get an unique identifier for the virtual memory systems backing memory object.
+    @discussion For memory descriptors that are directly mapped by real memory, IOGeneralMemoryDescriptors that are also persistent (kIOMemoryPersistent) return the id of the backing vm object.  This returned value can be tested to see if 2 memory persistent memory descriptors share the same backing.  The call itself is fairly heavy weight and can only be applied to persistent memory descriptors so it is not generally useful.  This function is NOT virtual at the moment.  We may choose to make it virtual in the future however.
+    @result 0 on non-persistent or non IOGeneralMemoryDescriptors, unique id if not. */
+    // See implementation at end of file
+    inline void * getBackingID() const;
+
+>>>>>>> origin/10.3
     virtual IOPhysicalAddress getSourceSegment( IOByteCount offset,
 						IOByteCount * length ) APPLE_KEXT_DEPRECATED;
 #endif /* !__LP64__ */
@@ -377,12 +447,20 @@ typedef IOOptionBits DMACommandOps;
     IOMemoryDescriptorReserved * getKernelReserved( void );
     IOReturn dmaMap(
 	IOMapper                    * mapper,
+<<<<<<< HEAD
 	IODMACommand                * command,
 	const IODMAMapSpecification * mapSpec,
 	uint64_t                      offset,
 	uint64_t                      length,
 	uint64_t                    * mapAddress,
 	uint64_t                    * mapLength);
+=======
+	const IODMAMapSpecification * mapSpec,
+	uint64_t                      offset,
+	uint64_t                      length,
+	uint64_t                    * address,
+	ppnum_t                     * mapPages);
+>>>>>>> origin/10.8
 #endif
 	
 private:
@@ -944,6 +1022,7 @@ public:
     OSMetaClassDeclareReservedUnused(IOMemoryMap, 7);
 };
 
+<<<<<<< HEAD
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 <<<<<<< HEAD
 #ifdef XNU_KERNEL_PRIVATE
@@ -967,6 +1046,8 @@ enum {
 // might be created by IOMemoryDescriptor::withAddressRange(), but there should be 
 // no need to reference as anything but a generic IOMemoryDescriptor *.
 
+=======
+>>>>>>> origin/10.5
 class IOGeneralMemoryDescriptor : public IOMemoryDescriptor
 {
     OSDeclareDefaultStructors(IOGeneralMemoryDescriptor);
@@ -1048,6 +1129,19 @@ public:
                                IOByteCount       * dirtyPageCount);
 #endif
 
+#ifdef XNU_KERNEL_PRIVATE
+    // Internal APIs may be made virtual at some time in the future.
+    IOReturn wireVirtual(IODirection forDirection);
+    IOReturn dmaMap(
+	IOMapper                    * mapper,
+	const IODMAMapSpecification * mapSpec,
+	uint64_t                      offset,
+	uint64_t                      length,
+	uint64_t                    * address,
+	ppnum_t                     * mapPages);
+    bool initMemoryEntries(size_t size, IOMapper * mapper);
+#endif
+
 private:
 
 #ifndef __LP64__
@@ -1056,6 +1150,11 @@ private:
     virtual void unmapFromKernel();
 #endif /* !__LP64__ */
 
+<<<<<<< HEAD
+=======
+    void *createNamedEntry();
+
+>>>>>>> origin/10.8
     // Internal
     OSData *	    _memoryEntries;
     unsigned int    _pages;
@@ -1069,6 +1168,11 @@ public:
     /*
      * IOMemoryDescriptor required methods
      */
+
+/*! @function getBackingID
+    @abstract Returns the vm systems unique id for the memory backing this IOGeneralMemoryDescriptor.  See IOMemoryDescriptor::getBackingID for details.
+    @result 0 on non-persistent or non IOGeneralMemoryDescriptors, unique id if not. */
+    void * getBackingID() const;
 
     // Master initaliser
     virtual bool initWithOptions(void *		buffers,
@@ -1185,5 +1289,17 @@ protected:
 >>>>>>> origin/10.0
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+// Implementation of inline functions
+void * IOMemoryDescriptor::getBackingID() const
+{
+    const IOGeneralMemoryDescriptor *genMD = (const IOGeneralMemoryDescriptor *)
+	OSDynamicCast(IOGeneralMemoryDescriptor, this);
+
+    if (genMD)
+        return genMD->getBackingID();
+    else
+	return 0;
+}
 
 #endif /* !_IOMEMORYDESCRIPTOR_H */

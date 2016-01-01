@@ -35,6 +35,11 @@
 #include <mach/message.h>
 #include <mach/exception.h>
 #include <mach/mig_errors.h>
+<<<<<<< HEAD
+=======
+#include <dlfcn.h>
+#include <stdlib.h>
+>>>>>>> origin/10.5
 
 #include "abort.h"
 #include "exc_catcher.h"
@@ -49,6 +54,7 @@ internal_catch_exception_raise(
     mach_msg_type_number_t codeCnt)
 {
 #if defined(__DYNAMIC__)
+<<<<<<< HEAD
 	static _libkernel_exc_raise_func_t exc_raise_func = (void*)-1;
 	
 	if (exc_raise_func == ((void*)-1)) {
@@ -59,6 +65,20 @@ internal_catch_exception_raise(
 		abort();
 	}
 	return (*exc_raise_func)(exception_port, thread, task, exception, code, codeCnt);
+=======
+    static int checkForFunction = 0;
+    /* This will be non-zero if the user has defined this function */
+    static kern_return_t (*func)(mach_port_t, mach_port_t, mach_port_t, exception_type_t, exception_data_t, mach_msg_type_number_t);
+    if (checkForFunction == 0) {
+        checkForFunction = 1;
+		func = dlsym(RTLD_DEFAULT, "catch_exception_raise");
+    }
+    if (func == 0) {
+        /* The user hasn't defined catch_exception_raise in their binary */
+        abort();
+    }
+    return (*func)(exception_port, thread, task, exception, code, codeCnt);
+>>>>>>> origin/10.5
 #else
 	extern kern_return_t catch_exception_raise(mach_port_t, mach_port_t, mach_port_t, exception_type_t, exception_data_t, mach_msg_type_number_t);
 	return catch_exception_raise(exception_port, thread, task, exception, code, codeCnt);

@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -806,6 +828,7 @@ devfs_remove(void *dirent_p)
 {
 	devnode_t * dnp = ((devdirent_t *)dirent_p)->de_dnp;
 	devnode_t * dnp2;
+<<<<<<< HEAD
 	boolean_t   lastlink;
 	struct devfs_event_log event_log;
 	uint32_t    log_count = 0;
@@ -814,6 +837,12 @@ devfs_remove(void *dirent_p)
 	struct devfs_vnode_event stackbuf[NUM_STACK_ENTRIES];
 	
 	DEVFS_LOCK();
+=======
+	boolean_t   funnel_state;
+	boolean_t   lastlink;
+
+	funnel_state = thread_funnel_set(kernel_flock, TRUE);
+>>>>>>> origin/10.2
 
 	if (!devfs_ready) {
 		printf("devfs_remove: not ready for devices!\n");
@@ -861,6 +890,7 @@ wrongsize:
 		dnp->dn_nextsibling->dn_prevsiblingp = &(dnp->dn_nextsibling);
 		dnp2->dn_nextsibling = dnp2;
 		dnp2->dn_prevsiblingp = &(dnp2->dn_nextsibling);
+<<<<<<< HEAD
 				
 		/* This file has been deleted in this plane */
 		if (do_notify != 0) {
@@ -874,6 +904,11 @@ wrongsize:
 				if (do_notify != 0) {
 					devfs_record_event(&event_log, dnp2->dn_linklist->de_parent, VNODE_EVENT_FILE_REMOVED);
 				}
+=======
+		if(dnp2->dn_linklist) {
+			do {
+				lastlink = (1 == dnp2->dn_links);
+>>>>>>> origin/10.2
 				dev_free_name(dnp2->dn_linklist);
 			} while (!lastlink);
 		}
@@ -884,6 +919,7 @@ wrongsize:
 	 * If we are not running in SPLIT_DEVS mode, then
 	 * THIS is what gets rid of the propogated nodes.
 	 */
+<<<<<<< HEAD
 	if (dnp->dn_linklist) {
 		do {
 			lastlink = (1 == dnp->dn_links);
@@ -891,6 +927,11 @@ wrongsize:
 			if (do_notify != 0) {
 				devfs_record_event(&event_log, dnp->dn_linklist->de_parent, VNODE_EVENT_FILE_REMOVED);
 			}
+=======
+	if(dnp->dn_linklist) {
+		do {
+			lastlink = (1 == dnp->dn_links);
+>>>>>>> origin/10.2
 			dev_free_name(dnp->dn_linklist);
 		} while (!lastlink);
 	}

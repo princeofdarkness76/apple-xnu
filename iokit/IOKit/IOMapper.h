@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 1998-2003 Apple Computer, Inc. All rights reserved.
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
@@ -17,11 +18,23 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -122,6 +135,7 @@ public:
 
     virtual uint64_t mapToPhysicalAddress(uint64_t mappedAddress) = 0;
 
+<<<<<<< HEAD
     // }
 
 private:
@@ -129,6 +143,25 @@ private:
     OSMetaClassDeclareReservedUnused(IOMapper, 1);
     OSMetaClassDeclareReservedUnused(IOMapper, 2);
     OSMetaClassDeclareReservedUnused(IOMapper, 3);
+=======
+    virtual ppnum_t iovmAllocDMACommand(IODMACommand * command, IOItemCount pageCount);
+    virtual void iovmFreeDMACommand(IODMACommand * command, ppnum_t addr, IOItemCount pageCount);
+    
+    virtual ppnum_t iovmMapMemory(
+    			  OSObject                    * memory,   // dma command or iomd
+			  ppnum_t                       offsetPage,
+			  ppnum_t                       pageCount,
+			  uint32_t                      options,
+			  upl_page_info_t             * pageList,
+			  const IODMAMapSpecification * mapSpecification);
+
+    OSMetaClassDeclareReservedUsed(IOMapper, 0);
+    OSMetaClassDeclareReservedUsed(IOMapper, 1);
+    OSMetaClassDeclareReservedUsed(IOMapper, 2);
+    OSMetaClassDeclareReservedUsed(IOMapper, 3);
+
+private:
+>>>>>>> origin/10.8
     OSMetaClassDeclareReservedUnused(IOMapper, 4);
     OSMetaClassDeclareReservedUnused(IOMapper, 5);
     OSMetaClassDeclareReservedUnused(IOMapper, 6);

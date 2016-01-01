@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -163,6 +189,7 @@ struct tseg_qent {
 	struct	mbuf	*tqe_m;		/* mbuf contains packet */
 };
 LIST_HEAD(tsegqe_head, tseg_qent);
+<<<<<<< HEAD
 
 struct sackblk {
 	tcp_seq start;		/* start seq no. of sack block */
@@ -191,6 +218,13 @@ struct tcp_rxt_seg {
 #define	TCP_RXT_DSACK_FOR_TLP	0x2
 	SLIST_ENTRY(tcp_rxt_seg) rx_link;
 };
+=======
+extern int	tcp_reass_maxseg;
+extern int	tcp_reass_qsize;
+#ifdef MALLOC_DECLARE
+MALLOC_DECLARE(M_TSEGQ);
+#endif
+>>>>>>> origin/10.3
 
 struct tcptemp {
 	u_char	tt_ipgen[40]; /* the size must be of max ip header, now IPv6 */
@@ -275,6 +309,7 @@ struct tcpcb {
 #define	TF_LOCAL	0x20000		/* connection to a host on local link */
 #define	TF_RXWIN0SENT	0x40000		/* sent a receiver win 0 in response */
 #define	TF_SLOWLINK	0x80000		/* route is a on a modem speed link */
+<<<<<<< HEAD
 #define	TF_LASTIDLE	0x100000	/* connection was previously idle */
 #define	TF_FASTRECOVERY	0x200000	/* in NewReno Fast Recovery */
 #define	TF_WASFRECOVERY	0x400000	/* was in NewReno Fast Recovery */
@@ -286,6 +321,10 @@ struct tcpcb {
 #define TF_BLACKHOLE	0x20000000	/* Path MTU Discovery Black Hole detection */
 #define TF_TIMER_ONLIST 0x40000000	/* pcb is on tcp_timer_list */
 #define TF_STRETCHACK	0x80000000	/* receiver is going to delay acks */
+=======
+
+	int	t_force;		/* 1 if forcing out a byte */
+>>>>>>> origin/10.2
 
 	tcp_seq	snd_una;		/* send unacknowledged */
 	tcp_seq	snd_max;		/* highest sequence number sent;
@@ -1400,6 +1439,7 @@ extern	struct inpcbinfo tcbinfo;
 extern	struct tcpstat tcpstat;	/* tcp statistics */
 extern	int tcp_mssdflt;	/* XXX */
 extern	int tcp_minmss;
+<<<<<<< HEAD
 #define	TCP_FASTOPEN_SERVER 0x01
 #define	TCP_FASTOPEN_CLIENT 0x02
 
@@ -1407,6 +1447,10 @@ extern	int tcp_tfo_halfcnt;
 extern	int tcp_tfo_backlog;
 extern	int tcp_fastopen;
 extern	int tcp_tfo_fallback_min;
+=======
+extern	int tcp_delack_enabled;
+extern	int tcp_do_newreno;
+>>>>>>> origin/10.3
 extern	int ss_fltsz;
 extern	int ss_fltsz_local;
 extern 	int tcp_do_rfc3390;		/* Calculate ss_fltsz according to RFC 3390 */
@@ -1461,10 +1505,18 @@ void	 tcp_mtudisc(struct inpcb *, int);
 struct tcpcb *
 	 tcp_newtcpcb(struct inpcb *);
 int	 tcp_output(struct tcpcb *);
+<<<<<<< HEAD
 void	 tcp_respond(struct tcpcb *, void *, struct tcphdr *, struct mbuf *,
     tcp_seq, tcp_seq, int, struct tcp_respond_args *);
 struct rtentry *
 	 tcp_rtlookup(struct inpcb *, unsigned int);
+=======
+void	 tcp_quench(struct inpcb *, int);
+void	 tcp_respond(struct tcpcb *, void *,
+	    struct tcphdr *, struct mbuf *, tcp_seq, tcp_seq, int,
+	    unsigned int);
+struct rtentry *tcp_rtlookup(struct inpcb *, unsigned int);
+>>>>>>> origin/10.5
 void	 tcp_setpersist(struct tcpcb *);
 void	 tcp_gc(struct inpcbinfo *);
 void     tcp_itimer(struct inpcbinfo *ipi);

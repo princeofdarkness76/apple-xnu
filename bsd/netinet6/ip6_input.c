@@ -183,7 +183,11 @@ struct in6_ifaddr *in6_ifaddrs = NULL;
 ip6_fw_chk_t *ip6_fw_chk_ptr;
 ip6_fw_ctl_t *ip6_fw_ctl_ptr;
 int ip6_fw_enable = 1;
+<<<<<<< HEAD
 #endif /* IPFW2 */
+=======
+#endif
+>>>>>>> origin/10.6
 
 struct ip6stat ip6stat;
 
@@ -320,6 +324,9 @@ ip6_init(struct ip6protosw *pp, struct domain *dp)
 	if (ip6_initialized)
 		return;
 	ip6_initialized = 1;
+
+	_CASSERT((sizeof(struct ip6_hdr) + sizeof(struct icmp6_hdr)) <= 
+		_MHLEN);
 
 	PE_parse_boot_argn("net.inet6.ip6.scopedroute", &ip6_doscopedroute,
 	    sizeof (ip6_doscopedroute));
@@ -637,8 +644,33 @@ ip6_input(struct mbuf *m)
 	}
 
 	ip6stat.ip6s_nxthist[ip6->ip6_nxt]++;
+<<<<<<< HEAD
 
+#if IPFW2
 	/*
+<<<<<<< HEAD
+=======
+	 * Check with the firewall...
+	 */
+	if (ip6_fw_enable && ip6_fw_chk_ptr) {
+		u_short port = 0;
+		/* If ipfw says divert, we have to just drop packet */
+		/* use port as a dummy argument */
+		if ((*ip6_fw_chk_ptr)(&ip6, NULL, &port, &m)) {
+			m_freem(m);
+			m = NULL;
+		}
+		if (!m) {
+			lck_mtx_unlock(ip6_mutex);
+			return;
+		}
+	}
+#endif
+
+=======
+>>>>>>> origin/10.10
+	/*
+>>>>>>> origin/10.6
 	 * Check against address spoofing/corruption.
 	 */
 	if (!(m->m_pkthdr.pkt_flags & PKTF_LOOP) &&
@@ -703,6 +735,7 @@ ip6_input(struct mbuf *m)
 	}
 #endif
 #if IPFW2
+<<<<<<< HEAD
 	/*
 	 * Check with the firewall...
 	 */
@@ -717,6 +750,22 @@ ip6_input(struct mbuf *m)
 		if (!m)
 			goto done;
 	}
+=======
+        /*
+         * Check with the firewall...
+         */
+        if (ip6_fw_enable && ip6_fw_chk_ptr) {
+                u_short port = 0;
+                /* If ipfw says divert, we have to just drop packet */
+                /* use port as a dummy argument */
+                if ((*ip6_fw_chk_ptr)(&ip6, NULL, &port, &m)) {
+                        m_freem(m);
+                        m = NULL;
+                }
+                if (!m)
+                        goto done;
+        }
+>>>>>>> origin/10.10
 #endif /* IPFW2 */
 
 	/*
@@ -813,7 +862,15 @@ check_with_pf:
 		if (in6m != NULL) {
 			IN6M_REMREF(in6m);
 			ours = 1;
+<<<<<<< HEAD
 		} else if (!nd6_prproxy) {
+=======
+#if MROUTING
+		else if (!ip6_mrouter) {
+#else
+		else {
+#endif
+>>>>>>> origin/10.6
 			ip6stat.ip6s_notmember++;
 			ip6stat.ip6s_cantforward++;
 			in6_ifstat_inc(inifp, ifs6_in_discard);
@@ -1068,6 +1125,7 @@ hbhcheck:
 	 * Forward if desirable.
 	 */
 	if (IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst)) {
+<<<<<<< HEAD
 		if (!ours && nd6_prproxy) {
 			/*
 			 * If this isn't for us, this might be a Neighbor
@@ -1079,6 +1137,28 @@ hbhcheck:
 			ours = nd6_prproxy_isours(m, ip6, NULL, IFSCOPE_NONE);
 			VERIFY(!ours ||
 			    (m->m_pkthdr.pkt_flags & PKTF_PROXY_DST));
+=======
+		/*
+		 * If we are acting as a multicast router, all
+		 * incoming multicast packets are passed to the
+		 * kernel-level multicast forwarding function.
+		 * The packet is returned (relatively) intact; if
+		 * ip6_mforward() returns a non-zero value, the packet
+		 * must be discarded, else it may be accepted below.
+		 */
+#if MROUTING
+		if (ip6_mrouter && ip6_mforward(ip6, m->m_pkthdr.rcvif, m)) {
+			ip6stat.ip6s_cantforward++;
+			m_freem(m);
+			lck_mtx_unlock(ip6_mutex);
+			return;
+		}
+#endif
+		if (!ours) {
+			m_freem(m);
+			lck_mtx_unlock(ip6_mutex);
+			return;
+>>>>>>> origin/10.6
 		}
 		if (!ours)
 			goto bad;
@@ -1139,7 +1219,11 @@ injectit:
 
 	while (nxt != IPPROTO_DONE) {
 		struct ipfilter *filter;
+<<<<<<< HEAD
 		int (*pr_input)(struct mbuf **, int *, int);
+=======
+		int (*pr_input)(struct mbuf **, int *);
+>>>>>>> origin/10.6
 
 		if (ip6_hdrnestlimit && (++nest > ip6_hdrnestlimit)) {
 			ip6stat.ip6s_toomanyhdr++;
@@ -1201,20 +1285,30 @@ injectit:
 			ipf_unref();
 		}
 
+<<<<<<< HEAD
 		DTRACE_IP6(receive, struct mbuf *, m, struct inpcb *, NULL,
 		    struct ip6_hdr *, ip6, struct ifnet *, inifp,
 		    struct ip *, NULL, struct ip6_hdr *, ip6);
 
+=======
+>>>>>>> origin/10.6
 		if ((pr_input = ip6_protox[nxt]->pr_input) == NULL) {
 			m_freem(m);
 			m = NULL;
 			nxt = IPPROTO_DONE;
 		} else if (!(ip6_protox[nxt]->pr_flags & PR_PROTOLOCK)) {
 			lck_mtx_lock(inet6_domain_mutex);
+<<<<<<< HEAD
 			nxt = pr_input(&m, &off, nxt);
 			lck_mtx_unlock(inet6_domain_mutex);
 		} else {
 			nxt = pr_input(&m, &off, nxt);
+=======
+			nxt = pr_input(&m, &off);
+			lck_mtx_unlock(inet6_domain_mutex);
+		} else {
+			nxt = pr_input(&m, &off);
+>>>>>>> origin/10.6
 		}
 	}
 done:

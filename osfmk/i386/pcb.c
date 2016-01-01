@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -381,6 +407,321 @@ void
 consider_machine_adjust(void)
 {
 }
+<<<<<<< HEAD
+=======
+extern void *get_bsduthreadarg(thread_t th);
+
+#if defined(__x86_64__)
+static void
+act_machine_switch_pcb( thread_t new )
+{
+        pcb_t			pcb = new->machine.pcb;
+	struct real_descriptor	*ldtp;
+	mach_vm_offset_t	pcb_stack_top;
+	cpu_data_t              *cdp = current_cpu_datap();
+
+	assert(new->kernel_stack != 0);
+
+	if (!cpu_mode_is64bit()) {
+		panic("K64 is 64bit!");
+	} else if (is_saved_state64(pcb->iss)) {
+		/*
+		 * The test above is performed against the thread save state
+		 * flavor and not task's 64-bit feature flag because of the
+		 * thread/task 64-bit state divergence that can arise in
+		 * task_set_64bit() x86: the task state is changed before
+		 * the individual thread(s).
+		 */
+	        x86_saved_state64_tagged_t	*iss64;
+		vm_offset_t			isf;
+
+		assert(is_saved_state64(pcb->iss));
+						   
+		iss64 = (x86_saved_state64_tagged_t *) pcb->iss;
+	
+		/*
+		 * Set pointer to PCB's interrupt stack frame in cpu data.
+		 * Used by syscall and double-fault trap handlers.
+		 */
+		isf = (vm_offset_t) &iss64->state.isf;
+		cdp->cpu_uber.cu_isf = isf;
+		pcb_stack_top = (vm_offset_t) (iss64 + 1);
+		/* require 16-byte alignment */
+		assert((pcb_stack_top & 0xF) == 0);
+
+		/* Interrupt stack is pcb */
+		current_ktss64()->rsp0 = pcb_stack_top;
+
+		/*
+		 * Top of temporary sysenter stack points to pcb stack.
+		 * Although this is not normally used by 64-bit users,
+		 * it needs to be set in case a sysenter is attempted.
+		 */
+		*current_sstk64() = pcb_stack_top;
+
+		cdp->cpu_task_map = new->map->pmap->pm_task_map; 
+
+		/*
+		 * Enable the 64-bit user code segment, USER64_CS.
+		 * Disable the 32-bit user code segment, USER_CS.
+		 */
+		ldt_desc_p(USER64_CS)->access |= ACC_PL_U;
+		ldt_desc_p(USER_CS)->access &= ~ACC_PL_U;
+
+		/*
+		 * Switch user's GS base if necessary
+		 * by setting the Kernel GS base MSR
+		 * - this will become the user's on the swapgs when
+		 * returning to user-space. Avoid this for
+		 * kernel threads (no user TLS support required)
+		 * and verify the memory shadow of the segment base
+		 * in the event it was altered in user space.
+		 */
+		if ((pcb->cthread_self != 0) || (new->task != kernel_task)) {
+			if ((cdp->cpu_uber.cu_user_gs_base != pcb->cthread_self) || (pcb->cthread_self != rdmsr64(MSR_IA32_KERNEL_GS_BASE))) {
+				cdp->cpu_uber.cu_user_gs_base = pcb->cthread_self;
+				wrmsr64(MSR_IA32_KERNEL_GS_BASE, pcb->cthread_self);
+			}
+		}
+	} else {
+		x86_saved_state_compat32_t	*iss32compat;
+		vm_offset_t			isf;
+
+		assert(is_saved_state32(pcb->iss));
+		iss32compat = (x86_saved_state_compat32_t *) pcb->iss;
+
+		pcb_stack_top = (uintptr_t) (iss32compat + 1);
+		/* require 16-byte alignment */
+		assert((pcb_stack_top & 0xF) == 0);
+
+		/*
+		 * Set pointer to PCB's interrupt stack frame in cpu data.
+		 * Used by debug trap handler.
+		 */
+		isf = (vm_offset_t) &iss32compat->isf64;
+		cdp->cpu_uber.cu_isf = isf;
+
+		/* Top of temporary sysenter stack points to pcb stack */
+		*current_sstk64() = pcb_stack_top;
+
+		/* Interrupt stack is pcb */
+		current_ktss64()->rsp0 = pcb_stack_top;
+
+		cdp->cpu_task_map = TASK_MAP_32BIT;
+		/* Precalculate pointers to syscall argument store, for use
+		 * in the trampolines.
+		 */
+		cdp->cpu_uber_arg_store = (vm_offset_t)get_bsduthreadarg(new);
+		cdp->cpu_uber_arg_store_valid = (vm_offset_t)&pcb->arg_store_valid;
+		pcb->arg_store_valid = 0;
+
+		/*
+		 * Disable USER64_CS
+		 * Enable USER_CS
+		 */
+		ldt_desc_p(USER64_CS)->access &= ~ACC_PL_U;
+		ldt_desc_p(USER_CS)->access |= ACC_PL_U;
+
+		/*
+		 * Set the thread`s cthread (a.k.a pthread)
+		 * For 32-bit user this involves setting the USER_CTHREAD
+		 * descriptor in the LDT to point to the cthread data.
+		 * The involves copying in the pre-initialized descriptor.
+		 */ 
+		ldtp = (struct real_descriptor *)current_ldt();
+		ldtp[sel_idx(USER_CTHREAD)] = pcb->cthread_desc;
+		if (pcb->uldt_selector != 0)
+			ldtp[sel_idx(pcb->uldt_selector)] = pcb->uldt_desc;
+		cdp->cpu_uber.cu_user_gs_base = pcb->cthread_self;
+
+		/*
+		 * Set the thread`s LDT or LDT entry.
+		 */
+		if (new->task == TASK_NULL || new->task->i386_ldt == 0) {
+			/*
+			 * Use system LDT.
+			 */
+		       	ml_cpu_set_ldt(KERNEL_LDT);
+		} else {
+			/*
+			 * Task has its own LDT.
+			 */
+			user_ldt_set(new);
+		}
+	}
+
+	/*
+	 * Bump the scheduler generation count in the commpage.
+	 * This can be read by user code to detect its preemption.
+	 */
+	commpage_sched_gen_inc();
+}
+#else
+static void
+act_machine_switch_pcb( thread_t new )
+{
+        pcb_t			pcb = new->machine.pcb;
+	struct real_descriptor	*ldtp;
+	vm_offset_t		pcb_stack_top;
+	vm_offset_t		hi_pcb_stack_top;
+	vm_offset_t		hi_iss;
+	cpu_data_t              *cdp = current_cpu_datap();
+
+	assert(new->kernel_stack != 0);
+	STACK_IEL(new->kernel_stack)->saved_state = pcb->iss;
+
+	if (!cpu_mode_is64bit()) {
+		x86_saved_state32_tagged_t	*hi_iss32;
+		/*
+		 *	Save a pointer to the top of the "kernel" stack -
+		 *	actually the place in the PCB where a trap into
+		 *	kernel mode will push the registers.
+		 */
+		hi_iss = (vm_offset_t)((unsigned long)
+			pmap_cpu_high_map_vaddr(cpu_number(), HIGH_CPU_ISS0) |
+			((unsigned long)pcb->iss & PAGE_MASK));
+
+		cdp->cpu_hi_iss = (void *)hi_iss;
+
+		pmap_high_map(pcb->iss_pte0, HIGH_CPU_ISS0);
+		pmap_high_map(pcb->iss_pte1, HIGH_CPU_ISS1);
+
+		hi_iss32 = (x86_saved_state32_tagged_t *) hi_iss;
+		assert(hi_iss32->tag == x86_SAVED_STATE32);
+
+		hi_pcb_stack_top = (int) (hi_iss32 + 1);
+
+		/*
+		 * For fast syscall, top of interrupt stack points to pcb stack
+		 */
+		*(vm_offset_t *) current_sstk() = hi_pcb_stack_top;
+
+		current_ktss()->esp0 = hi_pcb_stack_top;
+
+	} else if (is_saved_state64(pcb->iss)) {
+		/*
+		 * The test above is performed against the thread save state
+		 * flavor and not task's 64-bit feature flag because of the
+		 * thread/task 64-bit state divergence that can arise in
+		 * task_set_64bit() x86: the task state is changed before
+		 * the individual thread(s).
+		 */
+	        x86_saved_state64_tagged_t	*iss64;
+		vm_offset_t			isf;
+
+		assert(is_saved_state64(pcb->iss));
+						   
+		iss64 = (x86_saved_state64_tagged_t *) pcb->iss;
+	
+		/*
+		 * Set pointer to PCB's interrupt stack frame in cpu data.
+		 * Used by syscall and double-fault trap handlers.
+		 */
+		isf = (vm_offset_t) &iss64->state.isf;
+		cdp->cpu_uber.cu_isf = UBER64(isf);
+		pcb_stack_top = (vm_offset_t) (iss64 + 1);
+		/* require 16-byte alignment */
+		assert((pcb_stack_top & 0xF) == 0);
+		/* Interrupt stack is pcb */
+		current_ktss64()->rsp0 = UBER64(pcb_stack_top);
+
+		/*
+		 * Top of temporary sysenter stack points to pcb stack.
+		 * Although this is not normally used by 64-bit users,
+		 * it needs to be set in case a sysenter is attempted.
+		 */
+		*current_sstk64() = UBER64(pcb_stack_top);
+
+		cdp->cpu_task_map = new->map->pmap->pm_task_map; 
+
+		/*
+		 * Enable the 64-bit user code segment, USER64_CS.
+		 * Disable the 32-bit user code segment, USER_CS.
+		 */
+		ldt_desc_p(USER64_CS)->access |= ACC_PL_U;
+		ldt_desc_p(USER_CS)->access &= ~ACC_PL_U;
+
+	} else {
+		x86_saved_state_compat32_t	*iss32compat;
+		vm_offset_t			isf;
+
+		assert(is_saved_state32(pcb->iss));
+		iss32compat = (x86_saved_state_compat32_t *) pcb->iss;
+
+		pcb_stack_top = (int) (iss32compat + 1);
+		/* require 16-byte alignment */
+		assert((pcb_stack_top & 0xF) == 0);
+
+		/*
+		 * Set pointer to PCB's interrupt stack frame in cpu data.
+		 * Used by debug trap handler.
+		 */
+		isf = (vm_offset_t) &iss32compat->isf64;
+		cdp->cpu_uber.cu_isf = UBER64(isf);
+
+		/* Top of temporary sysenter stack points to pcb stack */
+		*current_sstk64() = UBER64(pcb_stack_top);
+
+		/* Interrupt stack is pcb */
+		current_ktss64()->rsp0 = UBER64(pcb_stack_top);
+
+		cdp->cpu_task_map = TASK_MAP_32BIT;
+		/* Precalculate pointers to syscall argument store, for use
+		 * in the trampolines.
+		 */
+		cdp->cpu_uber_arg_store = UBER64((vm_offset_t)get_bsduthreadarg(new));
+		cdp->cpu_uber_arg_store_valid = UBER64((vm_offset_t)&pcb->arg_store_valid);
+		pcb->arg_store_valid = 0;
+
+		/*
+		 * Disable USER64_CS
+		 * Enable USER_CS
+		 */
+		ldt_desc_p(USER64_CS)->access &= ~ACC_PL_U;
+		ldt_desc_p(USER_CS)->access |= ACC_PL_U;
+	}
+
+	/*
+	 * Set the thread`s cthread (a.k.a pthread)
+	 * For 32-bit user this involves setting the USER_CTHREAD
+	 * descriptor in the LDT to point to the cthread data.
+	 * The involves copying in the pre-initialized descriptor.
+	 */ 
+	ldtp = (struct real_descriptor *)current_ldt();
+	ldtp[sel_idx(USER_CTHREAD)] = pcb->cthread_desc;
+	if (pcb->uldt_selector != 0)
+		ldtp[sel_idx(pcb->uldt_selector)] = pcb->uldt_desc;
+
+
+	/*
+	 * For 64-bit, we additionally set the 64-bit User GS base
+	 * address. On return to 64-bit user, the GS.Base MSR will be written.
+	 */
+	cdp->cpu_uber.cu_user_gs_base = pcb->cthread_self;
+
+	/*
+	 * Set the thread`s LDT or LDT entry.
+	 */
+	if (new->task == TASK_NULL || new->task->i386_ldt == 0) {
+		/*
+		 * Use system LDT.
+		 */
+	       	ml_cpu_set_ldt(KERNEL_LDT);
+	} else {
+		/*
+		 * Task has its own LDT.
+		 */
+		user_ldt_set(new);
+	}
+
+	/*
+	 * Bump the scheduler generation count in the commpage.
+	 * This can be read by user code to detect its preemption.
+	 */
+	commpage_sched_gen_inc();
+}
+#endif
+>>>>>>> origin/10.6
 
 /*
  * Switch to the first thread on a CPU.
@@ -477,7 +818,11 @@ machine_thread_state_initialize(
      * The initialized state will then be lazily faulted-in, if required.
      * And if we're target, re-arm the no-fpu trap.
      */
+<<<<<<< HEAD
 	if (thread->machine.ifps) {
+=======
+	if (thread->machine.pcb->ifps) {
+>>>>>>> origin/10.6
 		(void) fpu_set_fxstate(thread, NULL, x86_FLOAT_STATE64);
 
 		if (thread == current_thread())
@@ -900,6 +1245,56 @@ machine_thread_set_state(
 		if (state->fsh.flavor == x86_FLOAT_STATE32 && state->fsh.count == x86_FLOAT_STATE32_COUNT &&
 		    !thread_is_64bit(thr_act)) {
 			return fpu_set_fxstate(thr_act, (thread_state_t)&state->ufs.fs32, x86_FLOAT_STATE32); 
+<<<<<<< HEAD
+		}
+		return(KERN_INVALID_ARGUMENT);
+	}
+
+	case x86_AVX_STATE32:
+	{
+		if (count != x86_AVX_STATE32_COUNT)
+			return(KERN_INVALID_ARGUMENT);
+
+		if (thread_is_64bit(thr_act))
+			return(KERN_INVALID_ARGUMENT);
+
+		return fpu_set_fxstate(thr_act, tstate, flavor);
+	}
+
+	case x86_AVX_STATE64:
+	{
+		if (count != x86_AVX_STATE64_COUNT)
+			return(KERN_INVALID_ARGUMENT);
+
+		if (!thread_is_64bit(thr_act))
+			return(KERN_INVALID_ARGUMENT);
+
+		return fpu_set_fxstate(thr_act, tstate, flavor);
+	}
+
+	case x86_AVX_STATE:
+	{   
+		x86_avx_state_t       *state;
+
+		if (count != x86_AVX_STATE_COUNT)
+			return(KERN_INVALID_ARGUMENT);
+
+		state = (x86_avx_state_t *)tstate;
+		if (state->ash.flavor == x86_AVX_STATE64 &&
+		    state->ash.count  == x86_FLOAT_STATE64_COUNT &&
+		    thread_is_64bit(thr_act)) {
+			return fpu_set_fxstate(thr_act,
+					       (thread_state_t)&state->ufs.as64,
+					       x86_FLOAT_STATE64);
+		}
+		if (state->ash.flavor == x86_FLOAT_STATE32 &&
+		    state->ash.count  == x86_FLOAT_STATE32_COUNT &&
+		    !thread_is_64bit(thr_act)) {
+			return fpu_set_fxstate(thr_act,
+					       (thread_state_t)&state->ufs.as32,
+					       x86_FLOAT_STATE32); 
+=======
+>>>>>>> origin/10.6
 		}
 		return(KERN_INVALID_ARGUMENT);
 	}
@@ -1220,8 +1615,18 @@ machine_thread_get_state(
 		return(kret);
 	    }
 
+<<<<<<< HEAD
+<<<<<<< HEAD
 	    case x86_AVX_STATE32:
 	    {
+=======
+	case x86_AVX_STATE32:
+	{
+>>>>>>> origin/10.6
+=======
+	    case x86_AVX_STATE32:
+	    {
+>>>>>>> origin/10.8
 		if (*count != x86_AVX_STATE32_COUNT)
 			return(KERN_INVALID_ARGUMENT);
 
@@ -1231,10 +1636,24 @@ machine_thread_get_state(
 		*count = x86_AVX_STATE32_COUNT;
 
 		return fpu_get_fxstate(thr_act, tstate, flavor);
+<<<<<<< HEAD
+<<<<<<< HEAD
 	    }
 
 	    case x86_AVX_STATE64:
 	    {
+=======
+	}
+
+	case x86_AVX_STATE64:
+	{
+>>>>>>> origin/10.6
+=======
+	    }
+
+	    case x86_AVX_STATE64:
+	    {
+>>>>>>> origin/10.8
 		if (*count != x86_AVX_STATE64_COUNT)
 			return(KERN_INVALID_ARGUMENT);
 
@@ -1244,6 +1663,10 @@ machine_thread_get_state(
 		*count = x86_AVX_STATE64_COUNT;
 
 		return fpu_get_fxstate(thr_act, tstate, flavor);
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.8
 	    }
 
 	    case x86_AVX_STATE:
@@ -1274,6 +1697,12 @@ machine_thread_get_state(
 
 		return(kret);
 	    }
+<<<<<<< HEAD
+=======
+	}
+>>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.8
 
 	    case x86_THREAD_STATE32: 
 	    {
@@ -1624,6 +2053,159 @@ machine_thread_get_kern_state(
 }
 
 
+<<<<<<< HEAD
+=======
+/*
+ * Initialize the machine-dependent state for a new thread.
+ */
+kern_return_t
+machine_thread_create(
+	thread_t		thread,
+	task_t			task)
+{
+	pcb_t			pcb = &thread->machine.xxx_pcb;
+	x86_saved_state_t	*iss;
+
+#if NCOPY_WINDOWS > 0
+	inval_copy_windows(thread);
+
+	thread->machine.physwindow_pte = 0;
+	thread->machine.physwindow_busy = 0;
+#endif
+
+	/*
+	 * Allocate pcb only if required.
+	 */
+	if (pcb->sf == NULL) {
+		pcb->sf = zalloc(iss_zone);
+		if (pcb->sf == NULL)
+			panic("iss_zone");
+	}
+
+        if (task_has_64BitAddr(task)) {
+		x86_sframe64_t		*sf64;
+
+		sf64 = (x86_sframe64_t *) pcb->sf;
+
+		bzero((char *)sf64, sizeof(x86_sframe64_t));
+
+		iss = (x86_saved_state_t *) &sf64->ssf;
+		iss->flavor = x86_SAVED_STATE64;
+		/*
+		 *      Guarantee that the bootstrapped thread will be in user
+		 *      mode.
+		 */
+		iss->ss_64.isf.rflags = EFL_USER_SET;
+		iss->ss_64.isf.cs = USER64_CS;
+		iss->ss_64.isf.ss = USER_DS;
+		iss->ss_64.fs = USER_DS;
+		iss->ss_64.gs = USER_DS;
+	} else {
+		if (cpu_mode_is64bit()) {
+			x86_sframe_compat32_t      *sfc32;
+
+			sfc32 = (x86_sframe_compat32_t *)pcb->sf;
+
+			bzero((char *)sfc32, sizeof(x86_sframe_compat32_t));
+
+			iss = (x86_saved_state_t *) &sfc32->ssf.iss32;
+			iss->flavor = x86_SAVED_STATE32;
+#if defined(__i386__)
+#if DEBUG
+			{
+				x86_saved_state_compat32_t *xssc;
+
+				xssc  = (x86_saved_state_compat32_t *) iss;
+
+				xssc->pad_for_16byte_alignment[0] = 0x64326432;
+				xssc->pad_for_16byte_alignment[1] = 0x64326432;
+			}
+#endif /* DEBUG */
+		} else {
+			x86_sframe32_t		*sf32;
+			struct real_descriptor	*ldtp;
+			pmap_paddr_t		paddr;
+
+			sf32 = (x86_sframe32_t *) pcb->sf;
+
+			bzero((char *)sf32, sizeof(x86_sframe32_t));
+
+			iss = (x86_saved_state_t *) &sf32->ssf;
+			iss->flavor = x86_SAVED_STATE32;
+			pcb->iss_pte0 = pte_kernel_rw(kvtophys((vm_offset_t)iss));
+			if (0 == (paddr = pa_to_pte(kvtophys((vm_offset_t)iss + PAGE_SIZE))))
+			        pcb->iss_pte1 = INTEL_PTE_INVALID;
+			else
+	      			pcb->iss_pte1 = pte_kernel_rw(paddr);
+
+
+			ldtp = (struct real_descriptor *)
+				    pmap_index_to_virt(HIGH_FIXED_LDT_BEGIN);
+			pcb->cthread_desc = ldtp[sel_idx(USER_DS)];
+			pcb->uldt_desc = ldtp[sel_idx(USER_DS)];
+#endif /* __i386__ */
+		}
+		/*
+		 *      Guarantee that the bootstrapped thread will be in user
+		 *      mode.
+		 */
+		iss->ss_32.cs = USER_CS;
+		iss->ss_32.ss = USER_DS;
+		iss->ss_32.ds = USER_DS;
+		iss->ss_32.es = USER_DS;
+		iss->ss_32.fs = USER_DS;
+		iss->ss_32.gs = USER_DS;
+		iss->ss_32.efl = EFL_USER_SET;
+
+	}
+	pcb->iss = iss;
+
+	thread->machine.pcb = pcb;
+	simple_lock_init(&pcb->lock, 0);
+
+	pcb->arg_store_valid = 0;
+	pcb->cthread_self = 0;
+	pcb->uldt_selector = 0;
+
+	/* Ensure that the "cthread" descriptor describes a valid
+	 * segment.
+	 */
+	if ((pcb->cthread_desc.access & ACC_P) == 0) {
+		struct real_descriptor	*ldtp;
+		ldtp = (struct real_descriptor *)current_ldt();
+		pcb->cthread_desc = ldtp[sel_idx(USER_DS)];
+	}
+
+
+	return(KERN_SUCCESS);
+}
+
+/*
+ * Machine-dependent cleanup prior to destroying a thread
+ */
+void
+machine_thread_destroy(
+	thread_t		thread)
+{
+	register pcb_t	pcb = thread->machine.pcb;
+
+	assert(pcb);
+        
+	if (pcb->ifps != 0)
+		fpu_free(pcb->ifps);
+	if (pcb->sf != 0) {
+		zfree(iss_zone, pcb->sf);
+		pcb->sf = 0;
+	}
+	if (pcb->ids) {
+		zfree(ids_zone, pcb->ids);
+		pcb->ids = NULL;
+	}
+	thread->machine.pcb = (pcb_t)0;
+
+}
+
+>>>>>>> origin/10.6
 void
 machine_thread_switch_addrmode(thread_t thread)
 {
@@ -1641,9 +2223,15 @@ machine_thread_switch_addrmode(thread_t thread)
 
 	/* If we're switching ourselves, reset the pcb addresses etc. */
 	if (thread == current_thread()) {
+<<<<<<< HEAD
 		boolean_t istate = ml_set_interrupts_enabled(FALSE);
 		act_machine_switch_pcb(NULL, thread);
 		ml_set_interrupts_enabled(istate);
+=======
+	  if (current_cpu_datap()->cpu_active_cr3 != kernel_pmap->pm_cr3)
+		pmap_load_kernel_cr3();
+	  act_machine_switch_pcb(thread);
+>>>>>>> origin/10.5
 	}
 	enable_preemption();
 }

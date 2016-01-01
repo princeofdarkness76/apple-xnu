@@ -54,6 +54,11 @@
 // include the correct file to find real_ncpus
 #if defined(__i386__) || defined(__x86_64__)
 #	include <i386/mp.h>	
+<<<<<<< HEAD
+=======
+#elif defined(__ppc__) || defined(__ppc64__)
+#	include <ppc/cpu_internal.h>
+>>>>>>> origin/10.5
 #else
 // fall back on declaring it extern.  The linker will sort us out.
 extern unsigned int real_ncpus;

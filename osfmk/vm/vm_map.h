@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -275,6 +297,7 @@ struct vm_map_entry {
 	/* boolean_t */	needs_copy:1,	/* object need to be copied? */
 
 		/* Only in task maps: */
+<<<<<<< HEAD
 	/* vm_prot_t */	protection:3,	/* protection code */
 	/* vm_prot_t */	max_protection:3, /* maximum protection */
 	/* vm_inherit_t */ inheritance:2, /* inheritance */
@@ -304,6 +327,26 @@ struct vm_map_entry {
 		__unused:6;
 ;
 
+=======
+	/* vm_prot_t */		protection:3,	/* protection code */
+	/* vm_prot_t */		max_protection:3,/* maximum protection */
+	/* vm_inherit_t */	inheritance:2,	/* inheritance */
+	/* boolean_t */		use_pmap:1,	/* nested pmaps */
+	/*
+	 * IMPORTANT:
+	 * The "alias" field can be updated while holding the VM map lock
+	 * "shared".  It's OK as along as it's the only field that can be
+	 * updated without the VM map "exclusive" lock.
+	 */
+	/* unsigned char */	alias:8,	/* user alias */
+	/* boolean_t */		no_cache:1,	/* should new pages be cached? */
+	/* boolean_t */		permanent:1,	/* mapping can not be removed */
+	/* boolean_t */		superpage_size:3,/* use superpages of a certain size */
+	/* boolean_t */		zero_wired_pages:1, /* zero out the wired pages of this entry it is being deleted without unwiring them */
+	/* boolean_t */		used_for_jit:1,
+	/* boolean_t */	from_reserved_zone:1;	/* Allocated from
+							 * kernel reserved zone	 */
+>>>>>>> origin/10.7
 	unsigned short		wired_count;	/* can be paged if = 0 */
 	unsigned short		user_wired_count; /* for vm_wire */
 #if	DEBUG
@@ -393,6 +436,7 @@ struct _vm_map {
 	decl_lck_mtx_data(,	s_lock)		/* Lock ref, res fields */
 	lck_mtx_ext_t		s_lock_ext;
 	vm_map_entry_t		hint;		/* hint for quick lookups */
+<<<<<<< HEAD
 	struct vm_map_links*	hole_hint;	/* hint for quick hole lookups */
 	union{
 		vm_map_entry_t		_first_free;	/* First free space hint */
@@ -412,6 +456,15 @@ struct _vm_map {
 	/* boolean_t */		map_disallow_data_exec:1, /* Disallow execution from data pages on exec-permissive architectures */
 	/* boolean_t */		holelistenabled:1,
 	/* reserved */		pad:24;
+=======
+	vm_map_entry_t		first_free;	/* First free space hint */
+	boolean_t		wait_for_space;	/* Should callers wait
+						   for space? */
+	boolean_t		wiring_required;/* All memory wired? */
+	boolean_t		no_zero_fill;	/* No zero fill absent pages */
+	boolean_t		mapped;		/* has this map been mapped */
+	boolean_t		prot_copy_allow;/* is VM_PROT_COPY allowed on this map */
+>>>>>>> origin/10.5
 	unsigned int		timestamp;	/* Version number */
 	unsigned int		color_rr;	/* next color (not protected by a lock) */
 #if CONFIG_FREEZE
@@ -570,6 +623,8 @@ extern void		vm_map_init(void);
 
 extern void		vm_kernel_reserved_entry_init(void);
 
+extern void		vm_kernel_reserved_entry_init(void) __attribute__((section("__TEXT, initcode")));
+
 /* Allocate a range in the specified virtual address map and
  * return the entry allocated for that range. */
 extern kern_return_t vm_map_find_space(
@@ -588,8 +643,15 @@ extern void vm_map_clip_end(
 	vm_map_t	map,
 	vm_map_entry_t	entry,
 	vm_map_offset_t	endaddr);
+<<<<<<< HEAD
 extern boolean_t vm_map_entry_should_cow_for_true_share(
 	vm_map_entry_t	entry);
+=======
+#if !CONFIG_EMBEDDED
+extern boolean_t vm_map_entry_should_cow_for_true_share(
+	vm_map_entry_t	entry);
+#endif /* !CONFIG_EMBEDDED */
+>>>>>>> origin/10.7
 
 /* Lookup map entry containing or the specified address in the given map */
 extern boolean_t	vm_map_lookup_entry(
@@ -1217,6 +1279,7 @@ extern void		vm_map_set_user_wire_limit(
 				vm_map_t		map,
 				vm_size_t		limit);
 
+<<<<<<< HEAD
 extern void vm_map_switch_protect(
 				vm_map_t		map, 
 				boolean_t		val);
@@ -1262,6 +1325,11 @@ extern kern_return_t vm_map_page_info(
 	mach_msg_type_number_t	*count);
 #endif /* XNU_KERNEL_PRIVATE */
 
+=======
+extern void		vm_map_set_prot_copy_allow(
+				vm_map_t		map,
+				boolean_t		allow);
+>>>>>>> origin/10.5
 
 #ifdef	MACH_KERNEL_PRIVATE
 
@@ -1373,6 +1441,12 @@ extern kern_return_t vm_map_freeze(
                 
 extern kern_return_t vm_map_thaw(
                 vm_map_t map);
+#endif
+
+#if CONFIG_DYNAMIC_CODE_SIGNING
+extern kern_return_t vm_map_sign(vm_map_t map, 
+				 vm_map_offset_t start, 
+				 vm_map_offset_t end);
 #endif
 
 __END_DECLS

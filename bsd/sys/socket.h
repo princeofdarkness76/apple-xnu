@@ -1,8 +1,18 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +24,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -216,6 +246,7 @@ struct so_tcdbg {
 
 #ifdef PRIVATE
 #define	SO_EXECPATH	0x1085 		/* Application Firewall Socket option */
+<<<<<<< HEAD
 /*
  * Traffic service class definitions (lowest to highest):
  *
@@ -356,6 +387,16 @@ typedef struct sa_endpoints {
 	struct sockaddr	*sae_dstaddr;   /* destination address */
 	socklen_t	sae_dstaddrlen; /* size of destination address */
 } sa_endpoints_t;
+=======
+#define SO_TRAFFIC_CLASS	0x1086		/* Traffic class */
+#define  SO_TC_BE	0		/* Best effort, normal */
+#define  SO_TC_BK	1		/* Background, low priority or bulk traffic */
+#define  SO_TC_VI	2		/* Interactive video, constant bit rate, low latency */
+#define  SO_TC_VO	3		/* Interactive voice, constant bit rate, lowest latency */
+#endif
+#define	SO_LABEL	0x1010		/* socket's MAC label */
+#define	SO_PEERLABEL	0x1011		/* socket's peer MAC label */
+>>>>>>> origin/10.6
 #endif	/* (!_POSIX_C_SOURCE || _DARWIN_C_SOURCE) */
 
 /*
@@ -879,6 +920,7 @@ struct user32_sa_endpoints {
 #define MSG_HAVEMORE	0x2000		/* Data ready to be read */
 #define MSG_RCVMORE	0x4000		/* Data remains in current pkt */
 #endif
+<<<<<<< HEAD
 #ifdef KERNEL_PRIVATE
 #define MSG_COMPAT      0x8000		/* deprecated */
 #endif /* KERNEL_PRIVATE */
@@ -891,6 +933,10 @@ struct user32_sa_endpoints {
 #define MSG_USEUPCALL	0x80000000 /* Inherit upcall in sock_accept */
 #endif
 #endif	/* (!_POSIX_C_SOURCE || _DARWIN_C_SOURCE) */
+=======
+#define MSG_COMPAT      0x8000		/* used in sendit() */
+#define MSG_NEEDSA	0x10000		/* Fail receive if socket address cannot be allocated */
+>>>>>>> origin/10.3
 
 /*
  * Header for ancillary data objects in msg_control buffer.
@@ -935,6 +981,7 @@ struct cmsgcred {
 /* given pointer to struct cmsghdr, return pointer to data */
 #define	CMSG_DATA(cmsg)		((unsigned char *)(cmsg) + \
 				 __DARWIN_ALIGN32(sizeof(struct cmsghdr)))
+<<<<<<< HEAD
 
 /*
  * RFC 2292 requires to check msg_controllen, in case that the kernel returns
@@ -945,6 +992,16 @@ struct cmsgcred {
          (struct cmsghdr *)(mhdr)->msg_control : \
          (struct cmsghdr *)0L)
 
+=======
+
+/* given pointer to struct cmsghdr, return pointer to next cmsghdr */
+#define	CMSG_NXTHDR(mhdr, cmsg)	\
+	(((unsigned char *)(cmsg) + __DARWIN_ALIGN32((uint32_t)(cmsg)->cmsg_len) + \
+	  __DARWIN_ALIGN32(sizeof(struct cmsghdr)) > \
+	    (unsigned char *)(mhdr)->msg_control + (mhdr)->msg_controllen) ? \
+	    (struct cmsghdr *)0L /* NULL */ : \
+	    (struct cmsghdr *)((unsigned char *)(cmsg) + __DARWIN_ALIGN32((uint32_t)(cmsg)->cmsg_len)))
+>>>>>>> origin/10.5
 
 /* 
  * Given pointer to struct cmsghdr, return pointer to next cmsghdr

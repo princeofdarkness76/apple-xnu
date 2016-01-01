@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -127,6 +153,17 @@
 #define	IFT_SMDSICIP	0x34		/* SMDS InterCarrier Interface */
 #define	IFT_PROPVIRTUAL	0x35		/* Proprietary Virtual/internal */
 #define	IFT_PROPMUX	0x36		/* Proprietary Multiplexing */
+<<<<<<< HEAD
+=======
+#define	IFT_GIF		0x37		/*0xf0*/
+#define	IFT_FAITH	0x38		/*0xf2*/
+#define	IFT_STF		0x39		/*0xf3*/
+#define	IFT_L2VLAN	0x87		/* Layer 2 Virtual LAN using 802.1Q */
+#define IFT_IEEE8023ADLAG 0x88		/* IEEE802.3ad Link Aggregate */
+#define	IFT_IEEE1394	0x90		/* IEEE1394 High Performance SerialBus*/
+#define IFT_BRIDGE	0xd1		/* Transparent bridge interface */
+
+>>>>>>> origin/10.6
 /*
  * IFT_GIF, IFT_FAITH and IFT_FAITH are not based on IANA assignments.
  * Note: IFT_STF has a defined ifType: 0xd7 (215), but we use 0x39.

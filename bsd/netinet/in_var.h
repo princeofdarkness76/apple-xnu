@@ -1,6 +1,11 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +20,24 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +45,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /*
  * Copyright (c) 1985, 1986, 1993
@@ -77,6 +114,7 @@
  * of the structure and is assumed to be first.
  */
 struct in_ifaddr {
+<<<<<<< HEAD
 	struct ifaddr ia_ifa;		/* protocol-independent info */
 #define	ia_ifp		ia_ifa.ifa_ifp
 #define	ia_flags	ia_ifa.ifa_flags
@@ -92,6 +130,22 @@ struct in_ifaddr {
 #define	ia_broadaddr	ia_dstaddr
 	struct sockaddr_in ia_sockmask;	/* reserve space for general netmask */
 	TAILQ_ENTRY(in_ifaddr) ia_hash;	/* hash bucket entry */
+=======
+	struct ifaddr		ia_ifa;		/* protocol-independent info */
+#define	ia_ifp			ia_ifa.ifa_ifp
+#define	ia_flags		ia_ifa.ifa_flags
+						/* ia_{,sub}net{,mask} in host order */
+	u_long			ia_net;		/* network number of interface */
+	u_long			ia_netmask;	/* mask of net part */
+	u_long			ia_subnet;	/* subnet number, including net */
+	u_long			ia_subnetmask;	/* mask of subnet part */
+	struct in_addr		ia_netbroadcast; /* to recognize net broadcasts */
+	TAILQ_ENTRY(in_ifaddr)	ia_link;	/* tailq macro glue */
+	struct sockaddr_in	ia_addr;	/* reserve space for interface name */
+	struct sockaddr_in	ia_dstaddr;	/* reserve space for broadcast addr */
+#define	ia_broadaddr		ia_dstaddr
+	struct sockaddr_in	ia_sockmask;	/* reserve space for general netmask */
+>>>>>>> origin/10.5
 };
 
 #define	ifatoia(ifa)	((struct in_ifaddr *)(void *)(ifa))
@@ -134,6 +188,13 @@ struct kev_in_arpalive {
 	struct net_event_data link_data; /* link where ARP was received */
 };
 
+struct kev_in_collision {
+	struct	net_event_data	link_data;	/* link colliding arp was received on */
+	struct	in_addr	ia_ipaddr;	/* IP address we and another node are using */
+	u_char	hw_len;	/* length of hardware address */
+	u_char	hw_addr[0];	/* variable length hardware address */
+};
+
 
 #ifdef __APPLE_API_PRIVATE
 struct kev_in_portinuse {
@@ -148,6 +209,7 @@ struct kev_in_portinuse {
  */
 #define	KEV_INET_SUBCLASS		1 /* inet subclass identifier */
 
+<<<<<<< HEAD
 #define	KEV_INET_NEW_ADDR		1 /* Userland configured IP address */
 #define	KEV_INET_CHANGED_ADDR		2 /* Address changed event */
 #define	KEV_INET_ADDR_DELETED		3 /* IPv6 address was deleted */
@@ -161,6 +223,18 @@ struct kev_in_portinuse {
 #define	KEV_INET_ARPRTRFAILURE		9 /* ARP resolution failed for router */
 #define	KEV_INET_ARPRTRALIVE		10 /* ARP resolution succeeded for 
 					      router */
+=======
+#define KEV_INET_SUBCLASS 1
+
+#define KEV_INET_NEW_ADDR     1
+#define KEV_INET_CHANGED_ADDR 2
+#define KEV_INET_ADDR_DELETED 3
+#define KEV_INET_SIFDSTADDR   4
+#define KEV_INET_SIFBRDADDR   5
+#define KEV_INET_SIFNETMASK   6
+#define KEV_INET_ARPCOLLISION 7	/* use kev_in_collision */
+#endif /* __APPLE__ */
+>>>>>>> origin/10.2
 
 #ifdef BSD_KERNEL_PRIVATE
 #include <net/if.h>
@@ -469,10 +543,44 @@ struct inpcb;
 /*
  * Return values for imo_multi_filter().
  */
+<<<<<<< HEAD
 #define	MCAST_PASS		0	/* Pass */
 #define	MCAST_NOTGMEMBER	1	/* This host not a member of group */
 #define	MCAST_NOTSMEMBER	2	/* This host excluded source */
 #define	MCAST_MUTED		3	/* [deprecated] */
+=======
+#define IN_NEXT_MULTI(step, inm) \
+	/* struct in_multistep  step; */ \
+	/* struct in_multi *inm; */ \
+do { \
+	if (((inm) = (step).i_inm) != NULL) \
+		(step).i_inm = LIST_NEXT((step).i_inm, inm_link); \
+} while(0)
+
+#define IN_FIRST_MULTI(step, inm) \
+	/* struct in_multistep step; */ \
+	/* struct in_multi *inm; */ \
+do { \
+	(step).i_inm = LIST_FIRST(&in_multihead); \
+	IN_NEXT_MULTI((step), (inm)); \
+} while(0)
+
+struct	route;
+struct	in_multi *in_addmulti(struct in_addr *, struct ifnet *);
+void	in_delmulti(struct in_multi **);
+int	in_control(struct socket *, u_long, caddr_t, struct ifnet *,
+			struct proc *);
+void	in_rtqdrain(void);
+extern struct radix_node *in_validate(struct radix_node *);
+void	ip_input(struct mbuf *);
+int	in_ifadown(struct ifaddr *ifa, int);
+void	in_ifscrub(struct ifnet *, struct in_ifaddr *, int);
+int	ipflow_fastforward(struct mbuf *);
+void	ipflow_create(const struct route *, struct mbuf *);
+void	ipflow_slowtimo(void);
+
+#endif /* KERNEL_PRIVATE */
+>>>>>>> origin/10.5
 
 /*
  * Per-interface IPv4 structures.

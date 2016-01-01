@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 1998-2010 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 1998-2011 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,18 +20,41 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.6
 
 #include <sys/sysctl.h>
 extern "C" {
@@ -48,6 +77,7 @@ extern "C" {
 #define DEBUG_INIT_VALUE 0
 #endif
 
+<<<<<<< HEAD
 SInt64          gIOKitDebug = DEBUG_INIT_VALUE;
 SInt64          gIOKitTrace = 0;
 
@@ -59,6 +89,15 @@ SInt64          gIOKitTrace = 0;
 
 SYSCTL_QUAD(_debug, OID_AUTO, iokit, IODEBUG_CTLFLAGS | CTLFLAG_LOCKED, &gIOKitDebug, "boot_arg io");
 SYSCTL_QUAD(_debug, OID_AUTO, iotrace, CTLFLAG_RW | CTLFLAG_LOCKED, &gIOKitTrace, "trace io");
+=======
+SInt64		gIOKitDebug = DEBUG_INIT_VALUE;
+SInt64		gIOKitTrace = 0x3B;
+UInt64		gIOInterruptThresholdNS = 0;
+
+SYSCTL_QUAD(_debug, OID_AUTO, iokit, CTLFLAG_RW | CTLFLAG_LOCKED, &gIOKitDebug, "boot_arg io");
+SYSCTL_QUAD(_debug, OID_AUTO, iotrace, CTLFLAG_RW | CTLFLAG_LOCKED, &gIOKitTrace, "trace io");
+SYSCTL_QUAD(_debug, OID_AUTO, iointthreshold, CTLFLAG_RW | CTLFLAG_LOCKED, &gIOInterruptThresholdNS, "io interrupt threshold");
+>>>>>>> origin/10.6
 
 
 int             debug_malloc_size;

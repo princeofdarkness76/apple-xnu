@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -12,16 +13,37 @@
  * circumvent, violate, or enable the circumvention or violation of, any
  * terms of an Apple operating system software license agreement.
  * 
+<<<<<<< HEAD
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -90,10 +112,73 @@
 #include <vm/vm_pageout.h>
 #include <vm/vm_fault.h>
 
+<<<<<<< HEAD
 #include <sys/kdebug.h>
 #include <libkern/OSAtomic.h>  
 
+<<<<<<< HEAD
 #include <sys/sdt.h>
+=======
+=======
+>>>>>>> origin/10.3
+#define CL_READ      0x01
+#define CL_ASYNC     0x02
+#define CL_COMMIT    0x04
+#define CL_PAGEOUT   0x10
+#define CL_AGE       0x20
+#define CL_DUMP      0x40
+#define CL_NOZERO    0x80
+#define CL_PAGEIN    0x100
+#define CL_DEV_MEMORY 0x200
+#define CL_PRESERVE   0x400
+
+
+struct clios {
+        u_int  io_completed;       /* amount of io that has currently completed */
+        u_int  io_issued;          /* amount of io that was successfully issued */
+        int    io_error;           /* error code of first error encountered */
+        int    io_wanted;          /* someone is sleeping waiting for a change in state */
+};
+
+
+static void cluster_zero(upl_t upl, vm_offset_t   upl_offset,
+		int size, struct buf *bp);
+static int cluster_read_x(struct vnode *vp, struct uio *uio,
+		off_t filesize, int devblocksize, int flags);
+static int cluster_write_x(struct vnode *vp, struct uio *uio,
+		off_t oldEOF, off_t newEOF, off_t headOff,
+		off_t tailOff, int devblocksize, int flags);
+static int cluster_nocopy_read(struct vnode *vp, struct uio *uio,
+		off_t filesize, int devblocksize, int flags);
+static int cluster_nocopy_write(struct vnode *vp, struct uio *uio,
+		off_t newEOF, int devblocksize, int flags);
+static int cluster_phys_read(struct vnode *vp, struct uio *uio,
+		off_t filesize, int devblocksize, int flags);
+static int cluster_phys_write(struct vnode *vp, struct uio *uio,
+		off_t newEOF, int devblocksize, int flags);
+static int cluster_align_phys_io(struct vnode *vp, struct uio *uio,
+<<<<<<< HEAD
+                vm_offset_t usr_paddr, int xsize, int devblocksize, int flags);
+static int cluster_push_x(struct vnode *vp, off_t EOF, daddr_t first, daddr_t last, int can_delay);
+static int cluster_try_push(struct vnode *vp, off_t newEOF, int can_delay, int push_all);
+=======
+                addr64_t usr_paddr, int xsize, int devblocksize, int flags);
+static int cluster_push_x(struct vnode *vp, off_t EOF, unsigned int first, unsigned int last, int can_delay);
+static int cluster_try_push(struct vnode *vp, off_t EOF, int can_delay, int push_all);
+
+static int sparse_cluster_switch(struct vnode *vp, off_t EOF);
+static int sparse_cluster_push(struct vnode *vp, off_t EOF, int push_all);
+static int sparse_cluster_add(struct vnode *vp, off_t EOF, daddr_t first, daddr_t last);
+
+static kern_return_t vfs_drt_mark_pages(void **cmapp, off_t offset, u_int length, int *setcountp);
+static kern_return_t vfs_drt_unmark_pages(void **cmapp, off_t offset, u_int length);
+static kern_return_t vfs_drt_get_cluster(void **cmapp, off_t *offsetp, u_int *lengthp);
+static kern_return_t vfs_drt_control(void **cmapp, int op_type);
+
+int     ubc_page_op_with_control __P((memory_object_control_t, off_t, int, ppnum_t *, int *));
+>>>>>>> origin/10.3
+
+>>>>>>> origin/10.2
 
 <<<<<<< HEAD
 #include <stdbool.h>
@@ -113,7 +198,11 @@
 
 
 #define CL_READ		0x01
+<<<<<<< HEAD
 #define CL_WRITE	0x02
+=======
+#define CL_WRITE       	0x02
+>>>>>>> origin/10.5
 #define CL_ASYNC	0x04
 #define CL_COMMIT	0x08
 #define CL_PAGEOUT	0x10
@@ -166,7 +255,13 @@ static lck_spin_t cl_direct_read_spin_lock;
 static lck_grp_t	*cl_mtx_grp;
 static lck_attr_t	*cl_mtx_attr;
 static lck_grp_attr_t   *cl_mtx_grp_attr;
+<<<<<<< HEAD
 static lck_mtx_t	*cl_transaction_mtxp;
+=======
+static lck_mtx_t	*cl_mtxp;
+static lck_mtx_t	*cl_transaction_mtxp;
+
+>>>>>>> origin/10.6
 
 #define	IO_UNKNOWN	0
 #define	IO_DIRECT	1
@@ -211,6 +306,7 @@ static int cluster_write_direct(vnode_t vp, struct uio *uio, off_t oldEOF, off_t
 static int cluster_write_contig(vnode_t vp, struct uio *uio, off_t newEOF,
 				int *write_type, u_int32_t *write_length, int (*)(buf_t, void *), void *callback_arg, int bflag);
 
+<<<<<<< HEAD
 static int cluster_align_phys_io(vnode_t vp, struct uio *uio, addr64_t usr_paddr, u_int32_t xsize, int flags, int (*)(buf_t, void *), void *callback_arg);
 
 static int 	cluster_read_prefetch(vnode_t vp, off_t f_offset, u_int size, off_t filesize, int (*callback)(buf_t, void *), void *callback_arg, int bflag);
@@ -219,6 +315,28 @@ static void	cluster_read_ahead(vnode_t vp, struct cl_extent *extent, off_t files
 static int	cluster_push_now(vnode_t vp, struct cl_extent *, off_t EOF, int flags, int (*)(buf_t, void *), void *callback_arg);
 
 static int	cluster_try_push(struct cl_writebehind *, vnode_t vp, off_t EOF, int push_flag, int flags, int (*)(buf_t, void *), void *callback_arg);
+=======
+static int
+cluster_iodone(bp)
+	struct buf *bp;
+{
+        int         b_flags;
+        int         error;
+	int         total_size;
+	int         total_resid;
+	int         upl_offset;
+	int         zero_offset;
+	upl_t       upl;
+	struct buf *cbp;
+	struct buf *cbp_head;
+	struct buf *cbp_next;
+	struct buf *real_bp;
+	struct vnode *vp;
+	struct clios *iostate;
+	int         commit_size;
+	int         pg_offset;
+
+>>>>>>> origin/10.2
 
 static void	sparse_cluster_switch(struct cl_writebehind *, vnode_t vp, off_t EOF, int (*)(buf_t, void *), void *callback_arg);
 static void	sparse_cluster_push(void **cmapp, vnode_t vp, off_t EOF, int push_flag, int io_flags, int (*)(buf_t, void *), void *callback_arg);
@@ -229,6 +347,7 @@ static kern_return_t vfs_drt_get_cluster(void **cmapp, off_t *offsetp, u_int *le
 static kern_return_t vfs_drt_control(void **cmapp, int op_type);
 
 
+<<<<<<< HEAD
 /*
  * For throttled IO to check whether
  * a block is cached by the boot cache
@@ -251,12 +370,23 @@ static kern_return_t vfs_drt_control(void **cmapp, int op_type);
  * See rdar://9974130 The new throttling mechanism breaks the boot cache for throttled IOs
  */
 int (*bootcache_contains_block)(dev_t device, u_int64_t blkno) = NULL;
+=======
+	cbp        = cbp_head;
+	upl_offset = cbp->b_uploffset;
+	upl        = cbp->b_pagelist;
+	b_flags    = cbp->b_flags;
+	real_bp    = cbp->b_real_bp;
+	vp         = cbp->b_vp;
+	zero_offset= cbp->b_validend;
+	iostate    = (struct clios *)cbp->b_iostate;
+>>>>>>> origin/10.2
 
 
 /*
  * limit the internal I/O size so that we
  * can represent it in a 32 bit int
  */
+<<<<<<< HEAD
 #define MAX_IO_REQUEST_SIZE	(1024 * 1024 * 512)
 #define MAX_IO_CONTIG_SIZE	MAX_UPL_SIZE_BYTES
 #define MAX_VECTS		16
@@ -266,37 +396,111 @@ int (*bootcache_contains_block)(dev_t device, u_int64_t blkno) = NULL;
  * we have not historically allowed the write to bypass the UBC. 
  */
 #define MIN_DIRECT_WRITE_SIZE	(16384)
+=======
+#define MAX_IO_REQUEST_SIZE	(1024 * 1024 * 256)
+#define MAX_IO_CONTIG_SIZE     	(MAX_UPL_SIZE * PAGE_SIZE)
+#define MAX_VECTS              	16
+#define MIN_DIRECT_WRITE_SIZE	(4 * PAGE_SIZE)
+>>>>>>> origin/10.5
 
 #define WRITE_THROTTLE		6
 #define WRITE_THROTTLE_SSD	2
 #define WRITE_BEHIND		1
 #define WRITE_BEHIND_SSD	1
 
+<<<<<<< HEAD
 #define PREFETCH		3
 #define PREFETCH_SSD		2
 uint32_t speculative_prefetch_max = (MAX_UPL_SIZE_BYTES * 3);	/* maximum bytes in a specluative read-ahead */
 uint32_t speculative_prefetch_max_iosize = (512 * 1024);	/* maximum I/O size to use in a specluative read-ahead on SSDs*/
 
 
+<<<<<<< HEAD
 #define IO_SCALE(vp, base)		(vp->v_mount->mnt_ioscale * (base))
 #define MAX_CLUSTER_SIZE(vp)		(cluster_max_io_size(vp->v_mount, CL_WRITE))
 #define MAX_PREFETCH(vp, size, is_ssd)	(size * IO_SCALE(vp, ((is_ssd && !ignore_is_ssd) ? PREFETCH_SSD : PREFETCH)))
 
 int	ignore_is_ssd = 0;
 int	speculative_reads_disabled = 0;
+=======
+		cbp = cbp_next;
+	}
+	if (zero_offset)
+	        cluster_zero(upl, zero_offset, PAGE_SIZE - (zero_offset & PAGE_MASK), real_bp);
+
+	if ((vp->v_flag & VTHROTTLED) && (vp->v_numoutput <= (ASYNC_THROTTLE / 3))) {
+	        vp->v_flag &= ~VTHROTTLED;
+		wakeup((caddr_t)&vp->v_numoutput);
+	}
+	if (iostate) {
+	        /*
+		 * someone has issued multiple I/Os asynchrounsly
+		 * and is waiting for them to complete (streaming)
+		 */
+	        if (error && iostate->io_error == 0)
+		        iostate->io_error = error;
+
+		iostate->io_completed += total_size;
+
+		if (iostate->io_wanted) {
+		        /*
+		         * someone is waiting for the state of
+			 * this io stream to change
+			 */
+		        iostate->io_wanted = 0;
+			wakeup((caddr_t)&iostate->io_wanted);
+		}
+	}
+	if ((b_flags & B_NEED_IODONE) && real_bp) {
+		if (error) {
+		        real_bp->b_flags |= B_ERROR;
+			real_bp->b_error = error;
+		}
+		real_bp->b_resid = total_resid;
+>>>>>>> origin/10.2
+=======
+#define MAX_CLUSTER_SIZE(vp)   (cluster_max_io_size(vp->v_mount, CL_WRITE))
+#define MAX_PREFETCH(vp)       (cluster_max_io_size(vp->v_mount, CL_READ) * 3);
+
+
+int speculative_reads_disabled = 0;
+>>>>>>> origin/10.5
 
 /*
  * throttle the number of async writes that
  * can be outstanding on a single vnode
  * before we issue a synchronous write 
  */
+<<<<<<< HEAD
 #define THROTTLE_MAXCNT	0
+=======
+#define HARD_THROTTLE_MAXCNT	0
+#define HARD_THROTTLE_MAXSIZE	(256 * 1024)
+>>>>>>> origin/10.7
 
+<<<<<<< HEAD
 uint32_t throttle_max_iosize = (128 * 1024);
 
 #define THROTTLE_MAX_IOSIZE (throttle_max_iosize)
 
 SYSCTL_INT(_debug, OID_AUTO, lowpri_throttle_max_iosize, CTLFLAG_RW | CTLFLAG_LOCKED, &throttle_max_iosize, 0, "");
+=======
+	if (b_flags & B_COMMIT_UPL) {
+	        pg_offset   = upl_offset & PAGE_MASK;
+		commit_size = (((pg_offset + total_size) + (PAGE_SIZE - 1)) / PAGE_SIZE) * PAGE_SIZE;
+
+		if (error || (b_flags & B_NOCACHE) || ((b_flags & B_PHYS) && !(b_flags & B_READ))) {
+		        int upl_abort_code;
+
+			if (b_flags & B_PHYS)
+			        upl_abort_code = UPL_ABORT_FREE_ON_EMPTY;
+			else if ((b_flags & B_PAGEOUT) && (error != ENXIO)) /* transient error */
+			        upl_abort_code = UPL_ABORT_FREE_ON_EMPTY;
+			else if (b_flags & B_PGIN)
+				upl_abort_code = UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR;
+			else
+			        upl_abort_code = UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_DUMP_PAGES;
+>>>>>>> origin/10.2
 
 
 void
@@ -312,15 +516,34 @@ cluster_init(void) {
 	 */
 	cl_mtx_attr = lck_attr_alloc_init();
 
+<<<<<<< HEAD
 	cl_transaction_mtxp = lck_mtx_alloc_init(cl_mtx_grp, cl_mtx_attr);
+=======
+			if (b_flags & B_PHYS)
+			        upl_commit_flags |= UPL_COMMIT_SET_DIRTY;
+			else if ( !(b_flags & B_PAGEOUT))
+			        upl_commit_flags |= UPL_COMMIT_CLEAR_DIRTY;
+			if (b_flags & B_AGE)
+			        upl_commit_flags |= UPL_COMMIT_INACTIVATE;
+>>>>>>> origin/10.2
 
 	if (cl_transaction_mtxp == NULL)
 	        panic("cluster_init: failed to allocate cl_transaction_mtxp");
 
+<<<<<<< HEAD
 	lck_spin_init(&cl_direct_read_spin_lock, cl_mtx_grp, cl_mtx_attr);
 
 	for (int i = 0; i < CL_DIRECT_READ_LOCK_BUCKETS; ++i)
 		LIST_INIT(&cl_direct_read_locks[i]);
+=======
+	if (cl_mtxp == NULL)
+	        panic("cluster_init: failed to allocate cl_mtxp");
+
+	cl_transaction_mtxp = lck_mtx_alloc_init(cl_mtx_grp, cl_mtx_attr);
+
+	if (cl_transaction_mtxp == NULL)
+	        panic("cluster_init: failed to allocate cl_transaction_mtxp");
+>>>>>>> origin/10.6
 }
 
 
@@ -368,6 +591,85 @@ cluster_max_io_size(mount_t mp, int type)
        return (max_io_size);
 }
 
+<<<<<<< HEAD
+=======
+static int
+cluster_io(vp, upl, upl_offset, f_offset, non_rounded_size, devblocksize, flags, real_bp, iostate)
+	struct vnode *vp;
+	upl_t         upl;
+	vm_offset_t   upl_offset;
+	off_t         f_offset;
+	int           non_rounded_size;
+	int           devblocksize;
+	int           flags;
+	struct buf   *real_bp;
+	struct clios *iostate;
+{
+	struct buf   *cbp;
+	struct iovec *iovp;
+	u_int         size;
+	u_int         io_size;
+	int           io_flags;
+	int           error = 0;
+	int           retval = 0;
+	struct buf   *cbp_head = 0;
+	struct buf   *cbp_tail = 0;
+	upl_page_info_t *pl;
+	int buf_count = 0;
+	int pg_count;
+	int pg_offset;
+	u_int max_iosize;
+	u_int max_vectors;
+	int priv;
+	int zero_offset = 0;
+	u_int  first_lblkno;
+>>>>>>> origin/10.2
+
+
+uint32_t
+cluster_max_io_size(mount_t mp, int type)
+{
+       uint32_t        max_io_size;
+       uint32_t        segcnt;
+       uint32_t        maxcnt;
+ 
+       switch(type) {
+
+       case CL_READ:
+               segcnt = mp->mnt_segreadcnt;
+               maxcnt = mp->mnt_maxreadcnt;
+               break;
+       case CL_WRITE:
+               segcnt = mp->mnt_segwritecnt;
+               maxcnt = mp->mnt_maxwritecnt;
+               break;
+       default:
+               segcnt = min(mp->mnt_segreadcnt, mp->mnt_segwritecnt);
+               maxcnt = min(mp->mnt_maxreadcnt, mp->mnt_maxwritecnt);
+               break;
+       }
+       if (segcnt > MAX_UPL_SIZE) {
+	       /*
+		* don't allow a size beyond the max UPL size we can create
+		*/
+               segcnt = MAX_UPL_SIZE;
+       }
+       max_io_size = min((segcnt * PAGE_SIZE), maxcnt);
+
+       if (max_io_size < (MAX_UPL_TRANSFER * PAGE_SIZE)) {
+	       /*
+		* don't allow a size smaller than the old fixed limit
+		*/
+	       max_io_size = (MAX_UPL_TRANSFER * PAGE_SIZE);
+       } else {
+	       /*
+		* make sure the size specified is a multiple of PAGE_SIZE
+		*/
+	       max_io_size &= ~PAGE_MASK;
+       }
+       return (max_io_size);
+}
+
 
 
 
@@ -376,6 +678,7 @@ cluster_max_io_size(mount_t mp, int type)
 #define CLW_IONOCACHE		0x04
 #define CLW_IOPASSIVE	0x08
 
+<<<<<<< HEAD
 /*
  * if the read ahead context doesn't yet exist,
  * allocate and initialize it...
@@ -398,6 +701,20 @@ cluster_get_rap(vnode_t vp)
 {
         struct ubc_info		*ubc;
 	struct cl_readahead	*rap;
+=======
+	if (flags & CL_AGE)
+	        io_flags |= B_AGE;
+	if (flags & CL_DUMP)
+	        io_flags |= B_NOCACHE;
+	if (flags & CL_PAGEIN)
+		io_flags |= B_PGIN;
+	if (flags & CL_PAGEOUT)
+		io_flags |= B_PAGEOUT;
+	if (flags & CL_COMMIT)
+	        io_flags |= B_COMMIT_UPL;
+	if (flags & CL_PRESERVE)
+	        io_flags |= B_PHYS;
+>>>>>>> origin/10.2
 
 	ubc = vp->v_ubcinfo;
 
@@ -419,13 +736,25 @@ cluster_get_rap(vnode_t vp)
 		}
 		vnode_unlock(vp);
 	}
+<<<<<<< HEAD
 	if (lck_mtx_try_lock(&rap->cl_lockr) == TRUE)
 	        return(rap);
 	
 	return ((struct cl_readahead *)NULL);
 }
+=======
+	while (size) {
+		int vsize;
+		int i;
+		int pl_index;
+		int pg_resid;
+		int num_contig;
+		daddr_t lblkno;
+		daddr_t blkno;
+>>>>>>> origin/10.2
 
 
+<<<<<<< HEAD
 /*
  * if the write behind context doesn't yet exist,
  * and CLW_ALLOCATE is specified, allocate and initialize it...
@@ -438,6 +767,13 @@ cluster_get_rap(vnode_t vp)
  * the lock associated with the write behind context before
  * returning
  */
+=======
+		if (error = VOP_CMAP(vp, f_offset, io_size, &blkno, (size_t *)&io_size, NULL)) {
+		        if (error == EOPNOTSUPP)
+			        panic("VOP_CMAP Unimplemented");
+			break;
+		}
+>>>>>>> origin/10.2
 
 static struct cl_writebehind *
 cluster_get_wbp(vnode_t vp, int flags)
@@ -547,16 +883,213 @@ static void cluster_handle_associated_upl(struct clios *iostate, upl_t upl,
 	if (!size)
 		return;
 
+<<<<<<< HEAD
 	upl_t associated_upl = upl_associated_upl(upl);
+=======
+		if (flags & CL_ASYNC) {
+			cbp->b_flags |= (B_CALL | B_ASYNC);
+		        cbp->b_iodone = (void *)cluster_iodone;
+		}
+		cbp->b_flags |= io_flags;
+>>>>>>> origin/10.2
 
 	if (!associated_upl)
 		return;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 #if 0
 	printf("1: %d %d\n", upl_offset, upl_offset + size);
 #endif
 =======
+=======
+		if (cbp->b_iostate = (void *)iostate)
+		        /*
+			 * caller wants to track the state of this
+			 * io... bump the amount issued against this stream
+			 */
+		        iostate->io_issued += io_size;
+
+		if (flags & CL_READ)
+			KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 26)) | DBG_FUNC_NONE,
+				     cbp->b_lblkno, cbp->b_blkno, upl_offset, io_size, 0);
+		else
+			KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 27)) | DBG_FUNC_NONE,
+				     cbp->b_lblkno, cbp->b_blkno, upl_offset, io_size, 0);
+
+		if (cbp_head) {
+		        cbp_tail->b_trans_next = cbp;
+			cbp_tail = cbp;
+		} else {
+		        cbp_head = cbp;
+			cbp_tail = cbp;
+		}
+		(struct buf *)(cbp->b_trans_head) = cbp_head;
+		buf_count++;
+
+		upl_offset += io_size;
+		f_offset   += io_size;
+		size       -= io_size;
+
+		if ( (!(upl_offset & PAGE_MASK) && !(flags & CL_DEV_MEMORY) && ((flags & CL_ASYNC) || buf_count > 8)) || size == 0) {
+		        /*
+			 * if we have no more I/O to issue or
+			 * the current I/O we've prepared fully
+			 * completes the last page in this request
+			 * and it's either an ASYNC request or 
+			 * we've already accumulated more than 8 I/O's into
+			 * this transaction and it's not an I/O directed to 
+			 * special DEVICE memory
+			 * then go ahead and issue the I/O
+			 */
+start_io:		
+			if (real_bp) {
+			        cbp_head->b_flags |= B_NEED_IODONE;
+				cbp_head->b_real_bp = real_bp;
+			} else
+			        cbp_head->b_real_bp = (struct buf *)NULL;
+
+			if (size == 0) {
+			        /*
+				 * we're about to issue the last I/O for this upl
+				 * if this was a read to the eof and the eof doesn't
+				 * finish on a page boundary, than we need to zero-fill
+				 * the rest of the page....
+				 */
+			        cbp_head->b_validend = zero_offset;
+			} else
+			        cbp_head->b_validend = 0;
+			  
+		        for (cbp = cbp_head; cbp;) {
+				struct buf * cbp_next;
+
+			        if (io_flags & B_WRITEINPROG)
+				        cbp->b_vp->v_numoutput++;
+
+				cbp_next = cbp->b_trans_next;
+				
+				(void) VOP_STRATEGY(cbp);
+				cbp = cbp_next;
+			}
+			if ( !(flags & CL_ASYNC)) {
+			        for (cbp = cbp_head; cbp; cbp = cbp->b_trans_next)
+				        biowait(cbp);
+
+				if (error = cluster_iodone(cbp_head)) {
+					if ((flags & CL_PAGEOUT) && (error == ENXIO))
+						retval = 0;	/* drop the error */
+					else
+						retval = error;
+					error  = 0;
+				}
+			}
+			cbp_head = (struct buf *)0;
+			cbp_tail = (struct buf *)0;
+
+			buf_count = 0;
+		}
+	}
+<<<<<<< HEAD
+	if (error) {
+	        int abort_size;
+
+		io_size = 0;
+		
+	        for (cbp = cbp_head; cbp;) {
+			struct buf * cbp_next;
+ 
+		        if (cbp->b_vectorcount > 1)
+			        _FREE(cbp->b_vectorlist, M_SEGMENT);
+			upl_offset -= cbp->b_bcount;
+			size       += cbp->b_bcount;
+			io_size    += cbp->b_bcount;
+
+			cbp_next = cbp->b_trans_next;
+			free_io_buf(cbp);
+			cbp = cbp_next;
+		}
+		if (iostate) {
+		        /*
+			 * update the error condition for this stream
+			 * since we never really issued the io
+			 * just go ahead and adjust it back
+			 */
+		        if (iostate->io_error == 0)
+			        iostate->io_error = error;
+			iostate->io_issued -= io_size;
+
+			if (iostate->io_wanted) {
+			        /*
+				 * someone is waiting for the state of
+				 * this io stream to change
+				 */
+			        iostate->io_wanted = 0;
+				wakeup((caddr_t)&iostate->io_wanted);
+			}
+		}
+		pg_offset  = upl_offset & PAGE_MASK;
+		abort_size = ((size + pg_offset + (PAGE_SIZE - 1)) / PAGE_SIZE) * PAGE_SIZE;
+
+		if (flags & CL_COMMIT) {
+		        int upl_abort_code;
+
+			if (flags & CL_PRESERVE)
+			        upl_abort_code = UPL_ABORT_FREE_ON_EMPTY;
+			else if ((flags & CL_PAGEOUT) && (error != ENXIO)) /* transient error */
+			        upl_abort_code = UPL_ABORT_FREE_ON_EMPTY;
+			else if (flags & CL_PAGEIN)
+			        upl_abort_code = UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR;
+			else
+				upl_abort_code = UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_DUMP_PAGES;
+
+		        ubc_upl_abort_range(upl, upl_offset - pg_offset, abort_size,
+						upl_abort_code);
+
+			KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 28)) | DBG_FUNC_NONE,
+				     (int)upl, upl_offset - pg_offset, abort_size, error, 0);
+		}
+		if (real_bp) {
+		        real_bp->b_flags |= B_ERROR;
+			real_bp->b_error  = error;
+
+			biodone(real_bp);
+		}
+		if (retval == 0)
+		        retval = error;
+	}
+	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 22)) | DBG_FUNC_END,
+		     (int)f_offset, size, upl_offset, retval, 0);
+
+	return (retval);
+=======
+	struct uthread	*ut;
+	if (throttle_get_io_policy(&ut) == IOPOL_THROTTLE) {
+		size_t devbsdunit;
+		if (vp->v_mount != NULL)
+			devbsdunit = vp->v_mount->mnt_devbsdunit;
+		else
+			devbsdunit = LOWPRI_MAX_NUM_DEV - 1;
+		if (throttle_io_will_be_throttled(-1, devbsdunit)) {
+			return(1);
+		}
+	}
+	return(0);
+>>>>>>> origin/10.5
+}
+
+
+static int
+cluster_rd_prefetch(vp, f_offset, size, filesize, devblocksize)
+	struct vnode *vp;
+	off_t         f_offset;
+	u_int         size;
+	off_t         filesize;
+	int           devblocksize;
+{
+	int           pages_to_fetch;
+	int           skipped_pages;
+
+>>>>>>> origin/10.2
 	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 49)) | DBG_FUNC_START,
 		     (int)f_offset, size, (int)filesize, 0, 0);
 
@@ -811,22 +1344,58 @@ cluster_iodone(buf_t bp, void *callback_arg)
 		     cbp_head, bp->b_lblkno, bp->b_bcount, bp->b_flags, 0);
 
 	if (cbp_head->b_trans_next || !(cbp_head->b_flags & B_EOT)) {
+<<<<<<< HEAD
 		boolean_t	need_wakeup = FALSE;
+
+		lck_mtx_lock_spin(cl_transaction_mtxp);
+=======
 
 		lck_mtx_lock_spin(cl_transaction_mtxp);
 
 		bp->b_flags |= B_TDONE;
+		
+		for (cbp = cbp_head; cbp; cbp = cbp->b_trans_next) {
+		        /*
+			 * all I/O requests that are part of this transaction
+			 * have to complete before we can process it
+			 */
+		        if ( !(cbp->b_flags & B_TDONE)) {
 
+			        KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 20)) | DBG_FUNC_END,
+					     cbp_head, cbp, cbp->b_bcount, cbp->b_flags, 0);
+
+				lck_mtx_unlock(cl_transaction_mtxp);
+				return 0;
+			}
+			if (cbp->b_flags & B_EOT)
+			        transaction_complete = TRUE;
+		}
+		lck_mtx_unlock(cl_transaction_mtxp);
+
+		if (transaction_complete == FALSE) {
+		        KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 20)) | DBG_FUNC_END,
+				     cbp_head, 0, 0, 0, 0);
+>>>>>>> origin/10.6
+
+		bp->b_flags |= B_TDONE;
+
+<<<<<<< HEAD
 		if (bp->b_flags & B_TWANTED) {
 			CLR(bp->b_flags, B_TWANTED);
 			need_wakeup = TRUE;
 		}
+<<<<<<< HEAD
 		for (cbp = cbp_head; cbp; cbp = cbp->b_trans_next) {
 			/*
 			 * all I/O requests that are part of this transaction
 			 * have to complete before we can process it
 			 */
 			if ( !(cbp->b_flags & B_TDONE)) {
+=======
+	return (cluster_io(vp, upl, upl_offset, f_offset, io_size, devblocksize,
+			   local_flags, (struct buf *)0, (struct clios *)0));
+}
+>>>>>>> origin/10.2
 
 				KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 20)) | DBG_FUNC_END,
 					     cbp_head, cbp, cbp->b_bcount, cbp->b_flags, 0);
@@ -851,6 +1420,8 @@ cluster_iodone(buf_t bp, void *callback_arg)
 				     cbp_head, 0, 0, 0, 0);
 			return 0;
 		}
+=======
+>>>>>>> origin/10.6
 	}
 	error       = 0;
 	total_size  = 0;
@@ -868,9 +1439,18 @@ cluster_iodone(buf_t bp, void *callback_arg)
 	if (real_bp)
 	        real_bp->b_dev = cbp->b_dev;
 
+<<<<<<< HEAD
 	while (cbp) {
 		if ((cbp->b_flags & B_ERROR) && error == 0)
 		        error = cbp->b_error;
+=======
+	if (size > rounded_size && (local_flags & CL_COMMIT))
+		ubc_upl_abort_range(upl, upl_offset + rounded_size,
+				    size - (upl_offset + rounded_size), UPL_ABORT_FREE_ON_EMPTY | UPL_ABORT_ERROR);
+	
+	retval = cluster_io(vp, upl, upl_offset, f_offset, io_size, devblocksize,
+			   local_flags | CL_READ | CL_PAGEIN, (struct buf *)0, (struct clios *)0);
+>>>>>>> origin/10.2
 
 		total_resid += cbp->b_resid;
 		total_size  += cbp->b_bcount;
@@ -902,8 +1482,13 @@ cluster_iodone(buf_t bp, void *callback_arg)
 	if (error == 0 && total_resid)
 		error = EIO;
 
+<<<<<<< HEAD
 	if (error == 0) {
 	        int	(*cliodone_func)(buf_t, void *) = (int (*)(buf_t, void *))(cbp_head->b_cliodone);
+=======
+        return (cluster_io(bp->b_vp, bp->b_pagelist, 0, f_offset, bp->b_bcount, 0, flags, bp, (struct clios *)0));
+}
+>>>>>>> origin/10.2
 
 		if (cliodone_func != NULL) {
 		        cbp_head->b_bcount = transaction_size;
@@ -914,11 +1499,30 @@ cluster_iodone(buf_t bp, void *callback_arg)
 	if (zero_offset)
 	        cluster_zero(upl, zero_offset, PAGE_SIZE - (zero_offset & PAGE_MASK), real_bp);
 
+<<<<<<< HEAD
         free_io_buf(cbp_head);
+=======
+	if ( (!(vp->v_flag & VNOCACHE_DATA)) || (!uio) || (uio->uio_segflg != UIO_USERSPACE))
+	  {
+	    retval = cluster_write_x(vp, uio, oldEOF, newEOF, headOff, tailOff, devblocksize, flags);
+	    return(retval);
+	  }
+	
+	while (uio->uio_resid && uio->uio_offset < newEOF && retval == 0)
+	  {
+	    /* we know we have a resid, so this is safe */
+	    iov = uio->uio_iov;
+	    while (iov->iov_len == 0) {
+	      uio->uio_iov++;
+	      uio->uio_iovcnt--;
+	      iov = uio->uio_iov;
+	    }
+>>>>>>> origin/10.2
 
 	if (iostate) {
 	        int need_wakeup = 0;
 
+<<<<<<< HEAD
 	        /*
 		 * someone has issued multiple I/Os asynchrounsly
 		 * and is waiting for them to complete (streaming)
@@ -977,6 +1581,127 @@ cluster_iodone(buf_t bp, void *callback_arg)
 	return (error);
 }
 
+=======
+            if (upl_flags & UPL_PHYS_CONTIG)
+	      {
+		if (flags & IO_HEADZEROFILL)
+		  {
+		    flags &= ~IO_HEADZEROFILL;
+
+		    if (retval = cluster_write_x(vp, (struct uio *)0, 0, uio->uio_offset, headOff, 0, devblocksize, IO_HEADZEROFILL))
+		        return(retval);
+		  }
+
+		retval = cluster_phys_write(vp, uio, newEOF, devblocksize, flags);
+
+		if (uio->uio_resid == 0 && (flags & IO_TAILZEROFILL))
+		  {
+		    retval = cluster_write_x(vp, (struct uio *)0, 0, tailOff, uio->uio_offset, 0, devblocksize, IO_HEADZEROFILL);
+		    return(retval);
+		  }
+	      }
+	    else if ((uio->uio_resid < 4 * PAGE_SIZE) || (flags & (IO_TAILZEROFILL | IO_HEADZEROFILL))) 
+	      {
+		/*
+		 * We set a threshhold of 4 pages to decide if the nocopy
+		 * write loop is worth the trouble...
+		 * we also come here if we're trying to zero the head and/or tail
+		 * of a partially written page, and the user source is not a physically contiguous region
+		 */
+		retval = cluster_write_x(vp, uio, oldEOF, newEOF, headOff, tailOff, devblocksize, flags);
+		return(retval);
+	      }
+	    else if (uio->uio_offset & PAGE_MASK_64)
+	      {
+		/* Bring the file offset write up to a pagesize boundary */
+		clip_size = (PAGE_SIZE - (uio->uio_offset & PAGE_MASK_64));
+		if (uio->uio_resid < clip_size)
+		  clip_size = uio->uio_resid;
+		/* 
+		 * Fake the resid going into the cluster_write_x call
+		 * and restore it on the way out.
+		 */
+		prev_resid = uio->uio_resid;
+		uio->uio_resid = clip_size;
+		retval = cluster_write_x(vp, uio, oldEOF, newEOF, headOff, tailOff, devblocksize, flags);
+		uio->uio_resid = prev_resid - (clip_size - uio->uio_resid);
+	      }
+	    else if ((int)iov->iov_base & PAGE_MASK_64)
+	      {
+		clip_size = iov->iov_len;
+		prev_resid = uio->uio_resid;
+		uio->uio_resid = clip_size;
+		retval = cluster_write_x(vp, uio, oldEOF, newEOF, headOff, tailOff, devblocksize, flags);
+		uio->uio_resid = prev_resid - (clip_size - uio->uio_resid);
+	      }
+	    else
+	      {
+		/* 
+		 * If we come in here, we know the offset into
+		 * the file is on a pagesize boundary
+		 */
+
+		max_io_size = newEOF - uio->uio_offset;
+		clip_size = uio->uio_resid;
+		if (iov->iov_len < clip_size)
+		  clip_size = iov->iov_len;
+		if (max_io_size < clip_size)
+		  clip_size = max_io_size;
+
+		if (clip_size < PAGE_SIZE)
+		  {
+		    /*
+		     * Take care of tail end of write in this vector
+		     */
+		    prev_resid = uio->uio_resid;
+		    uio->uio_resid = clip_size;
+		    retval = cluster_write_x(vp, uio, oldEOF, newEOF, headOff, tailOff, devblocksize, flags);
+		    uio->uio_resid = prev_resid - (clip_size - uio->uio_resid);
+		  }
+		else
+		  {
+		    /* round clip_size down to a multiple of pagesize */
+		    clip_size = clip_size & ~(PAGE_MASK);
+		    prev_resid = uio->uio_resid;
+		    uio->uio_resid = clip_size;
+		    retval = cluster_nocopy_write(vp, uio, newEOF, devblocksize, flags);
+		    if ((retval == 0) && uio->uio_resid)
+		      retval = cluster_write_x(vp, uio, oldEOF, newEOF, headOff, tailOff, devblocksize, flags);
+		    uio->uio_resid = prev_resid - (clip_size - uio->uio_resid);
+		  }
+	      } /* end else */
+	  } /* end while */
+	return(retval);
+}
+
+
+static int
+cluster_nocopy_write(vp, uio, newEOF, devblocksize, flags)
+	struct vnode *vp;
+	struct uio   *uio;
+	off_t         newEOF;
+	int           devblocksize;
+	int           flags;
+{
+	upl_t            upl;
+	upl_page_info_t  *pl;
+	off_t 	         upl_f_offset;
+	vm_offset_t      upl_offset;
+	off_t            max_io_size;
+	int              io_size;
+	int              io_flag;
+	int              upl_size;
+	int              upl_needed_size;
+	int              pages_in_pl;
+	int              upl_flags;
+	kern_return_t    kret;
+	struct iovec     *iov;
+	int              i;
+	int              first = 1;
+	int              force_data_sync;
+	int              error  = 0;
+	struct clios     iostate;
+>>>>>>> origin/10.2
 
 uint32_t
 cluster_throttle_io_limit(vnode_t vp, uint32_t *limit)
@@ -988,11 +1713,27 @@ cluster_throttle_io_limit(vnode_t vp, uint32_t *limit)
 	return 0;   
 }
 
+<<<<<<< HEAD
+=======
+	/*
+	 * When we enter this routine, we know
+	 *  -- the offset into the file is on a pagesize boundary
+	 *  -- the resid is a page multiple
+	 *  -- the resid will not exceed iov_len
+	 */
+	cluster_try_push(vp, newEOF, 0, 1);
+
+	iostate.io_completed = 0;
+	iostate.io_issued = 0;
+	iostate.io_error = 0;
+	iostate.io_wanted = 0;
+>>>>>>> origin/10.2
 
 void
 cluster_zero(upl_t upl, upl_offset_t upl_offset, int size, buf_t bp)
 {
 
+<<<<<<< HEAD
 	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 23)) | DBG_FUNC_START,
 		     upl_offset, size, bp, 0, 0);
 
@@ -1084,82 +1825,179 @@ cluster_wait_IO(buf_t cbp_head, int async)
 			   (int)uio->uio_offset, (int)uio->uio_resid, kret, 2, 0);
 	      return(0);
 	    }
+=======
+	while (uio->uio_resid && uio->uio_offset < newEOF && error == 0) {
+	        io_size = uio->uio_resid;
 
-	  /*
-	   * Consider the possibility that upl_size wasn't satisfied.
-	   */
-	  if (upl_size != upl_needed_size)
-	    io_size = (upl_size - (int)upl_offset) & ~PAGE_MASK;
+		if (io_size > (MAX_UPL_TRANSFER * PAGE_SIZE))
+		        io_size = MAX_UPL_TRANSFER * PAGE_SIZE;
 
+		if (first) {
+	                if (io_size > (MAX_UPL_TRANSFER * PAGE_SIZE) / 4)
+		                io_size = (MAX_UPL_TRANSFER * PAGE_SIZE) / 8;
+			first = 0;
+		}
+		upl_offset = (vm_offset_t)iov->iov_base & PAGE_MASK_64;
+		upl_needed_size = (upl_offset + io_size + (PAGE_SIZE -1)) & ~PAGE_MASK;
+
+		KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 76)) | DBG_FUNC_START,
+			     (int)upl_offset, upl_needed_size, (int)iov->iov_base, io_size, 0);
+
+		for (force_data_sync = 0; force_data_sync < 3; force_data_sync++) {
+		        pages_in_pl = 0;
+			upl_size = upl_needed_size;
+			upl_flags = UPL_FILE_IO | UPL_COPYOUT_FROM | UPL_NO_SYNC |
+		                    UPL_CLEAN_IN_PLACE | UPL_SET_INTERNAL;
+
+			kret = vm_map_get_upl(current_map(),
+					      (vm_offset_t)iov->iov_base & ~PAGE_MASK,
+					      &upl_size,
+					      &upl, 
+					      NULL, 
+					      &pages_in_pl,
+					      &upl_flags,
+					      force_data_sync);
+
+			if (kret != KERN_SUCCESS) {
+			        KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 76)) | DBG_FUNC_END,
+					     0, 0, 0, kret, 0);
+
+				/*
+				 * cluster_nocopy_write: failed to get pagelist
+				 *
+				 * we may have already spun some portion of this request
+				 * off as async requests... we need to wait for the I/O
+				 * to complete before returning
+				 */
+				goto wait_for_writes;
+			}
+			pl = UPL_GET_INTERNAL_PAGE_LIST(upl);
+			pages_in_pl = upl_size / PAGE_SIZE;
+>>>>>>> origin/10.2
+
+			for (i = 0; i < pages_in_pl; i++) {
+			        if (!upl_valid_page(pl, i))
+				        break;		  
+			}
+			if (i == pages_in_pl)
+			        break;
+
+<<<<<<< HEAD
 	  KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 76)) | DBG_FUNC_END,
 		       (int)upl_offset, upl_size, iov->iov_base, io_size, 0);		       
+=======
+			/*
+			 * didn't get all the pages back that we
+			 * needed... release this upl and try again
+			 */
+			ubc_upl_abort_range(upl, (upl_offset & ~PAGE_MASK), upl_size, 
+					    UPL_ABORT_FREE_ON_EMPTY);
+		}
+		if (force_data_sync >= 3) {
+		        KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 76)) | DBG_FUNC_END,
+				     i, pages_in_pl, upl_size, kret, 0);
+>>>>>>> origin/10.2
 
-	  if (io_size == 0)
-	    {
-	      ubc_upl_abort_range(upl, (upl_offset & ~PAGE_MASK), upl_size, 
-				   UPL_ABORT_FREE_ON_EMPTY);
-	      KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 75)) | DBG_FUNC_END,
-		     (int)uio->uio_offset, uio->uio_resid, 0, 3, 0);
+			/*
+			 * for some reason, we couldn't acquire a hold on all
+			 * the pages needed in the user's address space
+			 *
+			 * we may have already spun some portion of this request
+			 * off as async requests... we need to wait for the I/O
+			 * to complete before returning
+			 */
+			goto wait_for_writes;
+		}
 
-	      return(0);
-	    }
+		/*
+		 * Consider the possibility that upl_size wasn't satisfied.
+		 */
+		if (upl_size != upl_needed_size)
+		        io_size = (upl_size - (int)upl_offset) & ~PAGE_MASK;
 
-	  /*
-	   * Now look for pages already in the cache
-	   * and throw them away.
-	   */
+		KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 76)) | DBG_FUNC_END,
+			     (int)upl_offset, upl_size, (int)iov->iov_base, io_size, 0);		       
 
-	  upl_f_offset = uio->uio_offset;   /* this is page aligned in the file */
-	  max_io_size = io_size;
+		if (io_size == 0) {
+		        ubc_upl_abort_range(upl, (upl_offset & ~PAGE_MASK), upl_size, 
+					    UPL_ABORT_FREE_ON_EMPTY);
 
-	  while (max_io_size) {
+			/*
+			 * we may have already spun some portion of this request
+			 * off as async requests... we need to wait for the I/O
+			 * to complete before returning
+			 */
+			goto wait_for_writes;
+		}
+		/*
+		 * Now look for pages already in the cache
+		 * and throw them away.
+		 */
 
-	    /*
-	     * Flag UPL_POP_DUMP says if the page is found
-	     * in the page cache it must be thrown away.
-	     */
-	    ubc_page_op(vp, 
-			upl_f_offset,
-			UPL_POP_SET | UPL_POP_BUSY | UPL_POP_DUMP,
-			0, 0);
-	    max_io_size  -= PAGE_SIZE;
-	    upl_f_offset += PAGE_SIZE;
-	  }
+		upl_f_offset = uio->uio_offset;   /* this is page aligned in the file */
+		max_io_size = io_size;
 
-	  /*
-	   * issue a synchronous write to cluster_io
-	   */
+		while (max_io_size) {
+		        /*
+			 * Flag UPL_POP_DUMP says if the page is found
+			 * in the page cache it must be thrown away.
+			 */
+		        ubc_page_op(vp, 
+				    upl_f_offset,
+				    UPL_POP_SET | UPL_POP_BUSY | UPL_POP_DUMP,
+				    0, 0);
+			max_io_size  -= PAGE_SIZE_64;
+			upl_f_offset += PAGE_SIZE_64;
+		}
+		/*
+		 * we want push out these writes asynchronously so that we can overlap
+		 * the preparation of the next I/O
+		 * if there are already too many outstanding writes
+		 * wait until some complete before issuing the next
+		 */
+		while ((iostate.io_issued - iostate.io_completed) > (2 * MAX_UPL_TRANSFER * PAGE_SIZE)) {
+	                iostate.io_wanted = 1;
+			tsleep((caddr_t)&iostate.io_wanted, PRIBIO + 1, "cluster_nocopy_write", 0);
+		}	
+		if (iostate.io_error) {
+		        /*
+			 * one of the earlier writes we issued ran into a hard error
+			 * don't issue any more writes, cleanup the UPL
+			 * that was just created but not used, then
+			 * go wait for all writes that are part of this stream
+			 * to complete before returning the error to the caller
+			 */
+		        ubc_upl_abort_range(upl, (upl_offset & ~PAGE_MASK), upl_size, 
+					    UPL_ABORT_FREE_ON_EMPTY);
 
-	  KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 77)) | DBG_FUNC_START,
-		       (int)upl_offset, (int)uio->uio_offset, io_size, 0, 0);
+		        goto wait_for_writes;
+	        }
+		io_flag = CL_ASYNC | CL_PRESERVE | CL_COMMIT;
 
+<<<<<<< HEAD
 	  error = cluster_io(vp, upl, upl_offset, uio->uio_offset,
 			     io_size, 0, (struct buf *)0);
+=======
+		KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 77)) | DBG_FUNC_START,
+			     (int)upl_offset, (int)uio->uio_offset, io_size, io_flag, 0);
+>>>>>>> origin/10.2
 
-	  if (error == 0) {
-	    /*
-	     * The cluster_io write completed successfully,
-	     * update the uio structure.
-	     */
-	    iov->iov_base += io_size;
-	    iov->iov_len -= io_size;
-	    uio->uio_resid -= io_size;
-	    uio->uio_offset += io_size;
-	  }
-	  /*
-	   * always 'commit' the I/O via the abort primitive whether the I/O
-	   * succeeded cleanly or not... this is necessary to insure that 
-	   * we preserve the state of the DIRTY flag on the pages used to
-	   * provide the data for the I/O... the state of this flag SHOULD
-	   * NOT be changed by a write
-	   */
-	  ubc_upl_abort_range(upl, (upl_offset & ~PAGE_MASK), upl_size, 
-			      UPL_ABORT_FREE_ON_EMPTY);
+		error = cluster_io(vp, upl, upl_offset, uio->uio_offset,
+				   io_size, devblocksize, io_flag, (struct buf *)0, &iostate);
 
+		iov->iov_len    -= io_size;
+		iov->iov_base   += io_size;
+		uio->uio_resid  -= io_size;
+		uio->uio_offset += io_size;
 
+<<<<<<< HEAD
 	  KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 77)) | DBG_FUNC_END,
 		       (int)upl_offset, (int)uio->uio_offset, (int)uio->uio_resid, error, 0);
 >>>>>>> origin/10.1
+=======
+		KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 77)) | DBG_FUNC_END,
+			     (int)upl_offset, (int)uio->uio_offset, (int)uio->uio_resid, error, 0);
+>>>>>>> origin/10.2
 
 				if (!ISSET(cbp->b_flags, B_TDONE)) {
 					DTRACE_IO1(wait__start, buf_t, cbp);
@@ -1180,6 +2018,7 @@ cluster_complete_transaction(buf_t *cbp_head, void *callback_arg, int *retval, i
 	int	error;
 	boolean_t isswapout = FALSE;
 
+<<<<<<< HEAD
 	/*
 	 * cluster_complete_transaction will
 	 * only be called if we've issued a complete chain in synchronous mode
@@ -1195,13 +2034,32 @@ cluster_complete_transaction(buf_t *cbp_head, void *callback_arg, int *retval, i
 	 * so that cluster_iodone sees the transaction as completed
 	 */
 	for (cbp = *cbp_head; cbp; cbp = cbp->b_trans_next)
+<<<<<<< HEAD
 		cbp->b_flags |= B_TDONE;
 	cbp = *cbp_head;
+=======
+wait_for_writes:
+	/*
+	 * make sure all async writes issued as part of this stream
+	 * have completed before we return
+	 */
+	while (iostate.io_issued != iostate.io_completed) {
+	        iostate.io_wanted = 1;
+		tsleep((caddr_t)&iostate.io_wanted, PRIBIO + 1, "cluster_nocopy_write", 0);
+	}	
+	if (iostate.io_error)
+		error = iostate.io_error;
+>>>>>>> origin/10.2
 
 	if ((flags & (CL_ASYNC | CL_PAGEOUT)) == CL_PAGEOUT && vnode_isswap(cbp->b_vp))
 		isswapout = TRUE;
 
 	error = cluster_iodone(cbp, callback_arg);
+=======
+	        cbp->b_flags |= B_TDONE;
+
+	error = cluster_iodone(*cbp_head, callback_arg);
+>>>>>>> origin/10.6
 
 	if ( !(flags & CL_ASYNC) && error && *retval == 0) {
 		if (((flags & (CL_PAGEOUT | CL_KEEPCACHED)) != CL_PAGEOUT) || (error != ENXIO))
@@ -1214,6 +2072,7 @@ cluster_complete_transaction(buf_t *cbp_head, void *callback_arg, int *retval, i
 
 
 static int
+<<<<<<< HEAD
 cluster_io(vnode_t vp, upl_t upl, vm_offset_t upl_offset, off_t f_offset, int non_rounded_size,
 	   int flags, buf_t real_bp, struct clios *iostate, int (*callback)(buf_t, void *), void *callback_arg)
 {
@@ -1238,10 +2097,33 @@ cluster_io(vnode_t vp, upl_t upl, vm_offset_t upl_offset, off_t f_offset, int no
 	mount_t	mp;
 	vm_offset_t upl_end_offset;
 	boolean_t   need_EOT = FALSE;
+=======
+cluster_phys_write(vp, uio, newEOF, devblocksize, flags)
+	struct vnode *vp;
+	struct uio   *uio;
+	off_t        newEOF;
+	int          devblocksize;
+	int          flags;
+{
+	upl_page_info_t *pl;
+	vm_offset_t      src_paddr;
+ 	upl_t            upl;
+	vm_offset_t      upl_offset;
+	int              tail_size;
+	int              io_size;
+	int              upl_size;
+	int              upl_needed_size;
+	int              pages_in_pl;
+	int              upl_flags;
+	kern_return_t    kret;
+	struct iovec     *iov;
+	int              error  = 0;
+>>>>>>> origin/10.2
 
 	/*
 	 * we currently don't support buffers larger than a page
 	 */
+<<<<<<< HEAD
 	if (real_bp && non_rounded_size > PAGE_SIZE)
 		panic("%s(): Called with real buffer of size %d bytes which "
 				"is greater than the maximum allowed size of "
@@ -1250,12 +2132,38 @@ cluster_io(vnode_t vp, upl_t upl, vm_offset_t upl_offset, off_t f_offset, int no
 
 	mp = vp->v_mount;
 
+=======
+	cluster_try_push(vp, newEOF, 0, 1);
+
+	iov = uio->uio_iov;
+	io_size = iov->iov_len;
+	upl_offset = (vm_offset_t)iov->iov_base & PAGE_MASK_64;
+	upl_needed_size = upl_offset + io_size;
+
+	pages_in_pl = 0;
+	upl_size = upl_needed_size;
+	upl_flags = UPL_FILE_IO | UPL_COPYOUT_FROM | UPL_NO_SYNC | 
+	            UPL_CLEAN_IN_PLACE | UPL_SET_INTERNAL;
+
+	kret = vm_map_get_upl(current_map(),
+			      (vm_offset_t)iov->iov_base & ~PAGE_MASK,
+			      &upl_size, &upl, NULL, &pages_in_pl, &upl_flags, 0);
+
+	if (kret != KERN_SUCCESS) {
+	        /*
+		 * cluster_phys_write: failed to get pagelist
+		 * note: return kret here
+		 */
+	      return(EINVAL);
+	}
+>>>>>>> origin/10.2
 	/*
 	 * we don't want to do any funny rounding of the size for IO requests
 	 * coming through the DIRECT or CONTIGUOUS paths...  those pages don't
 	 * belong to us... we can't extend (nor do we need to) the I/O to fill
 	 * out a page
 	 */
+<<<<<<< HEAD
 	if (mp->mnt_devblocksize > 1 && !(flags & (CL_DEV_MEMORY | CL_DIRECT_IO))) {
 	        /*
 		 * round the requested size up so that this I/O ends on a
@@ -1306,6 +2214,64 @@ cluster_io(vnode_t vp, upl_t upl, vm_offset_t upl_offset, off_t f_offset, int no
 		max_vectors = mp->mnt_segwritecnt;
 	}
 	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 22)) | DBG_FUNC_NONE, max_iosize, max_vectors, mp->mnt_devblocksize, 0, 0);
+=======
+	if (upl_size < upl_needed_size) {
+	        kernel_upl_abort_range(upl, 0, upl_size, UPL_ABORT_FREE_ON_EMPTY);
+		return(EINVAL);
+	}
+	pl = ubc_upl_pageinfo(upl);
+
+	src_paddr = (vm_offset_t)upl_phys_page(pl, 0) + ((vm_offset_t)iov->iov_base & PAGE_MASK);
+
+	while (((uio->uio_offset & (devblocksize - 1)) || io_size < devblocksize) && io_size) {
+	        int   head_size;
+
+		head_size = devblocksize - (int)(uio->uio_offset & (devblocksize - 1));
+
+		if (head_size > io_size)
+		        head_size = io_size;
+
+		error = cluster_align_phys_io(vp, uio, src_paddr, head_size, devblocksize, 0);
+
+		if (error) {
+		        ubc_upl_abort_range(upl, 0, upl_size, UPL_ABORT_FREE_ON_EMPTY);
+
+			return(EINVAL);
+		}
+		upl_offset += head_size;
+		src_paddr  += head_size;
+		io_size    -= head_size;
+	}
+	tail_size = io_size & (devblocksize - 1);
+	io_size  -= tail_size;
+
+	if (io_size) {
+	        /*
+		 * issue a synchronous write to cluster_io
+		 */
+	        error = cluster_io(vp, upl, upl_offset, uio->uio_offset,
+				   io_size, 0, CL_DEV_MEMORY, (struct buf *)0, (struct clios *)0);
+	}
+	if (error == 0) {
+	        /*
+		 * The cluster_io write completed successfully,
+		 * update the uio structure
+		 */
+		uio->uio_resid  -= io_size;
+		iov->iov_len    -= io_size;
+	        iov->iov_base   += io_size;
+		uio->uio_offset += io_size;
+		src_paddr       += io_size;
+
+		if (tail_size)
+		        error = cluster_align_phys_io(vp, uio, src_paddr, tail_size, devblocksize, 0);
+	}
+	/*
+	 * just release our hold on the physically contiguous
+	 * region without changing any state
+	 */
+	ubc_upl_abort_range(upl, 0, upl_size, UPL_ABORT_FREE_ON_EMPTY);
+>>>>>>> origin/10.2
 
 	/*
 	 * make sure the maximum iosize is a
@@ -1313,6 +2279,7 @@ cluster_io(vnode_t vp, upl_t upl, vm_offset_t upl_offset, off_t f_offset, int no
 	 */
 	max_iosize  &= ~PAGE_MASK;
 
+<<<<<<< HEAD
 	/*
 	 * Ensure the maximum iosize is sensible.
 	 */
@@ -1330,12 +2297,60 @@ cluster_io(vnode_t vp, upl_t upl, vm_offset_t upl_offset, off_t f_offset, int no
 			else {
 			        u_int max_cluster;
 				u_int max_cluster_size;
+<<<<<<< HEAD
 				u_int scale;
+=======
+
+static int
+cluster_write_x(vp, uio, oldEOF, newEOF, headOff, tailOff, devblocksize, flags)
+	struct vnode *vp;
+	struct uio   *uio;
+	off_t         oldEOF;
+	off_t         newEOF;
+	off_t         headOff;
+	off_t         tailOff;
+	int           devblocksize;
+	int           flags;
+{
+	upl_page_info_t *pl;
+	upl_t            upl;
+	vm_offset_t      upl_offset;
+	int              upl_size;
+	off_t 	         upl_f_offset;
+	int              pages_in_upl;
+	int		 start_offset;
+	int              xfer_resid;
+	int              io_size;
+	int              io_flags;
+	vm_offset_t      io_address;
+	int              io_offset;
+	int              bytes_to_zero;
+	int              bytes_to_move;
+	kern_return_t    kret;
+	int              retval = 0;
+	int              uio_resid;
+	long long        total_size;
+	long long        zero_cnt;
+	off_t            zero_off;
+	long long        zero_cnt1;
+	off_t            zero_off1;
+	daddr_t          start_blkno;
+	daddr_t          last_blkno;
+>>>>>>> origin/10.2
 
 				max_cluster_size = MAX_CLUSTER_SIZE(vp);
 
 				if (max_iosize > max_cluster_size)
 				        max_cluster = max_cluster_size;
+=======
+				u_int max_prefetch;
+
+				max_cluster_size = MAX_CLUSTER_SIZE(vp);
+				max_prefetch = MAX_PREFETCH(vp);
+				
+				if (max_iosize > max_cluster_size)
+					max_cluster = max_cluster_size;
+>>>>>>> origin/10.5
 				else
 				        max_cluster = max_iosize;
 
@@ -1347,10 +2362,14 @@ cluster_io(vnode_t vp, upl_t upl, vm_offset_t upl_offset, off_t f_offset, int no
 				else
 					scale = WRITE_THROTTLE;
 
+<<<<<<< HEAD
 				if (flags & CL_CLOSE)
 					scale += MAX_CLUSTERS;
 
 			        async_throttle = min(IO_SCALE(vp, VNODE_ASYNC_THROTTLE), ((scale * max_cluster_size) / max_cluster) - 1);
+=======
+			        async_throttle = min(VNODE_ASYNC_THROTTLE, (max_prefetch / max_cluster) - 1);
+>>>>>>> origin/10.5
 			}
 		}
 	}
@@ -2074,7 +3093,11 @@ cluster_read_ahead(vnode_t vp, struct cl_extent *extent, off_t filesize, struct 
 	daddr64_t	r_addr;
 	off_t		f_offset;
 	int		size_of_prefetch;
+<<<<<<< HEAD
 	u_int		max_prefetch;
+=======
+	u_int           max_prefetch;
+>>>>>>> origin/10.5
 
 
 	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 48)) | DBG_FUNC_START,
@@ -2094,6 +3117,7 @@ cluster_read_ahead(vnode_t vp, struct cl_extent *extent, off_t filesize, struct 
 
 		return;
 	}
+<<<<<<< HEAD
 	max_prefetch = MAX_PREFETCH(vp, cluster_max_io_size(vp->v_mount, CL_READ), (vp->v_mount->mnt_kern_flag & MNTK_SSD));
 
 	if (max_prefetch > speculative_prefetch_max)
@@ -2106,6 +3130,12 @@ cluster_read_ahead(vnode_t vp, struct cl_extent *extent, off_t filesize, struct 
 	}
 	if (extent->e_addr < rap->cl_maxra && rap->cl_ralen >= 4) {
 	        if ((rap->cl_maxra - extent->e_addr) > (rap->cl_ralen / 4)) {
+=======
+	max_prefetch = MAX_PREFETCH(vp);
+
+	if (extent->e_addr < rap->cl_maxra) {
+	        if ((rap->cl_maxra - extent->e_addr) > ((max_prefetch / PAGE_SIZE) / 4)) {
+>>>>>>> origin/10.5
 
 		        KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 48)) | DBG_FUNC_END,
 				     rap->cl_ralen, (int)rap->cl_maxra, (int)rap->cl_lastr, 2, 0);
@@ -2476,9 +3506,16 @@ cluster_write_direct(vnode_t vp, struct uio *uio, off_t oldEOF, off_t newEOF, in
 	u_int32_t	 io_req_size;
 	u_int32_t	 offset_in_file;
 	u_int32_t	 offset_in_iovbase;
+<<<<<<< HEAD
 	u_int32_t        io_size;
 	int              io_flag = 0;
 	upl_size_t	 upl_size, vector_upl_size = 0;
+=======
+	u_int32_t	 io_size;
+	int              io_flag;
+	int              bflag;
+	vm_size_t	 upl_size;
+>>>>>>> origin/10.5
 	vm_size_t	 upl_needed_size;
 	mach_msg_type_number_t	pages_in_pl;
 	upl_control_flags_t upl_flags;
@@ -2491,6 +3528,7 @@ cluster_write_direct(vnode_t vp, struct uio *uio, off_t oldEOF, off_t newEOF, in
 	user_addr_t	 iov_base;
 	u_int32_t	 mem_alignment_mask;
 	u_int32_t	 devblocksize;
+<<<<<<< HEAD
 	u_int32_t	 max_io_size;
 	u_int32_t	 max_upl_size;
 	u_int32_t        max_vector_size;
@@ -2502,6 +3540,17 @@ cluster_write_direct(vnode_t vp, struct uio *uio, off_t oldEOF, off_t newEOF, in
  	int		 vector_upl_index=0;
  	upl_t		 vector_upl = NULL;
 
+=======
+	u_int32_t        max_upl_size;
+
+
+	max_upl_size = cluster_max_io_size(vp->v_mount, CL_WRITE);
+
+	if (flags & IO_PASSIVE)
+	    	bflag = CL_PASSIVE;
+	else
+	    	bflag = 0;
+>>>>>>> origin/10.5
 
 	/*
 	 * When we enter this routine, we know
@@ -2607,6 +3656,7 @@ next_dwrite:
 	        io_size  = io_req_size & ~PAGE_MASK;
 		iov_base = uio_curriovbase(uio);
 
+<<<<<<< HEAD
 		if (io_size > max_io_size)
 		        io_size = max_io_size;
 
@@ -2626,6 +3676,10 @@ next_dwrite:
 			* not page-aligned then the UPL with that base will be the first in the vector UPL.
 			*/
 		}
+=======
+		if (io_size > max_upl_size)
+		        io_size = max_upl_size;
+>>>>>>> origin/10.5
 
 		upl_offset = (vm_offset_t)((u_int32_t)iov_base & PAGE_MASK);
 		upl_needed_size = (upl_offset + io_size + (PAGE_SIZE -1)) & ~PAGE_MASK;
@@ -2732,7 +3786,24 @@ next_dwrite:
 		 * if there are already too many outstanding writes
 		 * wait until some complete before issuing the next
 		 */
+<<<<<<< HEAD
 		cluster_iostate_wait(&iostate, max_upl_size * IO_SCALE(vp, 2), "cluster_write_direct");
+=======
+		lck_mtx_lock(cl_mtxp);
+
+		while ((iostate.io_issued - iostate.io_completed) > (2 * max_upl_size)) {
+
+ 			KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 95)) | DBG_FUNC_START,
+    					iostate.io_issued, iostate.io_completed, 2 * max_upl_size, 0, 0);
+
+	                iostate.io_wanted = 1;
+			msleep((caddr_t)&iostate.io_wanted, cl_mtxp, PRIBIO + 1, "cluster_write_direct", NULL);
+
+ 			KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 95)) | DBG_FUNC_END,
+    					iostate.io_issued, iostate.io_completed, 2 * max_upl_size, 0, 0);
+		}	
+		lck_mtx_unlock(cl_mtxp);
+>>>>>>> origin/10.5
 
 		if (iostate.io_error) {
 		        /*
@@ -2813,9 +3884,23 @@ next_dwrite:
 
 wait_for_dwrites:
 
+<<<<<<< HEAD
 	if (retval == 0 && iostate.io_error == 0 && useVectorUPL && vector_upl_index) {
 		retval = vector_cluster_io(vp, vector_upl, vector_upl_offset, v_upl_uio_offset, vector_upl_iosize, io_flag, (buf_t)NULL, &iostate, callback, callback_arg);
 		reset_vector_run_state();	
+=======
+		while (iostate.io_issued != iostate.io_completed) {
+			KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 95)) | DBG_FUNC_START,
+    					iostate.io_issued, iostate.io_completed, 0, 0, 0);
+
+		        iostate.io_wanted = 1;
+			msleep((caddr_t)&iostate.io_wanted, cl_mtxp, PRIBIO + 1, "cluster_write_direct", NULL);
+
+ 			KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 95)) | DBG_FUNC_END,
+    					iostate.io_issued, iostate.io_completed, 0, 0, 0);
+		}	
+		lck_mtx_unlock(cl_mtxp);
+>>>>>>> origin/10.5
 	}
 	/*
 	 * make sure all async writes issued as part of this stream
@@ -2987,6 +4072,22 @@ next_cwrite:
 		 */
 		cluster_iostate_wait(&iostate, MAX_IO_CONTIG_SIZE * IO_SCALE(vp, 2), "cluster_write_contig");
 
+<<<<<<< HEAD
+=======
+			while ((iostate.io_issued - iostate.io_completed) > (2 * MAX_IO_CONTIG_SIZE)) {
+
+ 				KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 95)) | DBG_FUNC_START,
+    						iostate.io_issued, iostate.io_completed, 2 * MAX_IO_CONTIG_SIZE, 0, 0);
+
+			        iostate.io_wanted = 1;
+				msleep((caddr_t)&iostate.io_wanted, cl_mtxp, PRIBIO + 1, "cluster_write_contig", NULL);
+
+ 				KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 95)) | DBG_FUNC_END,
+    						iostate.io_issued, iostate.io_completed, 2 * MAX_IO_CONTIG_SIZE, 0, 0);
+			}
+			lck_mtx_unlock(cl_mtxp);
+		}
+>>>>>>> origin/10.5
                 if (iostate.io_error) {
                         /*
                          * one of the earlier writes we issued ran into a hard error
@@ -3030,7 +4131,23 @@ wait_for_cwrites:
          * make sure all async writes that are part of this stream
          * have completed before we proceed
          */
+<<<<<<< HEAD
 	cluster_iostate_wait(&iostate, 0, "cluster_write_contig");
+=======
+        lck_mtx_lock(cl_mtxp);
+
+        while (iostate.io_issued != iostate.io_completed) {
+ 		KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 95)) | DBG_FUNC_START,
+    				iostate.io_issued, iostate.io_completed, 0, 0, 0);
+
+	        iostate.io_wanted = 1;
+		msleep((caddr_t)&iostate.io_wanted, cl_mtxp, PRIBIO + 1, "cluster_write_contig", NULL);
+
+ 		KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 95)) | DBG_FUNC_END,
+    				iostate.io_issued, iostate.io_completed, 0, 0, 0);
+        }
+        lck_mtx_unlock(cl_mtxp);
+>>>>>>> origin/10.5
 
         if (iostate.io_error)
 	        error = iostate.io_error;
@@ -3117,8 +4234,18 @@ cluster_write_copy(vnode_t vp, struct uio *uio, u_int32_t io_req_size, off_t old
 	struct cl_extent cl;
 	struct cl_writebehind *wbp;
 	int              bflag;
+<<<<<<< HEAD
 	u_int		 max_cluster_pgcount;
 	u_int		 max_io_size;
+=======
+ 	u_int            max_cluster_pgcount;
+ 	u_int            max_io_size;
+
+	if (flags & IO_PASSIVE)
+    		bflag = CL_PASSIVE;
+	else
+    		bflag = 0;
+>>>>>>> origin/10.5
 
 	if (uio) {
 	        KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 40)) | DBG_FUNC_START,
@@ -3238,7 +4365,15 @@ cluster_write_copy(vnode_t vp, struct uio *uio, u_int32_t io_req_size, off_t old
 			 * because IO_HEADZEROFILL and IO_TAILZEROFILL not set
 			 */
 		        if ((start_offset + total_size) > max_io_size)
+<<<<<<< HEAD
+<<<<<<< HEAD
 			        total_size = max_io_size - start_offset;
+=======
+			        total_size -= start_offset;
+>>>>>>> origin/10.5
+=======
+			        total_size = max_io_size - start_offset;
+>>>>>>> origin/10.6
 		        xfer_resid = total_size;
 
 		        retval = cluster_copy_ubc_data_internal(vp, uio, &xfer_resid, 1, 1);
@@ -3468,14 +4603,22 @@ check_cluster:
 			 */
 			cl.e_addr = (daddr64_t)((upl_f_offset + (off_t)upl_size) / PAGE_SIZE_64);
 
+<<<<<<< HEAD
 			if (flags & IO_SYNC) {
+=======
+			if (flags & IO_SYNC)
+>>>>>>> origin/10.5
 			        /*
 				 * if the IO_SYNC flag is set than we need to 
 				 * bypass any clusters and immediately issue
 				 * the I/O
 				 */
 			        goto issue_io;
+<<<<<<< HEAD
 			}
+=======
+
+>>>>>>> origin/10.5
 			/*
 			 * take the lock to protect our accesses
 			 * of the writebehind and sparse cluster state
@@ -3489,7 +4632,11 @@ check_cluster:
 					 * we've fallen into the sparse
 					 * cluster method of delaying dirty pages
 					 */
+<<<<<<< HEAD
 					sparse_cluster_add(&(wbp->cl_scmap), vp, &cl, newEOF, callback, callback_arg);
+=======
+					sparse_cluster_add(wbp, vp, &cl, newEOF, callback, callback_arg);
+>>>>>>> origin/10.5
 
 					lck_mtx_unlock(&wbp->cl_lockw);
 
@@ -3504,7 +4651,11 @@ check_cluster:
 				 */
 				wbp->cl_number = 0;
 
+<<<<<<< HEAD
 				sparse_cluster_push(&(wbp->cl_scmap), vp, newEOF, PUSH_ALL, 0, callback, callback_arg);
+=======
+				sparse_cluster_push(wbp, vp, newEOF, PUSH_ALL, callback, callback_arg);
+>>>>>>> origin/10.5
 				/*
 				 * no clusters of either type present at this point
 				 * so just go directly to start_new_cluster since
@@ -3513,6 +4664,7 @@ check_cluster:
 				 * to avoid the deadlock with sparse_cluster_push
 				 */
 				goto start_new_cluster;
+<<<<<<< HEAD
 			}
 			if (first_pass) {
 				if (write_off == wbp->cl_last_write)
@@ -3524,6 +4676,9 @@ check_cluster:
 
 				first_pass = FALSE;
 			}
+=======
+			}		    
+>>>>>>> origin/10.5
 			if (wbp->cl_number == 0)
 			        /*
 				 * no clusters currently present
@@ -3843,7 +4998,11 @@ cluster_read_copy(vnode_t vp, struct uio *uio, u_int32_t io_req_size, off_t file
 	upl_page_info_t *pl;
 	upl_t            upl;
 	vm_offset_t      upl_offset;
+<<<<<<< HEAD
 	u_int32_t	 upl_size;
+=======
+	u_int32_t        upl_size;
+>>>>>>> origin/10.5
 	off_t 	         upl_f_offset;
 	int		 start_offset;
 	int	         start_pg;
@@ -3860,8 +5019,13 @@ cluster_read_copy(vnode_t vp, struct uio *uio, u_int32_t io_req_size, off_t file
 	u_int32_t        xsize;
 	u_int32_t        io_size;
 	u_int32_t        max_rd_size;
+<<<<<<< HEAD
 	u_int32_t        max_io_size;
 	u_int32_t        max_prefetch;
+=======
+ 	u_int32_t        max_io_size;
+ 	u_int32_t        max_prefetch;
+>>>>>>> origin/10.5
 	u_int            rd_ahead_enabled = 1;
 	u_int            prefetch_enabled = 1;
 	struct cl_readahead *	rap;
@@ -3887,6 +5051,7 @@ cluster_read_copy(vnode_t vp, struct uio *uio, u_int32_t io_req_size, off_t file
 	if (flags & IO_PASSIVE)
 		bflag = CL_PASSIVE;
 	else
+<<<<<<< HEAD
 		bflag = 0;
 
 	if (flags & IO_NOCACHE)
@@ -3898,6 +5063,13 @@ cluster_read_copy(vnode_t vp, struct uio *uio, u_int32_t io_req_size, off_t file
 	max_io_size = cluster_max_io_size(vp->v_mount, CL_READ);
 	max_prefetch = MAX_PREFETCH(vp, max_io_size, (vp->v_mount->mnt_kern_flag & MNTK_SSD));
 	max_rd_size = max_prefetch;
+=======
+    		bflag = 0;
+
+ 	max_prefetch = MAX_PREFETCH(vp);
+ 	max_rd_size = max_prefetch;
+ 	max_io_size = cluster_max_io_size(vp->v_mount, CL_READ);
+>>>>>>> origin/10.5
 
 	last_request_offset = uio->uio_offset + io_req_size;
 
@@ -4080,6 +5252,7 @@ cluster_read_copy(vnode_t vp, struct uio *uio, u_int32_t io_req_size, off_t file
 		        if (upl_size > max_io_size)
 			        upl_size = max_io_size;
 		} else {
+<<<<<<< HEAD
 		        if (upl_size > max_io_size / 4) {
 			        upl_size = max_io_size / 4;
 				upl_size &= ~PAGE_MASK;
@@ -4087,6 +5260,10 @@ cluster_read_copy(vnode_t vp, struct uio *uio, u_int32_t io_req_size, off_t file
 				if (upl_size == 0)
 					upl_size = PAGE_SIZE;
 			}
+=======
+		        if (upl_size > max_io_size / 4)
+			        upl_size = max_io_size / 4;
+>>>>>>> origin/10.5
 		}
 		pages_in_upl = upl_size / PAGE_SIZE;
 
@@ -4241,8 +5418,24 @@ cluster_read_copy(vnode_t vp, struct uio *uio, u_int32_t io_req_size, off_t file
 					rap->cl_lastr = extent.e_addr;
 				}
 			}
+<<<<<<< HEAD
 			if (iolock_inited == TRUE)
 				cluster_iostate_wait(&iostate, 0, "cluster_read_copy");
+=======
+			lck_mtx_lock(cl_mtxp);
+
+			while (iostate.io_issued != iostate.io_completed) {
+ 				KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 95)) | DBG_FUNC_START,
+    						iostate.io_issued, iostate.io_completed, 0, 0, 0);
+
+			        iostate.io_wanted = 1;
+				msleep((caddr_t)&iostate.io_wanted, cl_mtxp, PRIBIO + 1, "cluster_read_copy", NULL);
+
+ 				KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 95)) | DBG_FUNC_END,
+    						iostate.io_issued, iostate.io_completed, 0, 0, 0);
+			}	
+			lck_mtx_unlock(cl_mtxp);
+>>>>>>> origin/10.5
 
 			if (iostate.io_error)
 			        error = iostate.io_error;
@@ -4331,11 +5524,18 @@ cluster_read_copy(vnode_t vp, struct uio *uio, u_int32_t io_req_size, off_t file
 				        /*
 					 * coming out of throttled state
 					 */
+<<<<<<< HEAD
 					if (policy != THROTTLE_LEVEL_TIER3 && policy != THROTTLE_LEVEL_TIER2) {
 						if (rap != NULL)
 							rd_ahead_enabled = 1;
 						prefetch_enabled = 1;
 					}
+=======
+				        if (rap != NULL)
+					        rd_ahead_enabled = 1;
+					prefetch_enabled = 1;
+
+>>>>>>> origin/10.5
 					max_rd_size = max_prefetch;
 					last_ioread_offset = 0;
 				}
@@ -4464,6 +5664,7 @@ cluster_read_direct(vnode_t vp, struct uio *uio, off_t filesize, int *read_type,
         u_int32_t	 xsize;
 	u_int32_t	 devblocksize;
 	u_int32_t	 mem_alignment_mask;
+<<<<<<< HEAD
 	u_int32_t	 max_upl_size;
 	u_int32_t        max_rd_size;
 	u_int32_t        max_rd_ahead;
@@ -4481,6 +5682,23 @@ cluster_read_direct(vnode_t vp, struct uio *uio, off_t filesize, int *read_type,
 	user_addr_t	 orig_iov_base = 0;
 	user_addr_t	 last_iov_base = 0;
 	user_addr_t	 next_iov_base = 0;
+=======
+ 	u_int32_t        max_upl_size;
+ 	u_int32_t        max_rd_size;
+ 	u_int32_t        max_rd_ahead;
+ 
+
+ 	max_upl_size = cluster_max_io_size(vp->v_mount, CL_READ);
+
+ 	max_rd_size = max_upl_size;
+ 	max_rd_ahead = max_rd_size * 2;
+
+
+	if (flags & IO_PASSIVE)
+    		bflag = CL_PASSIVE;
+	else
+    		bflag = 0;
+>>>>>>> origin/10.5
 
 	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 70)) | DBG_FUNC_START,
 		     (int)uio->uio_offset, (int)filesize, *read_type, *read_length, 0);
@@ -4594,8 +5812,12 @@ next_dread:
 			max_vector_size = THROTTLE_MAX_IOSIZE;
 		} else {
 		        max_rd_size  = max_upl_size;
+<<<<<<< HEAD
 			max_rd_ahead = max_rd_size * IO_SCALE(vp, 2);
 			max_vector_size = MAX_VECTOR_UPL_SIZE;
+=======
+			max_rd_ahead = max_rd_size * 2;
+>>>>>>> origin/10.5
 		}
 		io_start = io_size = io_req_size;
 
@@ -4780,7 +6002,10 @@ next_dread:
 		else
 		        no_zero_fill = 0;
 
+<<<<<<< HEAD
 		vm_map_t map = UIO_SEG_IS_USER_SPACE(uio->uio_segflg) ? current_map() : kernel_map;
+=======
+>>>>>>> origin/10.6
 		for (force_data_sync = 0; force_data_sync < 3; force_data_sync++) {
 		        pages_in_pl = 0;
 			upl_size = upl_needed_size;
@@ -4861,6 +6086,21 @@ next_dread:
 		 */
 		cluster_iostate_wait(&iostate, max_rd_ahead, "cluster_read_direct");
 
+<<<<<<< HEAD
+=======
+		while ((iostate.io_issued - iostate.io_completed) > max_rd_ahead) {
+ 			KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 95)) | DBG_FUNC_START,
+    					iostate.io_issued, iostate.io_completed, max_rd_ahead, 0, 0);
+
+	                iostate.io_wanted = 1;
+			msleep((caddr_t)&iostate.io_wanted, cl_mtxp, PRIBIO + 1, "cluster_read_direct", NULL);
+
+ 			KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 95)) | DBG_FUNC_END,
+    					iostate.io_issued, iostate.io_completed, max_rd_ahead, 0, 0);
+		}	
+		lck_mtx_unlock(cl_mtxp);
+			
+>>>>>>> origin/10.5
 		if (iostate.io_error) {
 		        /*
 			 * one of the earlier reads we issued ran into a hard error
@@ -4953,9 +6193,23 @@ next_dread:
 
 wait_for_dreads:
 
+<<<<<<< HEAD
 	if(retval == 0 && iostate.io_error == 0 && useVectorUPL && vector_upl_index) {
 		retval = vector_cluster_io(vp, vector_upl, vector_upl_offset, v_upl_uio_offset, vector_upl_iosize,  io_flag, (buf_t)NULL, &iostate, callback, callback_arg);
 		reset_vector_run_state();
+=======
+		while (iostate.io_issued != iostate.io_completed) {
+ 			KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 95)) | DBG_FUNC_START,
+    					iostate.io_issued, iostate.io_completed, 0, 0, 0);
+
+		        iostate.io_wanted = 1;
+			msleep((caddr_t)&iostate.io_wanted, cl_mtxp, PRIBIO + 1, "cluster_read_direct", NULL);
+
+ 			KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 95)) | DBG_FUNC_END,
+    					iostate.io_issued, iostate.io_completed, 0, 0, 0);
+		}	
+		lck_mtx_unlock(cl_mtxp);
+>>>>>>> origin/10.5
 	}
 
 	// We don't need to wait for the I/O to complete
@@ -5029,6 +6283,7 @@ cluster_read_contig(vnode_t vp, struct uio *uio, off_t filesize, int *read_type,
 	int              bflag;
 
 	if (flags & IO_PASSIVE)
+<<<<<<< HEAD
 		bflag = CL_PASSIVE;
 	else
 		bflag = 0;
@@ -5036,6 +6291,12 @@ cluster_read_contig(vnode_t vp, struct uio *uio, off_t filesize, int *read_type,
 	if (flags & IO_NOCACHE)
 		bflag |= CL_NOCACHE;
 	
+=======
+	    	bflag = CL_PASSIVE;
+	else
+	    	bflag = 0;
+
+>>>>>>> origin/10.5
 	/*
 	 * When we enter this routine, we know
 	 *  -- the read_length will not exceed the current iov_len
@@ -5154,6 +6415,21 @@ next_cread:
 		 */
 		cluster_iostate_wait(&iostate, MAX_IO_CONTIG_SIZE * IO_SCALE(vp, 2), "cluster_read_contig");
 
+<<<<<<< HEAD
+=======
+			while ((iostate.io_issued - iostate.io_completed) > (2 * MAX_IO_CONTIG_SIZE)) {
+ 				KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 95)) | DBG_FUNC_START,
+    						iostate.io_issued, iostate.io_completed, 2 * MAX_IO_CONTIG_SIZE, 0, 0);
+
+			        iostate.io_wanted = 1;
+				msleep((caddr_t)&iostate.io_wanted, cl_mtxp, PRIBIO + 1, "cluster_read_contig", NULL);
+
+ 				KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 95)) | DBG_FUNC_END,
+    						iostate.io_issued, iostate.io_completed, 2 * MAX_IO_CONTIG_SIZE, 0, 0);
+			}	
+			lck_mtx_unlock(cl_mtxp);
+		}
+>>>>>>> origin/10.5
 		if (iostate.io_error) {
 		        /*
 			 * one of the earlier reads we issued ran into a hard error
@@ -5194,7 +6470,23 @@ wait_for_creads:
 	 * make sure all async reads that are part of this stream
 	 * have completed before we proceed
 	 */
+<<<<<<< HEAD
 	cluster_iostate_wait(&iostate, 0, "cluster_read_contig");
+=======
+	lck_mtx_lock(cl_mtxp);
+
+	while (iostate.io_issued != iostate.io_completed) {
+ 		KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 95)) | DBG_FUNC_START,
+    				iostate.io_issued, iostate.io_completed, 0, 0, 0);
+
+	        iostate.io_wanted = 1;
+		msleep((caddr_t)&iostate.io_wanted, cl_mtxp, PRIBIO + 1, "cluster_read_contig", NULL);
+
+ 		KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 95)) | DBG_FUNC_END,
+    				iostate.io_issued, iostate.io_completed, 0, 0, 0);
+	}	
+	lck_mtx_unlock(cl_mtxp);
+>>>>>>> origin/10.5
 
 	if (iostate.io_error)
 	        error = iostate.io_error;
@@ -5309,9 +6601,15 @@ advisory_read_ext(vnode_t vp, off_t filesize, off_t f_offset, int resid, int (*c
 	int              retval = 0;
 	int              issued_io;
 	int              skip_range;
+<<<<<<< HEAD
 	uint32_t	 max_io_size;
 
 
+=======
+	uint32_t         max_io_size;
+	
+	
+>>>>>>> origin/10.5
 	if ( !UBCINFOEXISTS(vp))
 		return(EINVAL);
 
@@ -5319,14 +6617,18 @@ advisory_read_ext(vnode_t vp, off_t filesize, off_t f_offset, int resid, int (*c
 		return(EINVAL);
 
 	max_io_size = cluster_max_io_size(vp->v_mount, CL_READ);
+<<<<<<< HEAD
 
 	if ((vp->v_mount->mnt_kern_flag & MNTK_SSD) && !ignore_is_ssd) {
 		if (max_io_size > speculative_prefetch_max_iosize)
 			max_io_size = speculative_prefetch_max_iosize;
 	}
 
+=======
+	
+>>>>>>> origin/10.5
 	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 60)) | DBG_FUNC_START,
-		     (int)f_offset, resid, (int)filesize, 0, 0);
+  			(int)f_offset, resid, (int)filesize, 0, 0);
 
 	while (resid && f_offset < filesize && retval == 0) {
 		/*
@@ -5444,6 +6746,12 @@ advisory_read_ext(vnode_t vp, off_t filesize, off_t f_offset, int resid, int (*c
 				if ((off_t)(upl_f_offset + upl_offset + io_size) > filesize)
 				        io_size = filesize - (upl_f_offset + upl_offset);
 
+<<<<<<< HEAD
+=======
+		        retval = cluster_io(vp, upl, 0, upl_f_offset, read_size, devblocksize,
+					    CL_READ, (struct buf *)0, (struct clios *)0);
+			if (retval) {
+>>>>>>> origin/10.2
 				/*
 				 * issue an asynchronous read to cluster_io
 				 */
@@ -5533,7 +6841,21 @@ cluster_push_ext(vnode_t vp, int flags, int (*callback)(buf_t, void *), void *ca
 		while (wbp->cl_sparse_pushes) {
 			KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 98)) | DBG_FUNC_START, vp, 0, 0, 0, 0);
 
+<<<<<<< HEAD
 			msleep((caddr_t)&wbp->cl_sparse_pushes, &wbp->cl_lockw, PRIBIO + 1, "cluster_push_ext", NULL);
+=======
+			        retval = cluster_io(vp, upl, upl_offset, upl_f_offset + upl_offset, read_size, devblocksize,
+						    CL_READ, (struct buf *)0, (struct clios *)0);
+				if (retval) {
+					/*
+					 * we had an error during the read which causes us to abort
+					 * the current cluster_write request... before we do, we
+					 * need to release the rest of the pages in the upl without
+					 * modifying there state and mark the failed page in error
+					 */
+					ubc_upl_abort_range(upl, upl_offset, PAGE_SIZE, UPL_ABORT_DUMP_PAGES);
+					ubc_upl_abort_range(upl, 0,          upl_size,  UPL_ABORT_FREE_ON_EMPTY);
+>>>>>>> origin/10.2
 
 			KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 98)) | DBG_FUNC_END, vp, 0, 0, 0, 0);
 		}
@@ -5632,10 +6954,17 @@ cluster_try_push(struct cl_writebehind *wbp, vnode_t vp, off_t EOF, int push_fla
         int cl_len;
 	int cl_pushed = 0;
 	struct cl_wextent l_clusters[MAX_CLUSTERS];
+<<<<<<< HEAD
 	u_int  max_cluster_pgcount;
 
 
 	max_cluster_pgcount = MAX_CLUSTER_SIZE(vp) / PAGE_SIZE;
+=======
+ 	u_int  max_cluster_pgcount;
+ 
+	
+ 	max_cluster_pgcount = MAX_CLUSTER_SIZE(vp) / PAGE_SIZE;
+>>>>>>> origin/10.5
 	/*
 	 * the write behind context exists and has
 	 * already been locked...
@@ -5731,6 +7060,7 @@ cluster_try_push(struct cl_writebehind *wbp, vnode_t vp, off_t EOF, int push_fla
 
 		cl_pushed++;
 
+<<<<<<< HEAD
 		if ( !(push_flag & PUSH_ALL) )
 		        break;
 	}
@@ -5749,9 +7079,30 @@ dont_try:
 			 * to represent them, so switch to the sparse cluster mechanism
 			 *
 			 * collect the active public clusters...
+=======
+			if (cluster_try_push(vp, newEOF, 0, 0) == 0) {
+			        vp->v_flag |= VHASDIRTY;
+				goto delay_io;
+			}
+start_new_cluster:
+			if (vp->v_clen == 0) {
+			        vp->v_ciosiz = devblocksize;
+				vp->v_cstart = start_blkno;
+				vp->v_lastw  = last_blkno;
+			}
+			vp->v_clusters[vp->v_clen].start_pg = start_blkno;
+			vp->v_clusters[vp->v_clen].last_pg  = last_blkno;
+			vp->v_clen++;
+delay_io:
+			/*
+			 * make sure we keep v_cstart and v_lastw up to 
+			 * date in case we have to fall back on the
+			 * V_HASDIRTY mechanism (or we've already entered it)
+>>>>>>> origin/10.2
 			 */
 		        sparse_cluster_switch(wbp, vp, EOF, callback, callback_arg);
 
+<<<<<<< HEAD
 		        for (cl_index = 0, cl_index1 = 0; cl_index < cl_len; cl_index++) {
 			        if (l_clusters[cl_index].b_addr == l_clusters[cl_index].e_addr)
 				        continue;
@@ -5761,6 +7112,11 @@ dont_try:
 
 				cl_index1++;
 			}
+=======
+		        ubc_upl_commit_range(upl, 0, upl_size, UPL_COMMIT_SET_DIRTY | UPL_COMMIT_INACTIVATE | UPL_COMMIT_FREE_ON_EMPTY);
+			continue;
+issue_io:
+>>>>>>> origin/10.2
 			/*
 			 * update the cluster count
 			 */
@@ -5786,16 +7142,172 @@ dont_try:
 				wbp->cl_clusters[cl_index1].e_addr = l_clusters[cl_index].e_addr;
 				wbp->cl_clusters[cl_index1].io_flags = l_clusters[cl_index].io_flags;
 
+<<<<<<< HEAD
 				cl_index1++;
 			}
 			/*
 			 * update the cluster count
 			 */
 			wbp->cl_number = cl_index1;
+=======
+			while (vp->v_numoutput >= ASYNC_THROTTLE) {
+			        vp->v_flag |= VTHROTTLED;
+				tsleep((caddr_t)&vp->v_numoutput, PRIBIO + 1, "cluster_write", 0);
+			}	
+			retval = cluster_io(vp, upl, 0, upl_f_offset, io_size, devblocksize,
+					    io_flags, (struct buf *)0, (struct clios *)0);
+>>>>>>> origin/10.2
 		}
 	}
 	return (MAX_CLUSTERS - wbp->cl_number);
 }
+
+<<<<<<< HEAD
+=======
+int
+cluster_read(vp, uio, filesize, devblocksize, flags)
+	struct vnode *vp;
+	struct uio   *uio;
+	off_t         filesize;
+	int           devblocksize;
+	int           flags;
+{
+	int           prev_resid;
+	int           clip_size;
+	off_t         max_io_size;
+	struct iovec  *iov;
+	vm_offset_t   upl_offset;
+	int           upl_size;
+	int           pages_in_pl;
+	upl_page_info_t *pl;
+	int           upl_flags;
+	upl_t         upl;
+	int           retval = 0;
+
+	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 32)) | DBG_FUNC_START,
+		     (int)uio->uio_offset, uio->uio_resid, (int)filesize, devblocksize, 0);
+
+	/*
+	 * We set a threshhold of 4 pages to decide if the nocopy
+	 * read loop is worth the trouble...
+	 */
+
+	if (!((vp->v_flag & VNOCACHE_DATA) && (uio->uio_segflg == UIO_USERSPACE)))
+	  {
+	    retval = cluster_read_x(vp, uio, filesize, devblocksize, flags);
+	    KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 32)) | DBG_FUNC_END,
+			 (int)uio->uio_offset, uio->uio_resid, vp->v_lastr, retval, 0);
+	    return(retval);
+	  }
+
+	while (uio->uio_resid && uio->uio_offset < filesize && retval == 0)
+	  {
+	    /* we know we have a resid, so this is safe */
+	    iov = uio->uio_iov;
+	    while (iov->iov_len == 0) {
+	      uio->uio_iov++;
+	      uio->uio_iovcnt--;
+	      iov = uio->uio_iov;
+	    }
+
+	    /*
+	     * We check every vector target and if it is physically 
+	     * contiguous space, we skip the sanity checks.
+	     */
+
+            upl_offset = (vm_offset_t)iov->iov_base & ~PAGE_MASK;
+            upl_size = (upl_offset + PAGE_SIZE +(PAGE_SIZE -1)) & ~PAGE_MASK;
+            pages_in_pl = 0;
+            upl_flags = UPL_QUERY_OBJECT_TYPE;
+            if((vm_map_get_upl(current_map(),
+			       (vm_offset_t)iov->iov_base & ~PAGE_MASK,
+                               &upl_size, &upl, NULL, &pages_in_pl, &upl_flags, 0)) != KERN_SUCCESS)
+              {
+		/*
+		 * the user app must have passed in an invalid address
+		 */
+		return (EFAULT);
+              }
+
+	    if (upl_flags & UPL_PHYS_CONTIG)
+	      {
+		retval = cluster_phys_read(vp, uio, filesize, devblocksize, flags);
+	      }
+	    else if (uio->uio_resid < 4 * PAGE_SIZE)
+	      {
+		/*
+		 * We set a threshhold of 4 pages to decide if the nocopy
+		 * read loop is worth the trouble...
+		 */
+		retval = cluster_read_x(vp, uio, filesize, devblocksize, flags);
+		KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 32)) | DBG_FUNC_END,
+			     (int)uio->uio_offset, uio->uio_resid, vp->v_lastr, retval, 0);
+		return(retval);
+	      }
+	    else if (uio->uio_offset & PAGE_MASK_64)
+	      {
+		/* Bring the file offset read up to a pagesize boundary */
+		clip_size = (PAGE_SIZE - (int)(uio->uio_offset & PAGE_MASK_64));
+		if (uio->uio_resid < clip_size)
+		  clip_size = uio->uio_resid;
+		/* 
+		 * Fake the resid going into the cluster_read_x call
+		 * and restore it on the way out.
+		 */
+		prev_resid = uio->uio_resid;
+		uio->uio_resid = clip_size;
+		retval = cluster_read_x(vp, uio, filesize, devblocksize, flags);
+		uio->uio_resid = prev_resid - (clip_size - uio->uio_resid);
+	      }
+	    else if ((int)iov->iov_base & PAGE_MASK_64)
+	      {
+		clip_size = iov->iov_len;
+		prev_resid = uio->uio_resid;
+		uio->uio_resid = clip_size;
+		retval = cluster_read_x(vp, uio, filesize, devblocksize, flags);
+		uio->uio_resid = prev_resid - (clip_size - uio->uio_resid);
+	      }
+	    else
+	      {
+		/* 
+		 * If we come in here, we know the offset into
+		 * the file is on a pagesize boundary
+		 */
+
+		max_io_size = filesize - uio->uio_offset;
+		clip_size = uio->uio_resid;
+		if (iov->iov_len < clip_size)
+		  clip_size = iov->iov_len;
+		if (max_io_size < clip_size)
+		  clip_size = (int)max_io_size;
+
+		if (clip_size < PAGE_SIZE)
+		  {
+		    /*
+		     * Take care of the tail end of the read in this vector.
+		     */
+		    prev_resid = uio->uio_resid;
+		    uio->uio_resid = clip_size;
+		    retval = cluster_read_x(vp, uio, filesize, devblocksize, flags);
+		    uio->uio_resid = prev_resid - (clip_size - uio->uio_resid);
+		  }
+		else
+		  {
+		    /* round clip_size down to a multiple of pagesize */
+		    clip_size = clip_size & ~(PAGE_MASK);
+		    prev_resid = uio->uio_resid;
+		    uio->uio_resid = clip_size;
+		    retval = cluster_nocopy_read(vp, uio, filesize, devblocksize, flags);
+		    if ((retval==0) && uio->uio_resid)
+		      retval = cluster_read_x(vp, uio, filesize, devblocksize, flags);
+		    uio->uio_resid = prev_resid - (clip_size - uio->uio_resid);
+		  }
+	      } /* end else */
+	  } /* end while */
+
+	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 32)) | DBG_FUNC_END,
+		     (int)uio->uio_offset, uio->uio_resid, vp->v_lastr, retval, 0);
+>>>>>>> origin/10.2
 
 
 
@@ -5945,7 +7457,82 @@ cluster_push_now(vnode_t vp, struct cl_extent *cl, off_t EOF, int flags, int (*c
 		}
 		upl_offset = start_pg * PAGE_SIZE;
 
+<<<<<<< HEAD
 		io_size = min(size, (last_pg - start_pg) * PAGE_SIZE);
+=======
+		if (start_pg < last_pg) {		
+		        /*
+			 * we found a range of 'invalid' pages that must be filled
+			 * if the last page in this range is the last page of the file
+			 * we may have to clip the size of it to keep from reading past
+			 * the end of the last physical block associated with the file
+			 */
+			upl_offset = start_pg * PAGE_SIZE;
+			io_size    = (last_pg - start_pg) * PAGE_SIZE;
+
+			if ((upl_f_offset + upl_offset + io_size) > filesize)
+			        io_size = filesize - (upl_f_offset + upl_offset);
+
+			/*
+			 * issue a synchronous read to cluster_io
+			 */
+
+			error = cluster_io(vp, upl, upl_offset, upl_f_offset + upl_offset,
+					   io_size, devblocksize, CL_READ, (struct buf *)0, (struct clios *)0);
+		}
+		if (error == 0) {
+		        /*
+			 * if the read completed successfully, or there was no I/O request
+			 * issued, than map the upl into kernel address space and
+			 * move the data into user land.... we'll first add on any 'valid'
+			 * pages that were present in the upl when we acquired it.
+			 */
+			u_int  val_size;
+			u_int  size_of_prefetch;
+
+		        for (uio_last = last_pg; uio_last < pages_in_upl; uio_last++) {
+			        if (!upl_valid_page(pl, uio_last))
+				        break;
+			}
+			/*
+			 * compute size to transfer this round,  if uio->uio_resid is
+			 * still non-zero after this uiomove, we'll loop around and
+			 * set up for another I/O.
+			 */
+			val_size = (uio_last * PAGE_SIZE) - start_offset;
+		
+			if (max_size < val_size)
+			        val_size = max_size;
+
+			if (uio->uio_resid < val_size)
+			        val_size = uio->uio_resid;
+
+			e_lblkno = (int)((uio->uio_offset + ((off_t)val_size - 1)) / PAGE_SIZE_64);
+
+			if (size_of_prefetch = (uio->uio_resid - val_size)) {
+			        /*
+				 * if there's still I/O left to do for this request, then issue a
+				 * pre-fetch I/O... the I/O wait time will overlap
+				 * with the copying of the data
+				 */
+     				cluster_rd_prefetch(vp, uio->uio_offset + val_size, size_of_prefetch, filesize, devblocksize);
+			} else {
+			        if (!(vp->v_flag & VRAOFF) && !(vp->v_flag & VNOCACHE_DATA))
+				        /*
+					 * let's try to read ahead if we're in 
+					 * a sequential access pattern
+					 */
+				        cluster_rd_ahead(vp, b_lblkno, e_lblkno, filesize, devblocksize);
+				vp->v_lastr = e_lblkno;
+			}
+			if (uio->uio_segflg == UIO_USERSPACE) {
+				int       offset;
+
+			        segflg = uio->uio_segflg;
+
+				uio->uio_segflg = UIO_PHYS_USERSPACE;
+
+>>>>>>> origin/10.2
 
 		io_flags = CL_THROTTLE | CL_COMMIT | CL_AGE | bflag;
 
@@ -6002,6 +7589,47 @@ sparse_cluster_switch(struct cl_writebehind *wbp, vnode_t vp, off_t EOF, int (*c
 	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 78)) | DBG_FUNC_END, vp, wbp->cl_scmap, 0, 0, 0);
 }
 
+<<<<<<< HEAD
+=======
+
+static int
+<<<<<<< HEAD
+cluster_nocopy_read(vp, uio, filesize, devblocksize, flags)
+	struct vnode *vp;
+	struct uio   *uio;
+	off_t         filesize;
+	int           devblocksize;
+	int           flags;
+=======
+cluster_push_x(vp, EOF, first, last, can_delay)
+        struct vnode *vp;
+	off_t  EOF;
+	unsigned int first;
+	unsigned int last;
+	int    can_delay;
+>>>>>>> origin/10.3
+{
+	upl_t            upl;
+	upl_page_info_t  *pl;
+	off_t 	         upl_f_offset;
+	vm_offset_t      upl_offset;
+	off_t            start_upl_f_offset;
+	off_t            max_io_size;
+	int              io_size;
+	int              upl_size;
+	int              upl_needed_size;
+	int              pages_in_pl;
+	vm_offset_t      paddr;
+	int              upl_flags;
+	kern_return_t    kret;
+	int              segflg;
+	struct iovec     *iov;
+	int              i;
+	int              force_data_sync;
+	int              retval = 0;
+	int              first = 1;
+	struct clios     iostate;
+>>>>>>> origin/10.2
 
 /*
  * sparse_cluster_push must be called with the write-behind lock held if the scmap is
@@ -6017,6 +7645,7 @@ sparse_cluster_push(void **scmap, vnode_t vp, off_t EOF, int push_flag, int io_f
 
 	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 79)) | DBG_FUNC_START, vp, (*scmap), 0, push_flag, 0);
 
+<<<<<<< HEAD
 	if (push_flag & PUSH_ALL)
 	        vfs_drt_control(scmap, 1);
 
@@ -6027,13 +7656,24 @@ sparse_cluster_push(void **scmap, vnode_t vp, off_t EOF, int push_flag, int io_f
 		cl.b_addr = (daddr64_t)(offset / PAGE_SIZE_64);
 		cl.e_addr = (daddr64_t)((offset + length) / PAGE_SIZE_64);
 
+<<<<<<< HEAD
 		cluster_push_now(vp, &cl, EOF, io_flags & (IO_PASSIVE|IO_CLOSE), callback, callback_arg);
+=======
+		wbp->cl_scdirty -= (int)(cl.e_addr - cl.b_addr);
+
+		cluster_push_now(vp, &cl, EOF, push_flag & IO_PASSIVE, callback, callback_arg);
+>>>>>>> origin/10.5
 
 		if ( !(push_flag & PUSH_ALL) )
 		        break;
 	}
+<<<<<<< HEAD
 	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 79)) | DBG_FUNC_END, vp, (*scmap), 0, 0, 0);
 }
+=======
+	upl_size = pages_in_upl * PAGE_SIZE;
+	upl_f_offset = (off_t)((unsigned long long)first * PAGE_SIZE_64);
+>>>>>>> origin/10.3
 
 
 /*
@@ -6220,6 +7860,234 @@ cluster_copy_upl_data(struct uio *uio, upl_t upl, int upl_offset, int *io_resid)
 			dirty_count++;
 
 		retval = uiomove64(paddr, csize, uio);
+=======
+	iostate.io_completed = 0;
+	iostate.io_issued = 0;
+	iostate.io_error = 0;
+	iostate.io_wanted = 0;
+
+	iov = uio->uio_iov;
+
+	while (uio->uio_resid && uio->uio_offset < filesize && retval == 0) {
+
+	        max_io_size = filesize - uio->uio_offset;
+
+		if (max_io_size < (off_t)((unsigned int)uio->uio_resid))
+		        io_size = max_io_size;
+		else
+		        io_size = uio->uio_resid;
+
+		/*
+		 * We don't come into this routine unless
+		 * UIO_USERSPACE is set.
+		 */
+		segflg = uio->uio_segflg;
+
+		uio->uio_segflg = UIO_PHYS_USERSPACE;
+
+		/*
+		 * First look for pages already in the cache
+		 * and move them to user space.
+		 */
+		while (io_size && (retval == 0)) {
+		        upl_f_offset = uio->uio_offset;
+
+			/*
+			 * If this call fails, it means the page is not
+			 * in the page cache.
+			 */
+			if (ubc_page_op(vp, upl_f_offset,
+					UPL_POP_SET | UPL_POP_BUSY, &paddr, 0) != KERN_SUCCESS)
+			        break;
+
+			retval = uiomove((caddr_t)(paddr), PAGE_SIZE, uio);
+				
+			ubc_page_op(vp, upl_f_offset, 
+				    UPL_POP_CLR | UPL_POP_BUSY, 0, 0);
+		  
+			io_size -= PAGE_SIZE;
+			KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 71)) | DBG_FUNC_NONE,
+				     (int)uio->uio_offset, io_size, uio->uio_resid, 0, 0);
+		}
+		uio->uio_segflg = segflg;
+			
+		if (retval) {
+			/*
+			 * we may have already spun some portion of this request
+			 * off as async requests... we need to wait for the I/O
+			 * to complete before returning
+			 */
+			goto wait_for_reads;
+		}
+		/*
+		 * If we are already finished with this read, then return
+		 */
+		if (io_size == 0) {
+			/*
+			 * we may have already spun some portion of this request
+			 * off as async requests... we need to wait for the I/O
+			 * to complete before returning
+			 */
+			goto wait_for_reads;
+		}
+		max_io_size = io_size;
+
+		if (max_io_size > (MAX_UPL_TRANSFER * PAGE_SIZE))
+		        max_io_size = MAX_UPL_TRANSFER * PAGE_SIZE;
+		if (first) {
+	                if (max_io_size > (MAX_UPL_TRANSFER * PAGE_SIZE) / 4)
+		                max_io_size = (MAX_UPL_TRANSFER * PAGE_SIZE) / 8;
+			first = 0;
+		}
+		start_upl_f_offset = uio->uio_offset;   /* this is page aligned in the file */
+		upl_f_offset = start_upl_f_offset;
+		io_size = 0;
+
+		while (io_size < max_io_size) {
+		        if (ubc_page_op(vp, upl_f_offset,
+					UPL_POP_SET | UPL_POP_BUSY, &paddr, 0) == KERN_SUCCESS) {
+			        ubc_page_op(vp, upl_f_offset,
+					    UPL_POP_CLR | UPL_POP_BUSY, 0, 0);
+				break;
+			}
+			/*
+			 * Build up the io request parameters.
+			 */
+			io_size += PAGE_SIZE_64;
+			upl_f_offset += PAGE_SIZE_64;
+		}
+		if (io_size == 0)
+			/*
+			 * we may have already spun some portion of this request
+			 * off as async requests... we need to wait for the I/O
+			 * to complete before returning
+			 */
+			goto wait_for_reads;
+
+<<<<<<< HEAD
+		upl_offset = (vm_offset_t)iov->iov_base & PAGE_MASK_64;
+		upl_needed_size = (upl_offset + io_size + (PAGE_SIZE -1)) & ~PAGE_MASK;
+=======
+static int
+sparse_cluster_push(struct vnode *vp, off_t EOF, int push_all)
+{
+        unsigned int first;
+	unsigned int last;
+        off_t offset;
+	u_int length;
+>>>>>>> origin/10.3
+
+		KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 72)) | DBG_FUNC_START,
+			     (int)upl_offset, upl_needed_size, (int)iov->iov_base, io_size, 0);
+
+		for (force_data_sync = 0; force_data_sync < 3; force_data_sync++) {
+		        pages_in_pl = 0;
+			upl_size = upl_needed_size;
+			upl_flags = UPL_FILE_IO | UPL_NO_SYNC | UPL_CLEAN_IN_PLACE | UPL_SET_INTERNAL;
+
+<<<<<<< HEAD
+			kret = vm_map_get_upl(current_map(),
+					      (vm_offset_t)iov->iov_base & ~PAGE_MASK,
+					      &upl_size, &upl, NULL, &pages_in_pl, &upl_flags, force_data_sync);
+=======
+	for (;;) {
+	        if (vfs_drt_get_cluster(&(vp->v_scmap), &offset, &length) != KERN_SUCCESS) {
+		        vp->v_flag &= ~VHASDIRTY;
+		        vp->v_clen = 0;
+			break;
+		}
+		first = (unsigned int)(offset / PAGE_SIZE_64);
+		last  = (unsigned int)((offset + length) / PAGE_SIZE_64);
+>>>>>>> origin/10.3
+
+			if (kret != KERN_SUCCESS) {
+			        KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 72)) | DBG_FUNC_END,
+					     (int)upl_offset, upl_size, io_size, kret, 0);
+		  
+				/*
+				 * cluster_nocopy_read: failed to get pagelist
+				 *
+				 * we may have already spun some portion of this request
+				 * off as async requests... we need to wait for the I/O
+				 * to complete before returning
+				 */
+				goto wait_for_reads;
+			}
+			pages_in_pl = upl_size / PAGE_SIZE;
+			pl = UPL_GET_INTERNAL_PAGE_LIST(upl);
+
+			for (i = 0; i < pages_in_pl; i++) {
+			        if (!upl_valid_page(pl, i))
+				        break;		  
+			}
+			if (i == pages_in_pl)
+			        break;
+
+			ubc_upl_abort_range(upl, (upl_offset & ~PAGE_MASK), upl_size, 
+					    UPL_ABORT_FREE_ON_EMPTY);
+		}
+		if (force_data_sync >= 3) {
+		        KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 72)) | DBG_FUNC_END,
+				     (int)upl_offset, upl_size, io_size, kret, 0);
+		  
+			goto wait_for_reads;
+		}
+		/*
+		 * Consider the possibility that upl_size wasn't satisfied.
+		 */
+		if (upl_size != upl_needed_size)
+		        io_size = (upl_size - (int)upl_offset) & ~PAGE_MASK;
+
+		if (io_size == 0) {
+		        ubc_upl_abort_range(upl, (upl_offset & ~PAGE_MASK), upl_size, 
+					    UPL_ABORT_FREE_ON_EMPTY);
+			goto wait_for_reads;
+		}
+		KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 72)) | DBG_FUNC_END,
+			     (int)upl_offset, upl_size, io_size, kret, 0);
+
+		/*
+		 * request asynchronously so that we can overlap
+		 * the preparation of the next I/O
+		 * if there are already too many outstanding reads
+		 * wait until some have completed before issuing the next read
+		 */
+		while ((iostate.io_issued - iostate.io_completed) > (2 * MAX_UPL_TRANSFER * PAGE_SIZE)) {
+	                iostate.io_wanted = 1;
+			tsleep((caddr_t)&iostate.io_wanted, PRIBIO + 1, "cluster_nocopy_read", 0);
+		}	
+		if (iostate.io_error) {
+		        /*
+			 * one of the earlier reads we issued ran into a hard error
+			 * don't issue any more reads, cleanup the UPL
+			 * that was just created but not used, then
+			 * go wait for any other reads to complete before
+			 * returning the error to the caller
+			 */
+		        ubc_upl_abort_range(upl, (upl_offset & ~PAGE_MASK), upl_size, 
+					    UPL_ABORT_FREE_ON_EMPTY);
+
+		        goto wait_for_reads;
+	        }
+		KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 73)) | DBG_FUNC_START,
+			     (int)upl, (int)upl_offset, (int)start_upl_f_offset, io_size, 0);
+
+		retval = cluster_io(vp, upl, upl_offset, start_upl_f_offset,
+				   io_size, devblocksize,
+				   CL_PRESERVE | CL_COMMIT | CL_READ | CL_ASYNC | CL_NOZERO,
+				   (struct buf *)0, &iostate);
+
+		/*
+		 * update the uio structure
+		 */
+		iov->iov_base   += io_size;
+		iov->iov_len    -= io_size;
+		uio->uio_resid  -= io_size;
+		uio->uio_offset += io_size;
+
+		KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 73)) | DBG_FUNC_END,
+			     (int)upl, (int)uio->uio_offset, (int)uio->uio_resid, retval, 0);
+>>>>>>> origin/10.2
 
 		pg_index += 1;
 		pg_offset = 0;
@@ -6228,7 +8096,21 @@ cluster_copy_upl_data(struct uio *uio, upl_t upl, int upl_offset, int *io_resid)
 	}
 	*io_resid = xsize;
 
+<<<<<<< HEAD
 	uio->uio_segflg = segflg;
+=======
+wait_for_reads:
+	/*
+	 * make sure all async reads that are part of this stream
+	 * have completed before we return
+	 */
+	while (iostate.io_issued != iostate.io_completed) {
+	        iostate.io_wanted = 1;
+		tsleep((caddr_t)&iostate.io_wanted, PRIBIO + 1, "cluster_nocopy_read", 0);
+	}	
+	if (iostate.io_error)
+		retval = iostate.io_error;
+>>>>>>> origin/10.2
 
 	task_update_logical_writes(current_task(), (dirty_count * PAGE_SIZE), TASK_WRITE_DEFERRED);
 	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 34)) | DBG_FUNC_END,
@@ -6238,13 +8120,87 @@ cluster_copy_upl_data(struct uio *uio, upl_t upl, int upl_offset, int *io_resid)
 }
 
 
+<<<<<<< HEAD
 int
 cluster_copy_ubc_data(vnode_t vp, struct uio *uio, int *io_resid, int mark_dirty)
 {
+=======
+static int
+cluster_phys_read(vp, uio, filesize, devblocksize, flags)
+	struct vnode *vp;
+	struct uio   *uio;
+	off_t        filesize;
+	int          devblocksize;
+	int          flags;
+{
+	upl_page_info_t *pl;
+	upl_t            upl;
+	vm_offset_t      upl_offset;
+	vm_offset_t      dst_paddr;
+	off_t            max_size;
+	int              io_size;
+	int              tail_size;
+	int              upl_size;
+	int              upl_needed_size;
+	int              pages_in_pl;
+	int              upl_flags;
+	kern_return_t    kret;
+	struct iovec     *iov;
+	struct clios     iostate;
+	int              error;
+
+	/*
+	 * When we enter this routine, we know
+	 *  -- the resid will not exceed iov_len
+	 *  -- the target address is physically contiguous
+	 */
+
+<<<<<<< HEAD
+	iov = uio->uio_iov;
+>>>>>>> origin/10.2
+=======
+/*
+ *	NOTE:  There is no prototype for the following in BSD. It, and the definitions
+ *	of the defines for cppvPsrc, cppvPsnk, cppvFsnk, and cppvFsrc will be found in
+ *	osfmk/ppc/mappings.h.  They are not included here because there appears to be no
+ *	way to do so without exporting them to kexts as well.
+ */
+	if (flags & CL_READ)
+//		copypv(ubc_paddr, usr_paddr, xsize, cppvPsrc | cppvPsnk | cppvFsnk);	/* Copy physical to physical and flush the destination */
+		copypv(ubc_paddr, usr_paddr, xsize,        2 |        1 |        4);	/* Copy physical to physical and flush the destination */
+	else
+//		copypv(usr_paddr, ubc_paddr, xsize, cppvPsrc | cppvPsnk | cppvFsrc);	/* Copy physical to physical and flush the source */
+		copypv(usr_paddr, ubc_paddr, xsize,        2 |        1 |        8);	/* Copy physical to physical and flush the source */
+	
+	if ( !(flags & CL_READ) || (upl_valid_page(pl, 0) && upl_dirty_page(pl, 0))) {
+	        /*
+		 * issue a synchronous write to cluster_io
+		 */
+		error = cluster_io(vp, upl, 0, uio->uio_offset & ~PAGE_MASK_64, PAGE_SIZE, devblocksize,
+					0, (struct buf *)0, (struct clios *)0);
+	}
+	if (error == 0) {
+		uio->uio_offset += xsize;
+		iov->iov_base   += xsize;
+		iov->iov_len    -= xsize;
+		uio->uio_resid  -= xsize;
+	}
+	ubc_upl_abort_range(upl, 0, PAGE_SIZE, UPL_ABORT_DUMP_PAGES | UPL_ABORT_FREE_ON_EMPTY);
+	
+	return (error);
+}
+>>>>>>> origin/10.3
 
 	return (cluster_copy_ubc_data_internal(vp, uio, io_resid, mark_dirty, 1));
 }
 
+<<<<<<< HEAD
+=======
+	if (max_size > (off_t)((unsigned int)iov->iov_len))
+	        io_size = iov->iov_len;
+	else
+	        io_size = max_size;
+>>>>>>> origin/10.2
 
 static int
 cluster_copy_ubc_data_internal(vnode_t vp, struct uio *uio, int *io_resid, int mark_dirty, int take_reference)
@@ -6256,11 +8212,19 @@ cluster_copy_ubc_data_internal(vnode_t vp, struct uio *uio, int *io_resid, int m
 	int       retval = 0;
 	memory_object_control_t	 control;
 
+<<<<<<< HEAD
 	io_size = *io_resid;
+=======
+	error       = 0;
+	pages_in_pl = 0;
+	upl_size = upl_needed_size;
+	upl_flags = UPL_FILE_IO | UPL_NO_SYNC | UPL_CLEAN_IN_PLACE | UPL_SET_INTERNAL;
+>>>>>>> origin/10.2
 
 	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 34)) | DBG_FUNC_START,
 		     (int)uio->uio_offset, io_size, mark_dirty, take_reference, 0);
 
+<<<<<<< HEAD
 	control = ubc_getobject(vp, UBC_FLAGS_NONE);
 
 	if (control == MEMORY_OBJECT_CONTROL_NULL) {
@@ -6287,6 +8251,140 @@ cluster_copy_ubc_data_internal(vnode_t vp, struct uio *uio, int *io_resid, int m
 	  case UIO_USERISPACE:
 		uio->uio_segflg = UIO_PHYS_USERSPACE;
 		break;
+=======
+	if (kret != KERN_SUCCESS) {
+	        /*
+		 * cluster_phys_read: failed to get pagelist
+		 */
+	        return(EINVAL);
+	}
+	if (upl_size < upl_needed_size) {
+	        /*
+		 * The upl_size wasn't satisfied.
+		 */
+	        ubc_upl_abort_range(upl, 0, upl_size, UPL_ABORT_FREE_ON_EMPTY);
+
+		return(EINVAL);
+	}
+	pl = ubc_upl_pageinfo(upl);
+
+	dst_paddr = (vm_offset_t)upl_phys_page(pl, 0) + ((vm_offset_t)iov->iov_base & PAGE_MASK);
+
+	while (((uio->uio_offset & (devblocksize - 1)) || io_size < devblocksize) && io_size) {
+	        int   head_size;
+
+		head_size = devblocksize - (int)(uio->uio_offset & (devblocksize - 1));
+
+		if (head_size > io_size)
+		        head_size = io_size;
+
+		error = cluster_align_phys_io(vp, uio, dst_paddr, head_size, devblocksize, CL_READ);
+
+		if (error) {
+		        ubc_upl_abort_range(upl, 0, upl_size, UPL_ABORT_FREE_ON_EMPTY);
+
+			return(EINVAL);
+		}
+		upl_offset += head_size;
+		dst_paddr  += head_size;
+		io_size    -= head_size;
+	}
+	tail_size = io_size & (devblocksize - 1);
+	io_size  -= tail_size;
+
+	iostate.io_completed = 0;
+	iostate.io_issued = 0;
+	iostate.io_error = 0;
+	iostate.io_wanted = 0;
+
+	while (io_size && error == 0) {
+	        int  xsize;
+
+		if (io_size > (MAX_UPL_TRANSFER * PAGE_SIZE))
+		        xsize = MAX_UPL_TRANSFER * PAGE_SIZE;
+		else
+		        xsize = io_size;
+		/*
+		 * request asynchronously so that we can overlap
+		 * the preparation of the next I/O... we'll do
+		 * the commit after all the I/O has completed
+		 * since its all issued against the same UPL
+		 * if there are already too many outstanding reads
+		 * wait until some have completed before issuing the next
+		 */
+		while ((iostate.io_issued - iostate.io_completed) > (2 * MAX_UPL_TRANSFER * PAGE_SIZE)) {
+	                iostate.io_wanted = 1;
+			tsleep((caddr_t)&iostate.io_wanted, PRIBIO + 1, "cluster_phys_read", 0);
+		}	
+
+	        error = cluster_io(vp, upl, upl_offset, uio->uio_offset, xsize, 0, 
+				   CL_READ | CL_NOZERO | CL_DEV_MEMORY | CL_ASYNC,
+				   (struct buf *)0, &iostate);
+	        /*
+		 * The cluster_io read was issued successfully,
+		 * update the uio structure
+		 */
+		if (error == 0) {
+		        uio->uio_resid  -= xsize;
+			iov->iov_len    -= xsize;
+			iov->iov_base   += xsize;
+			uio->uio_offset += xsize;
+			dst_paddr       += xsize;
+			upl_offset      += xsize;
+			io_size         -= xsize;
+		}
+	}
+	/*
+	 * make sure all async reads that are part of this stream
+	 * have completed before we proceed
+	 */
+	while (iostate.io_issued != iostate.io_completed) {
+	        iostate.io_wanted = 1;
+		tsleep((caddr_t)&iostate.io_wanted, PRIBIO + 1, "cluster_phys_read", 0);
+	}	
+	if (iostate.io_error) {
+	        error = iostate.io_error;
+	}
+	if (error == 0 && tail_size)
+	        error = cluster_align_phys_io(vp, uio, dst_paddr, tail_size, devblocksize, CL_READ);
+
+	/*
+	 * just release our hold on the physically contiguous
+	 * region without changing any state
+	 */
+	ubc_upl_abort_range(upl, 0, upl_size, UPL_ABORT_FREE_ON_EMPTY);
+	
+	return (error);
+}
+
+
+/*
+ * generate advisory I/O's in the largest chunks possible
+ * the completed pages will be released into the VM cache
+ */
+int
+advisory_read(vp, filesize, f_offset, resid, devblocksize)
+	struct vnode *vp;
+	off_t         filesize;
+	off_t         f_offset;
+	int           resid;
+	int           devblocksize;
+{
+	upl_page_info_t *pl;
+	upl_t            upl;
+	vm_offset_t      upl_offset;
+	int              upl_size;
+	off_t 	         upl_f_offset;
+	int		 start_offset;
+	int	         start_pg;
+	int		 last_pg;
+	int              pages_in_upl;
+	off_t            max_size;
+	int              io_size;
+	kern_return_t    kret;
+	int              retval = 0;
+	int              issued_io;
+>>>>>>> origin/10.2
 
 	  case UIO_SYSSPACE:
 		uio->uio_segflg = UIO_PHYS_SYSSPACE;
@@ -6363,6 +8461,7 @@ is_file_clean(vnode_t vp, off_t filesize)
 #define DRT_ADDRESS_MASK		(~((DRT_BITVECTOR_PAGES * PAGE_SIZE) - 1))
 #define DRT_ALIGN_ADDRESS(addr)		((addr) & DRT_ADDRESS_MASK)
 
+<<<<<<< HEAD
 /*
  * Hashtable address field handling.
  *
@@ -6397,6 +8496,13 @@ is_file_clean(vnode_t vp, off_t filesize)
 		(scm)->scm_hashtable[(i)].dhe_control = (oscm)->scm_hashtable[(oi)].dhe_control;	\
 		DRT_BITVECTOR_COPY(oscm, oi, scm, i);							\
 	} while(0);
+=======
+				/*
+				 * issue an asynchronous read to cluster_io
+				 */
+				retval = cluster_io(vp, upl, upl_offset, upl_f_offset + upl_offset, io_size, devblocksize,
+						    CL_ASYNC | CL_READ | CL_COMMIT | CL_AGE, (struct buf *)0, (struct clios *)0);
+>>>>>>> origin/10.2
 
 
 /*
@@ -6965,6 +9071,7 @@ vfs_drt_get_cluster(void **cmapp, off_t *offsetp, u_int *lengthp)
 		        /*  didn't find any bits set */
 		        panic("vfs_drt: entry summary count > 0 but no bits set in map");
 		}
+<<<<<<< HEAD
 		for (ls = 0; i < DRT_BITVECTOR_PAGES; i++, ls++) {
 			if (!DRT_HASH_TEST_BIT(cmap, index, i))
 			        break;
@@ -6996,6 +9103,9 @@ vfs_drt_get_cluster(void **cmapp, off_t *offsetp, u_int *lengthp)
 	
 	vfs_drt_free_map(cmap);
 	*cmapp = NULL;
+=======
+		cluster_io(vp, upl, upl_offset, upl_f_offset + upl_offset, io_size, vp->v_ciosiz, io_flags, (struct buf *)0, (struct clios *)0);
+>>>>>>> origin/10.2
 
 	return(KERN_FAILURE);
 }
@@ -7075,4 +9185,68 @@ vfs_drt_sanity(struct vfs_drt_clustermap *cmap)
 		        panic("bits_on = %d,  index = %d\n", bits_on, index);
 	}		
 }
+<<<<<<< HEAD
 #endif
+=======
+
+
+
+static int
+cluster_align_phys_io(struct vnode *vp, struct uio *uio, vm_offset_t usr_paddr, int xsize, int devblocksize, int flags)
+{
+        struct iovec     *iov;
+        upl_page_info_t  *pl;
+        upl_t            upl;
+        vm_offset_t      ubc_paddr;
+        kern_return_t    kret;
+        int              error = 0;
+
+        iov = uio->uio_iov;
+
+        kret = ubc_create_upl(vp,
+                              uio->uio_offset & ~PAGE_MASK_64,
+                              PAGE_SIZE,
+                              &upl,
+                              &pl,
+                              UPL_FLAGS_NONE);
+
+        if (kret != KERN_SUCCESS)
+                return(EINVAL);
+
+        if (!upl_valid_page(pl, 0)) {
+                /*
+                 * issue a synchronous read to cluster_io
+                 */
+                error = cluster_io(vp, upl, 0, uio->uio_offset & ~PAGE_MASK_64, PAGE_SIZE, devblocksize,
+				   CL_READ, (struct buf *)0, (struct clios *)0);
+                if (error) {
+                          ubc_upl_abort_range(upl, 0, PAGE_SIZE, UPL_ABORT_DUMP_PAGES | UPL_ABORT_FREE_ON_EMPTY);
+
+                          return(error);
+                }
+        }
+        ubc_paddr = (vm_offset_t)upl_phys_page(pl, 0) + (int)(uio->uio_offset & PAGE_MASK_64);
+
+	if (flags & CL_READ)
+	        copyp2p(ubc_paddr, usr_paddr, xsize, 2);
+	else
+	        copyp2p(usr_paddr, ubc_paddr, xsize, 1);
+
+	if ( !(flags & CL_READ) || upl_dirty_page(pl, 0)) {
+                /*
+                 * issue a synchronous write to cluster_io
+                 */
+                error = cluster_io(vp, upl, 0, uio->uio_offset & ~PAGE_MASK_64, PAGE_SIZE, devblocksize,
+				   0, (struct buf *)0, (struct clios *)0);
+	}
+	if (error == 0) {
+	        uio->uio_offset += xsize;
+		iov->iov_base   += xsize;
+		iov->iov_len    -= xsize;
+		uio->uio_resid  -= xsize;
+	}
+	ubc_upl_abort_range(upl, 0, PAGE_SIZE, UPL_ABORT_DUMP_PAGES | UPL_ABORT_FREE_ON_EMPTY);
+
+        return (error);
+}
+>>>>>>> origin/10.2

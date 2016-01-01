@@ -8,7 +8,11 @@ include $(MakeInc_cmd)
 include $(MakeInc_def)
 
 DATAFILES = \
+<<<<<<< HEAD
 	vfs_support.h
+=======
+	vfs_support.h vfs_journal.h
+>>>>>>> origin/10.2
 
 INSTALL_MI_LIST	= ${DATAFILES}
 

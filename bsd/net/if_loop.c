@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +16,24 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +41,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /*
  * Copyright (c) 1982, 1986, 1993
@@ -482,8 +515,13 @@ lo_rtrequest(int cmd, struct rtentry *rt, struct sockaddr *sa)
 /*
  * Process an ioctl request.
  */
+<<<<<<< HEAD
 static errno_t
 lo_ioctl(struct ifnet *ifp, u_long cmd, void *data)
+=======
+static int
+lo_if_ioctl(struct ifnet *ifp, u_long cmd, void * data)
+>>>>>>> origin/10.3
 {
 	int error = 0;
 
@@ -544,6 +582,13 @@ lo_ioctl(struct ifnet *ifp, u_long cmd, void *data)
 	}
 	return (error);
 }
+
+static int
+loioctl(u_long dl_tag, struct ifnet *ifp, u_long cmd, caddr_t data)
+{
+    return (lo_if_ioctl(ifp, cmd, data));
+}
+
 #endif /* NLOOP > 0 */
 
 
@@ -737,6 +782,7 @@ sysctl_dequeue_scidx SYSCTL_HANDLER_ARGS
 
 	i = lo_dequeue_scidx;
 
+<<<<<<< HEAD
 	err = sysctl_handle_int(oidp, &i, 0, req);
 	if (err != 0 || req->newptr == USER_ADDR_NULL)
 		return (err);
@@ -751,4 +797,25 @@ sysctl_dequeue_scidx SYSCTL_HANDLER_ARGS
 	lo_dequeue_scidx = MBUF_SCIDX(lo_dequeue_sc);
 
 	return (err);
+=======
+	for (ifp = loif; i < NLOOP; ifp++) {
+		lo_statics[i].bpf_callback = 0;
+		lo_statics[i].bpf_mode      = BPF_TAP_DISABLE;
+		ifp->if_name = "lo";
+		ifp->if_family = APPLE_IF_FAM_LOOPBACK;
+		ifp->if_unit = i++;
+		ifp->if_mtu = LOMTU;
+		ifp->if_flags = IFF_LOOPBACK | IFF_MULTICAST;
+		ifp->if_ioctl = lo_if_ioctl;
+		ifp->if_set_bpf_tap = lo_set_bpf_tap;
+		ifp->if_output = lo_output;
+		ifp->if_type = IFT_LOOP;
+		ifp->if_hwassist = 0; /* HW cksum on send side breaks Classic loopback */
+		dlil_if_attach(ifp);
+#if NBPFILTER > 0
+		bpfattach(ifp, DLT_NULL, sizeof(u_int));
+#endif
+	}
+	thread_funnel_switch(NETWORK_FUNNEL, KERNEL_FUNNEL);
+>>>>>>> origin/10.3
 }

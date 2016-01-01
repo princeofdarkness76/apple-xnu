@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -85,6 +107,7 @@
 #include <vm/vm_page.h>
 #endif
 
+<<<<<<< HEAD
 #include <sys/kdebug.h>
 
 #define VM_PAGE_AVAILABLE_COUNT()		((unsigned int)(vm_page_cleaned_count))
@@ -146,6 +169,8 @@ extern int	vm_debug_events;
 	MACRO_END
 
 extern void memoryshot(unsigned int event, unsigned int control);
+=======
+>>>>>>> origin/10.6
 
 extern kern_return_t vm_map_create_upl(
 	vm_map_t		map,
@@ -162,8 +187,32 @@ extern ppnum_t upl_get_highest_page(
 extern upl_size_t upl_get_size(
 	upl_t			upl);
 
+<<<<<<< HEAD
 extern upl_t upl_associated_upl(upl_t upl);
 extern void upl_set_associated_upl(upl_t upl, upl_t associated_upl);
+=======
+
+#ifndef	MACH_KERNEL_PRIVATE
+typedef struct vm_page	*vm_page_t;
+#endif
+
+
+extern void                vm_page_free_list(
+                            vm_page_t	mem,
+                            boolean_t	prepare_object);
+
+extern kern_return_t      vm_page_alloc_list(
+                            int         page_count,
+                            int			flags,
+                            vm_page_t * list);
+
+extern void               vm_page_set_offset(vm_page_t page, vm_object_offset_t offset);
+extern vm_object_offset_t vm_page_get_offset(vm_page_t page);
+extern ppnum_t            vm_page_get_phys_page(vm_page_t page);
+extern vm_page_t          vm_page_get_next(vm_page_t page);
+
+#ifdef	MACH_KERNEL_PRIVATE
+>>>>>>> origin/10.6
 
 extern void iopl_valid_data(
 	upl_t			upl_ptr);
@@ -223,6 +272,28 @@ struct vm_pageout_queue {
 extern struct	vm_pageout_queue	vm_pageout_queue_internal;
 extern struct	vm_pageout_queue	vm_pageout_queue_external;
 
+
+/*
+ * must hold the page queues lock to
+ * manipulate this structure
+ */
+struct vm_pageout_queue {
+        queue_head_t	pgo_pending;	/* laundry pages to be processed by pager's iothread */
+        unsigned int	pgo_laundry;	/* current count of laundry pages on queue or in flight */
+        unsigned int	pgo_maxlaundry;
+
+        unsigned int	pgo_idle:1,	/* iothread is blocked waiting for work to do */
+	                pgo_busy:1,     /* iothread is currently processing request from pgo_pending */
+			pgo_throttled:1,/* vm_pageout_scan thread needs a wakeup when pgo_laundry drops */
+		        pgo_draining:1,
+			:0;
+};
+
+#define VM_PAGE_Q_THROTTLED(q)		\
+        ((q)->pgo_laundry >= (q)->pgo_maxlaundry)
+
+extern struct	vm_pageout_queue	vm_pageout_queue_internal;
+extern struct	vm_pageout_queue	vm_pageout_queue_external;
 
 /*
  *	Routines exported to Mach.
@@ -340,12 +411,16 @@ struct upl {
 #define UPL_SHADOWED		0x1000
 #define UPL_KERNEL_OBJECT	0x2000
 #define UPL_VECTOR		0x4000
+<<<<<<< HEAD
 #define UPL_SET_DIRTY		0x8000
 #define UPL_HAS_BUSY		0x10000
 #define UPL_TRACKED_BY_OBJECT	0x20000
 #define UPL_EXPEDITE_SUPPORTED 	0x40000
 #define UPL_DECMP_REQ 		0x80000
 #define UPL_DECMP_REAL_IO 	0x100000
+=======
+#define UPL_HAS_BUSY            0x10000
+>>>>>>> origin/10.6
 
 /* flags for upl_create flags parameter */
 #define UPL_CREATE_EXTERNAL	0
@@ -429,11 +504,17 @@ extern kern_return_t vm_paging_map_object(
 	vm_page_t		page,
 	vm_object_t		object,
 	vm_object_offset_t	offset,
+<<<<<<< HEAD
 	vm_prot_t		protection,
 	boolean_t		can_unlock_object,
 	vm_map_size_t		*size,		/* IN/OUT */
 	vm_map_offset_t		*address,	/* OUT */
 	boolean_t		*need_unmap);	/* OUT */
+=======
+	vm_map_size_t		*size,
+	vm_prot_t		protection,
+	boolean_t		can_unlock_object);
+>>>>>>> origin/10.5
 extern void vm_paging_unmap_object(
 	vm_object_t		object,
 	vm_map_offset_t		start,
@@ -506,6 +587,7 @@ struct vm_page_stats_reusable {
 extern struct vm_page_stats_reusable vm_page_stats_reusable;
 	
 extern int hibernate_flush_memory(void);
+<<<<<<< HEAD
 extern void hibernate_reset_stats(void);
 extern void hibernate_create_paddr_map(void);
 
@@ -541,6 +623,8 @@ extern void vm_pageout_anonymous_pages(void);
 #define DEFAULT_FREEZER_COMPRESSED_PAGER_IS_SWAPLESS		((vm_compressor_mode & VM_PAGER_FREEZER_COMPRESSOR_NO_SWAP) == VM_PAGER_FREEZER_COMPRESSOR_NO_SWAP)
 #define DEFAULT_FREEZER_COMPRESSED_PAGER_IS_SWAPBACKED		((vm_compressor_mode & VM_PAGER_FREEZER_COMPRESSOR_WITH_SWAP) == VM_PAGER_FREEZER_COMPRESSOR_WITH_SWAP)
 
+=======
+>>>>>>> origin/10.6
 
 #endif	/* KERNEL_PRIVATE */
 

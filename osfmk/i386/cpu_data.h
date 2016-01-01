@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -66,9 +92,15 @@ struct prngContext;
  * Data structures embedded in per-cpu data:
  */
 typedef struct rtclock_timer {
+<<<<<<< HEAD
 	mpqueue_head_t		queue;
 	uint64_t		deadline;
 	uint64_t		when_set;
+=======
+	queue_head_t	queue;
+	uint64_t		deadline;
+	boolean_t		is_set;
+>>>>>>> origin/10.5
 	boolean_t		has_expired;
 } rtclock_timer_t;
 
@@ -101,12 +133,18 @@ typedef struct {
 	addr64_t	cu_user_gs_base;
 } cpu_uber_t;
 
+<<<<<<< HEAD
 typedef	uint16_t	pcid_t;
 typedef	uint8_t		pcid_ref_t;
 
 #define CPU_RTIME_BINS (12)
 #define CPU_ITIME_BINS (CPU_RTIME_BINS)
 
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.8
 /*
  * Per-cpu data.
  *
@@ -136,13 +174,34 @@ typedef struct cpu_data
 	int			cpu_interrupt_level;
 	int			cpu_phys_number;	/* Physical CPU */
 	cpu_id_t		cpu_id;			/* Platform Expert */
+<<<<<<< HEAD
 	volatile int		cpu_signals;		/* IPI events */
 	volatile int		cpu_prior_signals;	/* Last set of events,
 							 * debugging
 							 */
+=======
+	int			cpu_signals;		/* IPI events */
+	int			cpu_prior_signals;	/* Last set of events,
+							 * debugging
+							 */
+<<<<<<< HEAD
+	int			cpu_mcount_off;		/* mcount recursion */
+>>>>>>> origin/10.6
+	ast_t			cpu_pending_ast;
+<<<<<<< HEAD
+	volatile int		cpu_running;
+	boolean_t		cpu_fixed_pmcs_enabled;
+=======
+	int			cpu_type;
+	int			cpu_subtype;
+	int			cpu_threadtype;
+	int			cpu_running;
+>>>>>>> origin/10.5
+=======
 	ast_t			cpu_pending_ast;
 	volatile int		cpu_running;
 	boolean_t		cpu_fixed_pmcs_enabled;
+>>>>>>> origin/10.8
 	rtclock_timer_t		rtclock_timer;
 	volatile addr64_t	cpu_active_cr3 __attribute((aligned(64)));
 	union {
@@ -173,14 +232,34 @@ typedef struct cpu_data
 
 	vm_offset_t		cpu_physwindow_base;
 	uint64_t		*cpu_physwindow_ptep;
+<<<<<<< HEAD
 #endif
 
 #define HWINTCNT_SIZE 256
 	uint32_t		cpu_hwIntCnt[HWINTCNT_SIZE];	/* Interrupt counts */
  	uint64_t		cpu_hwIntpexits[HWINTCNT_SIZE];
 	uint64_t		cpu_hwIntcexits[HWINTCNT_SIZE];
+<<<<<<< HEAD
+=======
+	void 			*cpu_hi_iss;
+	boolean_t		cpu_tlb_invalid;
+	uint32_t		cpu_hwIntCnt[256];	/* Interrupt counts */
+>>>>>>> origin/10.5
 	uint64_t		cpu_dr7; /* debug control register */
 	uint64_t		cpu_int_event_time;	/* intr entry/exit time */
+=======
+	uint64_t		cpu_dr7; /* debug control register */
+	uint64_t		cpu_int_event_time;	/* intr entry/exit time */
+	uint64_t		cpu_uber_arg_store;	/* Double mapped address
+							 * of current thread's
+							 * uu_arg array.
+							 */
+	uint64_t		cpu_uber_arg_store_valid; /* Double mapped
+							   * address of pcb
+							   * arg store
+							   * validity flag.
+							   */
+>>>>>>> origin/10.8
 	pal_rtc_nanotime_t	*cpu_nanotime;		/* Nanotime info */
 #if KPC
 	/* double-buffered performance counter data */
@@ -202,6 +281,10 @@ typedef struct cpu_data
 	uint64_t		cpu_pmap_pcid_flushes;
 	uint64_t		cpu_pmap_pcid_preserves;
 #endif
+<<<<<<< HEAD
+=======
+#endif /* x86_64 */
+>>>>>>> origin/10.8
 	uint64_t		cpu_aperf;
 	uint64_t		cpu_mperf;
 	uint64_t		cpu_c3res;
@@ -216,9 +299,19 @@ typedef struct cpu_data
  	uint64_t		cpu_cur_insns;
  	uint64_t		cpu_cur_ucc;
  	uint64_t		cpu_cur_urc;
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 	uint64_t		cpu_gpmcs[4];
 	uint64_t                cpu_max_observed_int_latency;
 	int                     cpu_max_observed_int_latency_vector;
+=======
+	uint64_t                cpu_max_observed_int_latency;
+	int                     cpu_max_observed_int_latency_vector;
+	uint64_t		debugger_entry_time;
+	uint64_t		debugger_ipi_time;
+>>>>>>> origin/10.8
 	volatile boolean_t	cpu_NMI_acknowledged;
 	uint64_t		debugger_entry_time;
 	uint64_t		debugger_ipi_time;
@@ -236,14 +329,51 @@ typedef struct cpu_data
 #endif
 #if CONFIG_MCA
 	struct mca_state	*cpu_mca_state;		/* State at MC fault */
+<<<<<<< HEAD
+<<<<<<< HEAD
 #endif
 	struct prngContext	*cpu_prng;		/* PRNG's context */
+=======
+#endif
+>>>>>>> origin/10.8
  	int			cpu_type;
  	int			cpu_subtype;
  	int			cpu_threadtype;
  	boolean_t		cpu_iflag;
  	boolean_t		cpu_boot_complete;
  	int			cpu_hibernate;
+<<<<<<< HEAD
+=======
+	uint64_t		cpu_uber_arg_store;	/* Double mapped address
+							 * of current thread's
+							 * uu_arg array.
+							 */
+	uint64_t		cpu_uber_arg_store_valid; /* Double mapped
+							   * address of pcb
+							   * arg store
+							   * validity flag.
+							   */
+	rtc_nanotime_t		*cpu_nanotime;		/* Nanotime info */
+<<<<<<< HEAD
+							  
+>>>>>>> origin/10.5
+=======
+	thread_t		csw_old_thread;
+	thread_t		csw_new_thread;
+	uint64_t		cpu_max_observed_int_latency;
+	int			cpu_max_observed_int_latency_vector;
+	uint64_t		debugger_entry_time;
+	volatile boolean_t	cpu_NMI_acknowledged;
+	/* A separate nested interrupt stack flag, to account
+	 * for non-nested interrupts arriving while on the interrupt stack
+	 * Currently only occurs when AICPM enables interrupts on the
+	 * interrupt stack during processor offlining.
+	 */
+	uint32_t		cpu_nested_istack;
+	uint32_t		cpu_nested_istack_events;
+>>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.8
 } cpu_data_t;
 
 extern cpu_data_t	*cpu_data_ptr[];  

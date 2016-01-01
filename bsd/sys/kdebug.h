@@ -1,4 +1,5 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -15,6 +16,26 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +43,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 
 /* 	Copyright (c) 1997 Apple Computer, Inc.  All rights reserved.
@@ -53,6 +88,7 @@ __BEGIN_DECLS
 #include <mach/branch_predicates.h>
 #endif
 
+<<<<<<< HEAD
 /*
  * Kdebug is a facility for tracing events occurring on a system.
  *
@@ -110,6 +146,8 @@ __BEGIN_DECLS
 #define KDBG_EXTRACT_CODE(Debugid) \
         ((uint16_t)(((Debugid) & KDBG_CODE_MASK) >> KDBG_CODE_OFFSET))
 
+=======
+>>>>>>> origin/10.10
 #ifdef KERNEL_PRIVATE
 
 typedef enum
@@ -161,6 +199,18 @@ extern void kernel_debug_enter(
 	);
 
 #endif /* KERNEL_PRIVATE */
+<<<<<<< HEAD
+=======
+
+/* The debug code consists of the following 
+*
+* ----------------------------------------------------------------------
+*|              |               |                               |Func   |
+*| Class (8)    | SubClass (8)  |          Code (14)            |Qual(2)|
+* ----------------------------------------------------------------------
+* The class specifies the higher level 
+*/
+>>>>>>> origin/10.10
 
 /* The Function qualifiers  */
 #define DBG_FUNC_START		1
@@ -191,8 +241,11 @@ extern void kernel_debug_enter(
 #define DBG_XPC                 41
 #define DBG_ATM                 42
 #define DBG_ARIADNE             43
+<<<<<<< HEAD
 #define DBG_DAEMON              44
 #define DBG_ENERGYTRACE         45
+=======
+>>>>>>> origin/10.10
 
 
 #define DBG_MIG			255
@@ -216,6 +269,7 @@ extern void kernel_debug_enter(
  * On error, -1 will be returned and errno will indicate the error.
  */
 #ifndef KERNEL
+<<<<<<< HEAD
 extern int kdebug_trace(uint32_t code, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4) __OSX_AVAILABLE_STARTING(__MAC_10_10_2, __IPHONE_8_2);
 #endif
 
@@ -295,6 +349,12 @@ __OSX_AVAILABLE_STARTING(__MAC_10_11, __IPHONE_9_0);
 extern void kernel_debug_string_simple(const char *message);
 #endif /* XNU_KERNEL_PRIVATE */
 
+=======
+extern int kdebug_trace(uint32_t code, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4) __OSX_AVAILABLE_STARTING(__MAC_10_10_2, __IPHONE_NA);
+#endif
+#endif /* PRIVATE */
+
+>>>>>>> origin/10.10
 /* **** The Kernel Debug Sub Classes for Mach (DBG_MACH) **** */
 #define	DBG_MACH_EXCP_KTRAP_x86	0x02	/* Kernel Traps on x86 */
 #define	DBG_MACH_EXCP_DFLT	0x03	/* Data Translation Fault */
@@ -349,6 +409,7 @@ extern void kernel_debug_string_simple(const char *message);
 					 */
 #define	MACH_REDISPATCH		0x16	/* "next thread" thread redispatched */
 #define	MACH_REMOTE_AST		0x17	/* AST signal issued to remote processor */
+<<<<<<< HEAD
 #define	MACH_SCHED_CHOOSE_PROCESSOR	0x18	/* Result of choose_processor */
 #define MACH_DEEP_IDLE          0x19	/* deep idle on master processor */
 /* unused                       0x1a    was MACH_SCHED_DECAY_PRIORITY */
@@ -381,7 +442,11 @@ extern void kernel_debug_string_simple(const char *message);
 #define DBG_COW_FAULT         3
 #define DBG_CACHE_HIT_FAULT   4
 #define DBG_NZF_PAGE_FAULT    5
+<<<<<<< HEAD
 #define DBG_GUARD_FAULT	      6
+=======
+#define DBG_GUARD_FAULT	      6	
+>>>>>>> origin/10.10
 #define DBG_PAGEINV_FAULT     7
 #define DBG_PAGEIND_FAULT     8
 #define DBG_COMPRESSOR_FAULT  9
@@ -400,6 +465,13 @@ extern void kernel_debug_string_simple(const char *message);
 #define MACH_IPC_VOUCHER_DESTROY		0x9	/* Voucher removed from global voucher hashtable */
 
 /* Codes for pmap (DBG_MACH_PMAP) */
+=======
+
+#define	MACH_SCHED_LPA_BROKEN	0x18	/* last_processor affinity broken in choose_processor */
+#define MACH_DEEP_IDLE          0x19	/* deep idle on master processor */
+
+/* Codes for pmap (DBG_MACH_PMAP) */     
+>>>>>>> origin/10.8
 #define PMAP__CREATE		0x0
 #define PMAP__DESTROY		0x1
 #define PMAP__PROTECT		0x2
@@ -441,10 +513,13 @@ extern void kernel_debug_string_simple(const char *message);
 #define SFI_PID_SET_MANAGED		0x8
 #define SFI_PID_CLEAR_MANAGED		0x9
 #define SFI_GLOBAL_DEFER		0xa
+<<<<<<< HEAD
 
 /* Codes for Zone Allocator (DBG_MACH_ZALLOC) */
 #define ZALLOC_ZCRAM 			0x0
 
+=======
+>>>>>>> origin/10.10
 /* **** The Kernel Debug Sub Classes for Network (DBG_NETWORK) **** */
 #define DBG_NETIP	1	/* Internet Protocol */
 #define DBG_NETARP	2	/* Address Resolution Protocol */
@@ -475,7 +550,11 @@ extern void kernel_debug_string_simple(const char *message);
 
 /* **** The Kernel Debug Sub Classes for IOKIT (DBG_IOKIT) **** */
 #define DBG_IOINTC			0	/* Interrupt controller */
+<<<<<<< HEAD
 #define DBG_IOWORKLOOP			1	/* Work from work loop */
+=======
+#define DBG_IOWORKLOOP		1	/* Work from work loop */
+>>>>>>> origin/10.6
 #define DBG_IOINTES			2	/* Interrupt event source */
 #define DBG_IOCLKES			3	/* Clock event source */
 #define DBG_IOCMDQ			4	/* Command queue latencies */
@@ -503,11 +582,20 @@ extern void kernel_debug_string_simple(const char *message);
 #define DBG_IOBLUETOOTH		46	/* Bluetooth */
 #define DBG_IOFIREWIRE		47	/* FireWire */
 #define DBG_IOINFINIBAND	48	/* Infiniband */
+<<<<<<< HEAD
 #define DBG_IOCPUPM		49	/* CPU Power Management */
 #define DBG_IOGRAPHICS		50	/* Graphics */
 #define DBG_HIBERNATE		51	/* hibernation related events */
 #define DBG_IOTHUNDERBOLT	52	/* Thunderbolt */
 
+=======
+#define DBG_IOCPUPM			49	/* CPU Power Management */
+#define DBG_IOGRAPHICS		50	/* Graphics */
+<<<<<<< HEAD
+>>>>>>> origin/10.5
+=======
+#define DBG_HIBERNATE		51	/* hibernation related events */
+>>>>>>> origin/10.6
 
 /* Backwards compatibility */
 #define	DBG_IOPOINTING		DBG_IOHID			/* OBSOLETE: Use DBG_IOHID instead */
@@ -530,11 +618,22 @@ extern void kernel_debug_string_simple(const char *message);
 #define DBG_DRVBLUETOOTH	15	/* Bluetooth */
 #define DBG_DRVFIREWIRE		16	/* FireWire */
 #define DBG_DRVINFINIBAND	17	/* Infiniband */
+<<<<<<< HEAD
 #define DBG_DRVGRAPHICS		18  	/* Graphics */
 #define DBG_DRVSD		19 	/* Secure Digital */
 #define DBG_DRVNAND		20	/* NAND drivers and layers */
 #define DBG_SSD			21	/* SSD */
 #define DBG_DRVSPI		22	/* SPI */
+<<<<<<< HEAD
+=======
+#define DBG_DRVGRAPHICS		18  /* Graphics */
+<<<<<<< HEAD
+>>>>>>> origin/10.5
+=======
+#define DBG_DRVSD			19  /* Secure Digital */
+>>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.8
 
 /* Backwards compatibility */
 #define	DBG_DRVPOINTING		DBG_DRVHID	/* OBSOLETE: Use DBG_DRVHID instead */
@@ -569,10 +668,15 @@ extern void kernel_debug_string_simple(const char *message);
 #define DBG_HFS_UPDATE_MODTIME	 0x02
 #define DBG_HFS_UPDATE_CHGTIME	 0x04
 #define DBG_HFS_UPDATE_MODIFIED	 0x08
+<<<<<<< HEAD
 #define DBG_HFS_UPDATE_FORCE     0x10
 #define DBG_HFS_UPDATE_DATEADDED 0x20
 #define DBG_HFS_UPDATE_MINOR     0x40
 #define DBG_HFS_UPDATE_SKIPPED	 0x80
+=======
+#define DBG_HFS_UPDATE_FORCE	 0x10
+#define DBG_HFS_UPDATE_DATEADDED 0x20
+>>>>>>> origin/10.10
 
 /* The Kernel Debug Sub Classes for BSD */
 #define DBG_BSD_PROC		0x01	/* process/signals related */
@@ -613,7 +717,10 @@ extern void kernel_debug_string_simple(const char *message);
 #define	TRACE_DATA_NEWTHREAD		(TRACEDBG_CODE(DBG_TRACE_DATA, 1))
 #define	TRACE_DATA_EXEC			(TRACEDBG_CODE(DBG_TRACE_DATA, 2))
 #define	TRACE_DATA_THREAD_TERMINATE	(TRACEDBG_CODE(DBG_TRACE_DATA, 3))
+<<<<<<< HEAD
 #define TRACE_STRING_GLOBAL		(TRACEDBG_CODE(DBG_TRACE_STRING, 0))
+=======
+>>>>>>> origin/10.10
 #define	TRACE_STRING_NEWTHREAD		(TRACEDBG_CODE(DBG_TRACE_STRING, 1))
 #define	TRACE_STRING_EXEC		(TRACEDBG_CODE(DBG_TRACE_STRING, 2))
 #define	TRACE_PANIC			(TRACEDBG_CODE(DBG_TRACE_INFO, 0))
@@ -646,6 +753,7 @@ extern void kernel_debug_string_simple(const char *message);
 #define DKIO_THROTTLE	0x20 /* Deprecated, still provided so fs_usage doesn't break */
 #define DKIO_PASSIVE	0x40
 #define DKIO_NOCACHE	0x80
+<<<<<<< HEAD
 #define DKIO_TIER_MASK	0xF00
 #define DKIO_TIER_SHIFT	8
 
@@ -726,6 +834,13 @@ extern void kernel_debug_string_simple(const char *message);
 
 /* Kernel Debug Sub Classes for daemons (DBG_DAEMON) */
 #define DBG_DAEMON_COREDUET			0x1
+=======
+
+/* Kernel Debug Sub Classes for Applications (DBG_APPS) */
+#define DBG_APP_LOGINWINDOW     0x03
+#define DBG_APP_SAMBA           0x80
+
+>>>>>>> origin/10.8
 
 /**********************************************************************/
 
@@ -746,7 +861,10 @@ extern void kernel_debug_string_simple(const char *message);
 #define QTDBG_CODE(SubClass,code) KDBG_CODE(DBG_QT, SubClass, code)
 #define APPSDBG_CODE(SubClass,code) KDBG_CODE(DBG_APPS, SubClass, code)
 #define ARIADNEDBG_CODE(SubClass, code) KDBG_CODE(DBG_ARIADNE, SubClass, code)
+<<<<<<< HEAD
 #define DAEMONDBG_CODE(SubClass, code) KDBG_CODE(DBG_DAEMON, SubClass, code)
+=======
+>>>>>>> origin/10.10
 #define CPUPM_CODE(code) IOKDBG_CODE(DBG_IOCPUPM, code)
 
 #define KMEM_ALLOC_CODE MACHDBG_CODE(DBG_MACH_LEAKS, 0)
@@ -1123,7 +1241,10 @@ extern void kdbg_trace_string(struct proc *proc, long *arg1, long *arg2, long *a
 
 extern void kdbg_dump_trace_to_file(const char *);
 void start_kern_tracing(unsigned int, boolean_t);
+<<<<<<< HEAD
 void start_kern_tracing_with_typefilter(unsigned int, boolean_t, unsigned int);
+=======
+>>>>>>> origin/10.8
 struct task;
 extern void kdbg_get_task_name(char*, int, struct task *task);
 void disable_wrap(uint32_t *old_slowcheck, uint32_t *old_flags);
@@ -1429,11 +1550,17 @@ int kdbg_write_v3_chunk_to_fd(uint32_t tag, uint32_t sub_tag, uint64_t length, v
 #define VFS_LOOKUP	(FSDBG_CODE(DBG_FSRW,36))
 #define VFS_LOOKUP_DONE	(FSDBG_CODE(DBG_FSRW,39))
 
+<<<<<<< HEAD
 #ifdef XNU_KERNEL_PRIVATE
 #if (DEVELOPMENT || DEBUG)
 #define KDEBUG_MOJO_TRACE 1
 #endif
 #endif
+=======
+#if !CONFIG_EMBEDDED && (DEVELOPMENT || DEBUG)
+#define KDEBUG_MOJO_TRACE 1
+#endif
+>>>>>>> origin/10.10
 
 #endif /* __APPLE_API_PRIVATE */
 #endif	/* PRIVATE */

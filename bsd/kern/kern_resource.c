@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -79,6 +105,7 @@
 #include <sys/file_internal.h>
 #include <sys/resourcevar.h>
 #include <sys/malloc.h>
+<<<<<<< HEAD
 #include <sys/proc_internal.h>
 #include <sys/kauth.h>
 #include <machine/spl.h>
@@ -87,7 +114,14 @@
 #include <sys/sysproto.h>
 
 #include <security/audit/audit.h>
+=======
+#include <sys/proc.h>
+#include <sys/mount.h>
+>>>>>>> origin/10.3
 
+#include <bsm/audit_kernel.h>
+
+#include <machine/spl.h>
 #include <machine/vmparam.h>
 
 #include <mach/mach_types.h>
@@ -113,6 +147,7 @@
 int	donice(struct proc *curp, struct proc *chgp, int n);
 int	dosetrlimit(struct proc *p, u_int which, struct rlimit *limp);
 int	uthread_get_background_state(uthread_t);
+<<<<<<< HEAD
 static void do_background_socket(struct proc *p, thread_t thread);
 static int do_background_thread(struct proc *curp, thread_t thread, int priority);
 static int do_background_proc(struct proc *curp, struct proc *targetp, int priority);
@@ -131,6 +166,11 @@ int fill_task_qos_rusage(task_t task, rusage_info_current *ri);
 static void rusage_info_conversion(rusage_info_t ri_info, rusage_info_current *ri_current, int flavor);
 
 int proc_get_rusage(proc_t p, int flavor, user_addr_t buffer, __unused int is_zombie);
+=======
+static void do_background_socket(struct proc *p, thread_t thread, int priority);
+static int do_background_thread(struct proc *curp, int priority);
+static int do_background_task(struct proc *curp, int priority);
+>>>>>>> origin/10.6
 
 rlim_t maxdmap = MAXDSIZ;	/* XXX */ 
 rlim_t maxsmap = MAXSSIZ - PAGE_MAX_SIZE;	/* XXX */ 
@@ -258,6 +298,7 @@ getpriority(struct proc *curp, struct getpriority_args *uap, int32_t *retval)
 			refheld = 1;
 		}
 
+<<<<<<< HEAD
 		error = get_background_proc(curp, p, &low);
 
 		if (refheld)
@@ -274,6 +315,11 @@ getpriority(struct proc *curp, struct getpriority_args *uap, int32_t *retval)
 			if (p == PROC_NULL)
 				break;
 			refheld = 1;
+=======
+		low = 0;
+		if ( (ut->uu_flag & UT_BACKGROUND_TRAFFIC_MGT) != 0 ) {
+			low = 1;
+>>>>>>> origin/10.6
 		}
 
 		error = proc_get_darwin_role(curp, p, &low);
@@ -357,6 +403,10 @@ setpriority(struct proc *curp, struct setpriority_args *uap, int32_t *retval)
 	/* would also test (uap->who < 0), but id_t is unsigned */
 	if (uap->who > 0x7fffffff)
 		return (EINVAL);
+
+	AUDIT_ARG(cmd, uap->which);
+	AUDIT_ARG(owner, uap->who, 0);
+	AUDIT_ARG(value, uap->prio);
 
 	switch (uap->which) {
 
@@ -464,9 +514,33 @@ setpriority(struct proc *curp, struct setpriority_args *uap, int32_t *retval)
 				break;
 			refheld = 1;
 		}
+<<<<<<< HEAD
 
 		error = proc_set_darwin_role(curp, p, uap->prio);
 
+=======
+		error = do_background_thread(curp, uap->prio);
+		(void) do_background_socket(curp, current_thread(), uap->prio);
+>>>>>>> origin/10.6
+		found++;
+		if (refheld != 0)
+			proc_rele(p);
+		break;
+	}
+
+	case PRIO_DARWIN_PROCESS: {
+		if (uap->who == 0)
+			p = curp;
+		else {
+			p = proc_find(uap->who);
+			if (p == 0)
+				break;
+			refheld = 1;
+		}
+
+		error = do_background_task(p, uap->prio);
+		(void) do_background_socket(p, NULL, uap->prio);
+		
 		found++;
 		if (refheld != 0)
 			proc_rele(p);
@@ -531,12 +605,145 @@ out:
 	return (error);
 }
 
+<<<<<<< HEAD
 static int
 set_gpudeny_proc(struct proc *curp, struct proc *targetp, int priority)
 {
 	int error = 0;
 	kauth_cred_t ucred;
 	kauth_cred_t target_cred;
+=======
+static int
+do_background_task(struct proc *p, int priority)
+{
+	int error = 0;
+	task_category_policy_data_t info;
+
+	/* set the max scheduling priority on the task */
+	if (priority & PRIO_DARWIN_BG) { 
+		info.role = TASK_THROTTLE_APPLICATION;
+	} else {
+		info.role = TASK_DEFAULT_APPLICATION;
+	}
+
+	error = task_policy_set(p->task,
+			TASK_CATEGORY_POLICY,
+			(task_policy_t) &info,
+			TASK_CATEGORY_POLICY_COUNT);
+
+	if (error)
+		goto out;
+
+	proc_lock(p);
+
+	/* mark proc structure as backgrounded */
+	if (priority & PRIO_DARWIN_BG) {
+		p->p_lflag |= P_LBACKGROUND;
+	} else {
+		p->p_lflag &= ~P_LBACKGROUND;
+	}
+
+	/* set or reset the disk I/O priority */
+	p->p_iopol_disk = (priority == PRIO_DARWIN_BG ? 
+			IOPOL_THROTTLE : IOPOL_DEFAULT); 
+
+	proc_unlock(p);
+
+out:
+	return (error);
+}
+
+static void 
+do_background_socket(struct proc *p, thread_t thread, int priority)
+{
+	struct filedesc                     *fdp;
+	struct fileproc                     *fp;
+	int                                 i;
+
+	if (priority & PRIO_DARWIN_BG) {
+		/*
+		 * For PRIO_DARWIN_PROCESS (thread is NULL), simply mark
+		 * the sockets with the background flag.  There's nothing
+		 * to do here for the PRIO_DARWIN_THREAD case.
+		 */
+		if (thread == NULL) {
+			proc_fdlock(p);
+			fdp = p->p_fd;
+
+			for (i = 0; i < fdp->fd_nfiles; i++) {
+				struct socket       *sockp;
+
+				fp = fdp->fd_ofiles[i];
+				if (fp == NULL || (fdp->fd_ofileflags[i] & UF_RESERVED) != 0 ||
+						fp->f_fglob->fg_type != DTYPE_SOCKET) {
+					continue;
+				}
+				sockp = (struct socket *)fp->f_fglob->fg_data;
+				socket_set_traffic_mgt_flags(sockp, TRAFFIC_MGT_SO_BACKGROUND);
+				sockp->so_background_thread = NULL;
+			}
+			proc_fdunlock(p);
+		}
+
+	} else {
+		u_int32_t	traffic_mgt;
+		/*
+		 * See comments on do_background_thread().  Deregulate network
+		 * traffics only for setpriority(PRIO_DARWIN_THREAD).
+		 */
+		traffic_mgt = (thread == NULL) ? 0 : TRAFFIC_MGT_SO_BG_REGULATE;
+
+		/* disable networking IO throttle.
+		 * NOTE - It is a known limitation of the current design that we 
+		 * could potentially clear TRAFFIC_MGT_SO_BACKGROUND bit for 
+		 * sockets created by other threads within this process.  
+		 */
+		proc_fdlock(p);
+		fdp = p->p_fd;
+		for ( i = 0; i < fdp->fd_nfiles; i++ ) {
+			struct socket       *sockp;
+
+			fp = fdp->fd_ofiles[ i ];
+			if ( fp == NULL || (fdp->fd_ofileflags[ i ] & UF_RESERVED) != 0 ||
+					fp->f_fglob->fg_type != DTYPE_SOCKET ) {
+				continue;
+			}
+			sockp = (struct socket *)fp->f_fglob->fg_data;
+			/* skip if only clearing this thread's sockets */
+			if ((thread) && (sockp->so_background_thread != thread)) {
+				continue;
+			}
+			socket_clear_traffic_mgt_flags(sockp, TRAFFIC_MGT_SO_BACKGROUND | traffic_mgt);
+			sockp->so_background_thread = NULL;
+		}
+		proc_fdunlock(p);
+	}
+}
+
+
+/*
+ * do_background_thread
+ * Returns:	0			Success
+ * XXX - todo - does this need a MACF hook?
+ *
+ * NOTE: To maintain binary compatibility with PRIO_DARWIN_THREAD with respect
+ *	 to network traffic management, UT_BACKGROUND_TRAFFIC_MGT is set/cleared
+ *	 along with UT_BACKGROUND flag, as the latter alone no longer implies
+ *	 any form of traffic regulation (it simply means that the thread is
+ *	 background.)  With PRIO_DARWIN_PROCESS, any form of network traffic
+ *	 management must be explicitly requested via whatever means appropriate,
+ *	 and only TRAFFIC_MGT_SO_BACKGROUND is set via do_background_socket().
+ */
+static int
+do_background_thread(struct proc *curp __unused, int priority)
+{
+	thread_t							thread;
+	struct uthread						*ut;
+	thread_precedence_policy_data_t		policy;
+	
+	thread = current_thread();
+	ut = get_bsdthread_info(thread);
+>>>>>>> origin/10.6
 
 	ucred = kauth_cred_get();
 	target_cred = kauth_cred_proc_ref(targetp);
@@ -714,6 +921,7 @@ do_background_proc(struct proc *curp, struct proc *targetp, int priority)
 		goto out;
 #endif
 
+<<<<<<< HEAD
 	external = (curp == targetp) ? TASK_POLICY_INTERNAL : TASK_POLICY_EXTERNAL;
 
 	switch (priority) {
@@ -826,6 +1034,23 @@ do_background_thread(struct proc *curp, thread_t thread, int priority)
 
 	if (thread_is_static_param(thread)) {
 		return(EPERM);
+=======
+		/*
+		 * Clear background bit in thread and disable disk IO
+		 * throttle as well as network traffic management.
+		 * The corresponding socket flags for sockets created by
+		 * this thread will be cleared in do_background_socket().
+		 */
+		ut->uu_flag &= ~(UT_BACKGROUND | UT_BACKGROUND_TRAFFIC_MGT);
+		ut->uu_iopol_disk = IOPOL_NORMAL;
+
+		/* reset thread priority (we did not save previous value) */
+		policy.importance = 0;
+		thread_policy_set( thread, THREAD_PRECEDENCE_POLICY,
+						   (thread_policy_t)&policy,
+						   THREAD_PRECEDENCE_POLICY_COUNT );
+		return(0);
+>>>>>>> origin/10.6
 	}
 
 	/* Not allowed to combine QoS and DARWIN_BG, doing so strips the QoS */
@@ -834,6 +1059,7 @@ do_background_thread(struct proc *curp, thread_t thread, int priority)
 		rv = EIDRM;
 	}
 
+<<<<<<< HEAD
 	/* TODO: Fail if someone passes something besides 0 or PRIO_DARWIN_BG */
 	enable   = (priority == PRIO_DARWIN_BG) ? TASK_POLICY_ENABLE   : TASK_POLICY_DISABLE;
 	external = (current_thread() == thread) ? TASK_POLICY_INTERNAL : TASK_POLICY_EXTERNAL;
@@ -842,8 +1068,50 @@ do_background_thread(struct proc *curp, thread_t thread, int priority)
 	                            TASK_POLICY_DARWIN_BG, enable);
 
 	return rv;
+=======
+	/*
+	 * Tag thread as background and throttle disk IO, as well
+	 * as regulate network traffics.  Future sockets created
+	 * by this thread will have their corresponding socket
+	 * flags set at socket create time.
+	 */
+	ut->uu_flag |= (UT_BACKGROUND | UT_BACKGROUND_TRAFFIC_MGT);
+	ut->uu_iopol_disk = IOPOL_THROTTLE;
+
+	policy.importance = INT_MIN;
+	thread_policy_set( thread, THREAD_PRECEDENCE_POLICY,
+					   (thread_policy_t)&policy,
+					   THREAD_PRECEDENCE_POLICY_COUNT );
+
+	/* throttle networking IO happens in socket( ) syscall.
+	 * If UT_{BACKGROUND,BACKGROUND_TRAFFIC_MGT} is set in the current
+	 * thread then TRAFFIC_MGT_SO_{BACKGROUND,BG_REGULATE} is set.
+	 * Existing sockets are taken care of by do_background_socket().
+	 */
+	return(0);
+>>>>>>> origin/10.6
 }
 
+/*
+ * If the thread or its proc has been put into the background
+ * with setpriority(PRIO_DARWIN_{THREAD,PROCESS}, *, PRIO_DARWIN_BG),
+ * report that status.
+ *
+ * Returns: PRIO_DARWIN_BG if background
+ * 			0 if foreground
+ */
+int
+uthread_get_background_state(uthread_t uth)
+{
+	proc_t p = uth->uu_proc;
+	if (p && (p->p_lflag & P_LBACKGROUND))
+		return PRIO_DARWIN_BG;
+	
+	if (uth->uu_flag & UT_BACKGROUND)
+		return PRIO_DARWIN_BG;
+
+	return 0;
+}
 
 /*
  * Returns:	0			Success
@@ -1914,6 +2182,7 @@ proc_rlimit_control(__unused struct proc *p, struct proc_rlimit_control_args *ua
 		uint32_t ms_refill = 0;
 		uint64_t ns_refill;
 
+<<<<<<< HEAD
 		percent = (uint8_t)(cpulimits_flags & 0xffU);					/* low 8 bits for percent */
 		ms_refill = (cpulimits_flags >> 8) & 0xffffff;		/* next 24 bits represent ms refill value */
 		if (percent >= 100) {
@@ -1950,4 +2219,18 @@ int thread_selfusage(struct proc *p __unused, struct thread_selfusage_args *uap 
 	*retval = runtime;
 
 	return (0);
+=======
+	ut = get_bsdthread_info(current_thread());
+
+	if(ut){
+		policy = current_proc()->p_iopol_disk;
+
+		if (ut->uu_iopol_disk != IOPOL_DEFAULT)
+			policy = ut->uu_iopol_disk;
+
+		if (policy == IOPOL_THROTTLE)
+			return TRUE;
+	}
+	return FALSE;
+>>>>>>> origin/10.6
 }

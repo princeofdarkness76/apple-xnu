@@ -1,11 +1,19 @@
 /*
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+<<<<<<< HEAD
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+>>>>>>> origin/10.2
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
+<<<<<<< HEAD
  * compliance with the License. The rights granted to you under the License
  * may not be used to create, or enable the creation or redistribution of,
  * unlawful or unlicensed copies of an Apple operating system, or to
@@ -14,14 +22,29 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -123,3 +146,177 @@ xpr(
 	mp_enable_preemption();
 }
 
+<<<<<<< HEAD
+=======
+void 
+xprbootstrap(void)
+{
+	vm_offset_t	addr;
+	vm_size_t	size;
+	kern_return_t	kr;
+
+	simple_lock_init(&xprlock, 0);
+	if (nxprbufs == 0)
+		return;	/* assume XPR support not desired */
+
+	/* leave room at the end for a saved copy of xprptr */
+	size = nxprbufs * sizeof(struct xprbuf) + sizeof xprptr;
+
+	kr = kmem_alloc_wired(kernel_map, &addr, size);
+	if (kr != KERN_SUCCESS)
+		panic("xprbootstrap");
+
+	if (xprenable) {
+		/*
+		 *	If xprenable is set (the default) then we zero
+		 *	the buffer so xpr_dump doesn't encounter bad pointers.
+		 *	If xprenable isn't set, then we preserve
+		 *	the original contents of the buffer.  This is useful
+		 *	if memory survives reboots, so xpr_dump can show
+		 *	the previous buffer contents.
+		 */
+
+		(void) memset((void *) addr, 0, size);
+	}
+
+	xprbase = (struct xprbuf *) addr;
+	xprlast = &xprbase[nxprbufs];
+	xprptr = xprbase;	/* setting xprptr enables tracing */
+}
+
+int		xprinitial = 0;
+
+void
+xprinit(void)
+{
+	xprflags |= xprinitial;
+}
+
+#if	MACH_KDB
+#include <ddb/db_output.h>
+
+/*
+ * Prototypes for functions called from the debugger
+ */
+void
+xpr_dump(
+	struct xprbuf	*base,
+	int		nbufs);
+
+void
+xpr_search(
+	int	arg_index,
+	int	value);
+
+extern jmp_buf_t *db_recover;
+
+/*
+ *	Print current content of xpr buffers (KDB's sake)
+ *	Use stack order to make it understandable.
+ *
+ *	Called as "!xpr_dump" this dumps the kernel's xpr buffer.
+ *	Called with arguments, it can dump xpr buffers in user tasks,
+ *	assuming they use the same format as the kernel.
+ */
+static spl_t xpr_dump_spl;
+static struct xprbuf *base;
+static int nbufs;
+void
+xpr_dump(
+	struct xprbuf	*_base,
+	int		_nbufs)
+{
+	jmp_buf_t db_jmpbuf;
+	jmp_buf_t *prev;
+	struct xprbuf *last, *ptr;
+	register struct xprbuf *x;
+	int i;
+
+	base = _base;
+	nbufs = _nbufs;
+
+	if (base == 0) {
+		base = xprbase;
+		nbufs = nxprbufs;
+	}
+
+	if (nbufs == 0)
+		return;
+
+	if (base == xprbase) {
+		xpr_dump_spl = splhigh();
+		simple_lock(&xprlock);
+	}
+
+	last = base + nbufs;
+	ptr = * (struct xprbuf **) last;
+
+	prev = db_recover;
+	if (_setjmp(db_recover = &db_jmpbuf) == 0)
+	    for (x = ptr, i = 0; i < nbufs; i++) {
+		if (--x < base)
+			x = last - 1;
+
+		if (x->msg == 0)
+			break;
+
+		db_printf("<%d:%x:%x> ", x - base, x->cpuinfo, x->timestamp);
+		db_printf(x->msg, x->arg1,x->arg2,x->arg3,x->arg4,x->arg5);
+	    }
+	db_recover = prev;
+
+	if (base == xprbase) {
+		simple_unlock(&xprlock);
+		splx(xpr_dump_spl);
+	}
+}
+
+/*
+ * dump xpr table with a selection criteria.
+ * argument number "arg_index" must equal "value"
+ */
+
+void
+xpr_search(
+	int	arg_index,
+	int	value)
+{
+	jmp_buf_t db_jmpbuf;
+	jmp_buf_t *prev;
+	register struct xprbuf *x;
+	spl_t s;
+	int n;
+
+	if (!nxprbufs)
+		return;
+
+	s = splhigh();
+	simple_lock(&xprlock);
+
+	prev = db_recover;
+	if (_setjmp(db_recover = &db_jmpbuf) == 0) {
+	    n = nxprbufs;
+
+  	    for (x = *(struct xprbuf **)xprlast ; n--; ) {
+		if (--x < xprbase)
+			x = xprlast - 1;
+
+		if (x->msg == 0) {
+			break;
+		}
+
+		if (*((&x->arg1)+arg_index) != value)
+			continue;
+
+		db_printf("<%d:%d:%x> ", x - xprbase,
+			  x->cpuinfo, x->timestamp);
+		db_printf(x->msg, x->arg1,x->arg2,x->arg3,x->arg4,x->arg5);
+	    }
+	}
+	db_recover = prev;
+
+	simple_unlock(&xprlock);
+	splx(s);
+}
+#endif	/* MACH_KDB */
+>>>>>>> origin/10.5

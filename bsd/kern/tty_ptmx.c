@@ -343,6 +343,7 @@ ptmx_get_ioctl(int minor, int open_flag)
 				FREE(old_pis_ioctl_list, M_TTYS);
 		} 
 		
+<<<<<<< HEAD
 		/* is minor in range now? */
 		if (minor < 0 || minor >= _state.pis_total) {
 			ttyfree(new_ptmx_ioctl->pt_tty);
@@ -351,6 +352,8 @@ ptmx_get_ioctl(int minor, int open_flag)
 			return (NULL);
 		}
 		
+=======
+>>>>>>> origin/10.5
 		if (_state.pis_ioctl_list[minor] != NULL) {
 			ttyfree(new_ptmx_ioctl->pt_tty);
 			DEVFS_UNLOCK();
@@ -432,7 +435,11 @@ ptmx_free_ioctl(int minor, int open_flag)
 
 		/* Don't remove the entry until the devfs slot is free */
 		DEVFS_LOCK();
+<<<<<<< HEAD
 		_state.pis_ioctl_list[minor] = NULL;
+=======
+		_state.pis_ioctl_list[ minor] = NULL;
+>>>>>>> origin/10.5
 		_state.pis_free++;
 		DEVFS_UNLOCK();
 	}
@@ -525,7 +532,78 @@ static struct filterops ptsd_kqops = {
  */
 
 static void
+<<<<<<< HEAD
 ptsd_kqops_detach(struct knote *kn)
+=======
+ptmx_wakeup(struct tty *tp, int flag)
+{
+	struct ptmx_ioctl *pti;
+	boolean_t   funnel_state;
+
+	pti = ptmx_get_ioctl(minor(tp->t_dev), 0);
+#if 5161374
+	if (pti == NULL)
+		return;		/* XXX ENXIO, but this function is void! */
+#endif	/* 5161374 */
+
+	funnel_state = thread_funnel_set(kernel_flock, TRUE);
+
+	if (flag & FREAD) {
+		selwakeup(&pti->pt_selr);
+		wakeup(TSA_PTC_READ(tp));
+	}
+	if (flag & FWRITE) {
+		selwakeup(&pti->pt_selw);
+		wakeup(TSA_PTC_WRITE(tp));
+	}
+	(void) thread_funnel_set(kernel_flock, funnel_state);
+}
+
+FREE_BSDSTATIC int
+ptmx_open(dev_t dev, __unused int flag, __unused int devtype, __unused proc_t p)
+{
+	struct tty *tp;
+	struct ptmx_ioctl *pti;
+	int error = 0;
+	boolean_t   funnel_state;
+
+	pti = ptmx_get_ioctl(minor(dev), PF_OPEN_M);
+	if (pti == NULL) {
+	        return (ENXIO);
+	} else if (pti == (struct ptmx_ioctl*)-1) {
+		return (EREDRIVEOPEN);
+	}
+	tp = pti->pt_tty;
+
+	funnel_state = thread_funnel_set(kernel_flock, TRUE);
+
+	/* If master is open OR slave is still draining, pty is still busy */
+	if (tp->t_oproc || (tp->t_state & TS_ISOPEN)) {
+		/*
+		 * If master is closed, we are the only reference, so we
+		 * need to clear the master open bit
+		 */
+		if (!tp->t_oproc)
+			ptmx_free_ioctl(minor(dev), PF_OPEN_M);
+		error = EBUSY;
+		goto out;
+	}
+	tp->t_oproc = ptsd_start;
+	CLR(tp->t_state, TS_ZOMBIE);
+#ifdef sun4c
+	tp->t_stop = ptsd_stop;
+#endif
+	(void)(*linesw[tp->t_line].l_modem)(tp, 1);
+	tp->t_lflag &= ~EXTPROC;
+
+out:
+	(void) thread_funnel_set(kernel_flock, funnel_state);
+	return (error);
+}
+
+FREE_BSDSTATIC int
+ptmx_close(dev_t dev, __unused int flags, __unused int fmt, __unused proc_t p)
+>>>>>>> origin/10.5
 {
 	struct ptmx_ioctl *pti;
 	struct tty *tp;
@@ -632,9 +710,17 @@ ptsd_kqfilter(dev_t dev, struct knote *kn)
 
         switch (kn->kn_filter) {
         case EVFILT_READ:
+<<<<<<< HEAD
                 KNOTE_ATTACH(&tp->t_rsel.si_note, kn);
                 break;
         case EVFILT_WRITE:
+=======
+                kn->kn_fop = &ptsd_kqops_read;
+                KNOTE_ATTACH(&tp->t_rsel.si_note, kn);
+                break;
+        case EVFILT_WRITE:
+                kn->kn_fop = &ptsd_kqops_write;
+>>>>>>> origin/10.6
                 KNOTE_ATTACH(&tp->t_wsel.si_note, kn);
                 break;
         default:

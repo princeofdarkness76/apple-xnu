@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc.  All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -749,6 +775,7 @@ nfsrv_readlink(
 		else
 			error = ENXIO;
 	}
+<<<<<<< HEAD
 
 	if (!error)
 		error = nfsrv_authorize(vp, NULL, KAUTH_VNODE_READ_DATA, ctx, nxo, 0);
@@ -803,6 +830,34 @@ nfsmout:
 		*mrepp = NULL;
 	}
 	return (error);
+=======
+	nqsrv_getl(vp, ND_READ);
+	error = VOP_READLINK(vp, uiop, cred);
+out:
+	getret = VOP_GETATTR(vp, &attr, cred, procp);
+	vput(vp);
+	if (error) {
+		m_freem(mp3);
+		mp3 = NULL;
+	}
+	nfsm_reply(NFSX_POSTOPATTR(v3) + NFSX_UNSIGNED);
+	if (v3) {
+		nfsm_srvpostop_attr(getret, &attr);
+		if (error)
+			return (0);
+	}
+	if (!error) {
+		if (uiop->uio_resid > 0) {
+			len -= uiop->uio_resid;
+			tlen = nfsm_rndup(len);
+			nfsm_adj(mp3, NFS_MAXPATHLEN-tlen, tlen-len);
+		}
+		nfsm_build(tl, u_long *, NFSX_UNSIGNED);
+		*tl = txdr_unsigned(len);
+		mb->m_next = mp3;
+	}
+	nfsm_srvdone;
+>>>>>>> origin/10.3
 }
 
 /*
@@ -896,9 +951,68 @@ nfsrv_read(
 			error = ENOMEM;
 			goto errorexit;
 		}
+<<<<<<< HEAD
 		for (m = mread; m; m = mbuf_next(m))
 			uio_addiov(auio, CAST_USER_ADDR_T((caddr_t)mbuf_data(m)), mbuf_len(m));
 		error = VNOP_READ(vp, auio, IO_NODELOCKED, ctx);
+=======
+		MALLOC(iv, struct iovec *, i * sizeof (struct iovec),
+		       M_TEMP, M_WAITOK);
+		uiop->uio_iov = iv2 = iv;
+		m = mb;
+		left = cnt;
+		i = 0;
+		while (left > 0) {
+			if (m == NULL)
+				panic("nfsrv_read iov");
+			siz = min(M_TRAILINGSPACE(m), left);
+			if (siz > 0) {
+				iv->iov_base = mtod(m, caddr_t) + m->m_len;
+				iv->iov_len = siz;
+				m->m_len += siz;
+				left -= siz;
+				iv++;
+				i++;
+			}
+			m = m->m_next;
+		}
+		uiop->uio_iovcnt = i;
+		uiop->uio_offset = off;
+		uiop->uio_resid = cnt;
+		uiop->uio_rw = UIO_READ;
+		uiop->uio_segflg = UIO_SYSSPACE;
+		didhold = ubc_hold(vp);
+		error = VOP_READ(vp, uiop, IO_NODELOCKED, cred);
+		off = uiop->uio_offset;
+		FREE((caddr_t)iv2, M_TEMP);
+		/*
+		 * This may seem a little weird that we drop the whole
+		 * successful read if we get an error on the getattr.
+		 * The reason is because we've already set up the reply
+		 * to have postop attrs and omitting these optional bits
+		 * would require shifting all the data in the reply.
+		 *
+		 * It would be more correct if we would simply drop the
+		 * postop attrs if the getattr fails.  We might be able to
+		 * do that easier if we allocated separate mbufs for the data.
+		 */
+		if (error || (getret = VOP_GETATTR(vp, vap, cred, procp))) {
+			VOP_UNLOCK(vp, 0, procp);
+			if (didhold)
+				ubc_rele(vp);
+			if (!error)
+				error = getret;
+			m_freem(mreq);
+			vrele(vp);
+			nfsm_reply(NFSX_POSTOPATTR(v3));
+			nfsm_srvpostop_attr(getret, vap);
+			return (0);
+		}
+		VOP_UNLOCK(vp, 0, procp);
+		if (didhold)
+			ubc_rele(vp);
+		vrele(vp);
+>>>>>>> origin/10.3
 	} else {
 		auio = uio_createwithbuffer(0, 0, UIO_SYSSPACE, UIO_READ, &uio_buf[0], sizeof(uio_buf));
 		if (!auio) {
@@ -1428,8 +1542,15 @@ nfsrv_writegather(
 	    } else {
 		mlen = 0;
 	    }
+<<<<<<< HEAD
 
 	    if ((nd->nd_len > NFSRV_MAXDATA) || (nd->nd_len < 0)  || (mlen < nd->nd_len)) {
+=======
+	    if (len > NFS_MAXDATA || len < 0  || i < len) {
+nfsmout:
+		m_freem(mrep);
+		mrep = NULL;
+>>>>>>> origin/10.3
 		error = EIO;
 nfsmerr:
 		nd->nd_repstat = error;
@@ -1578,6 +1699,11 @@ loop1:
 			uio_bufp = NULL;
 		    }
 		}
+<<<<<<< HEAD
+=======
+		m_freem(mrep);
+		mrep = NULL;
+>>>>>>> origin/10.3
 		if (vp) {
 		    nfsm_srv_vattr_init(&postattr, nd->nd_vers);
 		    postattrerr = vnode_getattr(vp, &postattr, ctx);
@@ -4548,6 +4674,7 @@ nfsrv_statfs(
 		nfsm_srv_vattr_init(&attr, nd->nd_vers);
 		attrerr = vnode_getattr(vp, &attr, ctx);
 	}
+<<<<<<< HEAD
 
 nfsmerr:
 	if (vp)
@@ -4571,6 +4698,35 @@ nfsmerr:
 		nfsm_chain_add_64(error, &nmrep, va.f_ffree);
 		nfsm_chain_add_64(error, &nmrep, va.f_ffree);
 		nfsm_chain_add_32(error, &nmrep, 0); /* invarsec */
+=======
+	sf = &statfs;
+	error = VFS_STATFS(vp->v_mount, sf, procp);
+	getret = VOP_GETATTR(vp, &at, cred, procp);
+	vput(vp);
+	nfsm_reply(NFSX_POSTOPATTR(v3) + NFSX_STATFS(v3));
+	if (v3)
+		nfsm_srvpostop_attr(getret, &at);
+	if (error)
+		return (0);
+	nfsm_build(sfp, struct nfs_statfs *, NFSX_STATFS(v3));
+	if (v3) {
+		tval = (u_quad_t)(unsigned long)sf->f_blocks;
+		tval *= (u_quad_t)(unsigned long)sf->f_bsize;
+		txdr_hyper(&tval, &sfp->sf_tbytes);
+		tval = (u_quad_t)(unsigned long)sf->f_bfree;
+		tval *= (u_quad_t)(unsigned long)sf->f_bsize;
+		txdr_hyper(&tval, &sfp->sf_fbytes);
+		tval = (u_quad_t)(unsigned long)sf->f_bavail;
+		tval *= (u_quad_t)(unsigned long)sf->f_bsize;
+		txdr_hyper(&tval, &sfp->sf_abytes);
+		sfp->sf_tfiles.nfsuquad[0] = 0;
+		sfp->sf_tfiles.nfsuquad[1] = txdr_unsigned(sf->f_files);
+		sfp->sf_ffiles.nfsuquad[0] = 0;
+		sfp->sf_ffiles.nfsuquad[1] = txdr_unsigned(sf->f_ffree);
+		sfp->sf_afiles.nfsuquad[0] = 0;
+		sfp->sf_afiles.nfsuquad[1] = txdr_unsigned(sf->f_ffree);
+		sfp->sf_invarsec = 0;
+>>>>>>> origin/10.3
 	} else {
 		nfsm_chain_add_32(error, &nmrep, NFS_V2MAXDATA);
 		nfsm_chain_add_32(error, &nmrep, blksize);

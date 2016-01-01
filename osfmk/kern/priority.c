@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -113,6 +139,7 @@ thread_quantum_expire(
 	 * thread, we must credit the ledger before taking the thread lock. The ledger
 	 * pointers are only manipulated by the thread itself at the ast boundary.
 	 */
+<<<<<<< HEAD
 	ledger_credit(thread->t_ledger, task_ledgers.cpu_time, thread->quantum_remaining);
 	ledger_credit(thread->t_threadledger, thread_ledgers.cpu_time, thread->quantum_remaining);
 #ifdef CONFIG_BANK
@@ -122,12 +149,18 @@ thread_quantum_expire(
 	}
 	thread->t_deduct_bank_ledger_time = 0;
 #endif
+=======
+	if (!(thread->sched_mode & (TH_MODE_TIMESHARE|TH_MODE_PROMOTED))) {
+		uint64_t			new_computation;
+>>>>>>> origin/10.5
 
 	ctime = mach_absolute_time();
 
 #ifdef CONFIG_MACH_APPROXIMATE_TIME
 	commpage_update_mach_approximate_time(ctime);
 #endif
+
+	SCHED_STATS_QUANTUM_TIMER_EXPIRATION(processor);
 
 	thread_lock(thread);
 
@@ -138,6 +171,7 @@ thread_quantum_expire(
 	processor->last_dispatch = ctime;
 	thread->last_run_time = ctime;
 
+<<<<<<< HEAD
 	/*
 	 *	Check for fail-safe trip.
 	 */
@@ -155,6 +189,10 @@ thread_quantum_expire(
 			thread->safe_release = ctime + sched_safe_duration;
 
 			sched_thread_mode_demote(thread, TH_SFLAG_FAILSAFE);
+=======
+			thread->safe_release = sched_tick + sched_safe_duration;
+			thread->sched_mode |= (TH_MODE_FAILSAFE|TH_MODE_TIMESHARE);
+>>>>>>> origin/10.5
 		}
 	}
 
@@ -183,6 +221,7 @@ thread_quantum_expire(
 
 	thread_quantum_init(thread);
 
+<<<<<<< HEAD
 	/* Reload precise timing global policy to thread-local policy */
 	thread->precise_user_kernel_time = use_precise_user_kernel_time(thread);
 
@@ -200,11 +239,20 @@ thread_quantum_expire(
 	}
 
 	processor->quantum_end = ctime + thread->quantum_remaining;
+=======
+	processor->quantum_end += thread->current_quantum;
+	timer_call_enter1(&processor->quantum_timer, thread,
+	    processor->quantum_end, TIMER_CALL_CRITICAL);
+>>>>>>> origin/10.7
 
 	/*
 	 *	Context switch check.
 	 */
+<<<<<<< HEAD
 	if ((preempt = csw_check(processor, AST_QUANTUM)) != AST_NONE)
+=======
+	if ((preempt = csw_check(processor)) != AST_NONE)
+>>>>>>> origin/10.5
 		ast_on(preempt);
 
 	thread_unlock(thread);
@@ -256,10 +304,15 @@ thread_recompute_sched_pri(
 {
 	int priority;
 
+<<<<<<< HEAD
 	if (thread->sched_mode == TH_MODE_TIMESHARE)
 		priority = SCHED(compute_timeshare_priority)(thread);
 	else
 		priority = thread->base_pri;
+=======
+		pset_pri_hint(pset, processor, processor->current_pri);
+		pset_count_hint(pset, processor, processor->runq.count);
+>>>>>>> origin/10.5
 
 	if ((!(thread->sched_flags & TH_SFLAG_PROMOTED_MASK)  || (priority > thread->sched_pri)) &&
 	    (!(thread->sched_flags & TH_SFLAG_DEPRESSED_MASK) || override_depress)) {
@@ -357,8 +410,59 @@ static struct shift_data	sched_decay_shifts[SCHED_DECAY_TICKS] = {
  *
  *	Calculate the timesharing priority based upon usage and load.
  */
+<<<<<<< HEAD
 extern int sched_pri_decay_band_limit;
 
+=======
+#ifdef CONFIG_EMBEDDED
+
+#define do_priority_computation(thread, pri)							\
+	MACRO_BEGIN															\
+	(pri) = (thread)->priority		/* start with base priority */		\
+	    - ((thread)->sched_usage >> (thread)->pri_shift);				\
+	if ((pri) < MAXPRI_THROTTLE) {										\
+		if ((thread)->task->max_priority > MAXPRI_THROTTLE)				\
+			(pri) = MAXPRI_THROTTLE;									\
+		else															\
+			if ((pri) < MINPRI_USER)									\
+				(pri) = MINPRI_USER;									\
+	} else																\
+	if ((pri) > MAXPRI_KERNEL)											\
+		(pri) = MAXPRI_KERNEL;											\
+	MACRO_END
+
+#else
+
+#define do_priority_computation(thread, pri)							\
+	MACRO_BEGIN															\
+	(pri) = (thread)->priority		/* start with base priority */		\
+	    - ((thread)->sched_usage >> (thread)->pri_shift);				\
+	if ((pri) < MINPRI_USER)											\
+		(pri) = MINPRI_USER;											\
+	else																\
+	if ((pri) > MAXPRI_KERNEL)											\
+		(pri) = MAXPRI_KERNEL;											\
+	MACRO_END
+
+#endif
+
+/*
+ *	set_priority:
+ *
+ *	Set the base priority of the thread
+ *	and reset its scheduled priority.
+ *
+ *	Called with the thread locked.
+ */
+void
+set_priority(
+	register thread_t	thread,
+	register int		priority)
+{
+	thread->priority = priority;
+	compute_priority(thread, FALSE);
+}
+>>>>>>> origin/10.6
 
 int
 sched_compute_timeshare_priority(thread_t thread)

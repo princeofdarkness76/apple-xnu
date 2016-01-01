@@ -1,8 +1,18 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+>>>>>>> origin/10.10
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +24,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -148,7 +178,11 @@ SYSCTL_INT(_net_inet_icmp, OID_AUTO, log_redirect,
     CTLFLAG_RW | CTLFLAG_LOCKED,
     &log_redirect, 0, "");
 
+<<<<<<< HEAD
 const static int icmp_datalen = 8;
+=======
+static int icmp_datalen = 8;
+>>>>>>> origin/10.10
 
 #if ICMP_BANDLIM 
 
@@ -287,7 +321,11 @@ stdreply:	icmpelen = max(ICMP_MINLEN, min(icmp_datalen,
 	 */
 	if (MHLEN > (sizeof(struct ip) + ICMP_MINLEN + icmplen))
 		m = m_gethdr(M_DONTWAIT, MT_HEADER);	/* MAC-OK */
+<<<<<<< HEAD
 	else
+=======
+	else 
+>>>>>>> origin/10.10
 		m = m_getcl(M_DONTWAIT, MT_DATA, M_PKTHDR);
 
 	if (m == NULL)
@@ -525,6 +563,51 @@ icmp_input(struct mbuf *m, int hlen)
 			printf("deliver to protocol %d\n", icp->icmp_ip.ip_p);
 #endif
 		icmpsrc.sin_addr = icp->icmp_ip.ip_dst;
+<<<<<<< HEAD
+=======
+#if 1
+		/*
+		 * MTU discovery:
+		 * If we got a needfrag and there is a host route to the
+		 * original destination, and the MTU is not locked, then
+		 * set the MTU in the route to the suggested new value
+		 * (if given) and then notify as usual.  The ULPs will
+		 * notice that the MTU has changed and adapt accordingly.
+		 * If no new MTU was suggested, then we guess a new one
+		 * less than the current value.  If the new MTU is 
+		 * unreasonably small (defined by sysctl tcp_minmss), then
+		 * we reset the MTU to the interface value and enable the
+		 * lock bit, indicating that we are no longer doing MTU
+		 * discovery.
+		 */
+		if (code == PRC_MSGSIZE) {
+			struct rtentry *rt;
+			int mtu;
+
+			rt = rtalloc1((struct sockaddr *)&icmpsrc, 0,
+				      RTF_CLONING | RTF_PRCLONING);
+			if (rt && (rt->rt_flags & RTF_HOST)
+			    && !(rt->rt_rmx.rmx_locks & RTV_MTU)) {
+				mtu = ntohs(icp->icmp_nextmtu);
+				if (!mtu)
+					mtu = ip_next_mtu(rt->rt_rmx.rmx_mtu,
+							  1);
+#if DEBUG_MTUDISC
+				printf("MTU for %s reduced to %d\n",
+					inet_ntoa(icmpsrc.sin_addr), mtu);
+#endif
+				if (mtu < max(296, (tcp_minmss + sizeof(struct tcpiphdr)))) {
+					/* rt->rt_rmx.rmx_mtu =
+						rt->rt_ifp->if_mtu; */
+					rt->rt_rmx.rmx_locks |= RTV_MTU;
+				} else if (rt->rt_rmx.rmx_mtu > mtu) {
+					rt->rt_rmx.rmx_mtu = mtu;
+				}
+			}
+			if (rt)
+				rtfree(rt);
+		}
+>>>>>>> origin/10.3
 
 		/*
 		 * XXX if the packet contains [IPv4 AH TCP], we can't make a
@@ -880,6 +963,7 @@ icmp_send(struct mbuf *m, struct mbuf *opts)
 	int hlen;
 	struct icmp *icp;
 	struct route ro;
+<<<<<<< HEAD
 	struct ip_out_args ipoa = { IFSCOPE_NONE, { 0 },
 	    IPOAF_SELECT_SRCIF | IPOAF_BOUND_SRCADDR, 0 };
 
@@ -887,6 +971,12 @@ icmp_send(struct mbuf *m, struct mbuf *opts)
 		ipoa.ipoa_boundif = m->m_pkthdr.rcvif->if_index;
 		ipoa.ipoa_flags |= IPOAF_BOUND_IF;
 	}
+=======
+	struct ip_out_args ipoa = { IFSCOPE_NONE };
+
+	if ((m->m_flags & M_PKTHDR) && m->m_pkthdr.rcvif != NULL)
+		ipoa.ipoa_ifscope = m->m_pkthdr.rcvif->if_index;
+>>>>>>> origin/10.5
 
 	hlen = IP_VHL_HL(ip->ip_vhl) << 2;
 	m->m_data += hlen;
@@ -911,7 +1001,14 @@ icmp_send(struct mbuf *m, struct mbuf *opts)
 #endif
 	bzero(&ro, sizeof ro);
 	(void) ip_output(m, opts, &ro, IP_OUTARGS, NULL, &ipoa);
+<<<<<<< HEAD
 	ROUTE_RELEASE(&ro);
+=======
+	if (ro.ro_rt) {
+		rtfree(ro.ro_rt);
+		ro.ro_rt = NULL;
+	}
+>>>>>>> origin/10.5
 }
 
 u_int32_t
@@ -1139,9 +1236,14 @@ icmp_dgram_ctloutput(struct socket *so, struct sockopt *sopt)
 		case IP_RECVTTL:
 		case IP_BOUND_IF:
 #if CONFIG_FORCE_OUT_IFP
+<<<<<<< HEAD
                 case IP_FORCE_OUT_IFP:
 #endif
 		case IP_NO_IFT_CELLULAR:
+=======
+		case IP_FORCE_OUT_IFP:
+#endif
+>>>>>>> origin/10.5
 			error = rip_ctloutput(so, sopt);
 			break;
 

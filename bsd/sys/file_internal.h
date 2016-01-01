@@ -100,7 +100,11 @@ struct fileproc {
 #define FP_INCREATE 	0x0001
 #define FP_INCLOSE 	0x0002
 #define FP_INSELECT	0x0004
+<<<<<<< HEAD
 #define FP_UNUSED	0x0008	/* unused (was FP_INCHRREAD) */
+=======
+#define FP_INCHRREAD	0x0000	/* disable FP_INCHRREAD <rdar://6986929> */
+>>>>>>> origin/10.6
 #define FP_WRITTEN	0x0010
 #define FP_CLOSING	0x0020
 #define FP_WAITCLOSE	0x0040
@@ -154,11 +158,14 @@ typedef enum {
 #define FG_RMMSGQ	0x08 	/* the fileglob is being removed from msgqueue */
 #define FG_WRMMSGQ	0x10 	/* wait for the fileglob to  be removed from msgqueue */
 #define FG_PORTMADE	0x20	/* a port was at some point created for this fileglob */
+<<<<<<< HEAD
 #define FG_NOSIGPIPE	0x40	/* don't deliver SIGPIPE with EPIPE return */
 #define FG_OFF_LOCKED 	0x80	/* Used as a mutex for offset changes (for vnodes) */
 #define FG_OFF_LOCKWANT 0x100	/* Somebody's wating for the lock */
 #define FG_CONFINED	0x200	/* fileglob confined to process, immutably */
 #define FG_HAS_OFDLOCK	0x400	/* Has or has had an OFD lock */
+=======
+>>>>>>> origin/10.6
 
 struct fileglob {
 	LIST_ENTRY(fileglob) f_msglist;/* list of active files */

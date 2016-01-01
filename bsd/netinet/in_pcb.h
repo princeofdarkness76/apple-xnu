@@ -1,6 +1,11 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +20,24 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +45,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /*
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -147,7 +184,11 @@ struct inpcb {
 	struct socket *inp_socket;	/* back pointer to socket */
 	LIST_ENTRY(inpcb) inp_portlist;	/* list for this PCB's local port */
 	RB_ENTRY(inpcb) infc_link;	/* link for flowhash RB tree */
+<<<<<<< HEAD
 	struct inpcbport *inp_phd;	/* head of this list */
+=======
+	struct	inpcbport *inp_phd;	/* head of this list */
+>>>>>>> origin/10.8
 	inp_gen_t inp_gencnt;		/* generation count of this instance */
 	int	inp_hash_element;	/* array index of pcb's hash list */
 	int	inp_wantcnt;		/* wanted count; atomically updated */
@@ -156,7 +197,11 @@ struct inpcb {
 	u_short	inp_lport;		/* local port */
 	u_int32_t inp_flags;		/* generic IP/datagram flags */
 	u_int32_t inp_flags2;		/* generic IP/datagram flags #2 */
+<<<<<<< HEAD
 	u_int32_t inp_flow;		/* IPv6 flow information */
+=======
+	u_int32_t inp_flow;
+>>>>>>> origin/10.8
 
 	u_char	inp_sndinprog_cnt;	/* outstanding send operations */
 	u_char	inp_vflag;		/* INP_IPV4 or INP_IPV6 */
@@ -207,6 +252,7 @@ struct inpcb {
 	} inp_depend6;
 
 	caddr_t inp_saved_ppcb;		/* place to save pointer while cached */
+<<<<<<< HEAD
 #if CONFIG_MACF_NET
 	struct label *inp_label;	/* MAC label */
 #endif
@@ -233,6 +279,23 @@ struct inpcb {
 	u_int8_t inp_cstat_store[sizeof (struct inp_stat) + sizeof (u_int64_t)];
 	u_int8_t inp_wstat_store[sizeof (struct inp_stat) + sizeof (u_int64_t)];
 	u_int8_t inp_Wstat_store[sizeof (struct inp_stat) + sizeof (u_int64_t)];
+=======
+	struct inpcbpolicy *inp_sp;
+#ifdef _KERN_LOCKS_H_
+	lck_mtx_t *inpcb_mtx;	/* inpcb per-socket mutex */
+#else
+	void	  *inpcb_mtx;
+#endif
+	unsigned int inp_boundif;	/* interface scope for INP_BOUND_IF */
+	u_int32_t inp_reserved[3];	/* reserved for future use */
+#if CONFIG_MACF_NET
+	struct label *inp_label;	/* MAC label */
+#endif
+#if CONFIG_IP_EDGEHOLE
+	u_int32_t	inpcb_edgehole_flags;
+	u_int32_t	inpcb_edgehole_mask;
+#endif
+>>>>>>> origin/10.5
 };
 
 #define	INP_ADD_STAT(_inp, _cnt_cellular, _cnt_wifi, _cnt_wired, _a, _n)\
@@ -552,10 +615,16 @@ struct inpcbinfo {
 	struct inpcbhead	*ipi_listhead;
 	uint32_t		ipi_count;
 
+<<<<<<< HEAD
 	/*
 	 * Count of pcbs marked with INP2_TIMEWAIT flag.
 	 */
 	uint32_t		ipi_twcount;
+=======
+#define INP_RECVTTL		0x1000
+#define	INP_UDP_NOCKSUM		0x2000	/* Turn off outbound UDP checksum */
+#define	INP_BOUND_IF		0x4000	/* bind socket to an ifindex */
+>>>>>>> origin/10.5
 
 	/*
 	 * Generation count -- incremented each time a connection is
@@ -664,6 +733,7 @@ struct inpcbinfo {
 #define	IN6P_BINDV6ONLY		0x01000000 /* do not grab IPv4 traffic */
 
 #ifdef BSD_KERNEL_PRIVATE
+<<<<<<< HEAD
 #define	IN6P_RFC2292		0x02000000 /* used RFC2292 API on the socket */
 #define	IN6P_MTU		0x04000000 /* receive path MTU */
 #define	INP_PKTINFO		0x08000000 /* rcv and snd PKTINFO for IPv4 */
@@ -679,6 +749,41 @@ struct inpcbinfo {
 
 #define	INP_UNMAPPABLEOPTS \
 	(IN6P_HOPOPTS|IN6P_DSTOPTS|IN6P_RTHDR| IN6P_TCLASS|IN6P_AUTOFLOWLABEL)
+=======
+#define	IN6P_RFC2292		0x2000000 /* used RFC2292 API on the socket */
+#define	IN6P_MTU		0x4000000 /* receive path MTU */
+#define	INP_PKTINFO		0x8000000 /* receive and send PKTINFO for IPv4 */
+#define INP_FLOW_SUSPENDED	0x10000000 /* flow suspended */
+#define	INP_NO_IFT_CELLULAR	0x20000000 /* do not use IFT_CELLULAR route */
+#define INP_FLOW_CONTROLLED	0x40000000 /* flow controlled */
+#define INP_FC_FEEDBACK	0x80000000 /* got interface flow adv feedback */
+
+#define	INP_CONTROLOPTS		(INP_RECVOPTS|INP_RECVRETOPTS|INP_RECVDSTADDR|\
+				 INP_RECVIF|INP_RECVTTL|INP_PKTINFO|\
+				 IN6P_PKTINFO|IN6P_HOPLIMIT|IN6P_HOPOPTS|\
+				 IN6P_DSTOPTS|IN6P_RTHDR|IN6P_RTHDRDSTOPTS|\
+				 IN6P_TCLASS|IN6P_RFC2292|IN6P_MTU)
+
+#define	INP_UNMAPPABLEOPTS	(IN6P_HOPOPTS|IN6P_DSTOPTS|IN6P_RTHDR|\
+				 IN6P_TCLASS|IN6P_AUTOFLOWLABEL)
+
+ /* for KAME src sync over BSD*'s */
+#define	IN6P_HIGHPORT		INP_HIGHPORT
+#define	IN6P_LOWPORT		INP_LOWPORT
+#define	IN6P_ANONPORT		INP_ANONPORT
+#define	IN6P_RECVIF		INP_RECVIF
+#define	IN6P_MTUDISC		INP_MTUDISC
+#define	IN6P_RECV_ANYIF		INP_RECV_ANYIF
+#define	IN6P_CONTROLOPTS INP_CONTROLOPTS
+#define	IN6P_NO_IFT_CELLULAR	INP_NO_IFT_CELLULAR
+
+/* Overflowed INP flags; use INP2 prefix to avoid misuse */
+#define INP2_IN_FCTREE		0x2	/* in inp_fc_tree */
+	/*
+	 * socket AF version is {newer than,or include}
+	 * actual datagram AF version
+	 */
+>>>>>>> origin/10.8
 
 /*
  * Flags for inp_flags2.
@@ -699,6 +804,7 @@ struct inpcbinfo {
 #define	INPLOOKUP_WILDCARD	1
 
 #define	sotoinpcb(so)	((struct inpcb *)(so)->so_pcb)
+<<<<<<< HEAD
 #define	sotoin6pcb(so)	sotoinpcb(so)
 
 struct sysctl_req;
@@ -812,5 +918,155 @@ extern boolean_t inp_restricted_send(struct inpcb *, struct ifnet *);
 #ifdef KERNEL_PRIVATE
 /* exported for PPP */
 extern void inp_clear_INP_INADDR_ANY(struct socket *);
+=======
+#define	sotoin6pcb(so)	sotoinpcb(so) /* for KAME src sync over BSD*'s */
+
+#define	INP_SOCKAF(so) so->so_proto->pr_domain->dom_family
+
+#define	INP_CHECK_SOCKAF(so, af) 	(INP_SOCKAF(so) == af)
+
+#ifdef KERNEL
+extern int	ipport_lowfirstauto;
+extern int	ipport_lowlastauto;
+extern int	ipport_firstauto;
+extern int	ipport_lastauto;
+extern int	ipport_hifirstauto;
+extern int	ipport_hilastauto;
+
+#define INPCB_STATE_INUSE	0x1	/* freshly allocated PCB, it's in use */
+#define INPCB_STATE_CACHED	0x2	/* this pcb is sitting in a a cache */
+#define INPCB_STATE_DEAD	0x3	/* should treat as gone, will be garbage collected and freed */
+
+#define WNT_STOPUSING	0xffff	/* marked as ready to be garbaged collected, should be treated as not found */
+#define WNT_ACQUIRE	0x1		/* that pcb is being acquired, do not recycle this time */
+#define WNT_RELEASE	0x2		/* release acquired mode, can be garbage collected when wantcnt is null */
+
+<<<<<<< HEAD
+=======
+extern void	in_losing(struct inpcb *);
+extern void	in_rtchange(struct inpcb *, int);
+extern int	in_pcballoc(struct socket *, struct inpcbinfo *, struct proc *);
+extern int	in_pcbbind(struct inpcb *, struct sockaddr *, struct proc *);
+extern int	in_pcbconnect(struct inpcb *, struct sockaddr *, struct proc *,
+		    struct ifnet **);
+extern void	in_pcbdetach(struct inpcb *);
+extern void	in_pcbdispose (struct inpcb *);
+extern void	in_pcbdisconnect(struct inpcb *);
+extern int	in_pcbinshash(struct inpcb *, int);
+extern int	in_pcbladdr(struct inpcb *, struct sockaddr *,
+		    struct sockaddr_in *, struct ifnet **);
+extern struct inpcb *in_pcblookup_local(struct inpcbinfo *, struct in_addr,
+		    u_int, int);
+extern struct inpcb *in_pcblookup_local_and_cleanup(struct inpcbinfo *,
+		    struct in_addr, u_int, int);
+extern struct inpcb *in_pcblookup_hash(struct inpcbinfo *, struct in_addr,
+		    u_int, struct in_addr, u_int, int, struct ifnet *);
+extern int	in_pcblookup_hash_exists(struct inpcbinfo *, struct in_addr,
+		    u_int, struct in_addr, u_int, int, uid_t *, gid_t *, struct ifnet *);
+extern void	in_pcbnotifyall(struct inpcbinfo *, struct in_addr, int,
+		    void (*)(struct inpcb *, int));
+extern void	in_pcbrehash(struct inpcb *);
+extern int	in_setpeeraddr(struct socket *so, struct sockaddr **nam);
+extern int	in_setsockaddr(struct socket *so, struct sockaddr **nam);
+extern int	in_pcb_checkstate(struct inpcb *pcb, int mode, int locked);
+
+extern void	in_pcbremlists(struct inpcb *inp);
+extern void	inpcb_to_compat(struct inpcb *inp,
+		    struct inpcb_compat *inp_compat);
+#if !CONFIG_EMBEDDED
+extern void	inpcb_to_xinpcb64(struct inpcb *inp,
+		        struct xinpcb64 *xinp);
+#endif
+extern int get_pcblist_n(short , struct sysctl_req *, struct inpcbinfo *);
+extern void inpcb_get_ports_used(unsigned int , uint8_t *, struct inpcbinfo *);
+
+#define INPCB_OPPORTUNISTIC_THROTTLEON 0x0001
+#define INPCB_OPPORTUNISTIC_SETCMD     0x0002
+extern uint32_t inpcb_count_opportunistic(unsigned int , struct inpcbinfo *, u_int32_t);
+extern void	inp_route_copyout(struct inpcb *, struct route *);
+extern void	inp_route_copyin(struct inpcb *, struct route *);
+extern int	inp_bindif(struct inpcb *, unsigned int);
+extern int	inp_nocellular(struct inpcb *, unsigned int);
+extern u_int32_t inp_calc_flowhash(struct inpcb *);
+extern void	socket_flowadv_init(void);
+
+/* Flags used by inp_fc_getinp */
+#define INPFC_SOLOCKED	0x1
+#define INPFC_REMOVE	0x2
+extern struct inpcb *inp_fc_getinp(u_int32_t, u_int32_t);
+extern void	inp_fc_feedback(struct inpcb *);
+extern void	inp_reset_fc_state(struct inpcb *);
+extern int	inp_set_fc_state(struct inpcb *, int advcode);
+extern void	inp_fc_unthrottle_tcp(struct inpcb *);
+extern int	inp_flush(struct inpcb *, int);
+#endif /* BSD_KERNEL_PRIVATE */
+>>>>>>> origin/10.8
+
+void	in_pcbpurgeif0(struct inpcb *, struct ifnet *);
+void	in_losing(struct inpcb *);
+void	in_rtchange(struct inpcb *, int);
+int	in_pcballoc(struct socket *, struct inpcbinfo *, struct proc *);
+int	in_pcbbind(struct inpcb *, struct sockaddr *, struct proc *);
+int	in_pcbconnect(struct inpcb *, struct sockaddr *, struct proc *);
+void	in_pcbdetach(struct inpcb *);
+void	in_pcbdispose (struct inpcb *);
+void	in_pcbdisconnect(struct inpcb *);
+int	in_pcbinshash(struct inpcb *, int);
+int	in_pcbladdr(struct inpcb *, struct sockaddr *, struct sockaddr_in **);
+struct inpcb *
+	in_pcblookup_local(struct inpcbinfo *, struct in_addr, u_int, int);
+struct inpcb *
+	in_pcblookup_local_and_cleanup(struct inpcbinfo *, struct in_addr, u_int, int);
+struct inpcb *
+	in_pcblookup_hash(struct inpcbinfo *,
+			       struct in_addr, u_int, struct in_addr, u_int,
+			       int, struct ifnet *);
+void	in_pcbnotifyall(struct inpcbinfo *, struct in_addr,
+	    int, void (*)(struct inpcb *, int));
+void	in_pcbrehash(struct inpcb *);
+int	in_setpeeraddr(struct socket *so, struct sockaddr **nam);
+int	in_setsockaddr(struct socket *so, struct sockaddr **nam);
+int	in_pcb_checkstate(struct inpcb *pcb, int mode, int locked);
+
+int
+in_pcb_grab_port (struct inpcbinfo *pcbinfo,
+		       u_short		options,
+		       struct in_addr	laddr, 
+		       u_short		*lport,  
+		       struct in_addr	faddr,
+		       u_short		fport,
+		       u_int		cookie, 
+		       u_char		owner_id);
+
+int	
+in_pcb_letgo_port(struct inpcbinfo *pcbinfo, 
+		       struct in_addr laddr, 
+		       u_short lport,
+		       struct in_addr faddr,
+		       u_short fport, u_char owner_id);
+
+u_char
+in_pcb_get_owner(struct inpcbinfo *pcbinfo, 
+		      struct in_addr laddr, 
+		      u_short lport, 
+		      struct in_addr faddr,
+		      u_short fport,
+		      u_int *cookie);
+
+void in_pcb_nat_init(struct inpcbinfo *pcbinfo, int afamily, int pfamily,
+		     int protocol);
+
+int
+in_pcb_new_share_client(struct inpcbinfo *pcbinfo, u_char *owner_id);
+
+int
+in_pcb_rem_share_client(struct inpcbinfo *pcbinfo, u_char owner_id);
+
+void	in_pcbremlists(struct inpcb *inp);
+int 	in_pcb_ckeckstate(struct inpcb *, int, int);
+void	inpcb_to_compat(struct inpcb *inp, struct inpcb_compat *inp_compat);
+
+#endif /* KERNEL */
+>>>>>>> origin/10.5
 #endif /* KERNEL_PRIVATE */
 #endif /* !_NETINET_IN_PCB_H_ */

@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -458,9 +484,13 @@ struct ip_opts {
 #define IP_STRIPHDR      	23   /* bool: drop receive of raw IP header */
 #endif
 #define IP_RECVTTL		24   /* bool; receive reception TTL w/dgram */
+<<<<<<< HEAD
 #define	IP_BOUND_IF		25   /* int; set/get bound interface */
 #define	IP_PKTINFO		26   /* get pktinfo on recv socket, set src on sent dgram  */
 #define	IP_RECVPKTINFO		IP_PKTINFO	/* receive pktinfo w/dgram */
+=======
+#define	IP_BOUND_IF		25   /* set/get bound interface */
+>>>>>>> origin/10.5
 
 
 #define	IP_FW_ADD     		40   /* add a firewall rule to chain */
@@ -485,6 +515,7 @@ struct ip_opts {
 #define	IP_DUMMYNET_GET		64   /* get entire dummynet pipes */
 
 #define	IP_TRAFFIC_MGT_BACKGROUND	65   /* int*; get background IO flags; set background IO */
+<<<<<<< HEAD
 #define	IP_MULTICAST_IFINDEX	66   /* int*; set/get IP multicast i/f index */
 
 /* IPv4 Source Filter Multicast API [RFC3678] */
@@ -510,6 +541,19 @@ struct ip_opts {
 #define	IP_NO_IFT_PDP		IP_NO_IFT_CELLULAR /* deprecated */
 #define	IP_OUT_IF		9696 /* for internal use only */
 #endif /* PRIVATE */
+=======
+
+#ifdef PRIVATE
+#define	IP_FORCE_OUT_IFP	69  /* deprecated; use IP_BOUND_IF instead */
+#endif
+
+/* Background socket configuration flags */
+#ifdef __APPLE_API_UNSTABLE
+#define TRAFFIC_MGT_SO_BACKGROUND	0x0001	/* background socket */
+#define TRAFFIC_MGT_SO_BG_SUPPRESSED	0x0002	/* currently throttled */
+#define TRAFFIC_MGT_SO_BG_REGULATE	0x0004	/* traffic is regulated */
+#endif /* __APPLE_API_UNSTABLE */
+>>>>>>> origin/10.5
 
 /*
  * Defaults and limits for options

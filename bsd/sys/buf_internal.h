@@ -89,10 +89,13 @@
  * Attributes of an I/O to be used by lower layers
  */
 struct bufattr {
+<<<<<<< HEAD
 #if CONFIG_PROTECT
 	struct cpx *ba_cpx;
 	uint64_t ba_cp_file_off;
 #endif
+=======
+>>>>>>> origin/10.7
 	uint64_t ba_flags;	/* flags. Some are only in-use on embedded devices */
 };
 
@@ -136,10 +139,20 @@ struct buf {
 	uint32_t b_redundancy_flags;
 
 	proc_t 	b_proc;			/* Associated proc; NULL if kernel. */
+<<<<<<< HEAD
 #ifdef BUF_MAKE_PRIVATE
 	buf_t   b_data_store;
 #endif
 	struct bufattr b_attr;
+=======
+#if CONFIG_PROTECT
+	struct cprotect *b_cpentry; 	/* address of cp_entry, to be passed further down  */
+#endif /* CONFIG_PROTECT */
+<<<<<<< HEAD
+>>>>>>> origin/10.6
+=======
+	struct bufattr b_attr;
+>>>>>>> origin/10.7
 #ifdef JOE_DEBUG
         void *	b_owner;
         int     b_tag;
@@ -182,7 +195,11 @@ extern vm_offset_t buf_kernel_addrperm;
  * Parameters for buffer cache garbage collection 
  */
 #define BUF_STALE_THRESHHOLD 	30	/* Collect if untouched in the last 30 seconds */
+<<<<<<< HEAD
 #define BUF_MAX_GC_BATCH_SIZE	64	/* Under a single grab of the lock */
+=======
+#define BUF_MAX_GC_COUNT	1000	/* Generally 6-8 MB */
+>>>>>>> origin/10.6
 
 /*
  * mask used by buf_flags... these are the readable external flags
@@ -245,6 +262,10 @@ extern vm_offset_t buf_kernel_addrperm;
 #define B_TWANTED	0x20000000	/* but_t that is part of a cluster level transaction is wanted */
 #define B_COMMIT_UPL    0x40000000	/* commit/abort the UPL on I/O success/failure */
 #define B_TDONE		0x80000000	/* buf_t that is part of a cluster level transaction has completed */
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.6
 
 /* Flags to low-level allocation routines. */
 #define B_CLRBUF	0x01	/* Request allocated buffer be cleared. */
@@ -255,6 +276,7 @@ extern vm_offset_t buf_kernel_addrperm;
  * ba_flags (Buffer Attribute flags)
  * Some of these may be in-use only on embedded devices.
  */
+<<<<<<< HEAD
 #define BA_RAW_ENCRYPTED_IO     0x00000001
 #define BA_THROTTLED_IO         0x00000002
 #define BA_DELAYIDLESLEEP       0x00000004	/* Process is marked to delay idle sleep on disk IO */
@@ -280,6 +302,10 @@ do {										\
 	(bap)->ba_flags &= (~BA_IO_TIER_MASK); 					\
 	(bap)->ba_flags |= (((tier) << BA_IO_TIER_SHIFT) & BA_IO_TIER_MASK);	\
 } while(0)
+=======
+#define BA_THROTTLED_IO         0x000000002
+
+>>>>>>> origin/10.7
 
 extern int niobuf_headers;		/* The number of IO buffer headers for cluster IO */
 extern int nbuf_headers;		/* The number of buffer headers */

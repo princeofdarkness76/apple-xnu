@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2000, 2009 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -114,10 +114,6 @@ int ether_inputdebug = 0;
 
 #if LLC && CCITT
 extern struct ifqueue pkintrq;
-#endif
-
-#if BRIDGE
-#include <net/bridge.h>
 #endif
 
 /* #include "vlan.h" */

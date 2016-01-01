@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 1998-2004 Apple Computer, Inc. All rights reserved.
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
@@ -17,11 +18,23 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -29,8 +42,15 @@
 #include <IOKit/IOMapper.h>
 #include <IOKit/IODMACommand.h>
 #include <libkern/c++/OSData.h>
+<<<<<<< HEAD
+<<<<<<< HEAD
 #include <libkern/OSDebug.h>
 #include "IOKitKernelInternal.h"
+=======
+>>>>>>> origin/10.6
+=======
+#include <libkern/OSDebug.h>
+>>>>>>> origin/10.8
 
 __BEGIN_DECLS
 extern ppnum_t pmap_find_phys(pmap_t pmap, addr64_t va);
@@ -39,10 +59,17 @@ __END_DECLS
 #define super IOService
 OSDefineMetaClassAndAbstractStructors(IOMapper, IOService);
 
+<<<<<<< HEAD
 OSMetaClassDefineReservedUnused(IOMapper, 0);
 OSMetaClassDefineReservedUnused(IOMapper, 1);
 OSMetaClassDefineReservedUnused(IOMapper, 2);
 OSMetaClassDefineReservedUnused(IOMapper, 3);
+=======
+OSMetaClassDefineReservedUsed(IOMapper, 0);
+OSMetaClassDefineReservedUsed(IOMapper, 1);
+OSMetaClassDefineReservedUsed(IOMapper, 2);
+OSMetaClassDefineReservedUsed(IOMapper, 3);
+>>>>>>> origin/10.8
 OSMetaClassDefineReservedUnused(IOMapper, 4);
 OSMetaClassDefineReservedUnused(IOMapper, 5);
 OSMetaClassDefineReservedUnused(IOMapper, 6);
@@ -161,7 +188,58 @@ IOMapper * IOMapper::copyMapperForDeviceWithIndex(IOService * device, unsigned i
         data->release();
     }
     else
+<<<<<<< HEAD
         matching = IOService::propertyMatching(gIOMapperIDKey, obj);
+=======
+	obj->release();
+    
+    return (mapper);
+}
+
+ppnum_t IOMapper::iovmAllocDMACommand(IODMACommand * command, IOItemCount pageCount)
+{
+    return (0);
+}
+
+void IOMapper::iovmFreeDMACommand(IODMACommand * command,
+				  ppnum_t addr, IOItemCount pageCount)
+{
+}
+
+ppnum_t IOMapper::iovmMapMemory(
+    			  OSObject                    * memory,   // dma command or iomd
+			  ppnum_t                       offsetPage,
+			  ppnum_t                       pageCount,
+			  uint32_t                      options,
+			  upl_page_info_t             * pageList,
+			  const IODMAMapSpecification * mapSpecification)
+{
+    return (0);
+}
+
+void IOMapper::iovmInsert(ppnum_t addr, IOItemCount offset,
+                            ppnum_t *pageList, IOItemCount pageCount)
+{
+    while (pageCount--)
+        iovmInsert(addr, offset++, *pageList++);
+}
+
+void IOMapper::iovmInsert(ppnum_t addr, IOItemCount offset,
+                            upl_page_info_t *pageList, IOItemCount pageCount)
+{
+    for (IOItemCount i = 0; i < pageCount; i++)
+        iovmInsert(addr, offset + i, pageList[i].phys_addr);
+}
+
+OSData * IOMapper::
+NewARTTable(IOByteCount size, void ** virtAddrP, ppnum_t *physAddrP)
+{
+    if (!virtAddrP || !physAddrP)
+	return 0;
+
+    kern_return_t kr;
+    vm_address_t address;
+>>>>>>> origin/10.8
 
     if (matching)
     {
@@ -202,8 +280,20 @@ ppnum_t IOMapperIOVMAlloc(unsigned pages)
 void IOMapperIOVMFree(ppnum_t addr, unsigned pages)
 {
     if (IOMapper::gSystem)
+<<<<<<< HEAD
     {
         IOMapper::gSystem->iovmUnmapMemory(NULL, NULL, ptoa_64(addr), ptoa_64(pages));
+=======
+        IOMapper::gSystem->iovmFree(addr, (IOItemCount) pages);
+}
+
+ppnum_t IOMapperInsertPage(ppnum_t addr, unsigned offset, ppnum_t page)
+{
+    if (IOMapper::gSystem) {
+		if (!addr) panic("!addr");
+        IOMapper::gSystem->iovmInsert(addr, (IOItemCount) offset, page);
+        return addr + offset;
+>>>>>>> origin/10.8
     }
 }
 

@@ -1199,7 +1199,16 @@ nqnfs_clientd(nmp, cred, ncd, flag, argp, p)
 	for (rp = nfs_reqq.tqh_first; rp; rp = rp->r_chain.tqe_next)
 		if (rp->r_nmp == nmp)
 			rp->r_nmp = (struct nfsmount *)0;
+<<<<<<< HEAD
 	_FREE_ZONE((caddr_t)nmp, sizeof (struct nfsmount), M_NFSMNT);
+=======
+	/* Need to wake up any rcvlock waiters so they notice the unmount. */
+	if (nmp->nm_state & NFSSTA_WANTRCV) {
+		nmp->nm_state &= ~NFSSTA_WANTRCV;
+		wakeup(&nmp->nm_state);
+	}
+	FREE_ZONE((caddr_t)nmp, sizeof (struct nfsmount), M_NFSMNT);
+>>>>>>> origin/10.3
 	if (error == EWOULDBLOCK)
 		error = 0;
 	return (error);

@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -160,7 +182,26 @@ ipc_bootstrap(void)
 			       ipc_space_max * sizeof(struct ipc_space),
 			       sizeof(struct ipc_space),
 			       "ipc spaces");
+<<<<<<< HEAD
 	zone_change(ipc_space_zone, Z_NOENCRYPT, TRUE);
+=======
+#if 0
+	/* make it exhaustible */
+	zone_change(ipc_space_zone, Z_EXHAUST, TRUE);
+#endif
+	zone_change(ipc_space_zone, Z_NOENCRYPT, TRUE);
+
+	ipc_tree_entry_zone =
+		zinit(sizeof(struct ipc_tree_entry),
+			ipc_tree_entry_max * sizeof(struct ipc_tree_entry),
+			sizeof(struct ipc_tree_entry),
+			"ipc tree entries");
+#if 0
+	/* make it exhaustible */
+	zone_change(ipc_tree_entry_zone, Z_EXHAUST, TRUE);
+#endif
+	zone_change(ipc_tree_entry_zone, Z_NOENCRYPT, TRUE);
+>>>>>>> origin/10.6
 
 	/*
 	 * populate all port(set) zones
@@ -170,8 +211,16 @@ ipc_bootstrap(void)
 		      ipc_port_max * sizeof(struct ipc_port),
 		      sizeof(struct ipc_port),
 		      "ipc ports");
+<<<<<<< HEAD
 	/* cant charge callers for port allocations (references passed) */
 	zone_change(ipc_object_zones[IOT_PORT], Z_CALLERACCT, FALSE);
+=======
+	/*
+	 * XXX  Can't make the port zone exhaustible because the kernel
+	 * XXX	panics when port allocation for an internal object fails.
+	 *zone_change(ipc_object_zones[IOT_PORT], Z_EXHAUST, TRUE);
+	 */
+>>>>>>> origin/10.6
 	zone_change(ipc_object_zones[IOT_PORT], Z_NOENCRYPT, TRUE);
 
 	ipc_object_zones[IOT_PORT_SET] =
@@ -179,6 +228,11 @@ ipc_bootstrap(void)
 		      ipc_pset_max * sizeof(struct ipc_pset),
 		      sizeof(struct ipc_pset),
 		      "ipc port sets");
+<<<<<<< HEAD
+=======
+	/* make it exhaustible */
+	zone_change(ipc_object_zones[IOT_PORT_SET], Z_EXHAUST, TRUE);
+>>>>>>> origin/10.6
 	zone_change(ipc_object_zones[IOT_PORT_SET], Z_NOENCRYPT, TRUE);
 
 	/*
@@ -190,7 +244,22 @@ ipc_bootstrap(void)
 			      IKM_SAVED_KMSG_SIZE,
 			      IKM_SAVED_KMSG_SIZE,
 			      "ipc kmsgs");
+<<<<<<< HEAD
 	zone_change(ipc_kmsg_zone, Z_CALLERACCT, FALSE);
+<<<<<<< HEAD
+=======
+	zone_change(ipc_kmsg_zone, Z_NOENCRYPT, TRUE);
+=======
+>>>>>>> origin/10.7
+
+#if CONFIG_MACF_MACH
+	ipc_labelh_zone = 
+		zinit(sizeof(struct ipc_labelh),
+		      ipc_port_max * sizeof(struct ipc_labelh),
+		      sizeof(struct ipc_labelh),
+		      "label handles");
+#endif
+>>>>>>> origin/10.6
 
 	/* create special spaces */
 

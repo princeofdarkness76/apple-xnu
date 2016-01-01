@@ -1,8 +1,18 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +24,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -125,7 +155,12 @@ processor_up(
 	init_ast_check(processor);
 	pset = processor->processor_set;
 	pset_lock(pset);
+<<<<<<< HEAD
 	++pset->online_processor_count;
+=======
+	if (++pset->processor_count == 1)
+		pset->low_pri = pset->low_count = processor;
+>>>>>>> origin/10.5
 	enqueue_tail(&pset->active_queue, (queue_entry_t)processor);
 	processor->state = PROCESSOR_RUNNING;
 	(void)hw_atomic_add(&processor_avail_count, 1);
@@ -229,10 +264,17 @@ processor_shutdown(
 	}
 
 	if (processor->state == PROCESSOR_IDLE)
+<<<<<<< HEAD
 		remqueue((queue_entry_t)processor);
 	else
 	if (processor->state == PROCESSOR_RUNNING)
 		remqueue((queue_entry_t)processor);
+=======
+		remqueue(&pset->idle_queue, (queue_entry_t)processor);
+	else
+	if (processor->state == PROCESSOR_RUNNING)
+		remqueue(&pset->active_queue, (queue_entry_t)processor);
+>>>>>>> origin/10.5
 
 	processor->state = PROCESSOR_SHUTDOWN;
 
@@ -241,7 +283,17 @@ processor_shutdown(
 	processor_doshutdown(processor);
 	splx(s);
 
+<<<<<<< HEAD
+<<<<<<< HEAD
 	cpu_exit_wait(processor->cpu_id);
+=======
+#ifdef	__ppc__
+	cpu_exit_wait(processor->slot_num);
+#endif
+>>>>>>> origin/10.3
+=======
+	cpu_exit_wait(processor->cpu_num);
+>>>>>>> origin/10.5
 
 	return (KERN_SUCCESS);
 }
@@ -264,11 +316,16 @@ processor_doshutdown(
 	thread_block(THREAD_CONTINUE_NULL);
 
 	assert(processor->state == PROCESSOR_SHUTDOWN);
+<<<<<<< HEAD
 
 #if CONFIG_DTRACE
 	if (dtrace_cpu_state_changed_hook)
 		(*dtrace_cpu_state_changed_hook)(processor->cpu_id, FALSE);
 #endif
+
+	ml_cpu_down();
+=======
+>>>>>>> origin/10.8
 
 	ml_cpu_down();
 
@@ -282,7 +339,14 @@ processor_doshutdown(
 	pset = processor->processor_set;
 	pset_lock(pset);
 	processor->state = PROCESSOR_OFF_LINE;
+<<<<<<< HEAD
 	--pset->online_processor_count;
+=======
+	if (--pset->online_processor_count == 0) {
+		pset_pri_init_hint(pset, PROCESSOR_NULL);
+		pset_count_init_hint(pset, PROCESSOR_NULL);
+	}
+>>>>>>> origin/10.8
 	(void)hw_atomic_sub(&processor_avail_count, 1);
 	commpage_update_active_cpus();
 	SCHED(processor_queue_shutdown)(processor);
@@ -291,10 +355,25 @@ processor_doshutdown(
 	/*
 	 *	Continue processor shutdown in shutdown context.
 	 */
+<<<<<<< HEAD
 	thread_bind(prev);
 	old_thread = machine_processor_shutdown(self, processor_offline, processor);
 
 	thread_dispatch(old_thread, self);
+<<<<<<< HEAD
+=======
+	thread_bind(self, prev);
+	old_thread = switch_to_shutdown_context(self,
+									processor_offline, processor);
+	if (processor != current_processor())
+		timer_call_shutdown(processor);
+
+	_mk_sp_thread_begin(self, self->last_processor);
+
+	thread_dispatch(old_thread);
+>>>>>>> origin/10.3
+=======
+>>>>>>> origin/10.5
 }
 
 /*
@@ -322,8 +401,26 @@ processor_offline(
 
 	thread_dispatch(old_thread, new_thread);
 
+<<<<<<< HEAD
 	PMAP_DEACTIVATE_KERNEL(processor->cpu_id);
+=======
+	PMAP_DEACTIVATE_KERNEL(processor->cpu_num);
 
+<<<<<<< HEAD
+	pset = processor->processor_set;
+	pset_lock(pset);
+	processor->state = PROCESSOR_OFF_LINE;
+	if (--pset->processor_count == 0)
+		pset->low_pri = pset->low_count = PROCESSOR_NULL;
+	(void)hw_atomic_sub(&processor_avail_count, 1);
+	processor_queue_shutdown(processor);
+	/* pset lock dropped */
+
+	ml_cpu_down();
+>>>>>>> origin/10.5
+
+=======
+>>>>>>> origin/10.8
 	cpu_sleep();
 	panic("zombie processor");
 	/*NOTREACHED*/

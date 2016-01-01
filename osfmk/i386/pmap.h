@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -305,10 +327,14 @@ pmap_store_pte(pt_entry_t *entryp, pt_entry_t value)
 
 #define INTEL_PTE_INVALID       0
 /* This is conservative, but suffices */
+<<<<<<< HEAD
 #define INTEL_PTE_RSVD		((1ULL << 10) | (1ULL << 11) | (0x1FFULL << 54))
 
 #define INTEL_COMPRESSED	(1ULL << 62) /* marker, for invalid PTE only -- ignored by hardware for both regular/EPT entries*/
 
+=======
+#define INTEL_PTE_RSVD		((1ULL << 8) | (1ULL << 9) | (1ULL << 10) | (1ULL << 11) | (0x1FFULL << 54))
+>>>>>>> origin/10.6
 #define	pa_to_pte(a)		((a) & INTEL_PTE_PFN) /* XXX */
 #define	pte_to_pa(p)		((p) & INTEL_PTE_PFN) /* XXX */
 #define	pte_increment_pa(p)	((p) += INTEL_OFFMASK+1)
@@ -447,7 +473,18 @@ extern uint32_t		pmap_kernel_text_ps;
 #ifdef __x86_64__
 #define ID_MAP_VTOP(x)	((void *)(((uint64_t)(x)) & LOW_4GB_MASK))
 
+<<<<<<< HEAD
 extern	uint64_t physmap_base, physmap_max;
+=======
+#define PHYSMAP_BASE	KVADDR(KERNEL_PHYSMAP_INDEX,0,0,0)
+#define NPHYSMAP (MAX(K64_MAXMEM/GB + 4, 4))
+#define PHYSMAP_PTOV(x)	((void *)(((uint64_t)(x)) + PHYSMAP_BASE))
+
+static inline boolean_t physmap_enclosed(addr64_t a) {
+	return (a < (NPHYSMAP * GB));
+}
+#endif
+>>>>>>> origin/10.7
 
 #define NPHYSMAP (MAX(K64_MAXMEM/GB + 4, 4))
 
@@ -554,10 +591,16 @@ extern void         pmap_put_mapwindow(mapwindow_t *map);
 #endif
 
 typedef struct pmap_memory_regions {
+<<<<<<< HEAD
 	ppnum_t base;		/* first page of this region */
 	ppnum_t alloc_up;	/* pages below this one have been "stolen" */
 	ppnum_t alloc_down;	/* pages above this one have been "stolen" */
 	ppnum_t end;		/* last page of this region */
+=======
+	ppnum_t base;
+	ppnum_t end;
+	ppnum_t alloc;
+>>>>>>> origin/10.7
 	uint32_t type;
 	uint64_t attribute;
 } pmap_memory_region_t;
@@ -655,10 +698,25 @@ extern int		pmap_list_resident_pages(
 				vm_offset_t	*listp,
 				int		space);
 extern void		x86_filter_TLB_coherency_interrupts(boolean_t);
+<<<<<<< HEAD
 /*
  * Get cache attributes (as pagetable bits) for the specified phys page
  */
 extern	unsigned	pmap_get_cache_attributes(ppnum_t, boolean_t is_ept);
+=======
+#ifdef __i386__
+extern void             pmap_commpage32_init(
+					   vm_offset_t kernel,
+					   vm_offset_t user,
+					   int count);
+extern void             pmap_commpage64_init(
+					   vm_offset_t	kernel,
+					   vm_map_offset_t user,
+					   int count);
+
+#endif
+
+>>>>>>> origin/10.6
 #if NCOPY_WINDOWS > 0
 extern struct cpu_pmap	*pmap_cpu_alloc(
 				boolean_t	is_boot_cpu);
@@ -681,6 +739,22 @@ extern ppnum_t          pmap_find_phys(pmap_t map, addr64_t va);
 
 extern void pmap_cpu_init(void);
 extern void pmap_disable_NX(pmap_t pmap);
+<<<<<<< HEAD
+=======
+#ifdef __i386__
+extern void pmap_set_4GB_pagezero(pmap_t pmap);
+extern void pmap_clear_4GB_pagezero(pmap_t pmap);
+extern void pmap_load_kernel_cr3(void);
+extern vm_offset_t pmap_cpu_high_map_vaddr(int, enum high_cpu_types);
+extern vm_offset_t pmap_high_map_vaddr(enum high_cpu_types);
+extern vm_offset_t pmap_high_map(pt_entry_t, enum high_cpu_types);
+extern vm_offset_t pmap_cpu_high_shared_remap(int, enum high_cpu_types, vm_offset_t, int);
+extern vm_offset_t pmap_high_shared_remap(enum high_fixed_addresses, vm_offset_t, int);
+#endif
+
+extern void pt_fake_zone_info(int *, vm_size_t *, vm_size_t *, vm_size_t *, vm_size_t *, int *, int *);
+extern void pmap_pagetable_corruption_msg_log(int (*)(const char * fmt, ...)__printflike(1,2));
+>>>>>>> origin/10.6
 
 extern void pt_fake_zone_init(int);
 extern void pt_fake_zone_info(int *, vm_size_t *, vm_size_t *, vm_size_t *, vm_size_t *, 

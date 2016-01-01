@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -65,9 +87,12 @@
 #include <kern/sched_prim.h>
 #include <kern/misc_protos.h>
 #include <kern/clock.h>
+<<<<<<< HEAD
 #include <kern/telemetry.h>
 #include <kern/ecc.h>
 #include <kern/kern_cdata.h>
+=======
+>>>>>>> origin/10.5
 #include <vm/vm_kern.h>
 #include <vm/pmap.h>
 #include <stdarg.h>
@@ -116,6 +141,7 @@ unsigned int		panic_is_inited = 0;
 unsigned int		return_on_panic = 0;
 unsigned long		panic_caller;
 
+<<<<<<< HEAD
 #define DEBUG_BUF_SIZE (3 * PAGE_SIZE)
 
 /* debug_buf is directly linked with iBoot panic region for ARM64 targets */
@@ -129,6 +155,17 @@ __used char *debug_buf_addr = debug_buf;
 char *debug_buf_ptr = debug_buf;
 unsigned int debug_buf_size = sizeof(debug_buf);
 #endif
+=======
+#if CONFIG_EMBEDDED
+#define DEBUG_BUF_SIZE (PAGE_SIZE)
+#else
+#define DEBUG_BUF_SIZE (3 * PAGE_SIZE)
+#endif
+
+char debug_buf[DEBUG_BUF_SIZE];
+char *debug_buf_ptr = debug_buf;
+unsigned int debug_buf_size = sizeof(debug_buf);
+>>>>>>> origin/10.5
 
 static char model_name[64];
 unsigned char *kernel_uuid;
@@ -229,6 +266,7 @@ debug_log_init(void)
 {
 	if (debug_buf_size != 0)
 		return;
+<<<<<<< HEAD
 #if (defined(__arm64__) || defined(NAND_PANIC_DEVICE)) && !defined(LEGACY_PANIC_LOGS)
 	if (!gPanicBase) {
 		printf("debug_log_init: Error!! gPanicBase is still not initialized\n");
@@ -243,6 +281,10 @@ debug_log_init(void)
 	debug_buf_ptr = debug_buf;
 	debug_buf_size = sizeof(debug_buf);
 #endif
+=======
+	debug_buf_ptr = debug_buf;
+	debug_buf_size = sizeof(debug_buf);
+>>>>>>> origin/10.5
 }
 
 #if defined(__i386__) || defined(__x86_64__)
@@ -278,6 +320,14 @@ panic_prologue(const char *str)
 			ml_set_interrupts_enabled(TRUE);
 			kdbg_dump_trace_to_file("/var/tmp/panic.trace");
 		}
+	}
+
+	s = splhigh();
+	disable_preemption();
+
+	if (kdebug_enable) {
+		ml_set_interrupts_enabled(TRUE);
+		kdbg_dump_trace_to_file("/var/tmp/panic.trace");
 	}
 
 	s = splhigh();
@@ -561,18 +611,33 @@ static void panic_display_uptime(void) {
 	kdb_printf("\nSystem uptime in nanoseconds: %llu\n", uptime);
 }
 
+static void panic_display_uptime(void) {
+	uint64_t	uptime;
+	absolutetime_to_nanoseconds(mach_absolute_time(), &uptime);
+
+	kdb_printf("\nSystem uptime in nanoseconds: %llu\n", uptime);
+}
+
 extern const char version[];
 extern char osversion[];
 
 static volatile uint32_t config_displayed = 0;
 
 __private_extern__ void panic_display_system_configuration(void) {
+<<<<<<< HEAD
 
 	panic_display_process_name();
 	if (OSCompareAndSwap(0, 1, &config_displayed)) {
 		char buf[256];
 		if (strlcpy(buf, PE_boot_args(), sizeof(buf)))
 			kdb_printf("Boot args: %s\n", buf);
+=======
+	static volatile boolean_t config_displayed = FALSE;
+
+	panic_display_process_name();
+	if (config_displayed == FALSE) {
+		config_displayed = TRUE;
+>>>>>>> origin/10.6
 		kdb_printf("\nMac OS version:\n%s\n",
 		    (osversion[0] != 0) ? osversion : "Not yet set");
 		kdb_printf("\nKernel version:\n%s\n",version);
@@ -582,6 +647,13 @@ __private_extern__ void panic_display_system_configuration(void) {
 		panic_display_pal_info();
 		panic_display_model_name();
 		panic_display_uptime();
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+#if	defined(__i386__) || defined(__x86_64__)
+		pmap_pagetable_corruption_msg_log(&kdb_printf);
+#endif /* i386 || x86_64 */
+>>>>>>> origin/10.6
 		panic_display_zprint();
 #if CONFIG_ZLEAKS
 		panic_display_ztrace();
@@ -695,12 +767,64 @@ __private_extern__ void panic_display_ztrace(void)
 			kdb_printf("\nCan't access top_ztrace...\n");
 		}
 		kdb_printf("\n");
+=======
+		config_displayed = TRUE;
+>>>>>>> origin/10.5
 	}
 }
 #endif /* CONFIG_ZLEAKS */
 
+<<<<<<< HEAD
 #if ! (MACH_KDP && CONFIG_KDP_INTERACTIVE_DEBUGGING)
 static struct kdp_ether_addr kdp_current_mac_address = {{0, 0, 0, 0, 0, 0}};
+=======
+extern zone_t		first_zone;
+extern unsigned int	num_zones, stack_total;
+
+#if defined(__i386__)
+extern unsigned int	inuse_ptepages_count;
+#endif
+
+extern boolean_t	panic_include_zprint;
+extern vm_size_t	kalloc_large_total;
+
+__private_extern__ void panic_display_zprint()
+{
+	if(panic_include_zprint == TRUE) {
+
+		unsigned int	i;
+		struct zone	zone_copy;
+
+		if(first_zone!=NULL) {
+			if(ml_nofault_copy((vm_offset_t)first_zone, (vm_offset_t)&zone_copy, sizeof(struct zone)) == sizeof(struct zone)) {
+				for (i = 0; i < num_zones; i++) {
+					if(zone_copy.cur_size > (1024*1024)) {
+						kdb_printf("%.20s:%lu\n",zone_copy.zone_name,(uintptr_t)zone_copy.cur_size);
+					}	
+					
+					if(zone_copy.next_zone == NULL) {
+						break;
+					}
+
+					if(ml_nofault_copy((vm_offset_t)zone_copy.next_zone, (vm_offset_t)&zone_copy, sizeof(struct zone)) != sizeof(struct zone)) {
+						break;
+					}
+				}
+			}
+		}
+
+		kdb_printf("Kernel Stacks:%lu\n",(uintptr_t)(KERNEL_STACK_SIZE * stack_total));
+#if defined(__i386__)
+		kdb_printf("PageTables:%lu\n",(uintptr_t)(PAGE_SIZE * inuse_ptepages_count));
+#endif
+		kdb_printf("Kalloc.Large:%lu\n",(uintptr_t)kalloc_large_total);
+	}
+}
+
+#if !MACH_KDP
+static struct ether_addr kdp_current_mac_address = {{0, 0, 0, 0, 0, 0}};
+unsigned int not_in_kdp = 1;
+>>>>>>> origin/10.5
 
 /* XXX ugly forward declares to stop warnings */
 void *kdp_get_interface(void);

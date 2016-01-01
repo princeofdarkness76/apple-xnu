@@ -87,7 +87,10 @@ void kdp_set_dump_info(const uint32_t flags, const char *file, const char *desti
 void kdp_get_dump_info(uint32_t *flags, char *file, char *destip, char *routerip, 
                        uint32_t *port);
 
+<<<<<<< HEAD
 extern int kern_dump(boolean_t local);
+=======
+>>>>>>> origin/10.6
 
 struct corehdr *create_panic_header(unsigned int request, const char *corename, unsigned length, unsigned block);
 

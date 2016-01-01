@@ -699,6 +699,7 @@ vm_swapout_thread(void)
 		}
 		vm_swapout_thread_processed_segments++;
 
+<<<<<<< HEAD
 		size = round_page_32(C_SEG_OFFSET_TO_BYTES(c_seg->c_populated_offset));
 		
 		if (size == 0) {
@@ -708,11 +709,23 @@ vm_swapout_thread(void)
 			c_seg_switch_state(c_seg, C_IS_EMPTY, FALSE);
 			lck_mtx_unlock_always(&c_seg->c_lock);
 			lck_mtx_unlock_always(c_list_lock);
+=======
+		vm_swapout_thread_processed_segments++;
+>>>>>>> origin/10.9
 
 			vm_swapout_found_empty++;
 			goto c_seg_is_empty;
 		}
 		C_SEG_BUSY(c_seg);
+		c_seg->c_busy_swapping = 1;
+
+		size = round_page_32(C_SEG_OFFSET_TO_BYTES(c_seg->c_populated_offset));
+		
+		if (size == 0) {
+			c_seg_free_locked(c_seg);
+			goto c_seg_was_freed;
+		}
+		c_seg->c_busy = 1;
 		c_seg->c_busy_swapping = 1;
 
 		lck_mtx_unlock_always(c_list_lock);
@@ -780,7 +793,11 @@ vm_swapout_thread(void)
 		PAGE_REPLACEMENT_DISALLOWED(FALSE);
 
 		vm_pageout_io_throttle();
+<<<<<<< HEAD
 c_seg_is_empty:
+=======
+c_seg_was_freed:
+>>>>>>> origin/10.9
 		if (c_swapout_count == 0)
 			vm_swap_consider_defragmenting();
 

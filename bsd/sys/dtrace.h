@@ -2588,6 +2588,17 @@ extern void *dtrace_invop_callsite_post;
 
 #endif
 
+<<<<<<< HEAD
+=======
+#if defined(__APPLE__)
+#if defined (__ppc__) || defined (__ppc64__)
+#define DTRACE_INVOP_NOP                4
+#define DTRACE_INVOP_RET                5
+#define DTRACE_INVOP_BCTR               6
+#define DTRACE_INVOP_TAILJUMP           7
+#endif
+
+>>>>>>> origin/10.5
 
 #endif /* __APPLE__ */
 

@@ -1677,12 +1677,25 @@ nfs4_parsefattr(
 					s = sbuf;
 					slen = sizeof(sbuf);
 				}
+<<<<<<< HEAD
 				/* Let's add a bit more if we can to the allocation as to try and avoid future allocations */
 				MALLOC(s, char*, (len + 16 < NFS_MAX_WHO) ? len+16 : NFS_MAX_WHO, M_TEMP, M_WAITOK);
 				if (s)
 					slen = (len + 16 < NFS_MAX_WHO) ? len+16 : NFS_MAX_WHO;
 				else
 					error = ENOMEM;
+=======
+				if (len >= NFS_MAX_WHO) {
+					error = EBADRPC;
+				} else {
+					/* Let's add a bit more if we can to the allocation as to try and avoid future allocations */
+					MALLOC(s, char*, (len + 16 < NFS_MAX_WHO) ? len+16 : NFS_MAX_WHO, M_TEMP, M_WAITOK);
+					if (s)
+						slen = (len + 16 < NFS_MAX_WHO) ? len+16 : NFS_MAX_WHO;
+					else
+						error = ENOMEM;
+				}
+>>>>>>> origin/10.7
 			}
 			if (error2)
 				nfsm_chain_adv(error, nmc, nfsm_rndup(len));
@@ -2005,12 +2018,25 @@ nfs4_parsefattr(
 				s = sbuf;
 				slen = sizeof(sbuf);
 			}
+<<<<<<< HEAD
 			/* Let's add a bit more if we can to the allocation as to try and avoid future allocations */
 			MALLOC(s, char*, (len + 16 < NFS_MAX_WHO) ? len+16 : NFS_MAX_WHO, M_TEMP, M_WAITOK);
 			if (s)
 				slen = (len + 16 < NFS_MAX_WHO) ? len+16 : NFS_MAX_WHO;
 			else
 				error = ENOMEM;
+=======
+			if (len >= NFS_MAX_WHO) {
+				error = EBADRPC;
+			} else {
+				/* Let's add a bit more if we can to the allocation as to try and avoid future allocations */
+				MALLOC(s, char*, (len + 16 < NFS_MAX_WHO) ? len+16 : NFS_MAX_WHO, M_TEMP, M_WAITOK);
+				if (s)
+					slen = (len + 16 < NFS_MAX_WHO) ? len+16 : NFS_MAX_WHO;
+				else
+					error = ENOMEM;
+			}
+>>>>>>> origin/10.7
 		}
 		nfsm_chain_get_opaque(error, nmc, len, s);
 		if (!error) {
@@ -2040,12 +2066,25 @@ nfs4_parsefattr(
 				s = sbuf;
 				slen = sizeof(sbuf);
 			}
+<<<<<<< HEAD
 			/* Let's add a bit more if we can to the allocation as to try and avoid future allocations */
 			MALLOC(s, char*, (len + 16 < NFS_MAX_WHO) ? len+16 : NFS_MAX_WHO, M_TEMP, M_WAITOK);
 			if (s)
 				slen = (len + 16 < NFS_MAX_WHO) ? len+16 : NFS_MAX_WHO;
 			else
 				error = ENOMEM;
+=======
+			if (len >= NFS_MAX_WHO) {
+				error = EBADRPC;
+			} else {
+				/* Let's add a bit more if we can to the allocation as to try and avoid future allocations */
+				MALLOC(s, char*, (len + 16 < NFS_MAX_WHO) ? len+16 : NFS_MAX_WHO, M_TEMP, M_WAITOK);
+				if (s)
+					slen = (len + 16 < NFS_MAX_WHO) ? len+16 : NFS_MAX_WHO;
+				else
+					error = ENOMEM;
+			}
+>>>>>>> origin/10.7
 		}
 		nfsm_chain_get_opaque(error, nmc, len, s);
 		if (!error) {

@@ -63,7 +63,10 @@ fcntl(int fd, int cmd, ...)
 	 case F_ADDSIGS:
 	 case F_ADDFILESIGS:
 	 case F_ADDFILESIGS_FOR_DYLD_SIM:
+<<<<<<< HEAD
 	 case F_ADDFILESIGS_RETURN:
+=======
+>>>>>>> origin/10.10
 	 case F_FINDSIGS:
 	 case F_TRANSCODEKEY:
 		arg = va_arg(ap, void *);

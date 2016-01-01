@@ -550,6 +550,9 @@ vm_compressor_init(void)
 	if (COMPRESSED_PAGER_IS_ACTIVE || DEFAULT_FREEZER_COMPRESSED_PAGER_IS_SWAPBACKED)
 		vm_compressor_is_active = 1;
 
+	if (COMPRESSED_PAGER_IS_ACTIVE || DEFAULT_FREEZER_COMPRESSED_PAGER_IS_SWAPBACKED)
+		vm_compressor_is_active = 1;
+
 #if CONFIG_FREEZE
 	memorystatus_freeze_enabled = TRUE;
 #endif /* CONFIG_FREEZE */
@@ -992,7 +995,11 @@ c_seg_free(c_segment_t c_seg)
 void
 c_seg_free_locked(c_segment_t c_seg)
 {
+<<<<<<< HEAD
 	int		segno;
+=======
+	int		segno, i;
+>>>>>>> origin/10.10
 	int		pages_populated = 0;
 	int32_t		*c_buffer = NULL;
 	uint64_t	c_swap_handle = 0;
@@ -1037,7 +1044,13 @@ c_seg_free_locked(c_segment_t c_seg)
 	C_SEG_WAKEUP_DONE(c_seg);
 	lck_mtx_unlock_always(&c_seg->c_lock);
 
+<<<<<<< HEAD
 	segno = c_seg->c_mysegno;
+=======
+	if (c_buffer) {
+		if (pages_populated)
+			kernel_memory_depopulate(kernel_map, (vm_offset_t) c_buffer, pages_populated * PAGE_SIZE, KMA_COMPRESSOR);
+>>>>>>> origin/10.9
 
 	lck_mtx_lock_spin_always(c_list_lock);
 	/*
@@ -1872,6 +1885,7 @@ vm_compressor_do_delayed_compactions(boolean_t flush_all)
 		
 		lck_mtx_lock_spin_always(&c_seg->c_lock);
 
+<<<<<<< HEAD
 		if (c_seg->c_busy) {
 
 			lck_mtx_unlock_always(c_list_lock);
@@ -1881,6 +1895,17 @@ vm_compressor_do_delayed_compactions(boolean_t flush_all)
 			continue;
 		}
 		C_SEG_BUSY(c_seg);
+=======
+                if (c_seg->c_busy) {
+
+                        lck_mtx_unlock_always(c_list_lock);
+                        c_seg_wait_on_busy(c_seg);
+                        lck_mtx_lock_spin_always(c_list_lock);
+
+                        continue;
+                }
+		c_seg->c_busy = 1;
+>>>>>>> origin/10.9
 
 		c_seg_do_minor_compaction_and_unlock(c_seg, TRUE, FALSE, TRUE);
 
@@ -2072,11 +2097,19 @@ vm_compressor_record_warmup_end(void)
 	lck_mtx_lock_spin_always(c_list_lock);
 
 	if (fastwake_recording_in_progress == TRUE) {
+<<<<<<< HEAD
 
 		if (!queue_empty(&c_age_list_head)) {
 
 			c_seg = (c_segment_t)queue_last(&c_age_list_head);
 
+=======
+
+		if (!queue_empty(&c_age_list_head)) {
+
+			c_seg = (c_segment_t)queue_last(&c_age_list_head);
+
+>>>>>>> origin/10.9
 			last_c_segment_to_warm_generation_id = c_seg->c_generation_id;
 		} else
 			last_c_segment_to_warm_generation_id = first_c_segment_to_warm_generation_id;
@@ -2229,6 +2262,7 @@ vm_compressor_compact_and_swap(boolean_t flush_all)
 
 	vm_compressor_age_swapped_in_segments(flush_all);
 
+<<<<<<< HEAD
 	/*
 	 * we only need to grab the timestamp once per
 	 * invocation of this function since the 
@@ -2236,6 +2270,8 @@ vm_compressor_compact_and_swap(boolean_t flush_all)
 	 * in days
 	 */
 	clock_get_system_nanotime(&now,  &nsec);
+=======
+>>>>>>> origin/10.9
 
 	while (!queue_empty(&c_age_list_head) && compaction_swapper_abort == 0) {
 
@@ -3191,18 +3227,28 @@ c_seg_invalid_data:
 	}
 	if (c_seg->c_state != C_IS_FILLING) {
 		if (c_seg->c_bytes_used == 0) {
+<<<<<<< HEAD
 			if ( !(C_SEG_IS_ONDISK(c_seg))) {
+=======
+			if (!c_seg->c_ondisk) {
+>>>>>>> origin/10.9
 				int	pages_populated;
 
 				pages_populated = (round_page_32(C_SEG_OFFSET_TO_BYTES(c_seg->c_populated_offset))) / PAGE_SIZE;
 				c_seg->c_populated_offset = C_SEG_BYTES_TO_OFFSET(0);
 
 				if (pages_populated) {
+<<<<<<< HEAD
 
 					assert(c_seg->c_state != C_ON_BAD_Q);
 					assert(c_seg->c_store.c_buffer != NULL);
 
 					C_SEG_BUSY(c_seg);
+=======
+					assert(c_seg->c_store.c_buffer != NULL);
+
+					c_seg->c_busy = 1;
+>>>>>>> origin/10.9
 					lck_mtx_unlock_always(&c_seg->c_lock);
 
 					kernel_memory_depopulate(kernel_map, (vm_offset_t) c_seg->c_store.c_buffer, pages_populated * PAGE_SIZE, KMA_COMPRESSOR);
@@ -3210,10 +3256,17 @@ c_seg_invalid_data:
 					lck_mtx_lock_spin_always(&c_seg->c_lock);
 					C_SEG_WAKEUP_DONE(c_seg);
 				}
+<<<<<<< HEAD
 				if (!c_seg->c_on_minorcompact_q)
 					c_seg_need_delayed_compaction(c_seg);
 			} else
 				assert(c_seg->c_state == C_ON_SWAPPEDOUTSPARSE_Q);
+=======
+				if (!c_seg->c_on_minorcompact_q && !c_seg->c_on_swapout_q)
+					c_seg_need_delayed_compaction(c_seg);
+			} else
+				assert(c_seg->c_on_swappedout_sparse_q);
+>>>>>>> origin/10.9
 
 		} else if (c_seg->c_on_minorcompact_q) {
 

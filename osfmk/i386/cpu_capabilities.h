@@ -1,11 +1,21 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2003-2009 Apple Inc. All rights reserved.
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+=======
+ * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+<<<<<<< HEAD
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+>>>>>>> origin/10.2
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
+<<<<<<< HEAD
  * compliance with the License. The rights granted to you under the License
  * may not be used to create, or enable the creation or redistribution of,
  * unlawful or unlicensed copies of an Apple operating system, or to
@@ -14,22 +24,43 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 #ifdef	PRIVATE
+=======
+ * @APPLE_LICENSE_HEADER_END@
+ */
+>>>>>>> origin/10.2
 
 #ifndef _I386_CPU_CAPABILITIES_H
 #define _I386_CPU_CAPABILITIES_H
 
+<<<<<<< HEAD
 #ifndef	__ASSEMBLER__
 #include <stdint.h>
 #endif
@@ -53,7 +84,11 @@
 #define	kHasSSE4_1			0x00000400
 #define	kHasSSE4_2			0x00000800
 #define	kHasAES				0x00001000
+<<<<<<< HEAD
 #define	kInOrderPipeline		0x00002000
+=======
+#define	kInOrderPipeline		0x00002000	/* in-order execution */
+>>>>>>> origin/10.6
 #define	kSlow				0x00004000	/* tsc < nanosecond */
 #define	kUP				0x00008000	/* set if (kNumCPUs == 1) */
 #define	kNumCPUs			0x00FF0000	/* number of CPUs (see _NumCPUs() below) */
@@ -62,6 +97,10 @@
 #define	kHasRDRAND			0x02000000
 #define	kHasF16C			0x04000000
 #define	kHasENFSTRG			0x08000000
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.8
 #define	kHasFMA				0x10000000
 #define	kHasAVX2_0			0x20000000
 #define	kHasBMI1			0x40000000
@@ -69,11 +108,23 @@
 /* Extending into 64-bits from here: */ 
 #define	kHasRTM			0x0000000100000000ULL
 #define	kHasHLE			0x0000000200000000ULL
+<<<<<<< HEAD
+<<<<<<< HEAD
 #define	kHasRDSEED		0x0000000800000000ULL
 #define	kHasADX			0x0000000400000000ULL
 #define	kHasMPX			0x0000001000000000ULL
 #define	kHasSGX			0x0000002000000000ULL
 
+=======
+#define	kNumCPUsShift			16		/* see _NumCPUs() below */
+>>>>>>> origin/10.7
+=======
+=======
+#define	kHasRDSEED		0x0000000800000000ULL
+#define	kHasADX			0x0000000400000000ULL
+>>>>>>> origin/10.10
+
+>>>>>>> origin/10.8
 
 #ifndef	__ASSEMBLER__
 #include <sys/cdefs.h>
@@ -187,9 +238,13 @@ int _NumCPUs( void )
 
 #define _COMM_PAGE_CPUFAMILY		(_COMM_PAGE_START_ADDRESS+0x040)	/* uint32_t hw.cpufamily, x86*/
 #define _COMM_PAGE_KDEBUG_ENABLE	(_COMM_PAGE_START_ADDRESS+0x044)	/* uint32_t export "kdebug_enable" to userspace */
+<<<<<<< HEAD
 #define	_COMM_PAGE_ATM_DIAGNOSTIC_CONFIG	(_COMM_PAGE_START_ADDRESS+0x48) /* uint32_t export "atm_diagnostic_config" to userspace */
 
 #define _COMM_PAGE_UNUSED2		(_COMM_PAGE_START_ADDRESS+0x04C)	/* [0x4C,0x50) unused */
+=======
+#define _COMM_PAGE_UNUSED2		(_COMM_PAGE_START_ADDRESS+0x048)	/* [0x48,0x50) unused */
+>>>>>>> origin/10.10
 
 #define	_COMM_PAGE_TIME_DATA_START	(_COMM_PAGE_START_ADDRESS+0x050)	/* base of offsets below (_NT_SCALE etc) */
 #define _COMM_PAGE_NT_TSC_BASE		(_COMM_PAGE_START_ADDRESS+0x050)	/* used by nanotime() */
@@ -285,3 +340,36 @@ symbol_name: nop
 
 #endif /* _I386_CPU_CAPABILITIES_H */
 #endif /* PRIVATE */
+=======
+/* Sadly, some clients of this interface misspell __APPLE_API_PRIVATE.
+ * To avoid breaking them, we accept the incorrect _APPLE_API_PRIVATE.
+ */
+#ifdef	_APPLE_API_PRIVATE
+#ifndef __APPLE_API_PRIVATE
+#define	__APPLE_API_PRIVATE
+#endif	/* __APPLE_API_PRIVATE */
+#endif	/* _APPLE_API_PRIVATE */
+
+#ifndef __APPLE_API_PRIVATE
+#error	cpu_capabilities.h is for Apple Internal use only
+#else	/* __APPLE_API_PRIVATE */
+
+/* _cpu_capabilities
+ *
+ * This is the authoritative way to determine from user mode what
+ * implementation-specific processor features are available.
+ * This API only supported for Apple internal use.
+ * 
+ */
+
+#ifndef	__ASSEMBLER__
+ 
+extern int _cpu_capabilities;
+ 
+#endif
+
+/* Bit definitions for _cpu_capabilities: */
+
+#endif /* __APPLE_API_PRIVATE */
+#endif /* _I386_CPU_CAPABILITIES_H */
+>>>>>>> origin/10.2

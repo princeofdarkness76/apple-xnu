@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +16,24 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +41,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /* $KAME: in_gif.c,v 1.54 2001/05/14 14:02:16 itojun Exp $ */
 
@@ -89,6 +122,8 @@
 
 #include <net/net_osdep.h>
 
+extern u_long  route_generation;
+
 int ip_gif_ttl = GIF_TTL;
 SYSCTL_INT(_net_inet_ip, IPCTL_GIF_TTL, gifttl, CTLFLAG_RW | CTLFLAG_LOCKED,
 	&ip_gif_ttl,	0, "");
@@ -110,10 +145,14 @@ in_gif_output(
 	struct ip iphdr;	/* capsule IP header, host byte ordered */
 	int proto, error;
 	u_int8_t tos;
+<<<<<<< HEAD
 	struct ip_out_args ipoa =
 	    { IFSCOPE_NONE, { 0 }, IPOAF_SELECT_SRCIF, 0 };
 
 	GIF_LOCK_ASSERT(sc);
+=======
+	struct ip_out_args ipoa = { IFSCOPE_NONE };
+>>>>>>> origin/10.5
 
 	if (sin_src == NULL || sin_dst == NULL ||
 	    sin_src->sin_family != AF_INET ||
@@ -191,11 +230,20 @@ in_gif_output(
 	}
 	bcopy(&iphdr, mtod(m, struct ip *), sizeof (struct ip));
 
+<<<<<<< HEAD
 	if (ROUTE_UNUSABLE(&sc->gif_ro) ||
 	    dst->sin_family != sin_dst->sin_family ||
 	    dst->sin_addr.s_addr != sin_dst->sin_addr.s_addr ||
 	    (sc->gif_ro.ro_rt != NULL && sc->gif_ro.ro_rt->rt_ifp == ifp)) {
 		/* cache route doesn't match or recursive route */
+=======
+	if (dst->sin_family != sin_dst->sin_family ||
+	    dst->sin_addr.s_addr != sin_dst->sin_addr.s_addr ||
+	    (sc->gif_ro.ro_rt != NULL &&
+	    (sc->gif_ro.ro_rt->generation_id != route_generation ||
+	    sc->gif_ro.ro_rt->rt_ifp == ifp))) {
+		/* cache route doesn't match */
+>>>>>>> origin/10.5
 		dst->sin_family = sin_dst->sin_family;
 		dst->sin_len = sizeof (struct sockaddr_in);
 		dst->sin_addr = sin_dst->sin_addr;
@@ -227,8 +275,12 @@ in_gif_output(
 	}
 
 	error = ip_output(m, NULL, &sc->gif_ro, IP_OUTARGS, NULL, &ipoa);
+<<<<<<< HEAD
 
 	return (error);
+=======
+	return(error);
+>>>>>>> origin/10.5
 }
 
 void
@@ -396,6 +448,7 @@ gif_encapcheck4(
 		sin.sin_family = AF_INET;
 		sin.sin_len = sizeof (struct sockaddr_in);
 		sin.sin_addr = ip.ip_src;
+<<<<<<< HEAD
 		rt = rtalloc1_scoped((struct sockaddr *)&sin, 0, 0,
 		    m->m_pkthdr.rcvif->if_index);
 		if (rt != NULL)
@@ -403,6 +456,19 @@ gif_encapcheck4(
 		if (rt == NULL || rt->rt_ifp != m->m_pkthdr.rcvif) {
 			if (rt != NULL) {
 				RT_UNLOCK(rt);
+=======
+		lck_mtx_lock(rt_mtx);
+		rt = rtalloc1_scoped_locked((struct sockaddr *)&sin, 0, 0,
+		    m->m_pkthdr.rcvif->if_index);
+		lck_mtx_unlock(rt_mtx);
+		if (!rt || rt->rt_ifp != m->m_pkthdr.rcvif) {
+#if 0
+			log(LOG_WARNING, "%s: packet from 0x%x dropped "
+			    "due to ingress filter\n", if_name(&sc->gif_if),
+			    (u_int32_t)ntohl(sin.sin_addr.s_addr));
+#endif
+			if (rt)
+>>>>>>> origin/10.5
 				rtfree(rt);
 			}
 			return (0);

@@ -50,10 +50,17 @@
 
 #include <sys/dtrace_glue.h>
 
+<<<<<<< HEAD
 #include <machine/pal_routines.h>
 
 #if defined(__x86_64__)
 extern x86_saved_state_t *find_kern_regs(thread_t);
+=======
+#if defined(__ppc__) || defined(__ppc64__)
+extern struct savearea *find_kern_regs(thread_t);
+#elif defined(__i386__) || defined(__x86_64__)
+extern x86_saved_state32_t *find_kern_regs(thread_t);
+>>>>>>> origin/10.5
 #else
 #error Unknown architecture
 #endif
@@ -160,8 +167,33 @@ profile_fire(void *arg)
 	late = dtrace_gethrtime() - pcpu->profc_expected;
 	pcpu->profc_expected += pcpu->profc_interval;
 
+<<<<<<< HEAD
 #if defined(__x86_64__)
 	x86_saved_state_t *kern_regs = find_kern_regs(current_thread());
+=======
+#if !defined(__APPLE__)
+	dtrace_probe(prof->prof_id, CPU->cpu_profile_pc,
+	    CPU->cpu_profile_upc, late, 0, 0);
+#else
+#if defined(__ppc__) || defined(__ppc64__)
+	{
+	struct savearea *sv = find_kern_regs(current_thread());
+
+	if (sv) {
+		if (USERMODE(sv->save_srr1)) {
+			dtrace_probe(prof->prof_id, 0x0, sv->save_srr0, late, 0, 0);
+		} else {
+			dtrace_probe(prof->prof_id, sv->save_srr0, 0x0, late, 0, 0);
+		}
+	} else {
+		dtrace_probe(prof->prof_id, 0xcafebabe,
+	    	0x0, late, 0, 0); /* XXX_BOGUS also see profile_usermode() below. */
+	}
+	}
+#elif defined(__i386__) || defined(__x86_64__)
+	{
+	x86_saved_state32_t *kern_regs = find_kern_regs(current_thread());
+>>>>>>> origin/10.5
 
 	if (NULL != kern_regs) {
 		/* Kernel was interrupted. */
@@ -186,6 +218,7 @@ profile_fire(void *arg)
 			dtrace_probe(prof->prof_id, 0x0, regs->eip, late, 0, 0);
 		}
 	}
+	}
 #else
 #error Unknown architecture
 #endif
@@ -196,8 +229,33 @@ profile_tick(void *arg)
 {
 	profile_probe_t *prof = arg;
 
+<<<<<<< HEAD
 #if defined(__x86_64__)
 	x86_saved_state_t *kern_regs = find_kern_regs(current_thread());
+=======
+#if !defined(__APPLE__)
+	dtrace_probe(prof->prof_id, CPU->cpu_profile_pc,
+	    CPU->cpu_profile_upc, 0, 0, 0);
+#else
+#if defined(__ppc__) || defined(__ppc64__)
+	{
+	struct savearea *sv = find_kern_regs(current_thread());
+
+	if (sv) {
+		if (USERMODE(sv->save_srr1)) {
+			dtrace_probe(prof->prof_id, 0x0, sv->save_srr0, 0, 0, 0);
+		} else {
+			dtrace_probe(prof->prof_id, sv->save_srr0, 0x0, 0, 0, 0);
+		}
+	} else {
+		dtrace_probe(prof->prof_id, 0xcafebabe,
+	    	0x0, 0, 0, 0); /* XXX_BOGUS also see profile_usermode() below. */
+	}
+	}
+#elif defined(__i386__) || defined(__x86_64__)
+	{
+	x86_saved_state32_t *kern_regs = find_kern_regs(current_thread());
+>>>>>>> origin/10.5
 
 	if (NULL != kern_regs) {
 		/* Kernel was interrupted. */
@@ -220,6 +278,7 @@ profile_tick(void *arg)
 
 			dtrace_probe(prof->prof_id, 0x0, regs->eip, 0, 0, 0);
 		}
+	}
 	}
 #else
 #error Unknown architecture

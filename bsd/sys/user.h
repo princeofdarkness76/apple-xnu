@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -133,6 +155,10 @@ struct label;		/* MAC label dummy struct */
 struct uthread {
 	/* syscall parameters, results and catches */
 	u_int64_t uu_arg[8]; /* arguments to current system call */
+<<<<<<< HEAD
+=======
+	int	*uu_ap;			/* pointer to arglist */
+>>>>>>> origin/10.6
     int uu_rval[2];
 	unsigned int syscall_code; /* current syscall code */
 
@@ -216,11 +242,16 @@ struct uthread {
     
 	lck_mtx_t	*uu_mtx;
 
+<<<<<<< HEAD
 	TAILQ_ENTRY(uthread) uu_throttlelist;	/* List of uthreads currently throttled */
 	void	*	uu_throttle_info; 	/* pointer to throttled I/Os info */
 	int		uu_on_throttlelist;
 	int		uu_lowpri_window;
 	boolean_t	uu_throttle_bc;
+=======
+	int		uu_lowpri_window;
+	size_t		uu_devbsdunit; 		// to identify which device throttled I/Os are sent to
+>>>>>>> origin/10.5
 
 	u_int32_t	uu_network_marks;	/* network control flow marks */
 
@@ -287,10 +318,20 @@ struct uthread {
 	void *		t_dtrace_syscall_args;
 #endif /* CONFIG_DTRACE */
 	void *		uu_threadlist;
+<<<<<<< HEAD
 	char *		pth_name;
+<<<<<<< HEAD
 
 	/* Document Tracking struct used to track a "tombstone" for a document */
 	struct doc_tombstone *t_tombstone;
+=======
+>>>>>>> origin/10.5
+=======
+	struct label *	uu_label;	/* MAC label */
+
+	/* Document Tracking struct used to track a "tombstone" for a document */
+	struct doc_tombstone *t_tombstone;
+>>>>>>> origin/10.9
 };
 
 typedef struct uthread * uthread_t;
@@ -307,8 +348,13 @@ typedef struct uthread * uthread_t;
 #define UT_PASSIVE_IO	0x00000100	/* this thread issues passive I/O */
 #define UT_PROCEXIT	0x00000200	/* this thread completed the  proc exit */
 #define UT_RAGE_VNODES	0x00000400	/* rapid age any vnodes created by this thread */	
+<<<<<<< HEAD
 /* 0x00000800 unused, used to be UT_BACKGROUND */
 /* 0x00001000 unused, used to be UT_BACKGROUND_TRAFFIC_MGT */
+=======
+#define UT_BACKGROUND	0x00000800	/* this thread is in background state */	
+#define UT_BACKGROUND_TRAFFIC_MGT	0x00001000 /* background traffic is regulated */
+>>>>>>> origin/10.6
 
 #define	UT_VFORK	0x02000000	/* thread has vfork children */
 #define	UT_SETUID	0x04000000	/* thread is settugid() */

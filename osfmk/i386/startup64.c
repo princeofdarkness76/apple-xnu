@@ -64,6 +64,179 @@
 
 #include <i386/postcode.h>
 
+<<<<<<< HEAD
+=======
+void
+cpu_IA32e_enable(cpu_data_t *cdp)
+{
+	assert(!ml_get_interrupts_enabled());
+
+	if (!cdp->cpu_is64bit ||
+	    (rdmsr64(MSR_IA32_EFER) & MSR_IA32_EFER_LMA) != 0)
+		return;
+
+	postcode(CPU_IA32_ENABLE_ENTRY);
+
+	/* 
+	 * The following steps are performed by inlines so that
+	 * we can be assured we don't use the stack or any other
+	 * non-identity mapped data while paging is turned off...
+	 */
+	/* Turn paging off */
+	asm volatile(
+		"mov	%%cr0, %%eax	\n\t"
+		"andl	%0, %%eax	\n\t"
+		"mov	%%eax, %%cr0	\n\t"
+		:
+		: "i" (~CR0_PG)
+		: "eax" );
+
+	/* Pop new top level phys pg addr into CR3 */
+	asm volatile(
+		"mov	%%eax, %%cr3	\n\t"
+		:
+		: "a" ((uint32_t) kernel64_cr3));
+
+	/* Turn on the 64-bit mode bit */
+	asm volatile(
+		"rdmsr			\n\t"
+		"orl	%1, %%eax	\n\t"
+		"wrmsr			\n\t"
+		:
+		: "c" (MSR_IA32_EFER), "i" (MSR_IA32_EFER_LME)
+		: "eax", "edx");
+
+	/* Turn paging on again */
+	asm volatile(
+		"mov	%%cr0, %%eax	\n\t"
+		"orl	%0, %%eax	\n\t"
+		"mov	%%eax, %%cr0	\n\t"
+		:
+		: "i" (CR0_PG)
+		: "eax" );
+	
+#if ONLY_SAFE_FOR_LINDA_SERIAL
+	kprintf("cpu_IA32e_enable(%p)\n", cdp);
+#endif
+
+	if ((rdmsr64(MSR_IA32_EFER) & MSR_IA32_EFER_LMA) == 0)
+		panic("cpu_IA32e_enable() MSR_IA32_EFER_LMA not asserted");
+
+	cdp->cpu_kernel_cr3 = kernel64_cr3;
+
+	postcode(CPU_IA32_ENABLE_EXIT);
+}
+
+void
+cpu_IA32e_disable(cpu_data_t *cdp)
+{
+	assert(!ml_get_interrupts_enabled());
+
+	postcode(CPU_IA32_DISABLE_ENTRY);
+
+	if (!cdp->cpu_is64bit ||
+	    (rdmsr64(MSR_IA32_EFER) & MSR_IA32_EFER_LMA) == 0)
+		return;
+
+	/* 
+	 * The following steps are performed by inlines so that
+	 * we can be assured we don't use the stack or any other
+	 * non-identity mapped data while paging is turned off...
+	 */
+	/* Turn paging off */
+	asm volatile(
+		"mov	%%cr0, %%eax	\n\t"
+		"andl	%0, %%eax	\n\t"
+		"mov	%%eax, %%cr0	\n\t"
+		:
+		: "i" (~CR0_PG)
+		: "eax" );
+
+	/* Pop legacy top level phys pg addr into CR3 */
+	asm volatile(
+		"mov	%%eax, %%cr3	\n\t"
+		:
+		: "a" ((uint32_t) lo_kernel_cr3));
+
+	/* Turn off the 64-bit mode bit */
+	asm volatile(
+		"rdmsr			\n\t"
+		"andl	%1, %%eax	\n\t"
+		"wrmsr			\n\t"
+		:
+		: "c" (MSR_IA32_EFER), "i" (~MSR_IA32_EFER_LME)
+		: "eax", "edx");
+
+	/* Turn paging on again */
+	asm volatile(
+		"mov	%%cr0, %%eax	\n\t"
+		"orl	%0, %%eax	\n\t"
+		"mov	%%eax, %%cr0	\n\t"
+		:
+		: "i" (CR0_PG)
+		: "eax" );
+	
+	kprintf("cpu_IA32e_disable(%p)\n", cdp);
+
+	if ((rdmsr64(MSR_IA32_EFER) & MSR_IA32_EFER_LMA) != 0)
+		panic("cpu_IA32e_disable() MSR_IA32_EFER_LMA not cleared");
+
+	cdp->cpu_kernel_cr3 = 0ULL;
+
+	postcode(CPU_IA32_DISABLE_EXIT);
+}
+
+void
+fix_desc64(void *descp, int count)
+{
+	struct fake_descriptor64	*fakep;
+	union {
+		struct real_gate64		gate;
+		struct real_descriptor64	desc;
+	}				real;
+	int				i;
+
+	fakep = (struct fake_descriptor64 *) descp;
+	
+	for (i = 0; i < count; i++, fakep++) {
+		/*
+		 * Construct the real decriptor locally.
+		 */
+
+		bzero((void *) &real, sizeof(real));
+
+		switch (fakep->access & ACC_TYPE) {
+		case 0:
+			break;
+		case ACC_CALL_GATE:
+		case ACC_INTR_GATE:
+		case ACC_TRAP_GATE:
+			real.gate.offset_low16 = fakep->offset[0] & 0xFFFF;
+			real.gate.selector16 = fakep->lim_or_seg & 0xFFFF;
+			real.gate.IST = fakep->size_or_IST & 0x7;
+			real.gate.access8 = fakep->access;
+			real.gate.offset_high16 = (fakep->offset[0]>>16)&0xFFFF;
+			real.gate.offset_top32 = (uint32_t)fakep->offset[1];
+			break;
+		default:	/* Otherwise */
+			real.desc.limit_low16 = fakep->lim_or_seg & 0xFFFF;
+			real.desc.base_low16 = fakep->offset[0] & 0xFFFF;
+			real.desc.base_med8 = (fakep->offset[0] >> 16) & 0xFF;
+			real.desc.access8 = fakep->access;
+			real.desc.limit_high4 = (fakep->lim_or_seg >> 16) & 0xFF;
+			real.desc.granularity4 = fakep->size_or_IST;
+			real.desc.base_high8 = (fakep->offset[0] >> 24) & 0xFF;
+			real.desc.base_top32 = (uint32_t) fakep->offset[1];
+		}
+
+		/*
+		 * Now copy back over the fake structure.
+		 */
+		bcopy((void *) &real, (void *) fakep, sizeof(real));
+	}
+}
+
+>>>>>>> origin/10.5
 #if DEBUG
 extern void dump_regs64(void);
 extern void dump_gdt(void *);

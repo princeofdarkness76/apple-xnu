@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -50,7 +72,10 @@
 
 #include <libkern/c++/OSContainers.h>
 #include <libkern/crypto/sha1.h>
+<<<<<<< HEAD
 #include <libkern/OSAtomic.h>
+=======
+>>>>>>> origin/10.5
 
 extern "C" {
 #include <machine/machine_routines.h>
@@ -262,6 +287,7 @@ int (*PE_halt_restart)(unsigned int type) = 0;
 
 int IOPlatformExpert::haltRestart(unsigned int type)
 {
+<<<<<<< HEAD
   if (type == kPEPanicSync) return 0;
 
   if (type == kPEHangCPU) while (true) {}
@@ -275,6 +301,22 @@ int IOPlatformExpert::haltRestart(unsigned int type)
   if (type == kPEPanicRestartCPU)
 	  type = kPERestartCPU;
 
+=======
+  IOPMrootDomain *rd = getPMRootDomain();
+  OSBoolean   *b = 0;
+    
+  if(rd) b = (OSBoolean *)OSDynamicCast(OSBoolean, rd->getProperty(OSString::withCString("StallSystemAtHalt")));
+
+  if (type == kPEHangCPU) while (1);
+
+  if (kOSBooleanTrue == b) {
+    // Stall shutdown for 5 minutes, and if no outside force has removed our power, continue with
+    // a reboot.
+    IOSleep(1000*60*5);
+    type = kPERestartCPU;
+  }
+  
+>>>>>>> origin/10.3
   if (PE_halt_restart) return (*PE_halt_restart)(type);
   else return -1;
 }
@@ -431,14 +473,61 @@ void IOPlatformExpert::
 PMLog(const char *who, unsigned long event,
       unsigned long param1, unsigned long param2)
 {
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+    UInt32 debugFlags = gIOKitDebug;
+    UInt32 traceFlags = gIOKitTrace;
+
+    if (debugFlags & kIOLogPower) {
+
+>>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.8
 	clock_sec_t nows;
 	clock_usec_t nowus;
 	clock_get_system_microtime(&nows, &nowus);
 	nowus += (nows % 1000) * 1000000;
 
+<<<<<<< HEAD
+<<<<<<< HEAD
     kprintf("pm%u %p %.30s %d %lx %lx\n",
 		nowus, OBFUSCATE(current_thread()), who,	// Identity
 		(int) event, (long)OBFUSCATE(param1), (long)OBFUSCATE(param2));			// Args
+=======
+        kprintf("pm%u %p %.30s %d %lx %lx\n",
+		nowus, current_thread(), who,	// Identity
+		(int) event, (long) param1, (long) param2);			// Args
+
+	if (traceFlags & kIOTracePowerMgmt) {
+	    static const UInt32 sStartStopBitField[] = 
+		{ 0x00000000, 0x00000040 }; // Only Program Hardware so far
+
+	    // Arcane formula from Hacker's Delight by Warren
+	    // abs(x)  = ((int) x >> 31) ^ (x + ((int) x >> 31))
+	    UInt32 sgnevent = ((long) event >> 31);
+	    UInt32 absevent = sgnevent ^ (event + sgnevent);
+	    UInt32 code = IODBG_POWER(absevent);
+
+	    UInt32 bit = 1 << (absevent & 0x1f);
+	    if (absevent < sizeof(sStartStopBitField) * 8
+	    && (sStartStopBitField[absevent >> 5] & bit) ) {
+		// Or in the START or END bits, Start = 1 & END = 2
+		//      If sgnevent ==  0 then START -  0 => START
+		// else if sgnevent == -1 then START - -1 => END
+		code |= DBG_FUNC_START - sgnevent;
+	    }
+
+	    // Record the timestamp, wish I had a this pointer
+	    IOTimeStampConstant(code, (uintptr_t) who, event, param1, param2);
+	}
+    }
+>>>>>>> origin/10.6
+=======
+    kprintf("pm%u %p %.30s %d %lx %lx\n",
+		nowus, current_thread(), who,	// Identity
+		(int) event, (long) param1, (long) param2);			// Args
+>>>>>>> origin/10.8
 }
 
 
@@ -1120,7 +1209,11 @@ void IOPlatformExpert::registerNVRAMController(IONVRAMController * caller)
     OSData *          data;
     IORegistryEntry * entry;
     OSString *        string = 0;
+<<<<<<< HEAD
     uuid_string_t     uuid;
+=======
+    char              uuid[ 36 + 1 ];
+>>>>>>> origin/10.5
 
     entry = IORegistryEntry::fromPath( "/efi/platform", gIODTPlane );
     if ( entry )
@@ -1131,12 +1224,21 @@ void IOPlatformExpert::registerNVRAMController(IONVRAMController * caller)
             SHA1_CTX     context;
             uint8_t      digest[ SHA_DIGEST_LENGTH ];
             const uuid_t space = { 0x2A, 0x06, 0x19, 0x90, 0xD3, 0x8D, 0x44, 0x40, 0xA1, 0x39, 0xC4, 0x97, 0x70, 0x37, 0x65, 0xAC };
+<<<<<<< HEAD
 
             SHA1Init( &context );
             SHA1Update( &context, space, sizeof( space ) );
             SHA1Update( &context, data->getBytesNoCopy( ), data->getLength( ) );
             SHA1Final( digest, &context );
 
+=======
+
+            SHA1Init( &context );
+            SHA1Update( &context, space, sizeof( space ) );
+            SHA1Update( &context, data->getBytesNoCopy( ), data->getLength( ) );
+            SHA1Final( digest, &context );
+
+>>>>>>> origin/10.5
             digest[ 6 ] = ( digest[ 6 ] & 0x0F ) | 0x50;
             digest[ 8 ] = ( digest[ 8 ] & 0x3F ) | 0x80;
 

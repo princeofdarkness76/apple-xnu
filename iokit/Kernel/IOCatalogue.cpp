@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -529,7 +551,36 @@ void IOCatalogue::moduleHasLoaded(const char * moduleName)
 // xxx - return is really OSReturn/kern_return_t
 IOReturn IOCatalogue::unloadModule(OSString * moduleName) const
 {
+<<<<<<< HEAD
     return OSKext::removeKextWithIdentifier(moduleName->getCStringNoCopy());
+=======
+    kmod_info_t          * k_info = 0;
+    kern_return_t          ret;
+    const char           * name;
+
+    ret = kIOReturnBadArgument;
+    if ( moduleName ) {
+        name = moduleName->getCStringNoCopy();
+        k_info = kmod_lookupbyname_locked((char *)name);
+        if ( k_info && (k_info->reference_count < 1) ) {
+            record_kext_unload(k_info->id);
+            if ( k_info->stop &&
+                 !((ret = k_info->stop(k_info, 0)) == kIOReturnSuccess) ) {
+
+                kfree(k_info, sizeof(kmod_info_t));
+                return ret;
+           }
+            
+           ret = kmod_destroy(host_priv_self(), k_info->id);
+        }
+    }
+ 
+    if (k_info) {
+        kfree(k_info, sizeof(kmod_info_t));
+    }
+
+    return ret;
+>>>>>>> origin/10.5
 }
 
 IOReturn IOCatalogue::_terminateDrivers(OSDictionary * matching)
@@ -588,6 +639,7 @@ IOReturn IOCatalogue::_removeDrivers(OSDictionary * matching)
 
     // remove configs from catalog.
 
+<<<<<<< HEAD
     iter = OSCollectionIterator::withCollection(personalities);
     if (!iter) return (kIOReturnNoMemory);
 
@@ -610,6 +662,34 @@ IOReturn IOCatalogue::_removeDrivers(OSDictionary * matching)
         }
     }
     iter->release();
+=======
+    arrayCopy = OSArray::withCapacity(100);
+    if ( !arrayCopy )
+        return kIOReturnNoMemory;
+
+    tables = OSCollectionIterator::withCollection(arrayCopy);
+    arrayCopy->release();
+    if ( !tables )
+        return kIOReturnNoMemory;
+
+    arrayCopy->merge(array);
+    array->flushCollection();
+    tables->reset();
+    while ( (dict = (OSDictionary *)tables->getNextObject()) ) {
+
+       /* Remove from the catalogue's array any personalities
+        * that match the matching dictionary.
+        * This comparison must be done with only the keys in the
+        * "matching" dict to enable general matching.
+        */
+        if ( dict->isEqualTo(matching, matching) )
+            continue;
+
+        array->setObject(dict);
+    }
+
+    tables->release();
+>>>>>>> origin/10.6
 
     return ret;
 }
@@ -962,6 +1042,37 @@ static bool isModuleLoadedNoOSKextLock(OSDictionary *theKexts,
     return( myResult );
 }
 
+<<<<<<< HEAD
+=======
+    PE_parse_boot_argn("keepsyms", &keepsyms, sizeof (keepsyms));
+ 
+    IOLog("Jettisoning kernel linker.\n");
+
+    kernelLinkerPresent = 0;
+
+   /* Set the kmod_load_extension function as the means for loading
+    * a kernel extension.
+    */
+    kmod_load_function = &kmod_load_extension;
+
+    record_startup_extensions_function = 0;
+    add_from_mkext_function = 0;
+    remove_startup_extension_function = 0;
+
+
+   /* Invoke destructors for the __KLD and __LINKEDIT segments.
+    * Do this for all segments before actually freeing their
+    * memory so that any cross-dependencies (not that there
+    * should be any) are handled.
+    */
+    segmentKLD = getsegbyname("__KLD");
+    if (!segmentKLD) {
+        IOLog("error removing kernel linker: can't find __KLD segment\n");
+        result = KERN_FAILURE;
+        goto finish;
+    }
+    OSRuntimeUnloadCPPForSegment(segmentKLD);
+>>>>>>> origin/10.5
 
 #if PRAGMA_MARK
 #pragma mark Obsolete Kext Loading Stuff

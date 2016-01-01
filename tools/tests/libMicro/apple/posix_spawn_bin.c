@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD:tools/tests/libMicro/apple/posix_spawn_bin.c
  * Copyright (c) 2008 Apple Inc.  All Rights Reserved.
+=======
+ * Copyright (c) 2004-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5:osfmk/ppc/rtclock.h
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -55,6 +59,7 @@ main(int argc, char *argv[])
 
 	left--;
 
+<<<<<<< HEAD:tools/tests/libMicro/apple/posix_spawn_bin.c
 	if (left <= 0) {
 		exit(0);
 	} else {
@@ -65,6 +70,19 @@ main(int argc, char *argv[])
 			exit(2);
 		}
 	}
+=======
+#pragma pack(push,4)
+struct rtclock_timer_t  {
+	queue_head_t	queue;
+	uint64_t		deadline;
+	uint32_t
+	/*boolean_t*/	is_set:1,
+					has_expired:1,
+					:0;
+};
+#pragma pack(pop)
+typedef struct rtclock_timer_t rtclock_timer_t;
+>>>>>>> origin/10.5:osfmk/ppc/rtclock.h
 
 	return (0);
 }

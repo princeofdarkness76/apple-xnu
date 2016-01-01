@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -219,10 +241,18 @@ typedef struct vm_purgeable_info	*vm_purgeable_info_t;
 #define VM_PAGE_QUERY_PAGE_PAGED_OUT    0x10
 #define VM_PAGE_QUERY_PAGE_COPIED       0x20
 #define VM_PAGE_QUERY_PAGE_SPECULATIVE	0x40
+<<<<<<< HEAD
 #define VM_PAGE_QUERY_PAGE_EXTERNAL	0x80
 #define VM_PAGE_QUERY_PAGE_CS_VALIDATED	0x100
 #define VM_PAGE_QUERY_PAGE_CS_TAINTED	0x200
 #define VM_PAGE_QUERY_PAGE_CS_NX	0x400
+<<<<<<< HEAD
+=======
+#define VM_PAGE_QUERY_PAGE_CS_VALIDATED	0x100
+#define VM_PAGE_QUERY_PAGE_CS_TAINTED	0x200
+>>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.10
 
 #ifdef	MACH_KERNEL_PRIVATE
 
@@ -340,6 +370,7 @@ typedef struct pmap_statistics	*pmap_statistics_t;
 				 VM_FLAGS_OVERWRITE |		\
 				 VM_FLAGS_SUPERPAGE_MASK |	\
 				 VM_FLAGS_ALIAS_MASK)
+<<<<<<< HEAD
 #define VM_FLAGS_USER_MAP	(VM_FLAGS_USER_ALLOCATE |	\
 				 VM_FLAGS_RETURN_4K_DATA_ADDR |	\
 				 VM_FLAGS_RETURN_DATA_ADDR)
@@ -358,6 +389,12 @@ typedef struct pmap_statistics	*pmap_statistics_t;
 #define SUPERPAGE_SIZE_2MB		2
 #define VM_FLAGS_SUPERPAGE_SIZE_2MB (SUPERPAGE_SIZE_2MB<<VM_FLAGS_SUPERPAGE_SHIFT)
 #endif
+=======
+#define VM_FLAGS_USER_MAP	VM_FLAGS_USER_ALLOCATE
+#define VM_FLAGS_USER_REMAP	(VM_FLAGS_FIXED |    \
+				 VM_FLAGS_ANYWHERE | \
+				 VM_FLAGS_OVERWRITE)
+>>>>>>> origin/10.6
 
 #define VM_MEMORY_MALLOC 1
 #define VM_MEMORY_MALLOC_SMALL 2

@@ -1,6 +1,11 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 1999-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +20,24 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,6 +45,23 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+ */
+/*
+ *	Copyright (c) 1999 Apple Computer, Inc. 
+>>>>>>> origin/10.2
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -242,9 +282,51 @@ extern errno_t dlil_set_bpf_tap(ifnet_t, bpf_tap_mode, bpf_packet_func);
 /*
  * Send arp internal bypasses the check for IPv4LL.
  */
+<<<<<<< HEAD
 extern errno_t dlil_send_arp_internal(ifnet_t, u_int16_t,
     const struct sockaddr_dl *, const struct sockaddr *,
     const struct sockaddr_dl *, const struct sockaddr *);
+=======
+errno_t
+dlil_send_arp_internal(
+	ifnet_t	ifp,
+	u_int16_t arpop,
+	const struct sockaddr_dl* sender_hw,
+	const struct sockaddr* sender_proto,
+	const struct sockaddr_dl* target_hw,
+	const struct sockaddr* target_proto);
+
+int
+dlil_output(
+	ifnet_t					ifp,
+	protocol_family_t		proto_family,
+	mbuf_t					packetlist,
+	void					*route,
+	const struct sockaddr	*dest,
+	int						raw);
+
+errno_t
+dlil_resolve_multi(
+	struct ifnet *ifp,
+	const struct sockaddr *proto_addr,
+	struct sockaddr *ll_addr,
+	size_t ll_len);
+
+errno_t
+dlil_send_arp(
+	ifnet_t	ifp,
+	u_int16_t arpop,
+	const struct sockaddr_dl* sender_hw,
+	const struct sockaddr* sender_proto,
+	const struct sockaddr_dl* target_hw,
+	const struct sockaddr* target_proto);
+
+int dlil_attach_filter(ifnet_t ifp, const struct iff_filter *if_filter,
+					   interface_filter_t *filter_ref);
+void dlil_detach_filter(interface_filter_t filter);
+int dlil_detach_protocol(ifnet_t ifp, u_long protocol);
+extern void dlil_proto_unplumb_all(ifnet_t);
+>>>>>>> origin/10.5
 
 /*
  * The following constants are used with the net_thread_mark_apply and
@@ -432,6 +514,7 @@ extern void dlil_node_absent(struct ifnet *, struct sockaddr *);
 extern const void *dlil_ifaddr_bytes(const struct sockaddr_dl *, size_t *,
     kauth_cred_t *);
 
+<<<<<<< HEAD
 extern void dlil_report_issues(struct ifnet *, u_int8_t[DLIL_MODIDLEN],
     u_int8_t[DLIL_MODARGLEN]);
 
@@ -447,6 +530,12 @@ extern errno_t dlil_rxpoll_get_params(struct ifnet *,
     struct ifnet_poll_params *);
 
 #endif /* BSD_KERNEL_PRIVATE */
+=======
+#if IFNET_ROUTE_REFCNT
+extern u_int32_t ifnet_aggressive_drainers;
+#endif /* IFNET_ROUTE_REFCNT */
+
+>>>>>>> origin/10.6
 #endif /* KERNEL_PRIVATE */
 #endif /* KERNEL */
 #endif /* DLIL_H */

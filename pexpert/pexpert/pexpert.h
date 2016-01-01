@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -89,6 +111,9 @@ extern uint32_t PE_i_can_has_kernel_configuration(void);
 
 #endif /* KERNEL_PRIVATE */
 
+
+
+
 void PE_init_kprintf(
 	boolean_t vm_initialized);
 
@@ -127,6 +152,7 @@ struct clock_frequency_info_t {
   unsigned long long cpu_frequency_hz;
   unsigned long long cpu_frequency_min_hz;
   unsigned long long cpu_frequency_max_hz;
+<<<<<<< HEAD
   unsigned long long prf_frequency_hz;
   unsigned long long prf_frequency_min_hz;
   unsigned long long prf_frequency_max_hz;
@@ -134,6 +160,8 @@ struct clock_frequency_info_t {
   unsigned long long mem_frequency_min_hz;
   unsigned long long mem_frequency_max_hz;
   unsigned long long fix_frequency_hz;
+=======
+>>>>>>> origin/10.2
 };
 
 typedef struct clock_frequency_info_t clock_frequency_info_t;
@@ -256,7 +284,10 @@ extern int PE_initialize_console(
 #define kPEEnableScreen	 	6
 #define kPEDisableScreen	7
 #define kPEBaseAddressChange	8
+<<<<<<< HEAD
 #define kPERefreshBootGraphics	9
+=======
+>>>>>>> origin/10.6
 
 extern void PE_display_icon( unsigned int flags,
 			     const char * name );

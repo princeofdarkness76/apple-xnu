@@ -7,6 +7,14 @@ export MakeInc_dir=${SRCROOT}/makedefs/MakeInc.dir
 include $(MakeInc_cmd)
 include $(MakeInc_def)
 
+ALLPRODUCTS = AppleTV iPhone MacOSX
+PRODUCT = $(shell tconf --product)
+EXTRAUNIFDEF = $(foreach x,$(ALLPRODUCTS),$(if $(findstring $(PRODUCT),$(x)),-DPRODUCT_$(x),-UPRODUCT_$(x)))
+SINCFRAME_UNIFDEF += $(EXTRAUNIFDEF)
+SPINCFRAME_UNIFDEF += $(EXTRAUNIFDEF)
+KINCFRAME_UNIFDEF += $(EXTRAUNIFDEF)
+KPINCFRAME_UNIFDEF += $(EXTRAUNIFDEF)
+
 INSTINC_SUBDIRS = \
 	_types
 
@@ -18,6 +26,7 @@ EXPINC_SUBDIRS = \
 #	  $(DSTROOT)/usr/include/
 DATAFILES = \
 	appleapiopts.h 	acct.h aio.h attr.h \
+<<<<<<< HEAD
 	buf.h cdefs.h conf.h \
 	dir.h dirent.h disk.h dkstat.h dtrace.h dtrace_glue.h dtrace_impl.h \
 	errno.h ev.h event.h fasttrap.h fasttrap_isa.h fcntl.h file.h filedesc.h filio.h gmon.h \
@@ -29,6 +38,17 @@ DATAFILES = \
 	sbuf.h posix_sem.h posix_shm.h sdt.h \
 	select.h sem.h semaphore.h shm.h signal.h signalvar.h socket.h socketvar.h sockio.h stat.h stdio.h \
 	sysctl.h syslimits.h syslog.h sys_domain.h termios.h  time.h \
+=======
+	buf.h callout.h cdefs.h clist.h conf.h \
+	dir.h dirent.h disk.h disklabel.h disktab.h dkstat.h dmap.h domain.h \
+	errno.h ev.h event.h exec.h fcntl.h file.h filedesc.h filio.h gmon.h ioccom.h ioctl.h \
+	ioctl_compat.h ipc.h kernel.h kern_event.h ktrace.h loadable_fs.h lock.h lockf.h mach_swapon.h malloc.h \
+	kdebug.h linker_set.h md5.h kern_control.h \
+	mbuf.h mman.h mount.h msgbuf.h mtio.h namei.h netport.h param.h paths.h \
+	proc.h protosw.h ptrace.h queue.h quota.h random.h reboot.h resource.h resourcevar.h \
+	select.h sem.h semaphore.h shm.h signal.h signalvar.h socket.h socketvar.h sockio.h stat.h \
+	syscall.h sysctl.h syslimits.h syslog.h systm.h sys_domain.h termios.h  time.h \
+>>>>>>> origin/10.3
 	timeb.h times.h tprintf.h trace.h tty.h  ttychars.h ttycom.h \
 	ttydefaults.h ttydev.h  types.h ubc.h ucontext.h ucred.h uio.h un.h unistd.h unpcb.h \
 	user.h utfconv.h utsname.h vadvise.h vcmd.h \
@@ -122,10 +142,14 @@ KERNELFILES = \
 # Installs header file for Apple internal use for kernel extensions - 
 #	  $(DSTROOT)/System/Library/Frameworks/Kernel.framework/PrivateHeaders
 PRIVATE_KERNELFILES = \
+<<<<<<< HEAD
 	codesign.h \
 	cprotect.h \
 	content_protection.h \
 	csr.h \
+=======
+	cprotect.h \
+>>>>>>> origin/10.6
 	decmpfs.h \
 	disktab.h \
 	fbt.h \
@@ -201,8 +225,13 @@ sysproto.h: $(SRCROOT)/bsd/kern/syscalls.master $(MAKESYSCALLS) $(OBJROOT)/cscop
 	$(_v)$(MAKESYSCALLS) $< proto > /dev/null
 
 kdebugevents.h:  $(SRCROOT)/bsd/kern/trace.codes $(MAKEKDEBUGEVENTS) $(OBJROOT)/cscope.genhdrs
+<<<<<<< HEAD
 	@echo "Generating bsd/sys/$@ from $<";
 	@echo "$(OBJPATH)/bsd/sys/$@" > $(OBJROOT)/cscope.genhdrs/$@.path
+=======
+	@echo "Generating bsd/kern/$@ from $<";
+	@echo "$(OBJPATH)/bsd/kern/$@" > $(OBJROOT)/cscope.genhdrs/$@.path
+>>>>>>> origin/10.10
 	$(_v)$(MAKEKDEBUGEVENTS) $< > "$(OBJPATH)/bsd/sys/$@"
 
 MAKE_POSIX_AVAILABILITY = $(SRCROOT)/bsd/sys/make_posix_availability.sh

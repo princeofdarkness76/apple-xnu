@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -154,7 +180,11 @@ struct socket {
 	u_int32_t so_options;		/* from socket call, see socket.h */
 	short	so_linger;		/* time to linger while closing */
 	short	so_state;		/* internal state flags SS_*, below */
+<<<<<<< HEAD
 	void	*so_pcb;		/* protocol control block */
+=======
+	void	*so_pcb;			/* protocol control block */
+>>>>>>> origin/10.6
 	struct	protosw *so_proto;	/* protocol handle */
 	/*
 	 * Variables for connection queueing.
@@ -251,6 +281,7 @@ struct socket {
 	/* Plug-in support - make the socket interface overridable */
 	struct mbuf	*so_tail;
 	struct socket_filter_entry *so_filt;	/* NKE hook */
+<<<<<<< HEAD
 	u_int32_t	so_flags;	/* Flags */
 #define	SOF_NOSIGPIPE		0x00000001
 #define	SOF_NOADDRAVAIL		0x00000002 /* EADDRNOTAVAIL if src addr is gone */
@@ -297,6 +328,27 @@ struct socket {
 	u_int16_t	so_traffic_class;
 	u_int8_t	so_traffic_mgt_flags;	/* traffic_mgt socket config */
 	u_int8_t	so_restrictions;
+=======
+	u_long	so_flags;	/* Flags */
+#define	SOF_NOSIGPIPE	0x1
+#define	SOF_NOADDRAVAIL	0x2	/* EADDRNOTAVAIL if src addr is gone */
+#define	SOF_PCBCLEARING	0x4	/* pru_disconnect done; don't call pru_detach */
+#define	SOF_DEFUNCT	0x8	/* accepted socket marked as inactive */
+#define	SOF_CLOSEWAIT	0x10	/* blocked in close awaiting some events */
+#define	SOF_UPCALLINUSE	0x20	/* socket upcall is currently in progress */
+#define SOF_REUSESHAREUID	0x40	/* Allows SO_REUSEADDR/SO_REUSEPORT for multiple so_uid */
+#define	SOF_MULTIPAGES	0x80	/* jumbo clusters may be used for sosend */
+#define SOF_ABORTED	0x100	/* soabort was already called once on the socket */
+#define SOF_OVERFLOW 0x200	/* socket was dropped as overflow of listen queue */
+#ifdef __APPLE_API_PRIVATE
+#define SOF_NOTIFYCONFLICT 0x400	/* notify that a bind was done on a port already in use */
+#endif
+#define	SOF_UPCALLCLOSEWAIT 0x800 /* block on close until an upcall returns  */
+	int	so_usecount;	/* refcounting of socket use */;
+	int	so_retaincnt;
+	u_int32_t so_filteruse;	/* usecount for the socket filters */
+	u_int32_t	so_traffic_mgt_flags;	/* traffic_mgt socket config */
+>>>>>>> origin/10.5
 	thread_t	so_send_filt_thread;
 
 	/* for debug pruposes */
@@ -308,6 +360,7 @@ struct socket {
 
 	u_int16_t	so_pktheadroom;	/* headroom before packet payload */
 
+<<<<<<< HEAD
 	u_int32_t	so_ifdenied_notifies; /* # of notifications generated */
 
 	struct label	*so_label;	/* MAC label for socket */
@@ -346,6 +399,14 @@ struct socket {
 						      tcpcb */
 
 	u_int64_t	so_extended_bk_start;
+=======
+	struct	label *so_label;	/* MAC label for socket */
+	struct	label *so_peerlabel;	/* cached MAC label for socket peer */
+	thread_t	so_background_thread;	/* thread that marked this socket background */
+#if PKT_PRIORITY
+	int		so_traffic_class;
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 };
 
 /* Control message accessor in mbufs */
@@ -866,18 +927,27 @@ extern void resume_proc_sockets(proc_t);
 extern int so_check_extended_bk_idle_time(struct socket *);
 extern void so_drain_extended_bk_idle(struct socket *);
 extern void sohasoutofband(struct socket *so);
+<<<<<<< HEAD
 extern void sodisconnectwakeup(struct socket *so);
 extern int soisthrottled(struct socket *so);
 extern int soisprivilegedtraffic(struct socket *so);
 extern int soissrcbackground(struct socket *so);
 extern int soissrcrealtime(struct socket *so);
 extern int soissrcbesteffort(struct socket *so);
+=======
+extern void soisconnected(struct socket *so);
+extern void soisconnecting(struct socket *so);
+extern void soisdisconnected(struct socket *so);
+extern void soisdisconnecting(struct socket *so);
+extern int soisbackground(struct socket *so);
+>>>>>>> origin/10.6
 extern int solisten(struct socket *so, int backlog);
 extern struct socket *sodropablereq(struct socket *head);
 extern int socket_lock(struct socket *so, int refcount);
 extern int socket_unlock(struct socket *so, int refcount);
 extern int sogetaddr_locked(struct socket *, struct sockaddr **, int);
 extern const char *solockhistory_nr(struct socket *);
+<<<<<<< HEAD
 extern void soevent(struct socket *so, long hint);
 extern void sorflush(struct socket *so);
 extern void sowflush(struct socket *so);
@@ -918,6 +988,10 @@ extern struct sockaddr_list *sockaddrlist_dup(const struct sockaddr_list *,
 /* Service class flags used for setting service class on a packet */
 #define PKT_SCF_IPV6		0x00000001	/* IPv6 packet */
 #define PKT_SCF_TCP_ACK		0x00000002	/* Pure TCP ACK */
+=======
+extern void set_traffic_class(struct mbuf *, struct socket *, int);
+extern int mbuf_traffic_class_from_control(struct mbuf *);
+>>>>>>> origin/10.6
 
 /*
  * Flags for connectx(2) user-protocol request routine.

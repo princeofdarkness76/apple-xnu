@@ -37,7 +37,24 @@
 #include <i386/cpu_data.h>
 #include <i386/lapic.h>
 #include <i386/machine_routines.h>
+<<<<<<< HEAD
+=======
+#include <i386/lock.h>
+#include <i386/lapic.h>
 
+<<<<<<< HEAD
+//#define TOPO_DEBUG 1
+#if TOPO_DEBUG
+#define DBG(x...)	kprintf("DBG: " x)
+#else
+#define DBG(x...)
+#endif
+void debug_topology_print(void);
+void validate_topology(void);
+>>>>>>> origin/10.5
+
+=======
+>>>>>>> origin/10.7
 __private_extern__ void qsort(
     void * array,
     size_t nmembers,
@@ -110,6 +127,13 @@ cpu_topology_sort(int ncpus)
 	 */
 	for (i = 0; i < ncpus; i++) {
 		cpu_data_t	*cpup = cpu_datap(i);
+		x86_core_t	*core = cpup->lcpu.core;
+		x86_die_t	*die  = cpup->lcpu.die;
+		x86_pkg_t	*pkg  = cpup->lcpu.package;
+
+		assert(core != NULL);
+		assert(die != NULL);
+		assert(pkg != NULL);
 
 		if (cpup->cpu_number != i) {
 			kprintf("cpu_datap(%d):%p local apic id 0x%x "
@@ -118,6 +142,7 @@ cpu_topology_sort(int ncpus)
 				cpup->cpu_number);
 		}
 		cpup->cpu_number = i;
+<<<<<<< HEAD
 		lapic_cpu_map(cpup->cpu_phys_number, i);
 		x86_set_logical_topology(&cpup->lcpu, cpup->cpu_phys_number, i);
 	}
@@ -126,6 +151,31 @@ cpu_topology_sort(int ncpus)
 
 	ml_set_interrupts_enabled(istate);
 	TOPO_DBG("cpu_topology_start() LLC is L%d\n", topoParms.LLCDepth + 1);
+
+	/*
+	 * Let the CPU Power Management know that the topology is stable.
+	 */
+	topoParms.stable = TRUE;
+	pmCPUStateInit();
+=======
+		cpup->lcpu.cpu_num = i;
+		cpup->lcpu.pnum = cpup->cpu_phys_number;
+		lapic_cpu_map(cpup->cpu_phys_number, i);
+		x86_set_lcpu_numbers(&cpup->lcpu);
+		x86_set_core_numbers(core, &cpup->lcpu);
+		x86_set_die_numbers(die, &cpup->lcpu);
+		x86_set_pkg_numbers(pkg, &cpup->lcpu);
+	}
+
+	validate_topology();
+
+	ml_set_interrupts_enabled(istate);
+<<<<<<< HEAD
+	DBG("cpu_topology_start() LLC is L%d\n", topoParms.LLCDepth + 1);
+>>>>>>> origin/10.5
+=======
+	TOPO_DBG("cpu_topology_start() LLC is L%d\n", topoParms.LLCDepth + 1);
+>>>>>>> origin/10.7
 
 	/*
 	 * Let the CPU Power Management know that the topology is stable.
@@ -165,7 +215,15 @@ cpu_topology_sort(int ncpus)
 				aset, aset->num, aset->pset, aset->cache);
 		}
 
+<<<<<<< HEAD
+<<<<<<< HEAD
 		TOPO_DBG("\tprocessor_init set %p(%d) lcpup %p(%d) cpu %p processor %p\n",
+=======
+		DBG("\tprocessor_init set %p(%d) lcpup %p(%d) cpu %p processor %p\n",
+>>>>>>> origin/10.5
+=======
+		TOPO_DBG("\tprocessor_init set %p(%d) lcpup %p(%d) cpu %p processor %p\n",
+>>>>>>> origin/10.7
 			aset, aset->num, lcpup, lcpup->cpu_num, cpup, cpup->cpu_processor);
 
 		if (i != master_cpu)

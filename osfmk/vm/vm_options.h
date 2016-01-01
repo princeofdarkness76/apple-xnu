@@ -36,8 +36,11 @@
 #if VM_PAGE_BUCKETS_CHECK
 #define VM_PAGE_FAKE_BUCKETS 1
 #endif /* VM_PAGE_BUCKETS_CHECK */
+<<<<<<< HEAD
 
 #define VM_OBJECT_TRACKING 0
 #define VM_SCAN_FOR_SHADOW_CHAIN (DEVELOPMENT || DEBUG)
+=======
+>>>>>>> origin/10.9
 
 #endif /* __VM_VM_OPTIONS_H__ */

@@ -1,11 +1,21 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2003-2010 Apple Inc. All rights reserved.
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+=======
+ * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+<<<<<<< HEAD
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+>>>>>>> origin/10.2
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
+<<<<<<< HEAD
  * compliance with the License. The rights granted to you under the License
  * may not be used to create, or enable the creation or redistribution of,
  * unlawful or unlicensed copies of an Apple operating system, or to
@@ -14,15 +24,31 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 
@@ -70,10 +96,13 @@
 
 #include <sys/kdebug.h>
 
+<<<<<<< HEAD
 #if CONFIG_ATM
 #include <atm/atm_internal.h>
 #endif
 
+=======
+>>>>>>> origin/10.10
 /* the lists of commpage routines are in commpage_asm.s  */
 extern	commpage_descriptor*	commpage_32_routines[];
 extern	commpage_descriptor*	commpage_64_routines[];
@@ -301,6 +330,10 @@ commpage_init_cpu_capabilities( void )
 					CPUID_LEAF7_FEATURE_HLE);
 	setif(bits, kHasAVX2_0,  cpuid_leaf7_features() &
 					CPUID_LEAF7_FEATURE_AVX2);
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 	setif(bits, kHasRDSEED,  cpuid_features() &
 					CPUID_LEAF7_FEATURE_RDSEED);
 	setif(bits, kHasADX,     cpuid_features() &
@@ -319,6 +352,7 @@ commpage_init_cpu_capabilities( void )
 	_cpu_capabilities = bits;		// set kernel version for use by drivers etc
 }
 
+<<<<<<< HEAD
 /* initialize the approx_time_supported flag and set the approx time to 0.
  * Called during initial commpage population.
  */
@@ -328,6 +362,7 @@ commpage_mach_approximate_time_init(void)
         char *cp = commPagePtr32;
 	uint8_t supported;
 
+<<<<<<< HEAD
 #ifdef CONFIG_MACH_APPROXIMATE_TIME
 	supported = 1;
 #else
@@ -343,9 +378,34 @@ commpage_mach_approximate_time_init(void)
 		*(boolean_t *)cp = supported;
 	}
 	commpage_update_mach_approximate_time(0);
+=======
+	if (cpuid_features() & CPUID_FEATURE_AES)
+		bits |= kHasAES;
+=======
+	bits |= (cpuid_features() & CPUID_FEATURE_AES) ? kHasAES : 0;
+
+	bits |= (cpuid_features() & CPUID_FEATURE_F16C) ? kHasF16C : 0;
+	bits |= (cpuid_features() & CPUID_FEATURE_RDRAND) ? kHasRDRAND : 0;
+	bits |= ((cpuid_leaf7_features() & CPUID_LEAF7_FEATURE_ENFSTRG) &&
+		 (rdmsr64(MSR_IA32_MISC_ENABLE) & 1ULL )) ? kHasENFSTRG : 0;
+>>>>>>> origin/10.7
+
+=======
+	
+	uint64_t misc_enable = rdmsr64(MSR_IA32_MISC_ENABLE);
+	setif(bits, kHasENFSTRG, (misc_enable & 1ULL) &&
+				 (cpuid_leaf7_features() &
+					CPUID_LEAF7_FEATURE_ENFSTRG));
+	
+>>>>>>> origin/10.8
+	_cpu_capabilities = bits;		// set kernel version for use by drivers etc
+>>>>>>> origin/10.6
 }
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.8
 uint64_t
 _get_cpu_capabilities(void)
 {
@@ -489,9 +549,12 @@ commpage_populate( void )
 	commpage_mach_approximate_time_init();
 	rtc_nanotime_init_commpage();
 	commpage_update_kdebug_enable();
+<<<<<<< HEAD
 #if CONFIG_ATM
 	commpage_update_atm_diagnostic_config(atm_get_diagnostic_config());
 #endif
+=======
+>>>>>>> origin/10.10
 }
 
 /* Fill in the common routines during kernel initialization. 
@@ -750,6 +813,7 @@ commpage_update_kdebug_enable(void)
 	}
 }
 
+<<<<<<< HEAD
 /* Ditto for atm_diagnostic_config */
 void
 commpage_update_atm_diagnostic_config(uint32_t diagnostic_config)
@@ -771,6 +835,8 @@ commpage_update_atm_diagnostic_config(uint32_t diagnostic_config)
 		*saved_data_ptr = diagnostic_config;
 	}
 }
+=======
+>>>>>>> origin/10.10
 
 /*
  * update the commpage data for last known value of mach_absolute_time()
@@ -840,3 +906,18 @@ commpage_is_in_pfz64(addr64_t addr64)
 		return 0;
 }
 
+=======
+ * @APPLE_LICENSE_HEADER_END@
+ */
+
+#include <machine/cpu_capabilities.h>
+#include <machine/commpage.h>
+
+int	_cpu_capabilities = 0;				/* define the capability vector */
+
+void	commpage_populate( void ) {
+
+    /* no commpage on Intel yet */
+    
+}
+>>>>>>> origin/10.2

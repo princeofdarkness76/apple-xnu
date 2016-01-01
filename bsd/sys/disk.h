@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -55,7 +77,15 @@
  * DKIOCISWRITABLE                       is media writable?
  *
  * DKIOCREQUESTIDLE                      idle media
+<<<<<<< HEAD
+<<<<<<< HEAD
  * DKIOCUNMAP                            delete unused data
+=======
+ * DKIOCDISCARD                          delete unused data
+>>>>>>> origin/10.5
+=======
+ * DKIOCUNMAP                            delete unused data
+>>>>>>> origin/10.6
  *
  * DKIOCGETMAXBLOCKCOUNTREAD             get maximum block count for reads
  * DKIOCGETMAXBLOCKCOUNTWRITE            get maximum block count for writes
@@ -70,22 +100,44 @@
  * DKIOCGETMINSEGMENTALIGNMENTBYTECOUNT  get minimum segment alignment in bytes
  * DKIOCGETMAXSEGMENTADDRESSABLEBITCOUNT get maximum segment width in bits
  *
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
  * DKIOCGETFEATURES                      get device's feature set
  * DKIOCGETPHYSICALBLOCKSIZE             get device's block size
  * DKIOCGETCOMMANDPOOLSIZE               get device's queue depth
+=======
+ * DKIOCGETPHYSICALBLOCKSIZE             get device's block size
+>>>>>>> origin/10.5
  */
 
+<<<<<<< HEAD
 #define DK_FEATURE_BARRIER                    0x00000002
 #define DK_FEATURE_PRIORITY                   0x00000004
 #define DK_FEATURE_UNMAP                      0x00000010
 
 #define DK_SYNCHRONIZE_OPTION_BARRIER         0x00000002
 
+=======
+#define DK_FEATURE_UNMAP                      0x00000010
+
+>>>>>>> origin/10.6
 typedef struct
 {
     uint64_t               offset;
     uint64_t               length;
+<<<<<<< HEAD
+<<<<<<< HEAD
 } dk_extent_t;
+=======
+
+    uint8_t                reserved0128[16];       /* reserved, clear to zero */
+} dk_discard_t;
+>>>>>>> origin/10.5
+=======
+} dk_extent_t;
+>>>>>>> origin/10.6
 
 typedef struct
 {
@@ -114,6 +166,7 @@ typedef struct
 
 typedef struct
 {
+<<<<<<< HEAD
     uint64_t               offset;
     uint64_t               length;
 
@@ -149,6 +202,17 @@ typedef struct
 #define DK_CORESTORAGE_ENABLE_HOTFILES          0x00000002
 #define DK_CORESTORAGE_PIN_YOUR_SWAPFILE        0x00000004
 
+<<<<<<< HEAD
+=======
+#define DKIOCGETMAXBLOCKCOUNTREAD    _IOR('d', 64, u_int64_t)
+#define DKIOCGETMAXBLOCKCOUNTWRITE   _IOR('d', 65, u_int64_t)
+#define DKIOCGETMAXBYTECOUNTREAD         _IOR('d', 70, u_int64_t)
+#define DKIOCGETMAXBYTECOUNTWRITE        _IOR('d', 71, u_int64_t)
+#define DKIOCGETMAXSEGMENTCOUNTREAD  _IOR('d', 66, u_int64_t)
+#define DKIOCGETMAXSEGMENTCOUNTWRITE _IOR('d', 67, u_int64_t)
+#define DKIOCGETMAXSEGMENTBYTECOUNTREAD  _IOR('d', 68, u_int64_t)
+#define DKIOCGETMAXSEGMENTBYTECOUNTWRITE _IOR('d', 69, u_int64_t)
+>>>>>>> origin/10.2
 
 #ifdef KERNEL
 #ifdef PRIVATE
@@ -159,6 +223,18 @@ typedef struct
 #endif /* PRIVATE */
 #endif /* KERNEL */
 
+=======
+    dk_extent_t *          extents;
+    uint32_t               extentsCount;
+
+#ifdef __LP64__
+    uint8_t                reserved0096[4];        /* reserved, clear to zero */
+#else /* !__LP64__ */
+    uint8_t                reserved0064[8];        /* reserved, clear to zero */
+#endif /* !__LP64__ */
+} dk_unmap_t;
+
+>>>>>>> origin/10.6
 #define DKIOCEJECT                            _IO('d', 21)
 #define DKIOCSYNCHRONIZE                      _IOW('d', 22, dk_synchronize_t)
 
@@ -173,8 +249,16 @@ typedef struct
 #define DKIOCISWRITABLE                       _IOR('d', 29, uint32_t)
 
 #define DKIOCREQUESTIDLE                      _IO('d', 30)
+<<<<<<< HEAD
+<<<<<<< HEAD
 #define DKIOCUNMAP                            _IOW('d', 31, dk_unmap_t)
 #define DKIOCCORESTORAGE                      _IOR('d', 32, dk_corestorage_info_t)
+=======
+#define DKIOCDISCARD                          _IOW('d', 31, dk_discard_t)
+>>>>>>> origin/10.5
+=======
+#define DKIOCUNMAP                            _IOW('d', 31, dk_unmap_t)
+>>>>>>> origin/10.6
 
 #define DKIOCGETMAXBLOCKCOUNTREAD             _IOR('d', 64, uint64_t)
 #define DKIOCGETMAXBLOCKCOUNTWRITE            _IOR('d', 65, uint64_t)
@@ -189,11 +273,30 @@ typedef struct
 #define DKIOCGETMINSEGMENTALIGNMENTBYTECOUNT  _IOR('d', 74, uint64_t)
 #define DKIOCGETMAXSEGMENTADDRESSABLEBITCOUNT _IOR('d', 75, uint64_t)
 
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
 #define DKIOCGETFEATURES                      _IOR('d', 76, uint32_t)
 #define DKIOCGETPHYSICALBLOCKSIZE             _IOR('d', 77, uint32_t)
 #define DKIOCGETCOMMANDPOOLSIZE               _IOR('d', 78, uint32_t)
 
+<<<<<<< HEAD
 #define DKIOCSYNCHRONIZECACHE                 _IO('d', 22)
+=======
+#define DKIOCGETPHYSICALBLOCKSIZE             _IOR('d', 77, uint32_t)
+>>>>>>> origin/10.5
+=======
+typedef struct
+{
+    uint64_t               offset;
+    uint64_t               length;
+
+    uint8_t                reserved0128[16];       /* reserved, clear to zero */
+} dk_discard_t __attribute__ ((deprecated));
+
+#define DKIOCDISCARD                          _IOW('d', 31, dk_discard_t)
+>>>>>>> origin/10.6
 
 #ifdef KERNEL
 #define DK_FEATURE_FORCE_UNIT_ACCESS          0x00000001
@@ -234,6 +337,7 @@ typedef struct
 
 #define DKIOCSETBLOCKSIZE                     _IOW('d', 24, uint32_t)
 #define DKIOCGETBSDUNIT                       _IOR('d', 27, uint32_t)
+<<<<<<< HEAD
 #define DKIOCISSOLIDSTATE                     _IOR('d', 79, uint32_t)
 #define DKIOCISVIRTUAL                        _IOR('d', 72, uint32_t)
 #define DKIOCGETBASE                          _IOR('d', 73, uint64_t)
@@ -241,6 +345,7 @@ typedef struct
 #define DKIOCLOCKPHYSICALEXTENTS              _IO('d', 81)
 #define DKIOCGETPHYSICALEXTENT                _IOWR('d', 82, dk_physical_extent_t)
 #define DKIOCUNLOCKPHYSICALEXTENTS            _IO('d', 83)
+<<<<<<< HEAD
 #define DKIOCSETTIER                          _IOW('d', 85, dk_set_tier_t)
 #define DKIOCGETENCRYPTIONTYPE                _IOR('d', 86, uint32_t)
 #define DKIOCISLOWPOWERMODE                   _IOR('d', 87, uint32_t)
@@ -292,6 +397,17 @@ typedef struct _dk_cs_unmap {
 // No longer used: _DKIOCCSSETFSVNODE (203) & _DKIOCCSGETFREEBYTES (204)
 #define	_DKIOCCSUNMAP			      _IOWR('d', 205, _dk_cs_unmap_t)
 #endif /* PRIVATE */
+=======
+#define DKIOCISSOLIDSTATE		      _IOR('d', 79, uint32_t)
+#define DKIOCISVIRTUAL                        _IOR('d', 72, uint32_t)
+#define DKIOCGETBASE                          _IOR('d', 73, uint64_t)
+>>>>>>> origin/10.6
+=======
+
+#ifdef PRIVATE
+#define _DKIOCGETMIGRATIONUNITBYTESIZE        _IOR('d', 85, uint32_t)
+#endif /* PRIVATE */
+>>>>>>> origin/10.7
 #endif /* KERNEL */
 
 #ifdef PRIVATE

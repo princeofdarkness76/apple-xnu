@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2007-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2007-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -125,6 +129,13 @@ pfloginit(void)
 {
 	int i;
 
+<<<<<<< HEAD
+=======
+	if (pf_perim_lock == NULL || pf_lock == NULL) {
+		panic("%s: called before PF is initialized", __func__);
+		/* NOTREACHED */
+	}
+>>>>>>> origin/10.6
 	LIST_INIT(&pflogif_list);
 	for (i = 0; i < PFLOGIFS_MAX; i++)
 		pflogifs[i] = NULL;

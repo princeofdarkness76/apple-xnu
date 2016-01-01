@@ -139,9 +139,12 @@ void
 _vm_map_store_entry_link( struct vm_map_header * mapHdr, vm_map_entry_t after_where, vm_map_entry_t entry)
 {
 	assert(entry->vme_start < entry->vme_end);
+<<<<<<< HEAD
 	if (__improbable(vm_debug_events))
 		DTRACE_VM4(map_entry_link, vm_map_t, (char *)mapHdr - sizeof (lck_rw_t), vm_map_entry_t, entry, vm_address_t, entry->links.start, vm_address_t, entry->links.end);
 
+=======
+>>>>>>> origin/10.7
 	vm_map_store_entry_link_ll(mapHdr, after_where, entry);
 #ifdef VM_MAP_STORE_USE_RB
 	if (vm_map_store_has_RB_support( mapHdr )) {
@@ -169,7 +172,11 @@ vm_map_store_entry_link( vm_map_t map, vm_map_entry_t after_where, vm_map_entry_
 		update_first_free_ll(VMEL_map, VMEL_map->first_free);
 #ifdef VM_MAP_STORE_USE_RB
 		if (vm_map_store_has_RB_support( &VMEL_map->hdr )) {
+<<<<<<< HEAD
 			update_first_free_rb(VMEL_map, entry, TRUE);
+=======
+			update_first_free_rb(VMEL_map, VMEL_map->first_free);
+>>>>>>> origin/10.10
 		}
 #endif
 	}
@@ -210,7 +217,11 @@ vm_map_store_entry_unlink( vm_map_t map, vm_map_entry_t entry)
 	update_first_free_ll(VMEU_map, VMEU_first_free);
 #ifdef VM_MAP_STORE_USE_RB
 	if (vm_map_store_has_RB_support( &VMEU_map->hdr )) {
+<<<<<<< HEAD
 		update_first_free_rb(VMEU_map, entry, FALSE);
+=======
+		update_first_free_rb(VMEU_map, VMEU_first_free);
+>>>>>>> origin/10.10
 	}
 #endif
 }
@@ -233,7 +244,11 @@ vm_map_store_update_first_free( vm_map_t map, vm_map_entry_t first_free_entry, b
 	update_first_free_ll(map, first_free_entry);
 #ifdef VM_MAP_STORE_USE_RB
 	if (vm_map_store_has_RB_support( &map->hdr )) {
+<<<<<<< HEAD
 		update_first_free_rb(map, first_free_entry, new_entry_creation);
+=======
+		update_first_free_rb(map, first_free);
+>>>>>>> origin/10.10
 	}
 #endif
 }

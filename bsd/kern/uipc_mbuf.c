@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 1998-2014 Apple Inc. All rights reserved.
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +16,24 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +41,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */
 /*
@@ -94,8 +127,26 @@
 
 #include <IOKit/IOMapper.h>
 
+<<<<<<< HEAD
 #include <machine/limits.h>
 #include <machine/machine_routines.h>
+=======
+#define _MCLREF(p)       (++mclrefcnt[mtocl(p)])
+#define _MCLUNREF(p)     (--mclrefcnt[mtocl(p)] == 0)
+#define _M_CLEAR_PKTHDR(mbuf_ptr)	(mbuf_ptr)->m_pkthdr.rcvif = NULL; \
+									(mbuf_ptr)->m_pkthdr.len = 0; \
+									(mbuf_ptr)->m_pkthdr.header = NULL; \
+									(mbuf_ptr)->m_pkthdr.csum_flags = 0; \
+									(mbuf_ptr)->m_pkthdr.csum_data = 0; \
+									(mbuf_ptr)->m_pkthdr.aux = (struct mbuf*)NULL; \
+									(mbuf_ptr)->m_pkthdr.reserved_1 = 0; \
+									(mbuf_ptr)->m_pkthdr.vlan_tag = 0; \
+									(mbuf_ptr)->m_pkthdr.reserved2 = NULL;
+
+extern pmap_t kernel_pmap;    /* The kernel's pmap */
+/* kernel translater */
+extern ppnum_t pmap_find_phys(pmap_t pmap, addr64_t va);
+>>>>>>> origin/10.3
 
 #if CONFIG_MACF_NET
 #include <security/mac_framework.h>
@@ -444,7 +495,11 @@ typedef struct mcl_slab {
  * whenever a new piece of memory mapped in from the VM crosses the 1MB
  * boundary.
  */
+<<<<<<< HEAD
 #define	NSLABSPMB	((1 << MBSHIFT) >> PAGE_SHIFT)
+=======
+#define	NSLABSPMB	((1 << MBSHIFT) >> MCLSHIFT)	/* 512 slabs/grp */
+>>>>>>> origin/10.5
 
 typedef struct mcl_slabg {
 	mcl_slab_t	*slg_slab;	/* group of slabs */
@@ -1165,7 +1220,20 @@ m_freem_list(m)
 	} else {							\
 		(m)->m_data = (m)->m_pktdat;				\
 		(m)->m_flags = M_PKTHDR;				\
+<<<<<<< HEAD
 		MBUF_INIT_PKTHDR(m);					\
+=======
+		(m)->m_pkthdr.rcvif = NULL;				\
+		(m)->m_pkthdr.len = 0;					\
+		(m)->m_pkthdr.header = NULL;				\
+		(m)->m_pkthdr.csum_flags = 0;				\
+		(m)->m_pkthdr.csum_data = 0;				\
+		(m)->m_pkthdr.tso_segsz = 0;				\
+		(m)->m_pkthdr.vlan_tag = 0;				\
+		(m)->m_pkthdr.socket_id = 0;				\
+		m_tag_init(m);						\
+		m_prio_init(m);						\
+>>>>>>> origin/10.6
 	}								\
 }
 
@@ -1823,6 +1891,7 @@ mbinit(void)
 	    M_TEMP, M_WAITOK | M_ZERO);
 	VERIFY(slabstbl != NULL);
 
+<<<<<<< HEAD
 	/*
 	 * Allocate audit structures, if needed:
 	 *
@@ -1830,6 +1899,9 @@ mbinit(void)
 	 *
 	 * This yields mcl_audit_t units, each one representing a page.
 	 */
+=======
+	/* Allocate audit structures if needed */
+>>>>>>> origin/10.5
 	PE_parse_boot_argn("mbuf_debug", &mbuf_debug, sizeof (mbuf_debug));
 	mbuf_debug |= mcache_getflags();
 	if (mbuf_debug & MCF_DEBUG) {
@@ -1878,6 +1950,7 @@ mbinit(void)
 	embutl = (mbutl + (nmbclusters * MCLBYTES));
 	VERIFY(((embutl - mbutl) % MBIGCLBYTES) == 0);
 
+<<<<<<< HEAD
 	/* Prime up the freelist */
 	PE_parse_boot_argn("initmcl", &initmcl, sizeof (initmcl));
 	if (initmcl != 0) {
@@ -1887,6 +1960,9 @@ mbinit(void)
 	}
 	if (initmcl < m_minlimit(MC_BIGCL))
 		initmcl = m_minlimit(MC_BIGCL);
+=======
+	PE_parse_boot_argn("initmcl", &initmcl, sizeof (initmcl));
+>>>>>>> origin/10.5
 
 	lck_mtx_lock(mbuf_mlock);
 
@@ -3193,9 +3269,14 @@ m_clalloc(const u_int32_t num, const int wait, const u_int32_t bufsize)
 
 	lck_mtx_lock(mbuf_mlock);
 
+<<<<<<< HEAD
 	for (i = 0; i < numpages; i++, page += PAGE_SIZE) {
 		ppnum_t offset =
 		    ((unsigned char *)page - mbutl) >> PAGE_SHIFT;
+=======
+	for (i = 0; i < numpages; i++, page += NBPG) {
+		ppnum_t offset = ((char *)page - (char *)mbutl) / NBPG;
+>>>>>>> origin/10.8
 		ppnum_t new_page = pmap_find_phys(kernel_pmap, page);
 
 		/*
@@ -3204,12 +3285,20 @@ m_clalloc(const u_int32_t num, const int wait, const u_int32_t bufsize)
 		 * contents to prevent exposing leftover kernel memory.
 		 */
 		VERIFY(offset < mcl_pages);
+<<<<<<< HEAD
 		if (mcl_paddr_base != 0) {
 			bzero((void *)(uintptr_t) page, PAGE_SIZE);
 			new_page = IOMapperInsertPage(mcl_paddr_base,
 			    offset, new_page);
 		}
 		mcl_paddr[offset] = new_page;
+=======
+		if (mcl_paddr_base) {
+		    bzero((void *)(uintptr_t) page, page_size);
+		    new_page = IOMapperInsertPage(mcl_paddr_base, offset, new_page);
+		}
+		mcl_paddr[offset] = new_page << PGSHIFT;
+>>>>>>> origin/10.8
 
 		/* Pattern-fill this fresh page */
 		if (mclverify) {
@@ -4103,6 +4192,7 @@ m_copy_pkthdr(struct mbuf *to, struct mbuf *from)
 		m_tag_delete_chain(to, NULL);
 	}
 	to->m_pkthdr = from->m_pkthdr;		/* especially tags */
+<<<<<<< HEAD
 	m_classifier_init(from, 0);		/* purge classifier info */
 	m_tag_init(from, 1);			/* purge all tags from src */
 	m_scratch_init(from);			/* clear src scratch area */
@@ -4110,6 +4200,13 @@ m_copy_pkthdr(struct mbuf *to, struct mbuf *from)
 	if ((to->m_flags & M_EXT) == 0)
 		to->m_data = to->m_pktdat;
 	m_redzone_init(to);			/* setup red zone on dst */
+=======
+	m_tag_init(from);			/* purge tags from src */
+	m_prio_init(from);			/* reset priority from src */
+	to->m_flags = (from->m_flags & M_COPYFLAGS) | (to->m_flags & M_EXT);
+	if ((to->m_flags & M_EXT) == 0)
+		to->m_data = to->m_pktdat;
+>>>>>>> origin/10.5
 }
 
 /*
@@ -8033,7 +8130,8 @@ m_drain(void)
                                 n->m_pkthdr.csum_flags = 0;
                                 n->m_pkthdr.csum_data = 0;
                                 n->m_pkthdr.aux = NULL;
-                                n->m_pkthdr.reserved1 = 0;
+                                n->m_pkthdr.vlan_tag = 0;
+                                n->m_pkthdr.reserved_1 = 0;
                                 n->m_pkthdr.reserved2 = 0;
                                 bcopy(m->m_data, n->m_data, m->m_pkthdr.len);
 				return(n);

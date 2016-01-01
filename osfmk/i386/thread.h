@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -78,7 +100,43 @@
 #include <i386/tss.h>
 #include <i386/eflags.h>
 
+<<<<<<< HEAD
 #include <i386/cpu_data.h>
+=======
+/*
+ *	x86_saved_state32/64:
+ *
+ *	Has been exported to servers.  See: mach/i386/thread_status.h
+ *
+ *	This structure corresponds to the state of user registers
+ *	as saved upon kernel entry.  It lives in the pcb.
+ *	It is also pushed onto the stack for exceptions in the kernel.
+ *	For performance, it is also used directly in syscall exceptions
+ *	if the server has requested i386_THREAD_STATE flavor for the exception
+ *	port.
+ */
+
+/*
+ *	Save area for user floating-point state.
+ *	Allocated only when necessary.
+ */
+
+typedef	enum {
+		FXSAVE32 = 1,
+<<<<<<< HEAD
+		FXSAVE64 = 2
+	} fp_save_layout;
+        struct x86_fx_save 	fx_save_state __attribute__ ((aligned (16)));
+};
+>>>>>>> origin/10.5
+=======
+		FXSAVE64 = 2,
+		XSAVE32  = 3,
+		XSAVE64  = 4,
+		FP_UNUSED = 5
+	} fp_save_layout_t;
+
+>>>>>>> origin/10.6
 
 #include <machine/pal_routines.h>
 
@@ -99,6 +157,27 @@ struct x86_kernel_state {
 	uint64_t	k_r15;
 	uint64_t	k_rip;
 };
+<<<<<<< HEAD
+=======
+#endif
+
+typedef struct pcb {
+	void			*sf;
+	x86_saved_state_t	*iss;
+	void			*ifps;
+#ifdef	MACH_BSD
+	uint64_t	cthread_self;		/* for use of cthread package */
+        struct real_descriptor cthread_desc;
+	unsigned long  uldt_selector;          /* user ldt selector to set */
+	struct real_descriptor uldt_desc;      /* the actual user setable ldt data */
+#endif
+	decl_simple_lock_data(,lock);
+	uint64_t	iss_pte0;
+	uint64_t	iss_pte1;
+	void		*ids;
+	uint32_t	arg_store_valid;
+} *pcb_t;
+>>>>>>> origin/10.6
 
 /*
  * Maps state flavor to number of words in the state:

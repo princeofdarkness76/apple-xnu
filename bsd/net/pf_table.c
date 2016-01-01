@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2007-2010 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2007-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -1739,6 +1743,7 @@ pfr_commit_ktable(struct pfr_ktable *kt, u_int64_t tzero)
 	pfr_setflags_ktable(kt, nflags);
 }
 
+<<<<<<< HEAD
 void
 pfr_table_copyin_cleanup(struct pfr_table *tbl)
 {
@@ -1746,6 +1751,8 @@ pfr_table_copyin_cleanup(struct pfr_table *tbl)
 	tbl->pfrt_name[sizeof (tbl->pfrt_name) - 1] = '\0';
 }
 
+=======
+>>>>>>> origin/10.6
 static int
 pfr_validate_table(struct pfr_table *tbl, int allowedflags, int no_reserved)
 {

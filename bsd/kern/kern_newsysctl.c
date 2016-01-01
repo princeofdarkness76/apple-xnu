@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  *
@@ -77,7 +103,26 @@
 #include <sys/systm.h>
 #include <sys/sysproto.h>
 
+<<<<<<< HEAD
 #include <security/audit/audit.h>
+=======
+#include <bsm/audit_kernel.h>
+
+/*
+struct sysctl_oid_list sysctl__debug_children;
+struct sysctl_oid_list sysctl__kern_children;
+struct sysctl_oid_list sysctl__net_children;
+struct sysctl_oid_list sysctl__sysctl_children;
+*/
+
+extern struct sysctl_oid *newsysctl_list[];
+extern struct sysctl_oid *machdep_sysctl_list[];
+
+
+static void
+sysctl_sysctl_debug_dump_node(struct sysctl_oid_list *l, int i);
+
+>>>>>>> origin/10.3
 
 lck_grp_t * sysctl_lock_group = NULL;
 lck_rw_t * sysctl_geometry_lock = NULL;
@@ -95,6 +140,7 @@ lck_mtx_t * sysctl_unlocked_node_lock = NULL;
 #define STATIC static
 #endif
 
+<<<<<<< HEAD
 /* forward declarations  of static functions */
 STATIC void sysctl_sysctl_debug_dump_node(struct sysctl_oid_list *l, int i);
 STATIC int sysctl_sysctl_debug(struct sysctl_oid *oidp, void *arg1,
@@ -124,6 +170,36 @@ int	userland_sysctl(boolean_t string_is_canonical,
 					char *namestring, size_t namestringlen,
 					int *name, u_int namelen, struct sysctl_req *req,
 					size_t *retval);
+=======
+/*
+ * XXX this does not belong here
+ */
+static funnel_t *
+spl_kernel_funnel(void)
+{
+	funnel_t *cfunnel;
+
+	cfunnel = thread_funnel_get();
+	if (cfunnel != kernel_flock) {
+		if (cfunnel != NULL)
+			thread_funnel_set(cfunnel, FALSE);
+		thread_funnel_set(kernel_flock, TRUE);
+	}
+	return(cfunnel);
+}
+
+static void
+splx_kernel_funnel(funnel_t *saved)
+{
+	if (saved != kernel_flock) {
+		thread_funnel_set(kernel_flock, FALSE);
+		if (saved != NULL) 
+			thread_funnel_set(saved, TRUE);
+	}
+}
+
+static int sysctl_root SYSCTL_HANDLER_ARGS;
+>>>>>>> origin/10.2
 
 struct sysctl_oid_list sysctl__children; /* root list */
 
@@ -141,6 +217,9 @@ sysctl_register_oid(struct sysctl_oid *new_oidp)
 	struct sysctl_oid *p;
 	struct sysctl_oid *q;
 	int n;
+	funnel_t *fnl;
+
+	fnl = spl_kernel_funnel();
 
 	/*
 	 * The OID can be old-style (needs copy), new style without an earlier
@@ -228,13 +307,18 @@ sysctl_register_oid(struct sysctl_oid *new_oidp)
 	else
 		SLIST_INSERT_HEAD(parent, oidp, oid_link);
 
+<<<<<<< HEAD
 	/* Release the write lock */
 	lck_rw_unlock_exclusive(sysctl_geometry_lock);
+=======
+	splx_kernel_funnel(fnl);
+>>>>>>> origin/10.2
 }
 
 void
 sysctl_unregister_oid(struct sysctl_oid *oidp)
 {
+<<<<<<< HEAD
 	struct sysctl_oid *removed_oidp = NULL;	/* OID removed from tree */
 	struct sysctl_oid *old_oidp = NULL;	/* OID compatibility copy */
 
@@ -290,6 +374,13 @@ sysctl_unregister_oid(struct sysctl_oid *oidp)
 	if (old_oidp != NULL) {
 		FREE(old_oidp, M_TEMP);
 	}
+=======
+	funnel_t *fnl;
+
+	fnl = spl_kernel_funnel();
+	SLIST_REMOVE(oidp->oid_parent, oidp, sysctl_oid, oid_link);
+	splx_kernel_funnel(fnl);
+>>>>>>> origin/10.2
 }
 
 /*
@@ -997,7 +1088,11 @@ sysctl_sysctl_name2oid(__unused struct sysctl_oid *oidp, __unused void *arg1,
 	return (error);
 }
 
+<<<<<<< HEAD
 SYSCTL_PROC(_sysctl, 3, name2oid, CTLFLAG_RW|CTLFLAG_ANYBODY|CTLFLAG_KERN | CTLFLAG_LOCKED, 0, 0, 
+=======
+SYSCTL_PROC(_sysctl, 3, name2oid, CTLFLAG_RW|CTLFLAG_ANYBODY|CTLFLAG_KERN, 0, 0, 
+>>>>>>> origin/10.3
 	sysctl_sysctl_name2oid, "I", "");
 
 /*
@@ -1119,8 +1214,18 @@ sysctl_handle_long(__unused struct sysctl_oid *oidp, void *arg1,
 	__unused int arg2, struct sysctl_req *req)
 {
 	if (!arg1)
+<<<<<<< HEAD
 		return (EINVAL);
 	return sysctl_io_number(req, *(long*)arg1, sizeof(long), arg1, NULL);
+=======
+		error = EPERM;
+	else
+		error = SYSCTL_IN(req, arg1, sizeof(int));
+
+	if (error == 0)
+		AUDIT_ARG(value, *(int *)arg1);
+	return (error);
+>>>>>>> origin/10.3
 }
 
 /*
@@ -1146,6 +1251,64 @@ sysctl_handle_quad(__unused struct sysctl_oid *oidp, void *arg1,
 int
 sysctl_handle_int2quad(__unused struct sysctl_oid *oidp, void *arg1,
 	__unused int arg2, struct sysctl_req *req)
+{
+	int error = 0;
+	long long val;
+	int newval;
+
+	if (!arg1)
+		return (EINVAL);
+	val = (long long)*(int *)arg1;
+	error = SYSCTL_OUT(req, &val, sizeof(long long));
+
+	if (error || !req->newptr)
+		return (error);
+
+	error = SYSCTL_IN(req, &val, sizeof(long long));
+	if (!error) {
+		/*
+		 * Value must be representable; check by
+		 * casting and then casting back.
+		 */
+		newval = (int)val;
+		if ((long long)newval != val) {
+			error = ERANGE;
+		} else {
+			*(int *)arg1 = newval;
+		}
+	}
+	return (error);
+}
+
+/*
+ * Handle a quad, signed or unsigned.  arg1 points to it.
+ */
+
+int
+sysctl_handle_quad SYSCTL_HANDLER_ARGS
+{
+	int error = 0;
+
+	if (!arg1)
+		return (EINVAL);
+	error = SYSCTL_OUT(req, arg1, sizeof(long long));
+
+	if (error || !req->newptr)
+		return (error);
+
+	error = SYSCTL_IN(req, arg1, sizeof(long long));
+	return (error);
+}
+
+/*
+ * Expose an int value as a quad.
+ *
+ * This interface allows us to support interfaces defined
+ * as using quad values while the implementation is still
+ * using ints.
+ */
+int
+sysctl_handle_int2quad SYSCTL_HANDLER_ARGS
 {
 	int error = 0;
 	long long val;
@@ -1214,7 +1377,11 @@ sysctl_old_kernel(struct sysctl_req *req, const void *p, size_t l)
 		if (i > req->oldlen - req->oldidx)
 			i = req->oldlen - req->oldidx;
 		if (i > 0)
+<<<<<<< HEAD
 			bcopy((const void*)p, CAST_DOWN(char *, (req->oldptr + req->oldidx)), i);
+=======
+			bcopy((void*)p, (char *)req->oldptr + req->oldidx, i);
+>>>>>>> origin/10.2
 	}
 	req->oldidx += l;
 	if (req->oldptr && i != l)
@@ -1229,7 +1396,11 @@ sysctl_new_kernel(struct sysctl_req *req, void *p, size_t l)
 		return 0;
 	if (req->newlen - req->newidx < l)
 		return (EINVAL);
+<<<<<<< HEAD
 	bcopy(CAST_DOWN(char *, (req->newptr + req->newidx)), p, l);
+=======
+	bcopy((char *)req->newptr + req->newidx, p, l);
+>>>>>>> origin/10.2
 	req->newidx += l;
 	return (0);
 }
@@ -1239,6 +1410,7 @@ kernel_sysctl(struct proc *p, int *name, u_int namelen, void *old, size_t *oldle
 {
 	int error = 0;
 	struct sysctl_req req;
+	funnel_t *fnl;
 
 	/*
 	 * Construct request.
@@ -1248,7 +1420,11 @@ kernel_sysctl(struct proc *p, int *name, u_int namelen, void *old, size_t *oldle
 	if (oldlenp)
 		req.oldlen = *oldlenp;
 	if (old)
+<<<<<<< HEAD
 		req.oldptr = CAST_USER_ADDR_T(old);
+=======
+		req.oldptr= old;
+>>>>>>> origin/10.2
 	if (newlen) {
 		req.newlen = newlen;
 		req.newptr = CAST_USER_ADDR_T(new);
@@ -1257,8 +1433,42 @@ kernel_sysctl(struct proc *p, int *name, u_int namelen, void *old, size_t *oldle
 	req.newfunc = sysctl_new_kernel;
 	req.lock = 1;
 
+<<<<<<< HEAD
 	/* make the request */
 	error = sysctl_root(TRUE, FALSE, NULL, 0, name, namelen, &req);
+=======
+	/*
+	 * Locking.  Tree traversal always begins with the kernel funnel held.
+	 */
+	fnl = spl_kernel_funnel();
+
+	/* XXX this should probably be done in a general way */
+	while (memlock.sl_lock) {
+		memlock.sl_want = 1;
+		(void) tsleep((caddr_t)&memlock, PRIBIO+1, "sysctl", 0);
+		memlock.sl_locked++;
+	}
+	memlock.sl_lock = 1;
+
+	/* make the request */
+	error = sysctl_root(0, name, namelen, &req);
+
+	/* unlock memory if required */
+	if (req.lock == 2)
+		vsunlock(req.oldptr, req.oldlen, B_WRITE);
+
+	memlock.sl_lock = 0;
+
+	if (memlock.sl_want) {
+		memlock.sl_want = 0;
+		wakeup((caddr_t)&memlock);
+	}
+>>>>>>> origin/10.2
+
+	/*
+	 * Undo locking.
+	 */
+	splx_kernel_funnel(fnl);
 
 	if (error && error != ENOMEM)
 		return (error);
@@ -1438,6 +1648,7 @@ found:
 
 	/*
 	 * If we're inside the kernel, the OID must be marked as kernel-valid.
+<<<<<<< HEAD
 	 */
 	if (from_kernel && !(oid->oid_kind & CTLFLAG_KERN))
 	{
@@ -1453,6 +1664,14 @@ found:
 	 * addition, if the leaf node is set this way, then in order to do
 	 * specific enforcement, it has to be of type SYSCTL_PROC.
 	 */
+=======
+	 * XXX This mechanism for testing is bad.
+	 */
+	if ((req->oldfunc == sysctl_old_kernel) && !(oid->oid_kind & CTLFLAG_KERN))
+		return(EPERM);
+
+	/* Most likely only root can write */
+>>>>>>> origin/10.2
 	if (!(oid->oid_kind & CTLFLAG_ANYBODY) &&
 	    req->newptr && req->p &&
 	    (error = proc_suser(req->p)))
@@ -1735,6 +1954,7 @@ userland_sysctl(boolean_t string_is_canonical,
  *
  * Note that some sysctl handlers use copyin/copyout, which
  * may not work correctly.
+<<<<<<< HEAD
  *
  * The "sysctlbyname" KPI for use by kexts is aliased to this function.
  */
@@ -1758,6 +1978,48 @@ kernel_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, s
 	/* now use the OID */
 	if (error == 0)
 		error = kernel_sysctl(current_proc(), oid, oidlen, oldp, oldlenp, newp, newlen);
+=======
+ */
+
+static int
+sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen)
+{
+
+	return(kernel_sysctl(current_proc(), name, namelen, oldp, oldlenp, newp, newlen));
+}
+
+static int
+sysctlnametomib(const char *name, int *mibp, size_t *sizep)
+{
+	int oid[2];
+	int error;
+
+	/* magic service node */
+	oid[0] = 0;
+	oid[1] = 3;
+
+	/* look up OID for name */
+	*sizep *= sizeof(int);
+	error = sysctl(oid, 2, mibp, sizep, (void *)name, strlen(name));
+	*sizep /= sizeof(int);
+	return(error);
+}
+
+int
+sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen)
+{
+	int oid[CTL_MAXNAME + 2];
+	int error;
+	size_t oidlen;
+
+	/* look up the OID */
+	oidlen = CTL_MAXNAME;
+	error = sysctlnametomib(name, oid, &oidlen);
+
+	/* now use the OID */
+	if (error == 0)
+		error = sysctl(oid, oidlen, oldp, oldlenp, newp, newlen);
+>>>>>>> origin/10.2
 	return(error);
 }
 

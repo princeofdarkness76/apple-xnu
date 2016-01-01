@@ -1,8 +1,18 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +24,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -383,10 +413,46 @@ udp_input(struct mbuf *m, int iphlen)
 	/*
 	 * Checksum extended UDP header and data.
 	 */
+<<<<<<< HEAD
 	if (udp_input_checksum(m, uh, iphlen, len))
 		goto bad;
 
 	isbroadcast = in_broadcast(ip->ip_dst, ifp);
+=======
+	if (uh->uh_sum) {
+		if (m->m_pkthdr.csum_flags & CSUM_DATA_VALID) {
+			if (m->m_pkthdr.csum_flags & CSUM_PSEUDO_HDR)
+				uh->uh_sum = m->m_pkthdr.csum_data;
+			else
+				goto doudpcksum;
+			uh->uh_sum ^= 0xffff;
+		} else {
+			char b[9];
+doudpcksum:
+			*(uint32_t*)&b[0] = *(uint32_t*)&((struct ipovly *)ip)->ih_x1[0];
+			*(uint32_t*)&b[4] = *(uint32_t*)&((struct ipovly *)ip)->ih_x1[4];
+			*(uint8_t*)&b[8] = *(uint8_t*)&((struct ipovly *)ip)->ih_x1[8];
+			
+			bzero(((struct ipovly *)ip)->ih_x1, 9);
+			((struct ipovly *)ip)->ih_len = uh->uh_ulen;
+			uh->uh_sum = in_cksum(m, len + sizeof (struct ip));
+			
+			*(uint32_t*)&((struct ipovly *)ip)->ih_x1[0] = *(uint32_t*)&b[0];
+			*(uint32_t*)&((struct ipovly *)ip)->ih_x1[4] = *(uint32_t*)&b[4];
+			*(uint8_t*)&((struct ipovly *)ip)->ih_x1[8] = *(uint8_t*)&b[8];
+		}
+		if (uh->uh_sum) {
+			udpstat.udps_badsum++;
+			m_freem(m);
+			KERNEL_DEBUG(DBG_FNC_UDP_INPUT | DBG_FUNC_END, 0,0,0,0,0);
+			return;
+		}
+	}
+#ifndef __APPLE__
+	 else
+		udpstat.udps_nosum++;
+#endif
+>>>>>>> origin/10.2
 
 	if (IN_MULTICAST(ntohl(ip->ip_dst.s_addr)) || isbroadcast) {
 		int reuse_sock = 0, mcast_delivered = 0;
@@ -1269,14 +1335,37 @@ SYSCTL_PROC(_net_inet_udp, OID_AUTO, pcblist64,
 static int
 udp_pcblist_n SYSCTL_HANDLER_ARGS
 {
+<<<<<<< HEAD
 #pragma unused(oidp, arg1, arg2)
 	return (get_pcblist_n(IPPROTO_UDP, req, &udbinfo));
 }
+=======
+	register struct udpiphdr *ui;
+	register int len = m->m_pkthdr.len;
+	struct sockaddr_in *sin;
+	struct in_addr origladdr, laddr, faddr;
+	u_short lport, fport;
+	struct sockaddr_in *ifaddr;
+	int error = 0, udp_dodisconnect = 0;
+	struct socket *so = inp->inp_socket;
+	int soopts = 0;
+	struct mbuf *inpopts;
+	struct ip_moptions *mopts;
+	struct route ro;
+	struct ip_out_args ipoa;
+<<<<<<< HEAD
+>>>>>>> origin/10.5
+=======
+#if PKT_PRIORITY
+	mbuf_traffic_class_t mtc = MBUF_TC_NONE;
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 
 SYSCTL_PROC(_net_inet_udp, OID_AUTO, pcblist_n,
     CTLTYPE_STRUCT | CTLFLAG_RD | CTLFLAG_LOCKED, 0, 0, udp_pcblist_n,
     "S,xinpcb_n", "List of active UDP sockets");
 
+<<<<<<< HEAD
 __private_extern__ void
 udp_get_ports_used(uint32_t ifindex, int protocol, uint32_t flags,
     bitstr_t *bitfield)
@@ -1289,6 +1378,17 @@ udp_count_opportunistic(unsigned int ifindex, u_int32_t flags)
 {
 	return (inpcb_count_opportunistic(ifindex, &udbinfo, flags));
 }
+=======
+	if (control != NULL) {
+#if PKT_PRIORITY
+		mtc = mbuf_traffic_class_from_control(control);
+#endif /* PKT_PRIORITY */
+		m_freem(control);
+	}
+	KERNEL_DEBUG(DBG_LAYER_OUT_BEG, inp->inp_fport, inp->inp_lport,
+		     inp->inp_laddr.s_addr, inp->inp_faddr.s_addr,
+		     (htons((u_short)len + sizeof (struct udphdr))));
+>>>>>>> origin/10.6
 
 __private_extern__ uint32_t
 udp_find_anypcb_byaddr(struct ifaddr *ifa)
@@ -1307,6 +1407,7 @@ udp_check_pktinfo(struct mbuf *control, struct ifnet **outif,
 	if (outif != NULL)
 		*outif = NULL;
 
+<<<<<<< HEAD
 	/*
 	 * XXX: Currently, we assume all the optional information is stored
 	 * in a single mbuf.
@@ -1322,6 +1423,31 @@ udp_check_pktinfo(struct mbuf *control, struct ifnet **outif,
 		if (cm->cmsg_len < sizeof (struct cmsghdr) ||
 		    cm->cmsg_len > control->m_len)
 			return (EINVAL);
+=======
+        lck_mtx_assert(inp->inpcb_mtx, LCK_MTX_ASSERT_OWNED);
+
+	/* If socket was bound to an ifindex, tell ip_output about it */
+	ipoa.ipoa_ifscope = (inp->inp_flags & INP_BOUND_IF) ?
+	    inp->inp_boundif : IFSCOPE_NONE;
+	soopts |= IP_OUTARGS;
+
+	/* If there was a routing change, discard cached route and check
+	 * that we have a valid source address. 
+	 * Reacquire a new source address if INADDR_ANY was specified
+	 */
+	if (inp->inp_route.ro_rt && inp->inp_route.ro_rt->generation_id != route_generation) {
+		if (ifa_foraddr(inp->inp_laddr.s_addr) == 0) { /* src address is gone */
+			if (inp->inp_flags & INP_INADDR_ANY)
+				inp->inp_laddr.s_addr = INADDR_ANY; /* new src will be set later */
+			else {
+				error = EADDRNOTAVAIL;
+				goto release;
+			}
+		}
+		rtfree(inp->inp_route.ro_rt);
+		inp->inp_route.ro_rt = (struct rtentry *)0;
+	}
+>>>>>>> origin/10.5
 
 		if (cm->cmsg_level != IPPROTO_IP || cm->cmsg_type != IP_PKTINFO)
 			continue;
@@ -1586,10 +1712,18 @@ udp_output(struct inpcb *inp, struct mbuf *m, struct sockaddr *addr,
 
 #if CONFIG_MACF_NET
 	mac_mbuf_label_associate_inpcb(inp, m);
+<<<<<<< HEAD
 #endif /* CONFIG_MACF_NET */
 
 	if (inp->inp_flowhash == 0)
 		inp->inp_flowhash = inp_calc_flowhash(inp);
+=======
+#endif
+	
+#if CONFIG_IP_EDGEHOLE
+	ip_edgehole_mbuf_tag(inp, m);
+#endif
+>>>>>>> origin/10.5
 
 	/*
 	 * Calculate data length and get a mbuf
@@ -1671,6 +1805,7 @@ udp_output(struct inpcb *inp, struct mbuf *m, struct sockaddr *addr,
 	/* Copy the cached route and take an extra reference */
 	inp_route_copyout(inp, &ro);
 
+<<<<<<< HEAD
 	set_packet_service_class(m, so, msc, 0);
 	m->m_pkthdr.pkt_flowsrc = FLOWSRC_INPCB;
 	m->m_pkthdr.pkt_flowid = inp->inp_flowhash;
@@ -1686,10 +1821,21 @@ udp_output(struct inpcb *inp, struct mbuf *m, struct sockaddr *addr,
 		ipoa.ipoa_flags |= IPOAF_BOUND_SRCADDR;
 
 	inp->inp_sndinprog_cnt++;
+=======
+#if PKT_PRIORITY
+	set_traffic_class(m, so, mtc);
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 
 	socket_unlock(so, 0);
+<<<<<<< HEAD
 	error = ip_output(m, inpopts, &ro, soopts, mopts, &ipoa);
 	m = NULL;
+=======
+	/* XXX jgraessley please look at XXX */
+	error = ip_output_list(m, 0, inpopts,
+	    udp_dodisconnect ? &ro : &inp->inp_route, soopts, mopts, &ipoa);
+>>>>>>> origin/10.5
 	socket_lock(so, 0);
 	if (mopts != NULL)
 		IMO_REMREF(mopts);
@@ -1726,8 +1872,26 @@ udp_output(struct inpcb *inp, struct mbuf *m, struct sockaddr *addr,
 
 abort:
 	if (udp_dodisconnect) {
+<<<<<<< HEAD
+<<<<<<< HEAD
 		/* Always discard the cached route for unconnected socket */
 		ROUTE_RELEASE(&inp->inp_route);
+=======
+		/* Discard the cached route, if there is one */
+		if (ro.ro_rt != NULL) {
+			rtfree(ro.ro_rt);
+			ro.ro_rt = NULL;
+		}
+>>>>>>> origin/10.5
+=======
+#if IFNET_ROUTE_REFCNT
+		/* Always discard the cached route for unconnected socket */
+		if (inp->inp_route.ro_rt != NULL) {
+			rtfree(inp->inp_route.ro_rt);
+			inp->inp_route.ro_rt = NULL;
+		}
+#endif /* IFNET_ROUTE_REFCNT */
+>>>>>>> origin/10.6
 		in_pcbdisconnect(inp);
 		inp->inp_laddr = origladdr;	/* XXX rehash? */
 		/* no reference needed */
@@ -1762,6 +1926,7 @@ abort:
 	} else {
 		ROUTE_RELEASE(&inp->inp_route);
 	}
+<<<<<<< HEAD
 
 	/*
 	 * If output interface was cellular/expensive, and this socket is
@@ -1770,6 +1935,40 @@ abort:
 	if (error != 0 && (ipoa.ipoa_retflags & IPOARF_IFDENIED) &&
 	    (INP_NO_CELLULAR(inp) || INP_NO_EXPENSIVE(inp)))
 		soevent(so, (SO_FILT_HINT_LOCKED|SO_FILT_HINT_IFDENIED));
+=======
+#if IFNET_ROUTE_REFCNT
+	else if (inp->inp_route.ro_rt != NULL &&
+	    (inp->inp_route.ro_rt->rt_flags & (RTF_MULTICAST|RTF_BROADCAST))) {
+		/* Always discard non-unicast cached route */
+		rtfree(inp->inp_route.ro_rt);
+		inp->inp_route.ro_rt = NULL;
+	}
+#endif /* IFNET_ROUTE_REFCNT */
+
+	KERNEL_DEBUG(DBG_FNC_UDP_OUTPUT | DBG_FUNC_END, error, 0,0,0,0);
+	return (error);
+
+abort:
+        if (udp_dodisconnect) {
+#if IFNET_ROUTE_REFCNT
+		/* Always discard the cached route for unconnected socket */
+		if (inp->inp_route.ro_rt != NULL) {
+			rtfree(inp->inp_route.ro_rt);
+			inp->inp_route.ro_rt = NULL;
+		}
+#endif /* IFNET_ROUTE_REFCNT */
+		in_pcbdisconnect(inp);
+		inp->inp_laddr = origladdr; /* XXX rehash? */
+        }
+#if IFNET_ROUTE_REFCNT
+	else if (inp->inp_route.ro_rt != NULL &&
+	    (inp->inp_route.ro_rt->rt_flags & (RTF_MULTICAST|RTF_BROADCAST))) {
+		/* Always discard non-unicast cached route */
+		rtfree(inp->inp_route.ro_rt);
+		inp->inp_route.ro_rt = NULL;
+	}
+#endif /* IFNET_ROUTE_REFCNT */
+>>>>>>> origin/10.6
 
 release:
 	KERNEL_DEBUG(DBG_FNC_UDP_OUTPUT | DBG_FUNC_END, error, 0, 0, 0, 0);
@@ -2114,6 +2313,7 @@ udp_send(struct socket *so, int flags, struct mbuf *m,
 			m_freem(control);
 		return (EINVAL);
 	}
+<<<<<<< HEAD
 
 #if NECP
 #if FLOW_DIVERT
@@ -2125,6 +2325,10 @@ udp_send(struct socket *so, int flags, struct mbuf *m,
 #endif /* NECP */
 
 	return (udp_output(inp, m, addr, control, p));
+=======
+	
+	return udp_output(inp, m, addr, control, p);
+>>>>>>> origin/10.5
 }
 
 int

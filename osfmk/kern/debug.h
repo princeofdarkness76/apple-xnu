@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -60,6 +82,7 @@ struct thread_snapshot {
 	int32_t			sched_pri;   /* scheduled (current) priority */
 	int32_t			sched_flags; /* scheduler flags */
 	char			ss_flags;
+<<<<<<< HEAD
 	char			ts_qos;      /* effective qos */
 	char			ts_rqos;     /* requested qos */
 	char			ts_rqos_override; /* requested qos override */
@@ -112,11 +135,14 @@ struct thread_snapshot_v2 {
 	uint8_t   ths_rqos;
 	uint8_t   ths_rqos_override;
 	uint8_t   ths_io_tier;
+=======
+>>>>>>> origin/10.6
 } __attribute__ ((packed));
 
 struct task_snapshot {
 	uint32_t		snapshot_magic;
 	int32_t			pid;
+<<<<<<< HEAD
 	uint64_t		uniqueid;
 	uint64_t		user_time_in_terminated_threads;
 	uint64_t		system_time_in_terminated_threads;
@@ -134,6 +160,11 @@ struct task_snapshot {
 
 	/* 
 	 * We restrict ourselves to a statically defined
+=======
+	uint32_t		nloadinfos;
+	char			ss_flags;
+	/* We restrict ourselves to a statically defined
+>>>>>>> origin/10.6
 	 * (current as of 2009) length for the
 	 * p_comm string, due to scoping issues (osfmk/bsd and user/kernel
 	 * binary compatibility).
@@ -340,6 +371,7 @@ enum {
 	STACKSHOT_ENABLE_FAULTING			= 0x20000
 };
 
+<<<<<<< HEAD
 /*
  * NOTE: Please update libkdd/kcdata/kcdtypes.c if you make any changes
  * in STACKSHOT_KCTYPE_* types.
@@ -367,6 +399,15 @@ enum {
 #define STACKSHOT_TASK_SNAPSHOT_MAGIC   	0xdecafbad
 #define STACKSHOT_MEM_AND_IO_SNAPSHOT_MAGIC	0xbfcabcde
 #define STACKSHOT_MICRO_SNAPSHOT_MAGIC		0x31c54011
+=======
+enum {
+    STACKSHOT_GET_DQ = 0x1,
+    STACKSHOT_SAVE_LOADINFO = 0x2
+};
+
+#define STACKSHOT_THREAD_SNAPSHOT_MAGIC 0xfeedface
+#define STACKSHOT_TASK_SNAPSHOT_MAGIC 0xdecafbad
+>>>>>>> origin/10.6
 
 #endif /* __APPLE_API_UNSTABLE */
 #endif /* __APPLE_API_PRIVATE */
@@ -374,6 +415,7 @@ enum {
 #ifdef	KERNEL_PRIVATE
 
 extern unsigned int	systemLogDiags;
+<<<<<<< HEAD
 #if (!defined(__arm64__) && !defined(NAND_PANIC_DEVICE)) || defined(LEGACY_PANIC_LOGS)
 extern char debug_buf[];
 #endif
@@ -381,6 +423,13 @@ extern char *debug_buf_addr;
 extern unsigned int	debug_boot_arg;
 extern unsigned char *kernel_uuid;
 extern char kernel_uuid_string[];
+=======
+extern char debug_buf[];
+<<<<<<< HEAD
+>>>>>>> origin/10.5
+=======
+extern unsigned int	debug_boot_arg;
+>>>>>>> origin/10.6
 
 #ifdef MACH_KERNEL_PRIVATE
 
@@ -433,6 +482,7 @@ void	unpackA(char *inbuf, uint32_t length);
 
 void	panic_display_system_configuration(void);
 void	panic_display_zprint(void);
+<<<<<<< HEAD
 void	panic_display_kernel_aslr(void);
 void	panic_display_hibb(void);
 void	panic_display_model_name(void);
@@ -443,6 +493,9 @@ void	panic_display_ztrace(void);
 #if CONFIG_ECC_LOGGING
 void 	panic_display_ecc_errors(void);
 #endif /* CONFIG_ECC_LOGGING */
+=======
+
+>>>>>>> origin/10.5
 #endif /* MACH_KERNEL_PRIVATE */
 
 #define DB_HALT		0x1
@@ -464,9 +517,14 @@ void 	panic_display_ecc_errors(void);
 						* post-panic crashdump/paniclog
 						* dump.
 						*/
+<<<<<<< HEAD
 #define DB_NMI_BTN_ENA  	0x8000  /* Enable button to directly trigger NMI */
 #define DB_PRT_KDEBUG   	0x10000 /* kprintf KDEBUG traces */
 #define DB_DISABLE_LOCAL_CORE   0x20000 /* ignore local core dump support */
+=======
+#define DB_NMI_BTN_ENA  0x8000  /* Enable button to directly trigger NMI */
+#define DB_PRT_KDEBUG   0x10000 /* kprintf KDEBUG traces */
+>>>>>>> origin/10.10
 
 #if DEBUG
 /*
@@ -512,6 +570,7 @@ enum {
 	DEBUG_KPRINT_SYSCALL_MASK(DEBUG_KPRINT_SYSCALL_MDEP_MASK,fmt,args)
 #define DEBUG_KPRINT_SYSCALL_IPC(fmt, args...)				\
 	DEBUG_KPRINT_SYSCALL_MASK(DEBUG_KPRINT_SYSCALL_IPC_MASK,fmt,args)
+
 
 #endif	/* KERNEL_PRIVATE */
 

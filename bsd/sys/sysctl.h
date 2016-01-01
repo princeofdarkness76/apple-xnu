@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -161,8 +183,11 @@ struct ctlname {
 #define CTLFLAG_MASKED	0x04000000	/* deprecated variable, do not display */
 #define CTLFLAG_NOAUTO	0x02000000	/* do not auto-register */
 #define CTLFLAG_KERN	0x01000000	/* valid inside the kernel */
+<<<<<<< HEAD
 #define CTLFLAG_LOCKED	0x00800000	/* node will handle locking itself */
 #define CTLFLAG_OID2	0x00400000	/* struct sysctl_oid has version info */
+=======
+>>>>>>> origin/10.2
 
 /*
  * USE THIS instead of a hardwired number from the categories below
@@ -268,6 +293,10 @@ int sysctl_handle_int SYSCTL_HANDLER_ARGS;
 int sysctl_handle_long SYSCTL_HANDLER_ARGS;
 int sysctl_handle_quad SYSCTL_HANDLER_ARGS;
 int sysctl_handle_int2quad SYSCTL_HANDLER_ARGS;
+<<<<<<< HEAD
+=======
+/*int sysctl_handle_intptr SYSCTL_HANDLER_ARGS; XXX not implemented */
+>>>>>>> origin/10.2
 int sysctl_handle_string SYSCTL_HANDLER_ARGS;
 int sysctl_handle_opaque SYSCTL_HANDLER_ARGS;
 /* new interface */
@@ -377,6 +406,16 @@ __END_DECLS
 	SYSCTL_OID(parent, nbr, name, CTLTYPE_QUAD|access, \
 		ptr, 0, sysctl_handle_quad, "Q", descr); \
 	typedef char _sysctl_##parent##_##name##_size_check[(__builtin_constant_p(ptr) || sizeof(*(ptr)) == sizeof(long long)) ? 0 : -1];
+
+/* Oid for a quad.  The pointer must be non NULL. */
+#define SYSCTL_QUAD(parent, nbr, name, access, ptr, descr) \
+	SYSCTL_OID(parent, nbr, name, CTLTYPE_QUAD|access, \
+		ptr, 0, sysctl_handle_quad, "Q", descr)
+
+/* Oid for a int returned as quad.  The pointer must be non NULL. */
+#define SYSCTL_INT2QUAD(parent, nbr, name, access, ptr, descr) \
+	SYSCTL_OID(parent, nbr, name, CTLTYPE_QUAD|access, \
+		ptr, 0, sysctl_handle_int2quad, "Q", descr)
 
 /* Oid for an opaque object.  Specified by a pointer and a length. */
 #define SYSCTL_OPAQUE(parent, nbr, name, access, ptr, len, fmt, descr) \
@@ -491,7 +530,11 @@ SYSCTL_DECL(_user);
 #define KERN_PROCARGS		38
                              /* 39 was KERN_PCSAMPLES... now deprecated */
 #define KERN_NETBOOT		40	/* int: are we netbooted? 1=yes,0=no */
+<<<<<<< HEAD
                              /* 41 was KERN_PANICINFO : panic UI information (deprecated) */
+=======
+#define	KERN_PANICINFO		41	/* node: panic UI information (deprecated) */
+>>>>>>> origin/10.8
 #define	KERN_SYSV		42	/* node: System V IPC information */
 #define KERN_AFFINITY		43	/* xxx */
 #define KERN_TRANSLATE	   	44	/* xxx */
@@ -507,6 +550,7 @@ SYSCTL_DECL(_user);
 #define KERN_COREFILE		50	/* string: corefile format string */
 #define KERN_COREDUMP		51	/* int: whether to coredump at all */
 #define	KERN_SUGID_COREDUMP	52	/* int: whether to dump SUGID cores */
+<<<<<<< HEAD
 #define	KERN_PROCDELAYTERM	53	/* int: set/reset current proc for delayed termination during shutdown */
 #define KERN_SHREG_PRIVATIZABLE	54	/* int: can shared regions be privatized ? */
                              /* 55 was KERN_PROC_LOW_PRI_IO... now deprecated */
@@ -553,6 +597,9 @@ SYSCTL_DECL(_user);
 /* KERN_OPENEVT types */
 #define KERN_OPENEVT_PROC     1
 #define KERN_UNOPENEVT_PROC   2
+=======
+#define	KERN_MAXID		53	/* number of valid kern ids */
+>>>>>>> origin/10.3
 
 /* KERN_TFP types */
 #define KERN_TFP_POLICY 		1
@@ -580,6 +627,7 @@ SYSCTL_DECL(_user);
 #define KERN_KDGETENTROPY       16		/* Obsolescent */
 #define KERN_KDWRITETR		17
 #define KERN_KDWRITEMAP		18
+<<<<<<< HEAD
 #define KERN_KDENABLE_BG_TRACE	19
 #define KERN_KDDISABLE_BG_TRACE	20
 #define KERN_KDREADCURTHRMAP	21
@@ -590,6 +638,15 @@ SYSCTL_DECL(_user);
 #define KERN_KDSET_BG_TYPEFILTER   26
 #define KERN_KDWRITEMAP_V3	27
 #define KERN_KDWRITETR_V3	28
+=======
+
+
+/* KERN_PANICINFO types (deprecated) */
+#define	KERN_PANICINFO_MAXSIZE	1	/* quad: panic UI image size limit */
+#define	KERN_PANICINFO_IMAGE	2	/* panic UI in 8-bit kraw format */
+#define KERN_PANICINFO_TEST 	4	/* Allow the panic UI to be tested by root without causing a panic */
+#define KERN_PANICINFO_NOROOT_TEST	5	/* Allow the noroot UI to be tested by root */
+>>>>>>> origin/10.7
 
 #define CTL_KERN_NAMES { \
 	{ 0, 0 }, \
@@ -633,7 +690,11 @@ SYSCTL_DECL(_user);
 	{ "procargs",CTLTYPE_STRUCT },\
         { "dummy", CTLTYPE_INT },		/* deprecated pcsamples */ \
 	{ "netboot", CTLTYPE_INT }, \
+<<<<<<< HEAD
 	{ "dummy", CTLTYPE_INT }, 		/* deprecated: panicinfo */ \
+=======
+	{ "panicinfo", CTLTYPE_NODE }, /* deprecated: panicinfo */	\
+>>>>>>> origin/10.8
 	{ "sysv", CTLTYPE_NODE }, \
 	{ "dummy", CTLTYPE_INT }, \
 	{ "dummy", CTLTYPE_INT }, \
@@ -644,6 +705,7 @@ SYSCTL_DECL(_user);
 	{ "procargs2",CTLTYPE_STRUCT }, \
 	{ "corefile",CTLTYPE_STRING }, \
 	{ "coredump", CTLTYPE_INT }, \
+<<<<<<< HEAD
 	{ "sugid_coredump", CTLTYPE_INT }, \
 	{ "delayterm", CTLTYPE_INT }, \
 	{ "shreg_private", CTLTYPE_INT }, \
@@ -664,6 +726,9 @@ SYSCTL_DECL(_user);
 	{ "tty", CTLTYPE_NODE },	\
 	{ "check_openevt", CTLTYPE_INT }, \
 	{ "thread_name", CTLTYPE_STRING } \
+=======
+	{ "sugid_coredump", CTLTYPE_INT } \
+>>>>>>> origin/10.3
 }
 
 /*
@@ -950,13 +1015,18 @@ struct user64_loadavg {
 }
 
 /*
+<<<<<<< HEAD
  * XXX This information should be moved to the man page.
  *
  * These are the support HW selectors for sysctlbyname.  Parameters that are byte counts or frequencies are 64 bit numbers.
+=======
+ * These are the support HW selectors for sysctlbyname.  Parameters that are byte count or frequencies are 64 bit numbers.
+>>>>>>> origin/10.2
  * All other parameters are 32 bit numbers.
  *
  *   hw.memsize                - The number of bytes of physical memory in the system.
  *
+<<<<<<< HEAD
  *   hw.ncpu                   - The maximum number of processors that could be available this boot.
  *                               Use this value for sizing of static per processor arrays; i.e. processor load statistics.
  *
@@ -970,6 +1040,15 @@ struct user64_loadavg {
  *   hw.logicalcpu             - The number of logical processors available in the current power management mode.
  *   hw.logicalcpu_max         - The maximum number of logical processors that could be available this boot
  *
+=======
+ *   hw.ncpu                   - The number maximum number of processor that could be available this boot.
+ *                               Use this value for sizing of static per processor arrays; i.e. processor load statistics.
+ *
+ *   hw.activecpu              - The number of cpus currently available for executing threads.
+ *                               Use this number to determine the number threads to create in SMP aware applications.
+ *                               This number can change when power management modes are changed.
+ *   
+>>>>>>> origin/10.2
  *   hw.tbfrequency            - This gives the time base frequency used by the OS and is the basis of all timing services.
  *                               In general is is better to use mach's or higher level timing services, but this value
  *                               is needed to convert the PPC Time Base registers to real time.
@@ -986,9 +1065,12 @@ struct user64_loadavg {
  *   hw.cpusubtype             - These values should be used to determine what processor family the running cpu is from so that
  *                               the best binary can be chosen, or the best dynamic code generated.  They should not be used
  *                               to determine if a given processor feature is available.
+<<<<<<< HEAD
  *   hw.cputhreadtype          - This value will be present if the processor supports threads.  Like hw.cpusubtype this selector
  *                               should not be used to infer features, and only used to name the processors thread architecture.
  *                               The values are defined in <mach/machine.h>
+=======
+>>>>>>> origin/10.2
  *
  *   hw.byteorder              - Gives the byte order of the processor.  4321 for big endian, 1234 for little.
  *
@@ -1003,6 +1085,7 @@ struct user64_loadavg {
  *   hw.l2cachesize            -
  *   hw.l3cachesize            -
  *
+<<<<<<< HEAD
  *   hw.packages               - Gives the number of processor packages.
  *
  * These are the selectors for optional processor features for specific processors.  Selectors that return errors are not support 
@@ -1010,6 +1093,12 @@ struct user64_loadavg {
  * performance.  Future versions of these selectors may return larger values as necessary so it is best to test for non zero.
  *
  * For PowerPC:
+=======
+ *
+ * These are the selectors for optional processor features.  Selectors that return errors are not support on the system.
+ * Supported features will return 1 if they are recommended or 0 if they are supported but are not expected to help performance.
+ * Future versions of these selectors may return larger values as necessary so it is best to test for non zero.
+>>>>>>> origin/10.2
  *
  *   hw.optional.floatingpoint - Floating Point Instructions
  *   hw.optional.altivec       - AltiVec Instructions
@@ -1021,6 +1110,7 @@ struct user64_loadavg {
  *   hw.optional.datastreams   - Data Streams Instructions
  *   hw.optional.dcbtstreams   - Data Cache Block Touch Steams Instruction Form
  *
+<<<<<<< HEAD
  * For x86 Architecture:
  * 
  *   hw.optional.floatingpoint     - Floating Point Instructions
@@ -1030,6 +1120,8 @@ struct user64_loadavg {
  *   hw.optional.sse3              - Streaming SIMD Extensions 3
  *   hw.optional.supplementalsse3  - Supplemental Streaming SIMD Extensions 3
  *   hw.optional.x86_64            - 64-bit support
+=======
+>>>>>>> origin/10.2
  */
 
 
@@ -1110,9 +1202,49 @@ extern char	osversion[];
 
 struct linker_set;
 
+<<<<<<< HEAD
 void	sysctl_register_set(const char *set);
 void	sysctl_unregister_set(const char *set);
 void	sysctl_mib_init(void);
+=======
+void	sysctl_register_set(struct linker_set *lsp);
+void	sysctl_unregister_set(struct linker_set *lsp);
+void	sysctl_mib_init(void);
+int	kernel_sysctl(struct proc *p, int *name, u_int namelen, void *old,
+		      size_t *oldlenp, void *newp, size_t newlen);
+int	userland_sysctl(struct proc *p, int *name, u_int namelen, void *old,
+			size_t *oldlenp, int inkernel, void *newp, size_t newlen,
+			size_t *retval);
+
+/*
+ * Sysctl handling within the kernel.
+ *
+ * May be called with either or no funnel held; will take and
+ * switch funnels as required.
+ */
+int	sysctlbyname __P((const char *, void *, size_t *, void *, size_t));
+
+/*
+ * Internal sysctl function calling convention:
+ *
+ *	(*sysctlfn)(name, namelen, oldval, oldlenp, newval, newlen);
+ *
+ * The name parameter points at the next component of the name to be
+ * interpreted.  The namelen parameter is the number of integers in
+ * the name.
+ */
+typedef int (sysctlfn)
+    __P((int *, u_int, void *, size_t *, void *, size_t, struct proc *));
+
+int sysctl_int __P((void *, size_t *, void *, size_t, int *));
+int sysctl_rdint __P((void *, size_t *, void *, int));
+int sysctl_quad __P((void *, size_t *, void *, size_t, quad_t *));
+int sysctl_rdquad __P((void *, size_t *, void *, quad_t));
+int sysctl_string __P((void *, size_t *, void *, size_t, char *, int));
+int sysctl_rdstring __P((void *, size_t *, void *, char *));
+int sysctl_rdstruct __P((void *, size_t *, void *, void *, int));
+void fill_eproc __P((struct proc *, struct eproc *));
+>>>>>>> origin/10.2
 
 int sysctl_int(user_addr_t, size_t *, user_addr_t, size_t, int *);
 int sysctl_quad(user_addr_t, size_t *, user_addr_t, size_t, quad_t *);

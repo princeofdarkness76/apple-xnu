@@ -37,6 +37,7 @@
 #include <kern/mach_param.h> /* for TASK_CHUNK */
 #include <kern/task.h>
 #include <kern/zalloc.h>
+#include <kern/sfi.h>
 
 #include <libkern/OSAtomic.h>
 
@@ -248,6 +249,7 @@ struct coalition {
 	};
 };
 
+<<<<<<< HEAD
 /*
  * register different coalition types:
  * these must be kept in the order specified in coalition.h
@@ -276,6 +278,16 @@ s_coalition_types[COALITION_NUM_TYPES] = {
 		i_coal_jetsam_get_taskrole,
 		i_coal_jetsam_iterate_tasks,
 	},
+=======
+	/* state of the coalition */
+	unsigned int termrequested : 1;		/* launchd has requested termination when coalition becomes empty */
+	unsigned int terminated : 1;		/* coalition became empty and spawns are now forbidden */
+	unsigned int reaped : 1;		/* reaped, invisible to userspace, but waiting for ref_count to go to zero */
+	unsigned int notified : 1;		/* no-more-processes notification was sent via special port */
+
+	uint32_t focal_tasks_count;     /* count of TASK_FOREGROUND_APPLICATION tasks in the coalition */
+	uint32_t non_focal_tasks_count; /* count of TASK_BACKGROUND_APPLICATION tasks in the coalition */
+>>>>>>> origin/10.10
 };
 
 #define coal_call(coal, func, ...) \
@@ -837,6 +849,7 @@ coalition_release(coalition_t coal)
 	zfree(coalition_zone, coal);
 }
 
+<<<<<<< HEAD
 /*
  * coalition_find_by_id_internal
  * Returns: Coalition object with specified id, NOT referenced.
@@ -849,6 +862,15 @@ coalition_find_by_id_internal(uint64_t coal_id)
 	if (coal_id == 0) {
 		return COALITION_NULL;
 	}
+=======
+	if (do_dealloc) {
+		assert(coal->termrequested);
+		assert(coal->terminated);
+		assert(coal->active_count == 0);
+		assert(coal->reaped);
+		assert(coal->focal_tasks_count == 0);
+		assert(coal->non_focal_tasks_count == 0);
+>>>>>>> origin/10.10
 
 	lck_mtx_assert(&coalitions_list_lock, LCK_MTX_ASSERT_OWNED);
 	coalition_t coal;
@@ -1522,6 +1544,7 @@ coalitions_init(void)
 	/* "Leak" our reference to the global object */
 }
 
+<<<<<<< HEAD
 /*
  * BSD Kernel interface functions
  *
@@ -1921,3 +1944,49 @@ unlock_coal:
 
 	return ntasks;
 }
+=======
+/* coalition focal tasks */
+uint32_t coalition_adjust_focal_task_count(coalition_t coal, int count)
+{
+	return hw_atomic_add(&coal->focal_tasks_count, count);
+}
+
+uint32_t coalition_focal_task_count(coalition_t coal)
+{
+	return coal->focal_tasks_count;
+}
+
+uint32_t coalition_adjust_non_focal_task_count(coalition_t coal, int count)
+{
+	return hw_atomic_add(&coal->non_focal_tasks_count, count);
+}
+
+uint32_t coalition_non_focal_task_count(coalition_t coal)
+{
+	return coal->non_focal_tasks_count;
+}
+
+/* Call sfi_reevaluate() for every thread in the coalition */
+void coalition_sfi_reevaluate(coalition_t coal, task_t updated_task) {
+	task_t task;
+	thread_t thread;
+
+	coalition_lock(coal);
+
+	queue_iterate(&coal->tasks, task, task_t, coalition_tasks) {
+
+		/* Skip the task we're doing this on behalf of - it's already updated */
+		if (task == updated_task)
+			continue;
+
+		task_lock(task);
+
+		queue_iterate(&task->threads, thread, thread_t, task_threads) {
+				sfi_reevaluate(thread);
+		}
+		task_unlock(task);
+	}
+	coalition_unlock(coal);
+}
+
+>>>>>>> origin/10.10

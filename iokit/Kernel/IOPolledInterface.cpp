@@ -26,6 +26,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 
+<<<<<<< HEAD
 #include <sys/uio.h>
 #include <sys/conf.h>
 
@@ -39,6 +40,10 @@
 #include <IOKit/AppleKeyStoreInterface.h>
 #include "IOKitKernelInternal.h"
 
+=======
+#include <IOKit/IOService.h>
+#include <IOKit/IOPolledInterface.h>
+>>>>>>> origin/10.6
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
@@ -61,6 +66,7 @@ OSMetaClassDefineReservedUnused(IOPolledInterface, 13);
 OSMetaClassDefineReservedUnused(IOPolledInterface, 14);
 OSMetaClassDefineReservedUnused(IOPolledInterface, 15);
 
+<<<<<<< HEAD
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
 #ifndef kIOMediaPreferredBlockSizeKey
@@ -987,3 +993,15 @@ if (vars->position & (vars->blockSize - 1)) HIBLOG("misaligned file pos %qx\n", 
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
+=======
+#if !HIBERNATION
+/* KPI stub if hibernate is configured off */
+IOReturn
+IOPolledInterface::checkAllForWork(void)
+{
+  IOReturn	err = kIOReturnNotReady;
+
+  return err;
+}
+#endif /* !HIBERNATION */
+>>>>>>> origin/10.6

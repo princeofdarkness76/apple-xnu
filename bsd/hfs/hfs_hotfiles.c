@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2003-2013 Apple Inc. All rights reserved.
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
@@ -17,11 +18,23 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -248,6 +261,7 @@ hfs_recording_start(struct hfsmount *hfsmp)
 		    (SWAP_BE32 (hotfileinfo.magic) == HFC_MAGIC) &&
 		    (SWAP_BE32 (hotfileinfo.timeleft) > 0) &&
 		    (SWAP_BE32 (hotfileinfo.timebase) > 0)) {
+<<<<<<< HEAD
 			if (hfsmp->hfs_flags & HFS_CS_HOTFILE_PIN) {
 				if (hfsmp->hfs_hotfile_freeblks == 0) {
 					hfsmp->hfs_hotfile_freeblks = hfsmp->hfs_hotfile_maxblks - SWAP_BE32 (hotfileinfo.usedblocks);
@@ -266,6 +280,11 @@ hfs_recording_start(struct hfsmount *hfsmp)
 				timeleft = HFC_DEFAULT_DURATION;
 			}
 			hfsmp->hfc_timeout = timeleft + tv.tv_sec ;
+=======
+			hfsmp->hfc_maxfiles = SWAP_BE32 (hotfileinfo.maxfilecnt);
+			hfsmp->hfc_timebase = SWAP_BE32 (hotfileinfo.timebase);
+			hfsmp->hfc_timeout = SWAP_BE32 (hotfileinfo.timeleft) + tv.tv_sec ;
+>>>>>>> origin/10.8
 			/* Fix up any bogus timebase values. */
 			if (hfsmp->hfc_timebase < HFC_MIN_BASE_TIME) {
 				hfsmp->hfc_timebase = hfsmp->hfc_timeout - HFC_DEFAULT_DURATION;
@@ -1912,6 +1931,7 @@ hfs_addhotfile_internal(struct vnode *vp)
 	if (hfsmp->hfc_stage != HFC_RECORDING)
 		return (0);
 
+<<<<<<< HEAD
 	/* 
 	 * Only regular files are eligible for hotfiles addition. 
 	 * 
@@ -1920,6 +1940,10 @@ hfs_addhotfile_internal(struct vnode *vp)
 	 * symlinks will now be relocated/evicted from the hotfiles region.
 	 */
 	if (!vnode_isreg(vp) || vnode_issystem(vp)) {
+=======
+	/* Only regular files are allowed for hotfile inclusion ; symlinks disallowed */
+	if ((!vnode_isreg(vp)) || vnode_issystem(vp)) {
+>>>>>>> origin/10.8
 		return (0);
 	}
 
@@ -2173,8 +2197,14 @@ hfs_hotfile_adjust_blocks(struct vnode *vp, int64_t num_blocks)
 
 	hfsmp = VTOHFS(vp);
 
+<<<<<<< HEAD
 	if (!(hfsmp->hfs_flags & HFS_CS_HOTFILE_PIN) || num_blocks == 0 || vp == NULL) {
 		return 0;
+=======
+	/* Only regular files can move out of hotfiles */
+	if ((!vnode_isreg(vp)) || vnode_issystem(vp)) {
+		return (0);
+>>>>>>> origin/10.8
 	}
 
 	//
@@ -2489,6 +2519,7 @@ hotfiles_adopt(struct hfsmount *hfsmp, vfs_context_t ctx)
 			break;
 		}
 
+<<<<<<< HEAD
 		//printf("hfs: examining hotfile entry w/fileid %d, temp %d, blocks %d (HotFileCached: %s)\n",
 		//       listp->hfl_hotfile[i].hf_fileid, listp->hfl_hotfile[i].hf_temperature,
 		//       listp->hfl_hotfile[i].hf_blocks,
@@ -2497,6 +2528,11 @@ hotfiles_adopt(struct hfsmount *hfsmp, vfs_context_t ctx)
 		if (!vnode_isreg(vp)) {
 			/* Symlinks are ineligible for adoption into the hotfile zone.  */
 			//printf("hfs: hotfiles_adopt: huh, not a file %d (%d)\n", listp->hfl_hotfile[i].hf_fileid, VTOC(vp)->c_cnid);
+=======
+		/* only regular files are eligible */
+		if (!vnode_isreg(vp)) { 
+			printf("hfs: hotfiles_adopt: huh, not a file %d (%d)\n", listp->hfl_hotfile[i].hf_fileid, VTOC(vp)->c_cnid);
+>>>>>>> origin/10.8
 			hfs_unlock(VTOC(vp));
 			vnode_put(vp);
 			listp->hfl_hotfile[i].hf_temperature = 0;
@@ -2890,12 +2926,18 @@ hotfiles_evict(struct hfsmount *hfsmp, vfs_context_t ctx)
 			break;
 		}
 
+<<<<<<< HEAD
 		/* 
 		 * Symlinks that may have been inserted into the hotfile zone during a previous OS are now stuck 
 		 * here.  We do not want to move them. 
 		 */
 		if (!vnode_isreg(vp)) {
 			//printf("hfs: hotfiles_evict: huh, not a file %d\n", key->fileID);
+=======
+		/* only regular files are eligible */
+		if (!vnode_isreg(vp)) {
+			printf("hfs: hotfiles_evict: huh, not a file %d\n", key->fileID);
+>>>>>>> origin/10.8
 			hfs_unlock(VTOC(vp));
 			vnode_put(vp);
 			goto delete;  /* invalid entry, go to next */

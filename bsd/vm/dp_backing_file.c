@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -42,6 +68,7 @@
 #include <sys/vnode_internal.h>
 #include <sys/namei.h>
 #include <sys/ubc_internal.h>
+#include <sys/mount_internal.h>
 #include <sys/malloc.h>
 #include <sys/user.h>
 #if CONFIG_PROTECT
@@ -52,6 +79,9 @@
 #include <default_pager/default_pager_object.h>
 
 #include <security/audit/audit.h>
+#include <bsm/audit_kevents.h>
+
+#include <bsm/audit_kernel.h>
 #include <bsm/audit_kevents.h>
 
 #include <mach/mach_types.h>
@@ -244,6 +274,7 @@ macx_triggers(
 
 extern boolean_t dp_isssd;
 
+<<<<<<< HEAD
 /*
  * In the compressed pager world, the swapfiles are created by the kernel.
  * Well, all except the first one. That swapfile is absorbed by the kernel at
@@ -269,6 +300,8 @@ extern boolean_t dp_isssd;
  */
 boolean_t	macx_swapon_allowed = TRUE;
 
+=======
+>>>>>>> origin/10.6
 /*
  *	Routine:	macx_swapon
  *	Function:
@@ -290,6 +323,10 @@ macx_swapon(
 	vfs_context_t		ctx = vfs_context_current();
 	struct proc		*p =  current_proc();
 	int			dp_cluster_size;
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.6
 
 	AUDIT_MACH_SYSCALL_ENTER(AUE_SWAPON);
 	AUDIT_ARG(value32, args->priority);
@@ -307,6 +344,13 @@ macx_swapon(
 		}
 	}
 
+<<<<<<< HEAD
+=======
+	AUDIT_MACH_SYSCALL_ENTER(AUE_SWAPON);
+	AUDIT_ARG(value, priority);
+
+	funnel_state = thread_funnel_set(kernel_flock, TRUE);
+>>>>>>> origin/10.3
 	ndp = &nd;
 
 	if ((error = suser(kauth_cred_get(), 0)))
@@ -315,9 +359,14 @@ macx_swapon(
 	/*
 	 * Get a vnode for the paging area.
 	 */
+<<<<<<< HEAD
 	NDINIT(ndp, LOOKUP, OP_LOOKUP, FOLLOW | LOCKLEAF | AUDITVNPATH1,
 	       ((IS_64BIT_PROCESS(p)) ? UIO_USERSPACE64 : UIO_USERSPACE32),
 	       (user_addr_t) args->filename, ctx);
+=======
+	NDINIT(ndp, LOOKUP, FOLLOW | LOCKLEAF | AUDITVNPATH1, UIO_USERSPACE,
+	    filename, p);
+>>>>>>> origin/10.3
 
 	if ((error = namei(ndp)))
 		goto swapon_bailout;
@@ -344,6 +393,7 @@ macx_swapon(
 	if ((file_size < (off_t)size) && ((error = vnode_setsize(vp, (off_t)size, 0, ctx)) != 0))
 		goto swapon_bailout;
 
+<<<<<<< HEAD
 #if CONFIG_PROTECT
 	{
 		/* initialize content protection keys manually */
@@ -354,6 +404,8 @@ macx_swapon(
 #endif
 
 
+=======
+>>>>>>> origin/10.6
 	if (default_pager_init_flag == 0) {
 		start_def_pager(NULL);
 		default_pager_init_flag = 1;
@@ -386,17 +438,29 @@ macx_swapon(
 	   goto swapon_bailout;
 	}
 
+<<<<<<< HEAD
 	if ((dp_isssd = vnode_pager_isSSD(vp)) == TRUE) {
+=======
+	if (vp->v_mount->mnt_kern_flag & MNTK_SSD) {
+>>>>>>> origin/10.6
 		/*
 		 * keep the cluster size small since the
 		 * seek cost is effectively 0 which means
 		 * we don't care much about fragmentation
 		 */
+<<<<<<< HEAD
+=======
+		dp_isssd = TRUE;
+>>>>>>> origin/10.6
 		dp_cluster_size = 2 * PAGE_SIZE;
 	} else {
 		/*
 		 * use the default cluster size
 		 */
+<<<<<<< HEAD
+=======
+		dp_isssd = FALSE;
+>>>>>>> origin/10.6
 		dp_cluster_size = 0;
 	}
 	kr = default_pager_backing_store_create(default_pager, 
@@ -455,6 +519,7 @@ swapon_bailout:
 	if (vp) {
 		vnode_put(vp);
 	}
+<<<<<<< HEAD
 	lck_mtx_unlock(macx_lock);
 	AUDIT_MACH_SYSCALL_EXIT(error);
 
@@ -463,6 +528,10 @@ swapon_bailout:
 	else
 		printf("macx_swapon SUCCESS\n");
 
+=======
+	(void) thread_funnel_set(kernel_flock, FALSE);
+	AUDIT_MACH_SYSCALL_EXIT(error);
+>>>>>>> origin/10.3
 	return(error);
 }
 
@@ -488,9 +557,13 @@ macx_swapoff(
 	int			orig_iopol_disk;
 
 	AUDIT_MACH_SYSCALL_ENTER(AUE_SWAPOFF);
+<<<<<<< HEAD
 
 	lck_mtx_lock(macx_lock);
 	
+=======
+	funnel_state = thread_funnel_set(kernel_flock, TRUE);
+>>>>>>> origin/10.3
 	backing_store = NULL;
 	ndp = &nd;
 
@@ -500,9 +573,14 @@ macx_swapoff(
 	/*
 	 * Get the vnode for the paging area.
 	 */
+<<<<<<< HEAD
 	NDINIT(ndp, LOOKUP, OP_LOOKUP, FOLLOW | LOCKLEAF | AUDITVNPATH1,
 	       ((IS_64BIT_PROCESS(p)) ? UIO_USERSPACE64 : UIO_USERSPACE32),
 	       (user_addr_t) args->filename, ctx);
+=======
+	NDINIT(ndp, LOOKUP, FOLLOW | LOCKLEAF | AUDITVNPATH1, UIO_USERSPACE,
+	    filename, p);
+>>>>>>> origin/10.3
 
 	if ((error = namei(ndp)))
 		goto swapoff_bailout;
@@ -576,6 +654,11 @@ swapoff_bailout:
 	else
 		printf("macx_swapoff SUCCESS\n");
 
+<<<<<<< HEAD
+=======
+	(void) thread_funnel_set(kernel_flock, FALSE);
+	AUDIT_MACH_SYSCALL_EXIT(error);
+>>>>>>> origin/10.3
 	return(error);
 }
 

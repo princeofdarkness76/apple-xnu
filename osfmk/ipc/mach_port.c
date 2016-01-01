@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -1276,11 +1298,31 @@ mach_port_get_set_status(
 
 		names = (mach_port_name_t *) addr;
 		maxnames = (ipc_entry_num_t)(size / sizeof(mach_port_name_t));
+<<<<<<< HEAD
 
 		ipc_mqueue_set_gather_member_names(space, &pset->ips_messages, maxnames, names, &actual);
 
 		/* release the portset reference */
 		ips_release(pset);
+=======
+		actual = 0;
+
+		table = space->is_table;
+		tsize = space->is_table_size;
+
+		for (index = 0; index < tsize; index++) {
+			ipc_entry_t ientry = &table[index];
+			ipc_port_t port = (ipc_port_t) ientry->ie_object;
+
+			if (ientry->ie_bits & MACH_PORT_TYPE_RECEIVE &&
+			    port->ip_pset_count > 0) {
+				mach_port_gst_helper(pset, port,
+						     maxnames, names, &actual);
+			}
+		}
+
+		is_read_unlock(space);
+>>>>>>> origin/10.8
 
 		if (actual <= maxnames)
 			break;

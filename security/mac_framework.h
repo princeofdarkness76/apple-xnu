@@ -173,10 +173,16 @@ void	mac_cred_label_free(struct label *label);
 void	mac_cred_label_init(kauth_cred_t cred);
 int	mac_cred_label_compare(struct label *a, struct label *b);
 void	mac_cred_label_update(kauth_cred_t cred, struct label *newlabel);
+<<<<<<< HEAD
 void	mac_cred_label_update_execve(vfs_context_t ctx, kauth_cred_t newcred,
 	    struct vnode *vp, off_t offset, struct vnode *scriptvp,
 	    struct label *scriptvnodelabel, struct label *execlabel, u_int *csflags,
 	    void *macextensions, int *disjoint, int *labelupdateerror);
+=======
+int	mac_cred_label_update_execve(vfs_context_t ctx, kauth_cred_t newcred,
+	    struct vnode *vp, struct label *scriptvnodelabel,
+	    struct label *execlabel);
+>>>>>>> origin/10.5
 void	mac_devfs_label_associate_device(dev_t dev, struct devnode *de,
 	    const char *fullpath);
 void	mac_devfs_label_associate_directory(const char *dirname, int dirnamelen,
@@ -342,9 +348,13 @@ int	mac_proc_check_getaudit(proc_t proc);
 int	mac_proc_check_getauid(proc_t proc);
 int     mac_proc_check_getlcid(proc_t proc1, proc_t proc2,
 	    pid_t pid);
+<<<<<<< HEAD
 int     mac_proc_check_ledger(proc_t curp, proc_t target, int op);
 int	mac_proc_check_map_anon(proc_t proc, user_addr_t u_addr,
 	    user_size_t u_size, int prot, int flags, int *maxprot);
+=======
+int	mac_proc_check_map_prot_copy_allow(proc_t proc);
+>>>>>>> origin/10.5
 int	mac_proc_check_mprotect(proc_t proc,
 	    user_addr_t addr, user_size_t size, int prot);
 int	mac_proc_check_run_cs_invalid(proc_t proc);
@@ -469,10 +479,18 @@ int	mac_vnode_check_exchangedata(vfs_context_t ctx, struct vnode *v1,
 	    struct vnode *v2);
 int	mac_vnode_check_exec(vfs_context_t ctx, struct vnode *vp,
 	    struct image_params *imgp);
+<<<<<<< HEAD
 int	mac_vnode_check_fsgetpath(vfs_context_t ctx, struct vnode *vp);
 int	mac_vnode_check_signature(struct vnode *vp, off_t macho_offset,
 	    unsigned char *sha1, const void * signature, size_t size, 
 	    int flags, int *is_platform_binary);
+<<<<<<< HEAD
+=======
+int	mac_vnode_check_signature(struct vnode *vp, unsigned char *sha1,
+	    void * signature, size_t size);
+>>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.10
 int     mac_vnode_check_getattrlist(vfs_context_t ctx, struct vnode *vp,
 	    struct attrlist *alist);
 int	mac_vnode_check_getextattr(vfs_context_t ctx, struct vnode *vp,
@@ -551,9 +569,12 @@ int	mac_vnode_notify_create(vfs_context_t ctx, struct mount *mp,
 void	mac_vnode_notify_rename(vfs_context_t ctx, struct vnode *vp,
 	    struct vnode *dvp, struct componentname *cnp);
 void	mac_vnode_notify_open(vfs_context_t ctx, struct vnode *vp, int acc_flags);
+<<<<<<< HEAD
 void	mac_vnode_notify_link(vfs_context_t ctx, struct vnode *vp,
 			      struct vnode *dvp, struct componentname *cnp);
 int	mac_vnode_find_sigs(struct proc *p, struct vnode *vp, off_t offsetInMacho);
+=======
+>>>>>>> origin/10.8
 int	vnode_label(struct mount *mp, struct vnode *dvp, struct vnode *vp,
 	    struct componentname *cnp, int flags, vfs_context_t ctx);
 void	vnode_relabel(struct vnode *vp);

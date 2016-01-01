@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -171,8 +193,38 @@ memory_object_lock_page(
             m, should_return, should_flush, prot, 0);
 
 
+<<<<<<< HEAD
 	if (m->busy || m->cleaning)
 		return (MEMORY_OBJECT_LOCK_RESULT_MUST_BLOCK);
+=======
+	if (m->busy || m->cleaning) {
+		if (m->list_req_pending && (m->pageout || m->cleaning) &&
+		    should_return == MEMORY_OBJECT_RETURN_NONE &&
+		    should_flush == TRUE) {
+			/*
+			 * if pageout is set, page was earmarked by vm_pageout_scan
+			 * to be cleaned and stolen... if cleaning is set, we're
+			 * pre-cleaning pages for a hibernate...
+			 * in either case, we're going
+			 * to take it back since we are being asked to
+			 * flush the page w/o cleaning it (i.e. we don't
+			 * care that it's dirty, we want it gone from
+			 * the cache) and we don't want to stall
+			 * waiting for it to be cleaned for 2 reasons...
+			 * 1 - no use paging it out since we're probably
+			 *     shrinking the file at this point or we no
+			 *     longer care about the data in the page
+			 * 2 - if we stall, we may casue a deadlock in
+			 *     the FS trying to acquire its locks
+			 *     on the VNOP_PAGEOUT path presuming that
+			 *     those locks are already held on the truncate
+			 *     path before calling through to this function
+			 *
+			 * so undo all of the state that vm_pageout_scan
+			 * hung on this page
+			 */
+			m->busy = FALSE;
+>>>>>>> origin/10.6
 
 	if (m->laundry)
 		vm_pageout_steal_laundry(m, FALSE);
@@ -604,6 +656,7 @@ vm_object_update_extent(
 			}
 		}
 		while ((m = vm_page_lookup(object, offset)) != VM_PAGE_NULL) {
+<<<<<<< HEAD
 
 			dwp->dw_mask = 0;
 		        
@@ -684,6 +737,98 @@ vm_object_update_extent(
 					dwp = &dw_array[0];
 					dw_count = 0;
 				}
+=======
+		        page_lock_result = memory_object_lock_page(m, should_return, should_flush, prot);
+
+			XPR(XPR_MEMORY_OBJECT,
+			    "m_o_update: lock_page, obj 0x%X offset 0x%X result %d\n",
+			    (integer_t)object, offset, page_lock_result, 0, 0);
+
+			switch (page_lock_result)
+			{
+			  case MEMORY_OBJECT_LOCK_RESULT_DONE:
+			    /*
+			     *	End of a cluster of dirty pages.
+			     */
+			    if (data_cnt) {
+			            LIST_REQ_PAGEOUT_PAGES(object, 
+							   data_cnt, pageout_action, 
+							   paging_offset, offset_resid, io_errno, should_iosync);
+				    data_cnt = 0;
+				    continue;
+			    }
+			    break;
+
+			  case MEMORY_OBJECT_LOCK_RESULT_MUST_BLOCK:
+			    /*
+			     *	Since it is necessary to block,
+			     *	clean any dirty pages now.
+			     */
+			    if (data_cnt) {
+			            LIST_REQ_PAGEOUT_PAGES(object,
+							   data_cnt, pageout_action, 
+							   paging_offset, offset_resid, io_errno, should_iosync);
+				    data_cnt = 0;
+				    continue;
+			    }
+			    PAGE_SLEEP(object, m, THREAD_UNINT);
+			    continue;
+
+			  case MEMORY_OBJECT_LOCK_RESULT_MUST_CLEAN:
+			  case MEMORY_OBJECT_LOCK_RESULT_MUST_RETURN:
+			    /*
+			     * The clean and return cases are similar.
+			     *
+			     * if this would form a discontiguous block,
+			     * clean the old pages and start anew.
+			     *
+			     * Mark the page busy since we will unlock the
+			     * object if we issue the LIST_REQ_PAGEOUT
+			     */
+			    m->busy = TRUE;
+			    if (data_cnt && 
+				((last_offset != offset) || (pageout_action != page_lock_result))) {
+			            LIST_REQ_PAGEOUT_PAGES(object, 
+							   data_cnt, pageout_action, 
+							   paging_offset, offset_resid, io_errno, should_iosync);
+				    data_cnt = 0;
+			    }
+			    m->busy = FALSE;
+
+			    if (m->cleaning) {
+			            PAGE_SLEEP(object, m, THREAD_UNINT);
+				    continue;
+			    }
+			    if (data_cnt == 0) {
+			            pageout_action = page_lock_result;
+				    paging_offset = offset;
+			    }
+			    data_cnt += PAGE_SIZE;
+			    last_offset = offset + PAGE_SIZE_64;
+
+			    vm_page_lockspin_queues();
+			    /*
+			     * Clean
+			     */
+			    m->list_req_pending = TRUE;
+			    m->cleaning = TRUE;
+
+			    if (should_flush &&
+				/* let's no flush a wired page... */
+				!m->wire_count) {
+			            /*
+				     * and add additional state
+				     * for the flush
+				     */
+				    m->busy = TRUE;
+				    m->pageout = TRUE;
+				    vm_page_wire(m);
+			    }
+			    vm_page_unlock_queues();
+
+			    retval = 1;
+			    break;
+>>>>>>> origin/10.5
 			}
 			break;
 		}
@@ -852,10 +997,14 @@ vm_object_update(
 		fault_info.hi_offset = copy_size;
 		fault_info.no_cache   = FALSE;
 		fault_info.stealth = TRUE;
+<<<<<<< HEAD
 		fault_info.io_sync = FALSE;
 		fault_info.cs_bypass = FALSE;
 		fault_info.mark_zf_absent = FALSE;
 		fault_info.batch_pmap_op = FALSE;
+=======
+		fault_info.mark_zf_absent = FALSE;
+>>>>>>> origin/10.6
 
 		vm_object_paging_begin(copy_object);
 
@@ -2065,7 +2214,10 @@ memory_object_control_bootstrap(void)
 
 	i = (vm_size_t) sizeof (struct memory_object_control);
 	mem_obj_control_zone = zinit (i, 8192*i, 4096, "mem_obj_control");
+<<<<<<< HEAD
 	zone_change(mem_obj_control_zone, Z_CALLERACCT, FALSE);
+=======
+>>>>>>> origin/10.6
 	zone_change(mem_obj_control_zone, Z_NOENCRYPT, TRUE);
 	return;
 }

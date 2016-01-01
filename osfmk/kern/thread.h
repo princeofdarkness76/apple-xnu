@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -144,7 +166,19 @@ struct thread {
 	queue_chain_t	links;				/* run/wait queue links */
 	processor_t		runq;				/* run queue assignment */
 	event64_t		wait_event;			/* wait queue event */
+<<<<<<< HEAD
 	struct waitq	*waitq;
+=======
+	integer_t		options;			/* options set by thread itself */
+#define TH_OPT_INTMASK		0x03		/* interrupt / abort level */
+#define TH_OPT_VMPRIV		0x04		/* may allocate reserved memory */
+#define TH_OPT_DTRACE		0x08		/* executing under dtrace_probe */
+#define TH_OPT_SYSTEM_CRITICAL	0x10		/* Thread must always be allowed to run - even under heavy load */
+#define TH_OPT_PROC_CPULIMIT	0x20		/* Thread has a task-wide CPU limit applied to it */
+#define TH_OPT_PRVT_CPULIMIT	0x40		/* Thread has a thread-private CPU limit applied to it */
+#define TH_OPT_IDLE_THREAD		0x0080		/* Thread is a per-processor idle thread */
+
+>>>>>>> origin/10.8
 	/* Data updated during assert_wait/thread_wakeup */
 #if __SMP__
 	decl_simple_lock_data(,sched_lock)	/* scheduling lock (thread_lock()) */
@@ -185,12 +219,18 @@ struct thread {
 #define TH_SUSP			0x02			/* stopped or requested to stop */
 #define TH_RUN			0x04			/* running or on runq */
 #define TH_UNINT		0x08			/* waiting uninteruptibly */
+<<<<<<< HEAD
 #define TH_TERMINATE		0x10			/* halted at termination */
 #define TH_TERMINATE2		0x20			/* added to termination queue */
+=======
+#define	TH_TERMINATE	0x10			/* halted at termination */
+#define	TH_TERMINATE2	0x20			/* added to termination queue */
+>>>>>>> origin/10.6
 
 #define TH_IDLE			0x80			/* idling processor */
 
 	/* Scheduling information */
+<<<<<<< HEAD
 	sched_mode_t			sched_mode;		/* scheduling mode */
 	sched_mode_t			saved_mode;		/* saved mode during forced mode demotion */
 
@@ -233,6 +273,27 @@ struct thread {
 	int16_t				promotions;			/* level of promotion */
 	int16_t				pending_promoter_index;
 	uint32_t			ref_count;		/* number of references to me */
+=======
+	integer_t			sched_mode;			/* scheduling mode bits */
+#define TH_MODE_REALTIME		0x0001		/* time constraints supplied */
+#define TH_MODE_TIMESHARE		0x0002		/* use timesharing algorithm */
+#define TH_MODE_FAILSAFE		0x0004		/* fail-safe has tripped */
+#define	TH_MODE_PROMOTED		0x0008		/* sched pri has been promoted */
+#define TH_MODE_ABORT			0x0010		/* abort interruptible waits */
+#define TH_MODE_ABORTSAFELY		0x0020		/* ... but only those at safe point */
+#define TH_MODE_ISABORTED		(TH_MODE_ABORT | TH_MODE_ABORTSAFELY)
+#define	TH_MODE_DEPRESS			0x0040		/* normal depress yield */
+#define TH_MODE_POLLDEPRESS		0x0080		/* polled depress yield */
+#define TH_MODE_ISDEPRESSED		(TH_MODE_DEPRESS | TH_MODE_POLLDEPRESS)
+
+	integer_t			sched_pri;			/* scheduled (current) priority */
+	integer_t			priority;			/* base priority */
+	integer_t			max_priority;		/* max base priority */
+	integer_t			task_priority;		/* copy of task base priority */
+
+	integer_t			promotions;			/* level of promotion */
+	integer_t			pending_promoter_index;
+>>>>>>> origin/10.5
 	void				*pending_promoter[2];
 
 	uint32_t			rwlock_count;	/* Number of lck_rw_t locks held by thread */
@@ -421,6 +482,12 @@ struct thread {
 	        uint64_t    t_page_creation_throttled_soft;
 #endif /* DEVELOPMENT || DEBUG */
 
+	uint32_t    t_page_creation_throttled;
+#if (DEVELOPMENT || DEBUG)
+	uint64_t    t_page_creation_throttled_hard;
+	uint64_t    t_page_creation_throttled_soft;
+#endif /* DEVELOPMENT || DEBUG */
+
 #define T_CHUD_MARKED           0x01          /* this thread is marked by CHUD */
 #define T_IN_CHUD               0x02          /* this thread is already in a CHUD handler */
 #define THREAD_PMC_FLAG         0x04          /* Bit in "t_chud" signifying PMC interest */	
@@ -459,6 +526,7 @@ struct thread {
 	uint32_t		syscalls_mach;
 	ledger_t		t_ledger;
 	ledger_t		t_threadledger;	/* per thread ledger */
+<<<<<<< HEAD
 	uint64_t 		cpu_time_last_qos;
 #ifdef CONFIG_BANK
 	ledger_t		t_bankledger;  		   /* ledger to charge someone */
@@ -484,6 +552,16 @@ struct thread {
 	io_stat_info_t  		thread_io_stats; /* per-thread I/O statistics */
 
 
+=======
+	struct process_policy ext_appliedstate;	/* externally applied actions */
+	struct process_policy ext_policystate;	/* externally defined process policy states*/
+	struct process_policy appliedstate;		/* self applied acions */
+	struct process_policy policystate;		/* process wide policy states */
+#if CONFIG_EMBEDDED
+	task_watch_t *	taskwatch;		/* task watch */
+	integer_t		saved_importance;		/* saved task-relative importance */
+#endif /* CONFIG_EMBEDDED */
+>>>>>>> origin/10.8
 	uint32_t			thread_callout_interrupt_wakeups;
 	uint32_t			thread_callout_platform_idle_wakeups;
 	uint32_t			thread_timer_wakeups_bin_1;
@@ -491,6 +569,7 @@ struct thread {
 	uint16_t			thread_tag;
 	uint16_t			callout_woken_from_icontext:1,
 					callout_woken_from_platform_idle:1,
+<<<<<<< HEAD
 					callout_woke_thread:1,
 					thread_bitfield_unused:13;
 
@@ -505,6 +584,10 @@ struct thread {
 
 	/*** Machine-dependent state ***/
 	struct machine_thread   machine;
+=======
+					thread_bitfield_unused:14;
+
+>>>>>>> origin/10.8
 };
 
 #define ith_state		saved.receive.state
@@ -745,6 +828,13 @@ typedef struct {
 
 extern void thread_set_options(uint32_t thopt);
 
+static inline uint16_t thread_set_tag_internal(thread_t thread, uint16_t tag) {
+	return __sync_fetch_and_or(&thread->thread_tag, tag);
+}
+static inline uint16_t thread_get_tag_internal(thread_t thread) {
+	return thread->thread_tag;
+}
+
 #else	/* MACH_KERNEL_PRIVATE */
 
 __BEGIN_DECLS
@@ -795,6 +885,7 @@ __BEGIN_DECLS
 uint16_t	thread_set_tag(thread_t, uint16_t);
 uint16_t	thread_get_tag(thread_t);
 
+<<<<<<< HEAD
 /*
  * Allocate/assign a single work interval ID for a thread,
  * and support deallocating it.
@@ -807,6 +898,8 @@ extern kern_return_t			thread_policy_destroy_work_interval(
 	thread_t		thread,
 	uint64_t		work_interval_id);
 
+=======
+>>>>>>> origin/10.8
 extern kern_return_t    thread_state_initialize(
 							thread_t				thread);
 

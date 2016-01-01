@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2007 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -50,10 +76,12 @@
 #include <sys/kauth.h>
 #include <sys/sem_internal.h>
 #include <sys/malloc.h>
-#include <mach/mach_types.h>
-
 #include <sys/filedesc.h>
+<<<<<<< HEAD
 #include <sys/file_internal.h>
+=======
+#include <sys/file.h>
+>>>>>>> origin/10.3
 #include <sys/sysctl.h>
 #include <sys/ipcs.h>
 #include <sys/sysent.h>
@@ -62,7 +90,16 @@
 #include <security/mac_framework.h>
 #endif
 
+<<<<<<< HEAD
 #include <security/audit/audit.h>
+=======
+#include <bsm/audit_kernel.h>
+
+#include <mach/mach_types.h>
+
+/*#include <sys/sysproto.h>*/
+/*#include <sys/sysent.h>*/
+>>>>>>> origin/10.3
 
 #if SYSV_SEM
 
@@ -1102,14 +1139,25 @@ semop(struct proc *p, struct semop_args *uap, int32_t *retval)
 		goto semopout;
 	}
 
+<<<<<<< HEAD
+<<<<<<< HEAD
 	if (nsops < 0 || nsops > seminfo.semopm) {
+=======
+	if (nsops < 0 || nsops > MAX_SOPS) {
+>>>>>>> origin/10.3
 #ifdef SEM_DEBUG
 		printf("too many sops (max=%d, nsops=%d)\n",
 		    seminfo.semopm, nsops);
+=======
+	if (nsops < 0 || nsops > MAX_SOPS) {
+#ifdef SEM_DEBUG
+		printf("too many sops (max=%d, nsops=%d)\n", MAX_SOPS, nsops);
+>>>>>>> origin/10.5
 #endif
 		eval = E2BIG;
 		goto semopout;
 	}
+<<<<<<< HEAD
 	
 	/*  OK for LP64, since sizeof(struct sembuf) is currently invariant */
 	if ((eval = copyin(uap->sops, &sops, nsops * sizeof(struct sembuf))) != 0) {
@@ -1119,6 +1167,8 @@ semop(struct proc *p, struct semop_args *uap, int32_t *retval)
 #endif
 		goto semopout;
 	}
+=======
+>>>>>>> origin/10.5
 
 #if CONFIG_MACF
 	/*
@@ -1138,6 +1188,18 @@ semop(struct proc *p, struct semop_args *uap, int32_t *retval)
 		goto semopout;
 #endif
 
+<<<<<<< HEAD
+=======
+	/*  OK for LP64, since sizeof(struct sembuf) is currently invariant */
+	if ((eval = copyin(uap->sops, &sops, nsops * sizeof(struct sembuf))) != 0) {
+#ifdef SEM_DEBUG
+		printf("eval = %d from copyin(%08x, %08x, %ld)\n", eval,
+		    uap->sops, &sops, nsops * sizeof(struct sembuf));
+#endif
+		goto semopout;
+	}
+
+>>>>>>> origin/10.5
 	/*
 	 * Loop trying to satisfy the vector of requests.
 	 * If we reach a point where we must wait, any requests already

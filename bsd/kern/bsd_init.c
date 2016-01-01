@@ -7,6 +7,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -18,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  * 
@@ -99,7 +121,11 @@
 #include <sys/systm.h>
 #include <sys/mman.h>
 
+<<<<<<< HEAD
 #include <security/audit/audit.h>
+=======
+#include <bsm/audit_kernel.h>
+>>>>>>> origin/10.3
 
 #include <sys/malloc.h>
 #include <sys/dkstat.h>
@@ -199,12 +225,18 @@
 #include <pexpert/pexpert.h>
 #include <machine/pal_routines.h>
 #include <console/video_console.h>
+<<<<<<< HEAD
 =======
 
 extern shared_region_mapping_t       system_shared_region;
 >>>>>>> origin/10.1
 
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.7
 
+=======
+>>>>>>> origin/10.6
 void * get_user_regs(thread_t);		/* XXX kludge for <machine/thread.h> */
 void IOKitInitializeTime(void);		/* XXX */
 void IOSleep(unsigned int);		/* XXX */
@@ -257,10 +289,14 @@ struct	vnode *rootvp;
 int boothowto = RB_DEBUG;
 int minimalboot = 0;
 
+<<<<<<< HEAD
 #if PROC_REF_DEBUG
 __private_extern__ int proc_ref_tracking_disabled = 0; /* disable panics on leaked proc refs across syscall boundary */
 #endif
 
+=======
+void lightning_bolt(void *);
+>>>>>>> origin/10.5
 extern kern_return_t IOFindBSDRoot(char *, unsigned int, dev_t *, u_int32_t *);
 extern void IOSecureBSDRoot(const char * rootName);
 extern kern_return_t IOKitBSDInit(void );
@@ -311,6 +347,10 @@ void bsd_utaskbootstrap(void);
 static void parse_bsd_args(void);
 extern task_t bsd_init_task;
 extern boolean_t init_task_died;
+<<<<<<< HEAD
+=======
+extern char    init_task_failure_data[];
+>>>>>>> origin/10.10
 #if CONFIG_DEV_KMEM
 extern void dev_kmem_init(void);
 #endif
@@ -828,10 +868,14 @@ bsd_init(void)
 	 */
 	bsd_init_kprintf("calling sysctl_register_fixed\n");
 	sysctl_register_fixed(); 
+<<<<<<< HEAD
 	bsd_init_kprintf("calling sysctl_mib_init\n");
 	sysctl_mib_init();
 #if NETWORKING
 	bsd_init_kprintf("calling dlil_init\n");
+=======
+	sysctl_mib_init();
+>>>>>>> origin/10.2
 	dlil_init();
 	bsd_init_kprintf("calling proto_kpi_init\n");
 	proto_kpi_init();
@@ -850,6 +894,7 @@ bsd_init(void)
 	kernproc->p_fd->fd_cdir = NULL;
 	kernproc->p_fd->fd_rdir = NULL;
 
+<<<<<<< HEAD
 #if CONFIG_FREEZE
 #ifndef CONFIG_MEMORYSTATUS
     #error "CONFIG_FREEZE defined without matching CONFIG_MEMORYSTATUS"
@@ -870,6 +915,13 @@ bsd_init(void)
 
 	bsd_init_kprintf("calling acct_init\n");
 	acct_init();
+=======
+#if CONFIG_EMBEDDED
+	/* Initialize kernel memory status notifications */
+	bsd_init_kprintf("calling kern_memorystatus_init\n");
+	kern_memorystatus_init();
+#endif
+>>>>>>> origin/10.6
 
 #ifdef GPROF
 	/* Initialize kernel profiling. */
@@ -1072,7 +1124,10 @@ bsd_init(void)
 	consider_zone_gc(FALSE);
 #endif
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.6
 	bsd_init_kprintf("done\n");
 }
 
@@ -1098,6 +1153,10 @@ bsdinit_task(void)
 
 	bsd_init_task = get_threadtask(thread);
 	init_task_died = FALSE;
+<<<<<<< HEAD
+=======
+	init_task_failure_data[0] = 0;
+>>>>>>> origin/10.10
 
 #if CONFIG_MACF
 	mac_cred_label_associate_user(p->p_ucred);
@@ -1134,6 +1193,14 @@ setconf(void)
 	u_int32_t	flags;
 	kern_return_t	err;
 
+<<<<<<< HEAD
+=======
+	/*
+	 * calls into IOKit can generate networking registrations
+	 * which needs to be under network funnel. Right thing to do
+	 * here is to drop the funnel alltogether and regrab it afterwards
+	 */
+>>>>>>> origin/10.5
 	err = IOFindBSDRoot(rootdevice, sizeof(rootdevice), &rootdev, &flags);
 	if( err) {
 		printf("setconf: IOFindBSDRoot returned an error (%d);"
@@ -1194,7 +1261,11 @@ parse_bsd_args(void)
 	char namep[16];
 	int msgbuf;
 
+<<<<<<< HEAD
 	if ( PE_parse_boot_argn("-s", namep, sizeof (namep)))
+=======
+	if (PE_parse_boot_argn("-s", namep, sizeof (namep)))
+>>>>>>> origin/10.5
 		boothowto |= RB_SINGLE;
 
 	if (PE_parse_boot_argn("-b", namep, sizeof (namep)))
@@ -1203,6 +1274,7 @@ parse_bsd_args(void)
 	if (PE_parse_boot_argn("-x", namep, sizeof (namep))) /* safe boot */
 		boothowto |= RB_SAFEBOOT;
 
+<<<<<<< HEAD
 	if (PE_parse_boot_argn("-minimalboot", namep, sizeof(namep))) {
 		/*
 		 * -minimalboot indicates that we want userspace to be bootstrapped to a
@@ -1234,6 +1306,21 @@ parse_bsd_args(void)
 #endif
 #endif	/* CONFIG_MACF */
 
+=======
+	if (PE_parse_boot_argn("-l", namep, sizeof (namep))) /* leaks logging */
+		turn_on_log_leaks = 1;
+
+	PE_parse_boot_argn("srv", &srv, sizeof (srv));
+	PE_parse_boot_argn("ncl", &ncl, sizeof (ncl));
+	if (PE_parse_boot_argn("nbuf", &max_nbuf_headers, sizeof (max_nbuf_headers))) {
+		customnbuf = 1;
+	}
+#if !defined(SECURE_KERNEL)
+	PE_parse_boot_argn("kmem", &setup_kmem, sizeof (setup_kmem));
+#endif
+	PE_parse_boot_argn("trace", &new_nkdbufs, sizeof (new_nkdbufs));
+
+>>>>>>> origin/10.5
 	if (PE_parse_boot_argn("msgbuf", &msgbuf, sizeof (msgbuf))) {
 		log_setsize(msgbuf);
 	}

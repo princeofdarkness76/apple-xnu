@@ -1,6 +1,11 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +20,24 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +45,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /*
  * Copyright (c) 1982, 1989, 1993
@@ -111,8 +148,17 @@ extern void *kdp_get_interface(void);
 extern void kdp_set_ip_and_mac_addresses(struct in_addr *ipaddr,
     struct ether_addr *macaddr);
 
+<<<<<<< HEAD
 #define	_ip_copy(dst, src)	\
 	bcopy(src, dst, sizeof (struct in_addr))
+=======
+static __inline__ void
+_ip_copy(struct in_addr * dst, const struct in_addr * src)
+{
+	*dst = *src;
+	return;
+}
+>>>>>>> origin/10.5
 
 static void
 ether_inet_arp_input(struct ifnet *ifp, struct mbuf *m)
@@ -142,6 +188,7 @@ ether_inet_arp_input(struct ifnet *ifp, struct mbuf *m)
 		return;
 	}
 
+<<<<<<< HEAD
 	bzero(&sender_ip, sizeof (sender_ip));
 	sender_ip.sin_len = sizeof (sender_ip);
 	sender_ip.sin_family = AF_INET;
@@ -163,6 +210,9 @@ ether_inet_arp_input(struct ifnet *ifp, struct mbuf *m)
 	    &target_ip);
 	mbuf_freem(m);
 }
+=======
+extern void * kdp_get_interface();
+>>>>>>> origin/10.3
 
 /*
  * Process a received Ethernet packet;
@@ -285,6 +335,7 @@ static errno_t
 ether_inet_resolve_multi(ifnet_t ifp, const struct sockaddr *proto_addr,
     struct sockaddr_dl *out_ll, size_t ll_len)
 {
+<<<<<<< HEAD
 	static const size_t minsize =
 	    offsetof(struct sockaddr_dl, sdl_data[0]) + ETHER_ADDR_LEN;
 	const struct sockaddr_in *sin =
@@ -311,6 +362,43 @@ ether_inet_resolve_multi(ifnet_t ifp, const struct sockaddr *proto_addr,
 
 	return (0);
 }
+=======
+    struct rtentry  *rt0 = (struct rtentry *) route;
+    int s;
+    register struct mbuf *m = *m0;
+    register struct rtentry *rt;
+    register struct ether_header *eh;
+    int off, len = m->m_pkthdr.len;
+    int hlen;	/* link layer header length */
+    struct arpcom *ac = IFP2AC(ifp);
+
+
+
+    if ((ifp->if_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING)) 
+	return ENETDOWN;
+
+    rt = rt0;
+    if (rt) {
+	if ((rt->rt_flags & RTF_UP) == 0) {
+	    rt0 = rt = rtalloc1(dst_netaddr, 1, 0UL);
+	    if (rt0)
+		rtunref(rt);
+	    else
+		return EHOSTUNREACH;
+	}
+
+	if (rt->rt_flags & RTF_GATEWAY) {
+	    if (rt->rt_gwroute == 0)
+		goto lookup;
+	    if (((rt = rt->rt_gwroute)->rt_flags & RTF_UP) == 0) {
+		rtfree(rt); rt = rt0;
+	    lookup: rt->rt_gwroute = rtalloc1(rt->rt_gateway, 1,
+					      0UL);
+		if ((rt = rt->rt_gwroute) == 0)
+		    return (EHOSTUNREACH);
+	    }
+	}
+>>>>>>> origin/10.3
 
 static errno_t
 ether_inet_prmod_ioctl(ifnet_t ifp, protocol_family_t protocol_family,
@@ -434,6 +522,7 @@ ether_inet_arp(ifnet_t ifp, u_short arpop, const struct sockaddr_dl *sender_hw,
 	mbuf_setdata(m, datap, sizeof (*ea));
 	ea = mbuf_data(m);
 
+<<<<<<< HEAD
 	/*
 	 * Prepend the ethernet header, we will send the raw frame;
 	 * callee frees the original mbuf when allocation fails.
@@ -444,6 +533,17 @@ ether_inet_arp(ifnet_t ifp, u_short arpop, const struct sockaddr_dl *sender_hw,
 
 	eh = mbuf_data(m);
 	eh->ether_type = htons(ETHERTYPE_ARP);
+=======
+	    arp_ifinit(IFP2AC(ifp), ifa);
+	    /*
+	     * Register new IP and MAC addresses with the kernel debugger
+	     * if the interface is the same as was registered by IOKernelDebugger. If
+		 * no interface was registered, fall back and just match against en0 interface.
+	     */
+	    if ((kdp_get_interface() != 0 && kdp_get_interface() == ifp->if_private)
+		 || (kdp_get_interface() == 0 && ifp->if_unit == 0))
+		kdp_set_ip_and_mac_addresses(&(IA_SIN(ifa)->sin_addr), &(IFP2AC(ifp)->ac_enaddr));
+>>>>>>> origin/10.3
 
 #if CONFIG_MACF_NET
 	mac_mbuf_label_associate_linklayer(ifp, m);

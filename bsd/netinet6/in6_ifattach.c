@@ -1178,6 +1178,8 @@ in6_iid_mktmp(struct ifnet *ifp, u_int8_t *retbuf, const u_int8_t *baseid,
 	lck_mtx_unlock(&ndi->lock);
 }
 
+extern size_t nd_ifinfo_indexlim;
+extern int ip6_use_tempaddr;
 void
 in6_tmpaddrtimer(void *arg)
 {
@@ -1189,6 +1191,7 @@ in6_tmpaddrtimer(void *arg)
 	timeout(in6_tmpaddrtimer, (caddr_t)0, (ip6_temp_preferred_lifetime -
 	    ip6_desync_factor - ip6_temp_regen_advance) * hz);
 
+<<<<<<< HEAD
 	bzero(nullbuf, sizeof (nullbuf));
 	ifnet_head_lock_shared();
 	for (ifp = ifnet_head.tqh_first; ifp;
@@ -1205,8 +1208,30 @@ in6_tmpaddrtimer(void *arg)
 			 */
 			(void) in6_generate_tmp_iid(ndi->randomseed0,
 			    ndi->randomseed1, ndi->randomid);
+=======
+	if (ip6_use_tempaddr) {
+		
+		bzero(nullbuf, sizeof(nullbuf));
+		for (i = 1; i < nd_ifinfo_indexlim + 1; i++) {
+			ndi = &nd_ifinfo[i];
+			if (ndi->flags != ND6_IFF_PERFORMNUD)
+				continue;
+			if (bcmp(ndi->randomid, nullbuf, sizeof(nullbuf)) != 0) {
+				/*
+				 * We've been generating a random ID on this interface.
+				 * Create a new one.
+				 */
+				(void)generate_tmp_ifid(ndi->randomseed0,
+							ndi->randomseed1,
+							ndi->randomid);
+			}
+>>>>>>> origin/10.3
 		}
 		lck_mtx_unlock(&ndi->lock);
 	}
+<<<<<<< HEAD
 	ifnet_head_done();
+=======
+	splx(s);
+>>>>>>> origin/10.3
 }

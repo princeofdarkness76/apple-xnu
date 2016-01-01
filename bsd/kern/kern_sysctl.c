@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2011 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -101,12 +127,17 @@
 #include <sys/sysctl.h>
 #include <sys/user.h>
 #include <sys/aio_kern.h>
+<<<<<<< HEAD
 #include <sys/reboot.h>
 #include <sys/memory_maintenance.h>
 #include <sys/priv.h>
 
 #include <security/audit/audit.h>
 #include <kern/kalloc.h>
+=======
+
+#include <bsm/audit_kernel.h>
+>>>>>>> origin/10.3
 
 #include <mach/machine.h>
 #include <mach/mach_host.h>
@@ -128,8 +159,23 @@
 #include <IOKit/IOPlatformExpert.h>
 #include <pexpert/pexpert.h>
 
+<<<<<<< HEAD
 #include <machine/machine_routines.h>
 #include <machine/exec.h>
+=======
+#if __ppc__
+#include <ppc/machine_routines.h>
+#endif
+
+sysctlfn kern_sysctl;
+#ifdef DEBUG
+sysctlfn debug_sysctl;
+#endif
+extern sysctlfn vm_sysctl;
+extern sysctlfn vfs_sysctl;
+extern sysctlfn net_sysctl;
+extern sysctlfn cpu_sysctl;
+>>>>>>> origin/10.2
 
 #include <vm/vm_protos.h>
 #include <vm/vm_pageout.h>
@@ -318,6 +364,7 @@ fill_loadavg32(struct loadavg *la, struct user32_loadavg *la32)
 	la32->fscale	= (user32_long_t)la->fscale;
 }
 
+<<<<<<< HEAD
 /*
  * Attributes stored in the kernel.
  */
@@ -328,11 +375,45 @@ extern int sugid_coredump;
 #if COUNT_SYSCALLS
 extern int do_count_syscalls;
 #endif
+=======
+	AUDIT_ARG(ctlname, name, uap->namelen);
 
+	/* CTL_UNSPEC is used to get oid to AUTO_OID */
+	if (uap->new != NULL
+		&& ((name[0] == CTL_KERN
+				&& !(name[1] == KERN_IPC || name[1] == KERN_PANICINFO))
+			|| (name[0] == CTL_HW)
+			|| (name[0] == CTL_VM)
+			|| (name[0] == CTL_VFS))
+		&& (error = suser(p->p_ucred, &p->p_acflag)))
+		return (error);
+>>>>>>> origin/10.3
+
+<<<<<<< HEAD
 #ifdef INSECURE
 int securelevel = -1;
 #else
 int securelevel;
+=======
+	switch (name[0]) {
+	case CTL_KERN:
+		fn = kern_sysctl;
+		if ((name[1] != KERN_VNODE) && (name[1] != KERN_FILE) 
+			&& (name[1] != KERN_PROC))
+			dolock = 0;
+		break;
+	case CTL_VM:
+		fn = vm_sysctl;
+		break;
+                
+	case CTL_VFS:
+		fn = vfs_sysctl;
+		break;
+#ifdef DEBUG
+	case CTL_DEBUG:
+		fn = debug_sysctl;
+		break;
+>>>>>>> origin/10.2
 #endif
 
 STATIC int
@@ -438,7 +519,31 @@ out:
 	return error;
 }
 
+<<<<<<< HEAD
 SYSCTL_PROC(_kern, OID_AUTO, sched_stats, CTLFLAG_LOCKED, 0, 0, sysctl_sched_stats, "-", "");
+=======
+/*
+ * Attributes stored in the kernel.
+ */
+extern char hostname[MAXHOSTNAMELEN]; /* defined in bsd/kern/init_main.c */
+extern int hostnamelen;
+extern char domainname[MAXHOSTNAMELEN];
+extern int domainnamelen;
+extern char classichandler[32];
+extern long classichandler_fsid;
+extern long classichandler_fileid;
+__private_extern__ char corefilename[MAXPATHLEN+1];
+__private_extern__ do_coredump;
+__private_extern__ sugid_coredump;
+
+
+extern long hostid;
+#ifdef INSECURE
+int securelevel = -1;
+#else
+int securelevel;
+#endif
+>>>>>>> origin/10.3
 
 STATIC int
 sysctl_sched_stats_enable(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, __unused struct sysctl_req *req)
@@ -458,6 +563,7 @@ sysctl_sched_stats_enable(__unused struct sysctl_oid *oidp, __unused void *arg1,
 	return set_sched_stats_active(active);
 }
 
+<<<<<<< HEAD
 SYSCTL_PROC(_kern, OID_AUTO, sched_stats_enable, CTLFLAG_LOCKED | CTLFLAG_WR, 0, 0, sysctl_sched_stats_enable, "-", "");
 
 extern uint32_t sched_debug_flags;
@@ -524,11 +630,195 @@ sysctl_docountsyscalls SYSCTL_HANDLER_ARGS
 		}
 	}
 
+<<<<<<< HEAD
 	/* adjust index so we return the right required/consumed amount */
 	if (!error)
 		req->oldidx += req->oldlen;
 
 	return (error);
+=======
+/*
+ * kernel related system variables.
+ */
+int
+kern_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
+	int *name;
+	u_int namelen;
+	void *oldp;
+	size_t *oldlenp;
+	void *newp;
+	size_t newlen;
+	struct proc *p;
+{
+	int error, level, inthostid, tmp;
+	unsigned int oldval=0;
+	char *str;
+	extern char ostype[], osrelease[], version[];
+	extern int netboot_root();
+
+	/* all sysctl names not listed below are terminal at this level */
+	if (namelen != 1
+		&& !(name[0] == KERN_PROC
+			|| name[0] == KERN_PROF 
+			|| name[0] == KERN_KDEBUG
+#if !CONFIG_EMBEDDED
+			|| name[0] == KERN_PROCARGS
+#endif
+			|| name[0] == KERN_PROCARGS2
+			|| name[0] == KERN_PCSAMPLES
+			|| name[0] == KERN_IPC
+			|| name[0] == KERN_SYSV
+			|| name[0] == KERN_AFFINITY
+			|| name[0] == KERN_CLASSIC
+			|| name[0] == KERN_PANICINFO)
+		)
+		return (ENOTDIR);		/* overloaded */
+
+	switch (name[0]) {
+	case KERN_OSTYPE:
+		return (sysctl_rdstring(oldp, oldlenp, newp, ostype));
+	case KERN_OSRELEASE:
+		return (sysctl_rdstring(oldp, oldlenp, newp, osrelease));
+	case KERN_OSREV:
+		return (sysctl_rdint(oldp, oldlenp, newp, BSD));
+	case KERN_VERSION:
+		return (sysctl_rdstring(oldp, oldlenp, newp, version));
+	case KERN_MAXVNODES:
+		oldval = desiredvnodes;
+		error = sysctl_int(oldp, oldlenp, newp, 
+				newlen, &desiredvnodes);
+		reset_vmobjectcache(oldval, desiredvnodes);
+		resize_namecache(desiredvnodes);
+		return(error);
+	case KERN_MAXPROC:
+		return (sysctl_maxproc(oldp, oldlenp, newp, newlen));
+	case KERN_MAXFILES:
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &maxfiles));
+	case KERN_MAXPROCPERUID:
+		return( sysctl_maxprocperuid( oldp, oldlenp, newp, newlen ) );
+	case KERN_MAXFILESPERPROC:
+		return( sysctl_maxfilesperproc( oldp, oldlenp, newp, newlen ) );
+	case KERN_ARGMAX:
+		return (sysctl_rdint(oldp, oldlenp, newp, ARG_MAX));
+	case KERN_SECURELVL:
+		level = securelevel;
+		if ((error = sysctl_int(oldp, oldlenp, newp, newlen, &level)) ||
+		    newp == NULL)
+			return (error);
+		if (level < securelevel && p->p_pid != 1)
+			return (EPERM);
+		securelevel = level;
+		return (0);
+	case KERN_HOSTNAME:
+		error = sysctl_string(oldp, oldlenp, newp, newlen,
+		    hostname, sizeof(hostname));
+		if (newp && !error)
+			hostnamelen = newlen;
+		return (error);
+	case KERN_DOMAINNAME:
+		error = sysctl_string(oldp, oldlenp, newp, newlen,
+		    domainname, sizeof(domainname));
+		if (newp && !error)
+			domainnamelen = newlen;
+		return (error);
+	case KERN_HOSTID:
+		inthostid = hostid;  /* XXX assumes sizeof long <= sizeof int */
+		error =  sysctl_int(oldp, oldlenp, newp, newlen, &inthostid);
+		hostid = inthostid;
+		return (error);
+	case KERN_CLOCKRATE:
+		return (sysctl_clockrate(oldp, oldlenp));
+	case KERN_BOOTTIME:
+		return (sysctl_rdstruct(oldp, oldlenp, newp, &boottime,
+		    sizeof(struct timeval)));
+	case KERN_VNODE:
+		return (sysctl_vnode(oldp, oldlenp));
+	case KERN_PROC:
+		return (sysctl_doproc(name + 1, namelen - 1, oldp, oldlenp));
+	case KERN_FILE:
+		return (sysctl_file(oldp, oldlenp));
+#ifdef GPROF
+	case KERN_PROF:
+		return (sysctl_doprof(name + 1, namelen - 1, oldp, oldlenp,
+		    newp, newlen));
+#endif
+	case KERN_POSIX1:
+		return (sysctl_rdint(oldp, oldlenp, newp, _POSIX_VERSION));
+	case KERN_NGROUPS:
+		return (sysctl_rdint(oldp, oldlenp, newp, NGROUPS_MAX));
+	case KERN_JOB_CONTROL:
+		return (sysctl_rdint(oldp, oldlenp, newp, 1));
+	case KERN_SAVED_IDS:
+#ifdef _POSIX_SAVED_IDS
+		return (sysctl_rdint(oldp, oldlenp, newp, 1));
+#else
+		return (sysctl_rdint(oldp, oldlenp, newp, 0));
+#endif
+	case KERN_KDEBUG:
+		return (kdebug_ops(name + 1, namelen - 1, oldp, oldlenp, p));
+<<<<<<< HEAD
+	case KERN_PCSAMPLES:
+		return (pcsamples_ops(name + 1, namelen - 1, oldp, oldlenp, p));
+=======
+#if !CONFIG_EMBEDDED
+>>>>>>> origin/10.5
+	case KERN_PROCARGS:
+		/* new one as it does not use kinfo_proc */
+		return (sysctl_procargs(name + 1, namelen - 1, oldp, oldlenp, p));
+#endif
+	case KERN_PROCARGS2:
+		/* new one as it does not use kinfo_proc */
+		return (sysctl_procargs2(name + 1, namelen - 1, oldp, oldlenp, p));
+	case KERN_SYMFILE:
+		error = get_kernel_symfile( p, &str );
+		if ( error )
+			return error;
+		return (sysctl_rdstring(oldp, oldlenp, newp, str));
+	case KERN_NETBOOT:
+		return (sysctl_rdint(oldp, oldlenp, newp, netboot_root()));
+	case KERN_PANICINFO:
+		return(sysctl_dopanicinfo(name + 1, namelen - 1, oldp, oldlenp,
+			newp, newlen, p));
+	case KERN_AFFINITY:
+		return sysctl_affinity(name+1, namelen-1, oldp, oldlenp,
+									newp, newlen, p);
+	case KERN_CLASSIC:
+		return sysctl_classic(name+1, namelen-1, oldp, oldlenp,
+								newp, newlen, p);
+	case KERN_CLASSICHANDLER:
+		return sysctl_classichandler(name+1, namelen-1, oldp, oldlenp,
+										newp, newlen, p);
+	case KERN_AIOMAX:
+		return( sysctl_aiomax( oldp, oldlenp, newp, newlen ) );
+	case KERN_AIOPROCMAX:
+		return( sysctl_aioprocmax( oldp, oldlenp, newp, newlen ) );
+	case KERN_AIOTHREADS:
+		return( sysctl_aiothreads( oldp, oldlenp, newp, newlen ) );
+	case KERN_COREFILE:
+		error = sysctl_string(oldp, oldlenp, newp, newlen,
+		    corefilename, sizeof(corefilename));
+		return (error);
+	case KERN_COREDUMP:
+		tmp = do_coredump;
+		error = sysctl_int(oldp, oldlenp, newp, newlen, &do_coredump);
+		if (!error && (do_coredump < 0) || (do_coredump > 1)) {
+			do_coredump = tmp;
+			error = EINVAL;
+		}
+		return (error);
+	case KERN_SUGID_COREDUMP:
+		tmp = sugid_coredump;
+		error = sysctl_int(oldp, oldlenp, newp, newlen, &sugid_coredump);
+		if (!error && (sugid_coredump < 0) || (sugid_coredump > 1)) {
+			sugid_coredump = tmp;
+			error = EINVAL;
+		}
+		return (error);
+	default:
+		return (EOPNOTSUPP);
+	}
+	/* NOTREACHED */
+>>>>>>> origin/10.3
 }
 SYSCTL_PROC(_kern, KERN_COUNT_SYSCALLS, count_syscalls, CTLTYPE_NODE|CTLFLAG_RD | CTLFLAG_LOCKED,
 	0,			/* Pointer argument (arg1) */
@@ -538,7 +828,56 @@ SYSCTL_PROC(_kern, KERN_COUNT_SYSCALLS, count_syscalls, CTLTYPE_NODE|CTLFLAG_RD 
 	"");
 #endif	/* COUNT_SYSCALLS */
 
+=======
+#ifdef DEBUG
+>>>>>>> origin/10.2
 /*
+<<<<<<< HEAD
+=======
+ * Debugging related system variables.
+ */
+#if DIAGNOSTIC
+extern
+#endif /* DIAGNOSTIC */
+struct ctldebug debug0, debug1;
+struct ctldebug debug2, debug3, debug4;
+struct ctldebug debug5, debug6, debug7, debug8, debug9;
+struct ctldebug debug10, debug11, debug12, debug13, debug14;
+struct ctldebug debug15, debug16, debug17, debug18, debug19;
+static struct ctldebug *debugvars[CTL_DEBUG_MAXID] = {
+	&debug0, &debug1, &debug2, &debug3, &debug4,
+	&debug5, &debug6, &debug7, &debug8, &debug9,
+	&debug10, &debug11, &debug12, &debug13, &debug14,
+	&debug15, &debug16, &debug17, &debug18, &debug19,
+};
+int
+debug_sysctl(int *name, u_int namelen, user_addr_t oldp, size_t *oldlenp, 
+             user_addr_t newp, size_t newlen, __unused proc_t p)
+{
+	struct ctldebug *cdp;
+
+	/* all sysctl names at this level are name and field */
+	if (namelen != 2)
+		return (ENOTDIR);		/* overloaded */
+	if (name[0] < 0 || name[0] >= CTL_DEBUG_MAXID)
+                return (ENOTSUP);
+	cdp = debugvars[name[0]];
+	if (cdp->debugname == 0)
+		return (ENOTSUP);
+	switch (name[1]) {
+	case CTL_DEBUG_NAME:
+		return (sysctl_rdstring(oldp, oldlenp, newp, cdp->debugname));
+	case CTL_DEBUG_VALUE:
+		return (sysctl_int(oldp, oldlenp, newp, newlen, cdp->debugvar));
+	default:
+		return (ENOTSUP);
+	}
+	/* NOTREACHED */
+}
+#endif /* DEBUG */
+
+/*
+>>>>>>> origin/10.5
  * The following sysctl_* functions should not be used
  * any more, as they can only cope with callers in
  * user mode: Use new-style
@@ -547,6 +886,8 @@ SYSCTL_PROC(_kern, KERN_COUNT_SYSCALLS, count_syscalls, CTLTYPE_NODE|CTLFLAG_RD 
  *  sysctl_io_opaque()
  * instead.
  */
+<<<<<<< HEAD
+=======
 
 /*
  * Validate parameters and get old / set new parameters
@@ -569,8 +910,220 @@ sysctl_int(user_addr_t oldp, size_t *oldlenp,
 		error = copyout(valp, oldp, sizeof(int));
 	if (error == 0 && newp) {
 		error = copyin(newp, valp, sizeof(int));
+		AUDIT_ARG(value, *valp);
+	}
+	return (error);
+}
+
+/*
+ * As above, but read-only.
+ */
+int
+sysctl_rdint(user_addr_t oldp, size_t *oldlenp, user_addr_t newp, int val)
+{
+	int error = 0;
+
+	if (oldp != USER_ADDR_NULL && oldlenp == NULL)
+		return (EFAULT);
+	if (oldp && *oldlenp < sizeof(int))
+		return (ENOMEM);
+	if (newp)
+		return (EPERM);
+	*oldlenp = sizeof(int);
+	if (oldp)
+		error = copyout((caddr_t)&val, oldp, sizeof(int));
+	return (error);
+}
+
+/*
+ * Validate parameters and get old / set new parameters
+ * for an quad(64bit)-valued sysctl function.
+ */
+int
+sysctl_quad(user_addr_t oldp, size_t *oldlenp, 
+            user_addr_t newp, size_t newlen, quad_t *valp)
+{
+	int error = 0;
+
+	if (oldp != USER_ADDR_NULL && oldlenp == NULL)
+		return (EFAULT);
+	if (oldp && *oldlenp < sizeof(quad_t))
+		return (ENOMEM);
+	if (newp && newlen != sizeof(quad_t))
+		return (EINVAL);
+	*oldlenp = sizeof(quad_t);
+	if (oldp)
+		error = copyout(valp, oldp, sizeof(quad_t));
+	if (error == 0 && newp)
+		error = copyin(newp, valp, sizeof(quad_t));
+	return (error);
+}
+
+/*
+ * As above, but read-only.
+ */
+int
+sysctl_rdquad(user_addr_t oldp, size_t *oldlenp, user_addr_t newp, quad_t val)
+{
+	int error = 0;
+
+	if (oldp != USER_ADDR_NULL && oldlenp == NULL)
+		return (EFAULT);
+	if (oldp && *oldlenp < sizeof(quad_t))
+		return (ENOMEM);
+	if (newp)
+		return (EPERM);
+	*oldlenp = sizeof(quad_t);
+	if (oldp)
+		error = copyout((caddr_t)&val, oldp, sizeof(quad_t));
+	return (error);
+}
+
+/*
+ * Validate parameters and get old / set new parameters
+ * for a string-valued sysctl function.  Unlike sysctl_string, if you
+ * give it a too small (but larger than 0 bytes) buffer, instead of
+ * returning ENOMEM, it truncates the returned string to the buffer
+ * size.  This preserves the semantics of some library routines
+ * implemented via sysctl, which truncate their returned data, rather
+ * than simply returning an error. The returned string is always NUL
+ * terminated.
+ */
+int
+sysctl_trstring(user_addr_t oldp, size_t *oldlenp, 
+              user_addr_t newp, size_t newlen, char *str, int maxlen)
+{
+	int len, copylen, error = 0;
+
+	if (oldp != USER_ADDR_NULL && oldlenp == NULL)
+		return (EFAULT);
+	copylen = len = strlen(str) + 1;
+	if (oldp && (len < 0 || *oldlenp < 1))
+		return (ENOMEM);
+	if (oldp && (*oldlenp < (size_t)len))
+		copylen = *oldlenp + 1;
+	if (newp && (maxlen < 0 || newlen >= (size_t)maxlen))
+		return (EINVAL);
+	*oldlenp = copylen - 1; /* deal with NULL strings correctly */
+	if (oldp) {
+		error = copyout(str, oldp, copylen);
+		if (!error) {
+			unsigned char c = 0;
+			/* NUL terminate */
+			oldp += *oldlenp;
+			error = copyout((void *)&c, oldp, sizeof(char));
+		}
+	}
+	if (error == 0 && newp) {
+		error = copyin(newp, str, newlen);
+		str[newlen] = 0;
+		AUDIT_ARG(text, (char *)str);
+	}
+	return (error);
+}
+
+/*
+ * Validate parameters and get old / set new parameters
+ * for a string-valued sysctl function.
+ */
+int
+sysctl_string(user_addr_t oldp, size_t *oldlenp, 
+              user_addr_t newp, size_t newlen, char *str, int maxlen)
+{
+	int len, error = 0;
+
+	if (oldp != USER_ADDR_NULL && oldlenp == NULL)
+		return (EFAULT);
+	len = strlen(str) + 1;
+	if (oldp && (len < 0 || *oldlenp < (size_t)len))
+		return (ENOMEM);
+	if (newp && (maxlen < 0 || newlen >= (size_t)maxlen))
+		return (EINVAL);
+	*oldlenp = len -1; /* deal with NULL strings correctly */
+	if (oldp) {
+		error = copyout(str, oldp, len);
+	}
+	if (error == 0 && newp) {
+		error = copyin(newp, str, newlen);
+		str[newlen] = 0;
+		AUDIT_ARG(text, (char *)str);
+	}
+	return (error);
+}
+
+/*
+ * As above, but read-only.
+ */
+int
+sysctl_rdstring(user_addr_t oldp, size_t *oldlenp, 
+                user_addr_t newp, char *str)
+{
+	int len, error = 0;
+
+	if (oldp != USER_ADDR_NULL && oldlenp == NULL)
+		return (EFAULT);
+	len = strlen(str) + 1;
+	if (oldp && *oldlenp < (size_t)len)
+		return (ENOMEM);
+	if (newp)
+		return (EPERM);
+	*oldlenp = len;
+	if (oldp)
+		error = copyout(str, oldp, len);
+	return (error);
+}
+>>>>>>> origin/10.5
+
+/*
+ * Validate parameters and get old / set new parameters
+ * for an integer-valued sysctl function.
+ */
+int
+sysctl_int(user_addr_t oldp, size_t *oldlenp, 
+           user_addr_t newp, size_t newlen, int *valp)
+{
+	int error = 0;
+
+	if (oldp != USER_ADDR_NULL && oldlenp == NULL)
+		return (EFAULT);
+	if (oldp && *oldlenp < sizeof(int))
+		return (ENOMEM);
+	if (newp && newlen != sizeof(int))
+		return (EINVAL);
+	*oldlenp = sizeof(int);
+	if (oldp)
+		error = copyout(valp, oldp, sizeof(int));
+	if (error == 0 && newp) {
+		error = copyin(newp, valp, sizeof(int));
+<<<<<<< HEAD
 		AUDIT_ARG(value32, *valp);
 	}
+=======
+		AUDIT_ARG(value, *valp);
+	}
+	return (error);
+}
+
+/*
+ * As above, but read-only.
+ */
+int
+sysctl_rdint(oldp, oldlenp, newp, val)
+	void *oldp;
+	size_t *oldlenp;
+	void *newp;
+	int val;
+{
+	int error = 0;
+
+	if (oldp && *oldlenp < sizeof(int))
+		return (ENOMEM);
+	if (newp)
+		return (EPERM);
+	*oldlenp = sizeof(int);
+	if (oldp)
+		error = copyout((caddr_t)&val, oldp, sizeof(int));
+>>>>>>> origin/10.3
 	return (error);
 }
 
@@ -631,7 +1184,25 @@ sysdoproc_filt_KERN_PROC_TTY(proc_t p, void * arg)
 	else
 		retval = 1;
 
+<<<<<<< HEAD
 	return(retval);
+=======
+	len = strlen(str) + 1;
+	if (oldp && *oldlenp < len)
+		return (ENOMEM);
+	if (newp && newlen >= maxlen)
+		return (EINVAL);
+	*oldlenp = len -1; /* deal with NULL strings correctly */
+	if (oldp) {
+		error = copyout(str, oldp, len);
+	}
+	if (error == 0 && newp) {
+		error = copyin(newp, str, newlen);
+		str[newlen] = 0;
+		AUDIT_ARG(text, (char *)str);
+	}
+	return (error);
+>>>>>>> origin/10.3
 }
 
 STATIC int
@@ -1191,6 +1762,7 @@ sysctl_kdebug_ops SYSCTL_HANDLER_ARGS
 
 	if (namelen == 0)
 		return(ENOTSUP);
+<<<<<<< HEAD
 	
 	ret = suser(kauth_cred_get(), &p->p_acflag);
 #if KPERF
@@ -1200,6 +1772,10 @@ sysctl_kdebug_ops SYSCTL_HANDLER_ARGS
 	if (ret)
 		ret = kperf_access_check();
 #endif /* KPERF */
+=======
+
+    ret = suser(kauth_cred_get(), &p->p_acflag);
+>>>>>>> origin/10.5
 	if (ret)
 		return(ret);
 	
@@ -1310,7 +1886,11 @@ SYSCTL_PROC(_kern, KERN_PROCARGS2, procargs2, CTLTYPE_NODE|CTLFLAG_RD | CTLFLAG_
 	NULL,			/* Data pointer */
 	"");
 
+<<<<<<< HEAD
 STATIC int
+=======
+static int
+>>>>>>> origin/10.5
 sysctl_procargsx(int *name, u_int namelen, user_addr_t where, 
                  size_t *sizep, proc_t cur_proc, int argc_yes)
 {
@@ -1333,7 +1913,11 @@ sysctl_procargsx(int *name, u_int namelen, user_addr_t where,
 
 	if ( namelen < 1 )
 		return(EINVAL);
+<<<<<<< HEAD
 	
+=======
+
+>>>>>>> origin/10.5
 	if (argc_yes)
 		buflen -= sizeof(int);		/* reserve first word to return argc */
 
@@ -1647,6 +2231,7 @@ STATIC int
 sysctl_maxproc
 (__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
 {
+<<<<<<< HEAD
 	int new_value, changed;
 	int error = sysctl_io_number(req, maxproc, sizeof(int), &new_value, &changed);
 	if (changed) {
@@ -1655,6 +2240,28 @@ sysctl_maxproc
 		   limit set at kernel compilation */
 		if (new_value <= hard_maxproc && new_value > 0)
 			maxproc = new_value;
+=======
+	int 	error = 0;
+	int		new_value;
+
+	if ( oldp != NULL && *oldlenp < sizeof(int) )
+		return (ENOMEM);
+	if ( newp != NULL && newlen != sizeof(int) )
+		return (EINVAL);
+		
+	*oldlenp = sizeof(int);
+	if ( oldp != NULL )
+		error = copyout( &maxprocperuid, oldp, sizeof(int) );
+	if ( error == 0 && newp != NULL ) {
+		error = copyin( newp, &new_value, sizeof(int) );
+		if ( error == 0 ) {
+			AUDIT_ARG(value, new_value);
+			if ( new_value <= maxproc && new_value > 0 )
+				maxprocperuid = new_value;
+			else
+				error = EINVAL;
+		}
+>>>>>>> origin/10.3
 		else
 			error = EINVAL;
 	}
@@ -1726,6 +2333,7 @@ sysctl_osversion(__unused struct sysctl_oid *oidp, void *arg1, int arg2, struct 
 {
     int rval = 0;
 
+<<<<<<< HEAD
     rval = sysctl_handle_string(oidp, arg1, arg2, req);
 
     if (req->newptr) {
@@ -1806,6 +2414,27 @@ sysctl_maxvnodes (__unused struct sysctl_oid *oidp, __unused void *arg1, __unuse
 	if (oldval != desiredvnodes) {
 		reset_vmobjectcache(oldval, desiredvnodes);
 		resize_namecache(desiredvnodes);
+=======
+	if ( oldp != NULL && *oldlenp < sizeof(int) )
+		return (ENOMEM);
+	if ( newp != NULL && newlen != sizeof(int) )
+		return (EINVAL);
+		
+	*oldlenp = sizeof(int);
+	if ( oldp != NULL )
+		error = copyout( &maxfilesperproc, oldp, sizeof(int) );
+	if ( error == 0 && newp != NULL ) {
+		error = copyin( newp, &new_value, sizeof(int) );
+		if ( error == 0 ) {
+			AUDIT_ARG(value, new_value);
+			if ( new_value < maxfiles && new_value > 0 )
+				maxfilesperproc = new_value;
+			else
+				error = EINVAL;
+		}
+		else
+			error = EINVAL;
+>>>>>>> origin/10.3
 	}
 
 	return(error);
@@ -1860,6 +2489,7 @@ sysctl_securelvl
 	return(error);
 }
 
+<<<<<<< HEAD
 SYSCTL_PROC(_kern, KERN_SECURELVL, securelevel,
 		CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED,
 		0, 0, sysctl_securelvl, "I", "");
@@ -1873,6 +2503,27 @@ sysctl_domainname
 	error = sysctl_io_string(req, domainname, sizeof(domainname), 0, &changed);
 	if (changed) {
 		domainnamelen = strlen(domainname);
+=======
+	if ( oldp != NULL && *oldlenp < sizeof(int) )
+		return (ENOMEM);
+	if ( newp != NULL && newlen != sizeof(int) )
+		return (EINVAL);
+		
+	*oldlenp = sizeof(int);
+	if ( oldp != NULL )
+		error = copyout( &maxproc, oldp, sizeof(int) );
+	if ( error == 0 && newp != NULL ) {
+		error = copyin( newp, &new_value, sizeof(int) );
+		if ( error == 0 ) {
+			AUDIT_ARG(value, new_value);
+			if ( new_value <= hard_maxproc && new_value > 0 )
+				maxproc = new_value;
+			else
+				error = EINVAL;
+		}
+		else
+			error = EINVAL;
+>>>>>>> origin/10.3
 	}
 	return(error);
 }
@@ -2029,10 +2680,14 @@ SYSCTL_PROC(_kern, KERN_NETBOOT, netboot,
 #endif
 
 #ifdef CONFIG_IMGSRC_ACCESS
+<<<<<<< HEAD
 /*
  * Legacy--act as if only one layer of nesting is possible.
  */
 STATIC int
+=======
+static int
+>>>>>>> origin/10.6
 sysctl_imgsrcdev 
 (__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
 {
@@ -2044,16 +2699,28 @@ sysctl_imgsrcdev
 		return EPERM;
 	}    
 
+<<<<<<< HEAD
 	if (imgsrc_rootvnodes[0] == NULL) {
 		return ENOENT;
 	}    
 
 	result = vnode_getwithref(imgsrc_rootvnodes[0]);
+=======
+	if (imgsrc_rootvnode == NULL) {
+		return ENOENT;
+	}    
+
+	result = vnode_getwithref(imgsrc_rootvnode);
+>>>>>>> origin/10.6
 	if (result != 0) {
 		return result;
 	}
 	
+<<<<<<< HEAD
 	devvp = vnode_mount(imgsrc_rootvnodes[0])->mnt_devvp;
+=======
+	devvp = vnode_mount(imgsrc_rootvnode)->mnt_devvp;
+>>>>>>> origin/10.6
 	result = vnode_getwithref(devvp);
 	if (result != 0) {
 		goto out;
@@ -2063,11 +2730,16 @@ sysctl_imgsrcdev
 
 	vnode_put(devvp);
 out:
+<<<<<<< HEAD
 	vnode_put(imgsrc_rootvnodes[0]);
+=======
+	vnode_put(imgsrc_rootvnode);
+>>>>>>> origin/10.6
 	return result;
 }
 
 SYSCTL_PROC(_kern, OID_AUTO, imgsrcdev,
+<<<<<<< HEAD
 		CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED,
 		0, 0, sysctl_imgsrcdev, "I", ""); 
 
@@ -2214,6 +2886,13 @@ SYSCTL_PROC(_kern_timer_longterm, OID_AUTO, latency_max,
 #endif /* DEBUG */
 
 STATIC int
+=======
+		CTLTYPE_INT | CTLFLAG_RD,
+		0, 0, sysctl_imgsrcdev, "I", ""); 
+#endif /* CONFIG_IMGSRC_ACCESS */
+
+static int
+>>>>>>> origin/10.6
 sysctl_usrstack
 (__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
 {
@@ -2244,9 +2923,14 @@ sysctl_coredump
 (__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
 {
 #ifdef SECURE_KERNEL
+<<<<<<< HEAD
 	(void)req;
 	return (ENOTSUP);
 #else
+=======
+	return (ENOTSUP);
+#endif
+>>>>>>> origin/10.5
 	int new_value, changed;
 	int error = sysctl_io_number(req, do_coredump, sizeof(int), &new_value, &changed);
 	if (changed) {
@@ -2268,9 +2952,14 @@ sysctl_suid_coredump
 (__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
 {
 #ifdef SECURE_KERNEL
+<<<<<<< HEAD
 	(void)req;
 	return (ENOTSUP);
 #else
+=======
+	return (ENOTSUP);
+#endif
+>>>>>>> origin/10.5
 	int new_value, changed;
 	int error = sysctl_io_number(req, sugid_coredump, sizeof(int), &new_value, &changed);
 	if (changed) {
@@ -2440,9 +3129,14 @@ sysctl_nx
 (__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
 {
 #ifdef SECURE_KERNEL
+<<<<<<< HEAD
 	(void)req;
 	return ENOTSUP;
 #else
+=======
+	return ENOTSUP;
+#endif
+>>>>>>> origin/10.5
 	int new_value, changed;
 	int error;
 
@@ -2451,7 +3145,11 @@ sysctl_nx
 		return error;
 
 	if (changed) {
+<<<<<<< HEAD
 #if defined(__i386__) || defined(__x86_64__)
+=======
+#ifdef __i386__
+>>>>>>> origin/10.5
 		/*
 		 * Only allow setting if NX is supported on the chip
 		 */
@@ -2737,6 +3435,7 @@ extern int vm_map_copy_overwrite_aligned_src_large;
 SYSCTL_INT(_vm, OID_AUTO, vm_copy_src_not_internal, CTLFLAG_RD | CTLFLAG_LOCKED, &vm_map_copy_overwrite_aligned_src_not_internal, 0, "");
 SYSCTL_INT(_vm, OID_AUTO, vm_copy_src_not_symmetric, CTLFLAG_RD | CTLFLAG_LOCKED, &vm_map_copy_overwrite_aligned_src_not_symmetric, 0, "");
 SYSCTL_INT(_vm, OID_AUTO, vm_copy_src_large, CTLFLAG_RD | CTLFLAG_LOCKED, &vm_map_copy_overwrite_aligned_src_large, 0, "");
+<<<<<<< HEAD
 
 
 extern uint32_t	vm_page_external_count;
@@ -2747,8 +3446,11 @@ SYSCTL_INT(_vm, OID_AUTO, vm_page_filecache_min, CTLFLAG_RW | CTLFLAG_LOCKED, &v
 
 extern int	vm_compressor_mode;
 extern int	vm_compressor_is_active;
+<<<<<<< HEAD
 extern int	vm_compressor_available;
 extern uint32_t	vm_ripe_target_age;
+=======
+>>>>>>> origin/10.10
 extern uint32_t	swapout_target_age;
 extern int64_t  compressor_bytes_used;
 extern int64_t  c_segment_input_bytes;
@@ -2763,8 +3465,13 @@ extern uint32_t	vm_compressor_majorcompact_threshold_divisor;
 extern uint32_t	vm_compressor_unthrottle_threshold_divisor;
 extern uint32_t	vm_compressor_catchup_threshold_divisor;
 
+<<<<<<< HEAD
 SYSCTL_QUAD(_vm, OID_AUTO, compressor_input_bytes, CTLFLAG_RD | CTLFLAG_LOCKED, &c_segment_input_bytes, "");
 SYSCTL_QUAD(_vm, OID_AUTO, compressor_compressed_bytes, CTLFLAG_RD | CTLFLAG_LOCKED, &c_segment_compressed_bytes, "");
+=======
+SYSCTL_INT(_vm, OID_AUTO, compressor_mode, CTLFLAG_RD | CTLFLAG_LOCKED, &vm_compressor_mode, 0, "");
+SYSCTL_INT(_vm, OID_AUTO, compressor_is_active, CTLFLAG_RD | CTLFLAG_LOCKED, &vm_compressor_is_active, 0, "");
+>>>>>>> origin/10.10
 SYSCTL_QUAD(_vm, OID_AUTO, compressor_bytes_used, CTLFLAG_RD | CTLFLAG_LOCKED, &compressor_bytes_used, "");
 
 SYSCTL_INT(_vm, OID_AUTO, compressor_mode, CTLFLAG_RD | CTLFLAG_LOCKED, &vm_compressor_mode, 0, "");
@@ -2800,12 +3507,23 @@ SYSCTL_INT(_vm, OID_AUTO, phantom_cache_thrashing_threshold_ssd, CTLFLAG_RW | CT
 #if (DEVELOPMENT || DEBUG)
 
 SYSCTL_UINT(_vm, OID_AUTO, vm_page_creation_throttled_hard,
+<<<<<<< HEAD
 		CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED,
 		&vm_page_creation_throttled_hard, 0, "");
+=======
+>>>>>>> origin/10.7
 
 SYSCTL_UINT(_vm, OID_AUTO, vm_page_creation_throttled_soft,
 		CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED,
 		&vm_page_creation_throttled_soft, 0, "");
+=======
+	    CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED,
+	    &vm_page_creation_throttled_hard, 0, "");
+
+SYSCTL_UINT(_vm, OID_AUTO, vm_page_creation_throttled_soft,
+	    CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED,
+	    &vm_page_creation_throttled_soft, 0, "");
+>>>>>>> origin/10.10
 
 #endif /* DEVELOPMENT || DEBUG */
 
@@ -3029,4 +3747,13 @@ SYSCTL_INT(_kern, OID_AUTO, hv_support,
 		&hv_support_available, 0, "");
 #endif
 
+
+/*
+ * enable back trace for port allocations
+ */
+extern int ipc_portbt;
+
+SYSCTL_INT(_kern, OID_AUTO, ipc_portbt, 
+		CTLFLAG_RW | CTLFLAG_KERN, 
+		&ipc_portbt, 0, "");
 

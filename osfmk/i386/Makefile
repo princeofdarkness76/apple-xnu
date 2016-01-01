@@ -7,6 +7,7 @@ include $(MakeInc_cmd)
 include $(MakeInc_def)
 
 EXPORT_ONLY_FILES = 	\
+<<<<<<< HEAD
 		    apic.h \
 		    asm.h \
 		    atomic.h \
@@ -17,9 +18,18 @@ EXPORT_ONLY_FILES = 	\
 		    cpu_topology.h \
 		    cpuid.h \
 		    eflags.h \
+<<<<<<< HEAD
+=======
+		    cpu_capabilities.h	\
+		    cpu_number.h \
+		    hw_lock_types.h \
+>>>>>>> origin/10.2
+=======
+>>>>>>> origin/10.5
 		    io_map_entries.h \
 		    lapic.h \
 		    lock.h \
+<<<<<<< HEAD
 		    locks.h \
 		    machine_routines.h \
 		    machine_cpu.h \
@@ -53,6 +63,14 @@ INSTALL_KF_MD_LIST = asm.h cpuid.h eflags.h locks.h machine_routines.h proc_reg.
 
 INSTALL_KF_MD_LCL_LIST = $(filter-out bit_routines.h cpu_data.h pal_i386.h, $(EXPORT_ONLY_FILES))
 
+=======
+		    machine_routines.h
+
+INSTALL_MD_DIR = i386
+
+INSTALL_MD_LCL_LIST = cpu_capabilities.h
+
+>>>>>>> origin/10.2
 EXPORT_MD_LIST = ${EXPORT_ONLY_FILES}
 
 EXPORT_MD_DIR = i386

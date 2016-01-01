@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -168,6 +190,17 @@ load_code_signature(
 	load_result_t			*result);
 	
 #if CONFIG_CODE_DECRYPTION
+<<<<<<< HEAD
+=======
+static load_return_t
+set_code_unprotect(
+	struct encryption_info_command	*lcp,
+	caddr_t				addr,
+	vm_map_t			map,
+	struct vnode			*vp);
+#endif
+
+>>>>>>> origin/10.5
 static load_return_t
 set_code_unprotect(
 	struct encryption_info_command	*lcp,
@@ -358,6 +391,7 @@ load_machfile(
 	} else
 		map = new_map;
 
+<<<<<<< HEAD
 #if   (__ARM_ARCH_7K__ >= 2) && defined(PLATFORM_WatchOS)
 	/* enforce 16KB alignment for watch targets with new ABI */
 	vm_map_set_page_shift(map, SIXTEENK_PAGE_SHIFT);
@@ -394,6 +428,14 @@ load_machfile(
 		dyld_aslr_offset %= max_slide_pages;
 		dyld_aslr_offset <<= vm_map_page_shift(map);
 	}
+=======
+#ifndef	CONFIG_ENFORCE_SIGNED_CODE
+	/* This turns off faulting for executable pages, which allows to 
+	 * circumvent Code Signing Enforcement */
+	if ( (header->flags & MH_ALLOW_STACK_EXECUTION) )
+	        vm_map_disable_NX(map);
+#endif
+>>>>>>> origin/10.6
 	
 	if (!result)
 		result = &myresult;
@@ -458,6 +500,7 @@ load_machfile(
 			 *
 			 * NOTE: task_start_halt() makes sure that no new
 			 * threads are created in the task during the transition.
+<<<<<<< HEAD
 			 * We need to mark the workqueue as exiting before we
 			 * wait for threads to terminate (at the end of which
 			 * we no longer have a prohibition on thread creation).
@@ -478,6 +521,25 @@ load_machfile(
 			kqueue_dealloc(p->p_wqkqueue);
 			p->p_wqkqueue = NULL;
 		}
+=======
+ 			 * We need to mark the workqueue as exiting before we
+ 			 * wait for threads to terminate (at the end of which
+ 			 * we no longer have a prohibition on thread creation).
+ 			 * 
+ 			 * Finally, clean up any lingering workqueue data structures
+ 			 * that may have been left behind by the workqueue threads
+ 			 * as they exited (and then clean up the work queue itself).
+  			 */
+  			kret = task_start_halt(task);
+  			if (kret != KERN_SUCCESS) {
+  				return(kret);		
+  			}
+ 			proc_transcommit(p, 0);
+ 			workqueue_mark_exiting(p);
+  			task_complete_halt(task);
+ 			workqueue_exit(p);
+  		}
+>>>>>>> origin/10.7
 		old_map = swap_task_map(old_task, thread, map, !spawn);
 		vm_map_deallocate(old_map);
 	}
@@ -518,8 +580,14 @@ parse_machfile(
 	load_result_t		*result
 )
 {
+<<<<<<< HEAD
 	uint32_t		ncmds;
 	struct load_command	*lcp;
+=======
+	struct machine_slot	*ms;
+	uint32_t		ncmds;
+	struct load_command	*lcp, *next;
+>>>>>>> origin/10.3
 	struct dylinker_command	*dlp = 0;
 	integer_t		dlarchbits = 0;
 	void *			control;
@@ -616,6 +684,7 @@ parse_machfile(
 			kfree(kl_addr, kl_size);
 		return(LOAD_IOERROR);
 	}
+<<<<<<< HEAD
 
 	if (resid) {
 		/* We must be able to read in as much as the mach_header indicated */
@@ -624,6 +693,19 @@ parse_machfile(
 		return(LOAD_BADMACHO);
 	}
 
+<<<<<<< HEAD
+=======
+	
+>>>>>>> origin/10.5
+=======
+	if (resid) {
+		/* We must be able to read in as much as the mach_header indicated */
+		if (kl_addr)
+			kfree(kl_addr, kl_size);
+		return(LOAD_BADMACHO);
+	}
+
+>>>>>>> origin/10.10
 	/*
 	 *	For PIE and dyld, slide everything by the ASLR offset.
 	 */
@@ -639,6 +721,7 @@ parse_machfile(
 	 *  2: segments
 	 *  3: dyld, encryption, check entry point
 	 */
+<<<<<<< HEAD
 	
 	for (pass = 0; pass <= 3; pass++) {
 
@@ -658,13 +741,20 @@ parse_machfile(
 			break;
 		}
 
+=======
+	for (pass = 1; pass <= 2; pass++) {
+>>>>>>> origin/10.3
 		/*
 		 * Loop through each of the load_commands indicated by the
 		 * Mach-O header; if an absurd value is provided, we just
 		 * run off the end of the reserved section by incrementing
 		 * the offset too far, so we are implicitly fail-safe.
 		 */
+<<<<<<< HEAD
 		offset = mach_header_sz;
+=======
+		offset = sizeof(struct mach_header);
+>>>>>>> origin/10.3
 		ncmds = header->ncmds;
 
 		while (ncmds--) {
@@ -685,8 +775,13 @@ parse_machfile(
 			 */
 			if (oldoffset > offset ||
 			    lcp->cmdsize < sizeof(struct load_command) ||
+<<<<<<< HEAD
 			    offset > header->sizeofcmds + mach_header_sz) {
 				ret = LOAD_BADMACHO;
+=======
+			    offset > header->sizeofcmds + sizeof(struct mach_header)) {
+			    	ret = LOAD_BADMACHO;
+>>>>>>> origin/10.3
 				break;
 			}
 
@@ -873,11 +968,34 @@ parse_machfile(
 					 psignal(p, SIGKILL);
 				}
 				break;
+<<<<<<< HEAD
+=======
+#if CONFIG_CODE_DECRYPTION
+			case LC_ENCRYPTION_INFO:
+				if (pass != 2)
+					break;
+				ret = set_code_unprotect(
+					(struct encryption_info_command *) lcp,
+					addr, map, vp);
+				if (ret != LOAD_SUCCESS) {
+					printf("proc %d: set_code_unprotect() error %d "
+					       "for file \"%s\"\n",
+					       p->p_pid, ret, vp->v_name);
+					/* Don't let the app run if it's 
+					 * encrypted but we failed to set up the
+					 * decrypter */
+					 psignal(p, SIGKILL);
+				}
+				break;
+>>>>>>> origin/10.5
 #endif
 			default:
 				/* Other commands are ignored by the kernel */
 				ret = LOAD_SUCCESS;
+<<<<<<< HEAD
 				break;
+=======
+>>>>>>> origin/10.3
 			}
 			if (ret != LOAD_SUCCESS)
 				break;
@@ -891,15 +1009,24 @@ parse_machfile(
 			if (cs_enforcement(NULL)) {
 				ret = LOAD_FAILURE;
 			} else {
+<<<<<<< HEAD
                                /*
                                 * No embedded signatures: look for detached by taskgated,
                                 * this is only done on OSX, on embedded platforms we expect everything
                                 * to be have embedded signatures.
                                 */
+=======
+				/*
+				 * No embedded signatures: look for detached by taskgated,
+				 * this is only done on OSX, on embedded platforms we expect everything
+				 * to be have embedded signatures.
+				 */
+>>>>>>> origin/10.10
 				struct cs_blob *blob;
 
 				blob = ubc_cs_blob_get(vp, -1, file_offset);
 				if (blob != NULL) {
+<<<<<<< HEAD
 					unsigned int cs_flag_data = blob->csb_flags;
 					if(0 != ubc_cs_generation_check(vp)) {
 						if (0 != ubc_cs_blob_revalidate(vp, blob, 0)) {
@@ -910,15 +1037,31 @@ parse_machfile(
 					}
 					/* get flags to be applied to the process */
 					result->csflags |= cs_flag_data;
+=======
+				    unsigned int cs_flag_data = blob->csb_flags;
+				    if(0 != ubc_cs_generation_check(vp)) {
+				    	if (0 != ubc_cs_blob_revalidate(vp, blob, 0)) {
+						/* clear out the flag data if revalidation fails */
+						cs_flag_data = 0;
+						result->csflags &= ~CS_VALID;
+					}
+				    }
+				    /* get flags to be applied to the process */
+				    result->csflags |= cs_flag_data;
+>>>>>>> origin/10.10
 				}
 			}
 		}
 
 		/* Make sure if we need dyld, we got it */
-		if (result->needs_dynlinker && !dlp) {
+		if ((ret == LOAD_SUCCESS) && result->needs_dynlinker && !dlp) {
 			ret = LOAD_FAILURE;
 		}
+<<<<<<< HEAD
 
+=======
+		
+>>>>>>> origin/10.10
 		if ((ret == LOAD_SUCCESS) && (dlp != 0)) {
 			/*
 			 * load the dylinker, and slide it by the independent DYLD ASLR
@@ -984,6 +1127,7 @@ unprotect_dsmos_segment(
 		crypt_info.page_decrypt = dsmos_page_transform;
 		crypt_info.crypt_ops = NULL;
 		crypt_info.crypt_end = NULL;
+<<<<<<< HEAD
 #pragma unused(vp, macho_offset)
 		crypt_info.crypt_ops = (void *)0x2e69cf40;
 		vm_map_offset_t crypto_backing_offset;
@@ -1000,6 +1144,11 @@ unprotect_dsmos_segment(
 					    map_addr,
 					    map_addr + map_size,
 					    crypto_backing_offset,
+=======
+		kr = vm_map_apple_protected(map,
+					    map_addr,
+					    map_addr + map_size,
+>>>>>>> origin/10.5
 					    &crypt_info);
 	}
 
@@ -1009,6 +1158,7 @@ unprotect_dsmos_segment(
 	return LOAD_SUCCESS;
 }
 #else	/* CONFIG_CODE_DECRYPTION */
+<<<<<<< HEAD
 static load_return_t
 unprotect_dsmos_segment(
 	__unused	uint64_t	file_off,
@@ -1149,6 +1299,11 @@ done:
 	assert(cur_end >= vm_start + (file_end - file_start));
 	return LOAD_SUCCESS;
 }
+=======
+#define unprotect_segment_64(file_off, file_size, map, map_addr, map_size) \
+	LOAD_SUCCESS
+#endif	/* CONFIG_CODE_DECRYPTION */
+>>>>>>> origin/10.5
 
 static
 load_return_t
@@ -1250,6 +1405,21 @@ load_segment(
 	 * If we have a code signature attached for this slice
 	 * require that the segments are within the signed part
 	 * of the file.
+<<<<<<< HEAD
+=======
+	 */
+	if (result->cs_end_offset &&
+	    result->cs_end_offset < (off_t)scp->fileoff &&
+	    result->cs_end_offset - scp->fileoff < scp->filesize)
+        {
+		if (cs_debug)
+			printf("section outside code signature\n");
+		return LOAD_BADMACHO;
+	}
+
+	/*
+	 *	Round sizes to page size.
+>>>>>>> origin/10.10
 	 */
 	if (result->cs_end_offset &&
 	    result->cs_end_offset < (off_t)scp->fileoff &&
@@ -1443,7 +1613,11 @@ load_segment(
 	}
 
 	if (result->entry_point != MACH_VM_MIN_ADDRESS) {
+<<<<<<< HEAD
 		if ((result->entry_point >= vm_offset) && (result->entry_point < (vm_offset + vm_size))) {
+=======
+		if ((result->entry_point >= map_addr) && (result->entry_point < (map_addr + map_size))) {
+>>>>>>> origin/10.10
 			if ((scp->initprot & (VM_PROT_READ|VM_PROT_EXECUTE)) == (VM_PROT_READ|VM_PROT_EXECUTE)) {
 				result->validentry = 1;
 			} else {
@@ -1918,6 +2092,7 @@ load_dylinker(
 
 	if (ret == LOAD_SUCCESS) {		
 		result->dynlinker = TRUE;
+<<<<<<< HEAD
 		result->entry_point = myresult->entry_point;
 		result->validentry = myresult->validentry;
 		result->all_image_info_addr = myresult->all_image_info_addr;
@@ -1925,6 +2100,9 @@ load_dylinker(
 		if (myresult->platform_binary) {
 			result->csflags |= CS_DYLD_PLATFORM;
 		}
+=======
+		result->entry_point = myresult.entry_point;
+>>>>>>> origin/10.5
 	}
 out:
 	vnode_put(vp);
@@ -2008,9 +2186,14 @@ load_code_signature(
 			    cputype,
 			    macho_offset,
 			    addr,
+<<<<<<< HEAD
 			    lcp->datasize,
 			    0,
 			    &blob)) {
+=======
+			    lcp->datasize, 
+			    0)) {
+>>>>>>> origin/10.10
 		ret = LOAD_FAILURE;
 		goto out;
 	} else {
@@ -2022,6 +2205,11 @@ load_code_signature(
 	ubc_cs_validation_bitmap_allocate( vp );
 #endif
 		
+<<<<<<< HEAD
+=======
+	blob = ubc_cs_blob_get(vp, cputype, macho_offset);
+
+>>>>>>> origin/10.10
 	ret = LOAD_SUCCESS;
 out:
 	if (ret == LOAD_SUCCESS) {
@@ -2045,6 +2233,7 @@ out:
 
 static load_return_t
 set_code_unprotect(
+<<<<<<< HEAD
 	struct encryption_info_command *eip,
 	caddr_t addr, 	
 	vm_map_t map,
@@ -2058,15 +2247,30 @@ set_code_unprotect(
 	pager_crypt_info_t crypt_info;
 	const char * cryptname = 0;
 	char *vpath;
+=======
+		   struct encryption_info_command *eip,
+		   caddr_t addr, 	
+		   vm_map_t map,
+		   struct vnode	*vp)
+{
+	int result, len;
+	char vpath[MAXPATHLEN];
+	pager_crypt_info_t crypt_info;
+	const char * cryptname = 0;
+>>>>>>> origin/10.5
 	
 	size_t offset;
 	struct segment_command_64 *seg64;
 	struct segment_command *seg32;
 	vm_map_offset_t map_offset, map_size;
+<<<<<<< HEAD
 	vm_object_offset_t crypto_backing_offset;
 	kern_return_t kr;
 
 	if (eip->cmdsize < sizeof(*eip)) return LOAD_BADMACHO;
+=======
+	kern_return_t kr;
+>>>>>>> origin/10.5
 	
 	switch(eip->cryptid) {
 		case 0:
@@ -2084,6 +2288,7 @@ set_code_unprotect(
 			return LOAD_BADMACHO;
 	}
 	
+<<<<<<< HEAD
 	if (map == VM_MAP_NULL) return (LOAD_SUCCESS);
 	if (NULL == text_crypter_create) return LOAD_FAILURE;
 
@@ -2110,15 +2315,28 @@ set_code_unprotect(
 	       p->p_pid, p->p_comm, map, __FUNCTION__, vpath, kr);
 #endif /* DEVELOPMENT || DEBUG */
 	FREE_ZONE(vpath, MAXPATHLEN, M_NAMEI);
+=======
+	len = MAXPATHLEN;
+	result = vn_getpath(vp, vpath, &len);
+	if(result) return result;
+	
+	/* set up decrypter first */
+	if(NULL==text_crypter_create) return LOAD_FAILURE;
+	kr=text_crypter_create(&crypt_info, cryptname, (void*)vpath);
+>>>>>>> origin/10.5
 	
 	if(kr) {
 		printf("set_code_unprotect: unable to create decrypter %s, kr=%d\n",
 		       cryptname, kr);
+<<<<<<< HEAD
 		if (kr == kIOReturnNotPrivileged) {
 			/* text encryption returned decryption failure */
 			return(LOAD_DECRYPTFAIL);
 		 }else
 			return LOAD_RESOURCE;
+=======
+		return LOAD_RESOURCE;
+>>>>>>> origin/10.5
 	}
 	
 	/* this is terrible, but we have to rescan the load commands to find the
@@ -2145,9 +2363,14 @@ set_code_unprotect(
 				if ((seg64->fileoff <= eip->cryptoff) &&
 				    (seg64->fileoff+seg64->filesize >= 
 				     eip->cryptoff+eip->cryptsize)) {
+<<<<<<< HEAD
 					map_offset = seg64->vmaddr + eip->cryptoff - seg64->fileoff + slide;
 					map_size = eip->cryptsize;
 					crypto_backing_offset = macho_offset + eip->cryptoff;
+=======
+					map_offset = seg64->vmaddr + eip->cryptoff - seg64->fileoff;
+					map_size = eip->cryptsize;
+>>>>>>> origin/10.5
 					goto remap_now;
 				}
 			case LC_SEGMENT:
@@ -2155,9 +2378,14 @@ set_code_unprotect(
 				if ((seg32->fileoff <= eip->cryptoff) &&
 				    (seg32->fileoff+seg32->filesize >= 
 				     eip->cryptoff+eip->cryptsize)) {
+<<<<<<< HEAD
 					map_offset = seg32->vmaddr + eip->cryptoff - seg32->fileoff + slide;
 					map_size = eip->cryptsize;
 					crypto_backing_offset = macho_offset + eip->cryptoff;
+=======
+					map_offset = seg32->vmaddr + eip->cryptoff - seg32->fileoff;
+					map_size = eip->cryptsize;
+>>>>>>> origin/10.5
 					goto remap_now;
 				}
 		}
@@ -2168,6 +2396,7 @@ set_code_unprotect(
 	
 remap_now:
 	/* now remap using the decrypter */
+<<<<<<< HEAD
 	MACHO_PRINTF(("+++ set_code_unprotect: vm[0x%llx:0x%llx]\n",
 		      (uint64_t) map_offset,
 		      (uint64_t) (map_offset+map_size)));
@@ -2178,6 +2407,12 @@ remap_now:
 				    &crypt_info);
 	if (kr) {
 		printf("set_code_unprotect(): mapping failed with %x\n", kr);
+=======
+	kr = vm_map_apple_protected(map, map_offset, map_offset+map_size, &crypt_info);
+	if(kr) {
+		printf("set_code_unprotect(): mapping failed with %x\n", kr);
+		crypt_info.crypt_end(crypt_info.crypt_ops);
+>>>>>>> origin/10.5
 		return LOAD_PROTECT;
 	}
 	

@@ -1,6 +1,11 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2003-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2003-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
@@ -17,11 +22,23 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -178,11 +195,16 @@ x86_64_post_sleep(uint64_t new_cr3)
 // NPHYSMAP is determined by the maximum supported RAM size plus 4GB to account
 // the PCI hole (which is less 4GB but not more).
 
+<<<<<<< HEAD
 /* Compile-time guard: NPHYSMAP is capped to 256GiB, accounting for
  * randomisation
  */
 extern int maxphymapsupported[NPHYSMAP <= (PTE_PER_PAGE/2) ? 1 : -1];
 
+=======
+// Compile-time guard:
+extern int maxphymapsupported[NPHYSMAP <= PTE_PER_PAGE ? 1 : -1];
+>>>>>>> origin/10.7
 static void
 physmap_init(void)
 {
@@ -374,12 +396,33 @@ vstart(vm_offset_t boot_args_start)
 
 		cpu = 0;
 		cpu_data_alloc(TRUE);
+
+				
+		/*
+		 * Setup boot args given the physical start address.
+		 */
+		kernelBootArgs = (boot_args *)
+		    ml_static_ptovirt(boot_args_start);
+		DBG("i386_init(0x%lx) kernelBootArgs=%p\n",
+		    (unsigned long)boot_args_start, kernelBootArgs);
+
+		PE_init_platform(FALSE, kernelBootArgs);
+		postcode(PE_INIT_PLATFORM_D);
 	} else {
 		/* Switch to kernel's page tables (from the Boot PTs) */
 		set_cr3_raw((uintptr_t)ID_MAP_VTOP(IdlePML4));
 		/* Find our logical cpu number */
 		cpu = lapic_to_cpu[(LAPIC_READ(ID)>>LAPIC_ID_SHIFT) & LAPIC_ID_MASK];
 		DBG("CPU: %d, GSBASE initial value: 0x%llx\n", cpu, rdmsr64(MSR_IA32_GS_BASE));
+<<<<<<< HEAD
+=======
+#ifdef	__x86_64__
+		if (cpuid_extfeatures() & CPUID_EXTFEATURE_XD) {
+			wrmsr64(MSR_IA32_EFER, rdmsr64(MSR_IA32_EFER) | MSR_IA32_EFER_NXE);
+			DBG("vstart() NX/XD enabled, non-boot\n");
+		}
+#endif
+>>>>>>> origin/10.7
 	}
 
 	postcode(VSTART_CPU_DESC_INIT);
@@ -398,9 +441,39 @@ vstart(vm_offset_t boot_args_start)
 			 cpu_datap(cpu)->cpu_int_stack_top);
 }
 
+<<<<<<< HEAD
 void
 pstate_trace(void)
 {
+=======
+	if (is_boot_cpu)
+		i386_init();
+	else
+		i386_init_slave();
+	/*NOTREACHED*/
+#else
+	/* We need to switch to a new per-cpu stack, but we must do this atomically with
+	 * the call to ensure the compiler doesn't assume anything about the stack before
+	 * e.g. tail-call optimisations
+	 */
+	if (is_boot_cpu)
+	{
+		asm volatile(
+				"mov %1, %%rdi;"
+				"mov %0, %%rsp;"
+				"call _i386_init;"	: : "r" 
+				(cpu_datap(cpu)->cpu_int_stack_top), "r" (boot_args_start));
+	}
+	else
+	{
+		asm volatile(
+				"mov %0, %%rsp;"
+				"call _i386_init_slave;"	: : "r" 
+				(cpu_datap(cpu)->cpu_int_stack_top));
+	}
+	/*NOTREACHED*/
+#endif
+>>>>>>> origin/10.7
 }
 
 /*
@@ -412,9 +485,15 @@ i386_init(void)
 {
 	unsigned int	maxmem;
 	uint64_t	maxmemtouse;
+<<<<<<< HEAD
 	unsigned int	cpus = 0;
 	boolean_t	fidn;
 	boolean_t	IA32e = TRUE;
+=======
+	unsigned int	cpus;
+	boolean_t	legacy_mode;
+	boolean_t	fidn;
+>>>>>>> origin/10.5
 
 	postcode(I386_INIT_ENTRY);
 
@@ -430,6 +509,12 @@ i386_init(void)
 	mca_cpu_init();
 #endif
 
+<<<<<<< HEAD
+=======
+
+	kernel_early_bootstrap();
+
+>>>>>>> origin/10.7
 	master_cpu = 0;
 	cpu_init();
 
@@ -442,9 +527,12 @@ i386_init(void)
 	kernel_debug_string_simple("PE_init_kprintf");
 	PE_init_kprintf(FALSE);
 
+<<<<<<< HEAD
 	kernel_debug_string_simple("kernel_early_bootstrap");
 	kernel_early_bootstrap();
 
+=======
+>>>>>>> origin/10.5
 	if (!PE_parse_boot_argn("diag", &dgWork.dgFlags, sizeof (dgWork.dgFlags)))
 		dgWork.dgFlags = 0;
 
@@ -478,25 +566,54 @@ i386_init(void)
 	/*
 	 * debug support for > 4G systems
 	 */
+<<<<<<< HEAD
 	PE_parse_boot_argn("himemory_mode", &vm_himemory_mode, sizeof (vm_himemory_mode));
 	if (vm_himemory_mode != 0)
 		kprintf("himemory_mode: %d\n", vm_himemory_mode);
+=======
+	if (!PE_parse_boot_argn("himemory_mode", &vm_himemory_mode, sizeof (vm_himemory_mode)))
+	        vm_himemory_mode = 0;
+>>>>>>> origin/10.5
 
 	if (!PE_parse_boot_argn("immediate_NMI", &fidn, sizeof (fidn)))
 		force_immediate_debugger_NMI = FALSE;
 	else
 		force_immediate_debugger_NMI = fidn;
 
+<<<<<<< HEAD
 #if DEBUG
 	nanoseconds_to_absolutetime(URGENCY_NOTIFICATION_ASSERT_NS, &urgency_notification_assert_abstime_threshold);
 #endif
 	PE_parse_boot_argn("urgency_notification_abstime",
 	    &urgency_notification_assert_abstime_threshold,
 	    sizeof(urgency_notification_assert_abstime_threshold));
+=======
+	/*
+	 * At this point we check whether we are a 64-bit processor
+	 * and that we're not restricted to legacy mode, 32-bit operation.
+	 */
+	boolean_t IA32e = FALSE;
+	if (cpuid_extfeatures() & CPUID_EXTFEATURE_EM64T) {
+		kprintf("EM64T supported");
+		if (PE_parse_boot_argn("-legacy", &legacy_mode, sizeof (legacy_mode))) {
+			kprintf(" but legacy mode forced\n");
+		} else {
+			IA32e = TRUE;
+			kprintf(" and will be enabled\n");
+		}
+	}
+>>>>>>> origin/10.5
 
 	if (!(cpuid_extfeatures() & CPUID_EXTFEATURE_XD))
 		nx_enabled = 0;
 
+<<<<<<< HEAD
+=======
+	/* Obtain "lcks" options:this currently controls lock statistics */
+	if (!PE_parse_boot_argn("lcks", &LcksOpts, sizeof (LcksOpts)))
+		LcksOpts = 0;
+
+>>>>>>> origin/10.5
 	/*   
 	 * VM initialization, after this we're using page tables...
 	 * Thn maximum number of cpus must be set beforehand.
@@ -504,6 +621,17 @@ i386_init(void)
 	kernel_debug_string_simple("i386_vm_init");
 	i386_vm_init(maxmemtouse, IA32e, kernelBootArgs);
 
+<<<<<<< HEAD
+=======
+	if ( ! PE_parse_boot_argn("novmx", &noVMX, sizeof (noVMX)))
+		noVMX = 0;	/* OK to support Altivec in rosetta? */
+
+	tsc_init();
+	power_management_init();
+
+	PE_init_platform(TRUE, kernelBootArgs);
+
+>>>>>>> origin/10.5
 	/* create the console for verbose or pretty mode */
 	/* Note: doing this prior to tsc_init() allows for graceful panic! */
 	PE_init_platform(TRUE, kernelBootArgs);

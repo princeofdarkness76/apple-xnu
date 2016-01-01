@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -131,6 +153,7 @@ static void task_policy_update_locked(task_t task, thread_t thread, task_pend_to
 static void task_policy_update_internal_locked(task_t task, thread_t thread, boolean_t in_create, task_pend_token_t pend_token);
 static void task_policy_update_task_locked(task_t task, boolean_t update_throttle, boolean_t update_bg_throttle, boolean_t update_sfi);
 static void task_policy_update_thread_locked(thread_t thread, int update_cpu, boolean_t update_throttle, boolean_t update_sfi, boolean_t update_qos);
+static boolean_t task_policy_update_coalition_focal_tasks(task_t task, int prev_role, int next_role);
 
 #if CONFIG_SCHED_SFI
 static boolean_t task_policy_update_coalition_focal_tasks(task_t task, int prev_role, int next_role);
@@ -340,7 +363,46 @@ task_policy_set(
 			default:
 				result = KERN_INVALID_ARGUMENT;
 				break;
+<<<<<<< HEAD
 		} /* switch (info->role) */
+=======
+			}
+		}
+		else
+		if (info->role == TASK_CONTROL_APPLICATION) {
+			if (	task != current_task()			||
+					task->sec_token.val[0] != 0			)
+				result = KERN_INVALID_ARGUMENT;
+			else {
+				task_priority(task, BASEPRI_CONTROL, task->max_priority);
+				task->role = info->role;
+			}
+		}
+		else
+		if (info->role == TASK_GRAPHICS_SERVER) {
+			if (	task != current_task()			||
+					task->sec_token.val[0] != 0			)
+				result = KERN_INVALID_ARGUMENT;
+			else {
+				task_priority(task, MAXPRI_RESERVED - 3, MAXPRI_RESERVED);
+				task->role = info->role;
+			}
+		}
+		else
+		if (info->role == TASK_THROTTLE_APPLICATION) {
+			task_priority(task, MAXPRI_THROTTLE, MAXPRI_THROTTLE);
+			task->role = info->role;
+		}
+		else
+		if (info->role == TASK_DEFAULT_APPLICATION) {
+			task_priority(task, BASEPRI_DEFAULT, MAXPRI_USER);
+			task->role = info->role;
+		}
+		else
+			result = KERN_INVALID_ARGUMENT;
+
+		task_unlock(task);
+>>>>>>> origin/10.6
 
 		break;
 	}
@@ -774,7 +836,11 @@ task_policy_update_internal_locked(task_t task, thread_t thread, boolean_t in_cr
 				case TASK_DEFAULT_APPLICATION:
 					/* This is 'may render UI but we don't know if it's focal/nonfocal' */
 					next.t_qos_ceiling = THREAD_QOS_UNSPECIFIED;
+<<<<<<< HEAD
 					break;
+=======
+					break;					
+>>>>>>> origin/10.10
 
 				case TASK_NONUI_APPLICATION:
 					/* i.e. 'off-screen' */
@@ -1199,12 +1265,19 @@ task_policy_update_internal_locked(task_t task, thread_t thread, boolean_t in_cr
 			(prev.t_sfi_managed != next.t_sfi_managed))
 			update_sfi = TRUE;
 
+<<<<<<< HEAD
 #if CONFIG_SCHED_SFI
+=======
+/* TODO: if CONFIG_SFI */
+>>>>>>> origin/10.10
 		if (prev.t_role != next.t_role && task_policy_update_coalition_focal_tasks(task, prev.t_role, next.t_role)) {
 			update_sfi = TRUE;
 			pend_token->tpt_update_coal_sfi = 1;
 		}
+<<<<<<< HEAD
 #endif /* !CONFIG_SCHED_SFI */
+=======
+>>>>>>> origin/10.10
 
 		task_policy_update_task_locked(task, update_throttle, update_threads, update_sfi);
 	} else {
@@ -1230,8 +1303,11 @@ task_policy_update_internal_locked(task_t task, thread_t thread, boolean_t in_cr
 	}
 }
 
+<<<<<<< HEAD
 
 #if CONFIG_SCHED_SFI
+=======
+>>>>>>> origin/10.10
 /*
  * Yet another layering violation. We reach out and bang on the coalition directly.
  */
@@ -1242,6 +1318,7 @@ task_policy_update_coalition_focal_tasks(task_t     task,
 {
 	boolean_t sfi_transition = FALSE;
 
+<<<<<<< HEAD
 	/* task moving into/out-of the foreground */
 	if (prev_role != TASK_FOREGROUND_APPLICATION && next_role == TASK_FOREGROUND_APPLICATION) {
 		if (task_coalition_adjust_focal_count(task, 1) == 1)
@@ -1257,12 +1334,30 @@ task_policy_update_coalition_focal_tasks(task_t     task,
 			sfi_transition = TRUE;
 	} else if (prev_role == TASK_BACKGROUND_APPLICATION && next_role != TASK_BACKGROUND_APPLICATION) {
 		if (task_coalition_adjust_nonfocal_count(task, -1) == 0)
+=======
+	if (prev_role != TASK_FOREGROUND_APPLICATION && next_role == TASK_FOREGROUND_APPLICATION) {
+		if (coalition_adjust_focal_task_count(task->coalition, 1) == 1)
+			sfi_transition = TRUE;
+	} else if (prev_role == TASK_FOREGROUND_APPLICATION && next_role != TASK_FOREGROUND_APPLICATION) {
+		if (coalition_adjust_focal_task_count(task->coalition, -1) == 0)
+			sfi_transition = TRUE;
+	}
+
+	if (prev_role != TASK_BACKGROUND_APPLICATION && next_role == TASK_BACKGROUND_APPLICATION) {
+		if (coalition_adjust_non_focal_task_count(task->coalition, 1) == 1)
+			sfi_transition = TRUE;
+	} else if (prev_role == TASK_BACKGROUND_APPLICATION && next_role != TASK_BACKGROUND_APPLICATION) {
+		if (coalition_adjust_non_focal_task_count(task->coalition, -1) == 0)
+>>>>>>> origin/10.10
 			sfi_transition = TRUE;
 	}
 
 	return sfi_transition;
 }
+<<<<<<< HEAD
 #endif /* CONFIG_SCHED_SFI */
+=======
+>>>>>>> origin/10.10
 
 /* Despite the name, the thread's task is locked, the thread is not */
 void
@@ -1447,12 +1542,17 @@ task_policy_update_complete_unlocked(task_t task, thread_t thread, task_pend_tok
 		if (pend_token->tpt_update_live_donor)
 			task_importance_update_live_donor(task);
 
+<<<<<<< HEAD
 #if CONFIG_SCHED_SFI
 		/* use the resource coalition for SFI re-evaluation */
 		if (pend_token->tpt_update_coal_sfi)
 			coalition_for_each_task(task->coalition[COALITION_TYPE_RESOURCE],
 						(void *)task, task_sfi_reevaluate_cb);
 #endif /* CONFIG_SCHED_SFI */
+=======
+		if (pend_token->tpt_update_coal_sfi)
+			coalition_sfi_reevaluate(task->coalition, task);
+>>>>>>> origin/10.10
 	}
 }
 
@@ -2450,6 +2550,7 @@ boolean_t proc_thread_qos_add_override(task_t task, thread_t thread, uint64_t ti
 		requested.thrp_qos_override = new_qos_override;
 
 		thread->requested_policy = requested;
+<<<<<<< HEAD
 
 		task_policy_update_locked(task, thread, &pend_token);
 		
@@ -2469,6 +2570,27 @@ boolean_t proc_thread_qos_add_override(task_t task, thread_t thread, uint64_t ti
 
 		task_unlock(task);
 
+=======
+
+		task_policy_update_locked(task, thread, &pend_token);
+		
+		if (!has_thread_reference) {
+			thread_reference(thread);
+		}
+		
+		task_unlock(task);
+		
+		task_policy_update_complete_unlocked(task, thread, &pend_token);
+
+		new_effective_qos = thread->effective_policy.thep_qos;
+		
+		thread_deallocate(thread);
+	} else {
+		new_effective_qos = thread->effective_policy.thep_qos;
+
+		task_unlock(task);
+
+>>>>>>> origin/10.10
 		if (has_thread_reference) {
 			thread_deallocate(thread);
 		}

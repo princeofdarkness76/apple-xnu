@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -622,6 +648,7 @@ continue_create_lookup:
 	if (!did_create && (vp->v_flag & VOPENEVT) && (current_proc()->p_flag & P_CHECKOPENEVT)) {
 		fmode |= O_EVTONLY;
 	}
+<<<<<<< HEAD
 
 	/*
 	 * Grab reference, etc.
@@ -630,6 +657,10 @@ continue_create_lookup:
 	if (error) {
 		ref_failed = TRUE;
 		goto bad;
+=======
+	if ( (error = vnode_ref_ext(vp, fmode)) ) {
+		goto bad2;
+>>>>>>> origin/10.5
 	}
 
 	/* Compound VNOP open is responsible for doing the truncate */
@@ -638,7 +669,12 @@ continue_create_lookup:
 
 	*fmodep = fmode;
 	return (0);
+<<<<<<< HEAD
 
+=======
+bad2:
+	VNOP_CLOSE(vp, fmode, ctx);
+>>>>>>> origin/10.5
 bad:
 	/* Opened either explicitly or by a batched create */
 	if (!need_vnop_open) {
@@ -648,11 +684,17 @@ bad:
 	ndp->ni_vp = NULL;
 	if (vp) {
 #if NAMEDRSRCFORK
+<<<<<<< HEAD
 		/* Aggressively recycle shadow files if we error'd out during open() */
 		if ((vnode_isnamedstream(vp)) &&
 			(vp->v_parent != NULLVP) && 
 			(vnode_isshadow(vp))) {
 				vnode_recycle(vp);
+=======
+		if ((vnode_isnamedstream(vp)) && (vp->v_parent != NULLVP) &&
+					(vnode_isshadow (vp))) {
+			vnode_recycle(vp);
+>>>>>>> origin/10.5
 		}
 #endif
 		vnode_put(vp);
@@ -663,6 +705,7 @@ bad:
 		 *
 		 * EREDRIVEOPEN: means that we were hit by the tty allocation race.
 		 */
+<<<<<<< HEAD
 		if (((error == ENOENT) && (*fmodep & O_CREAT)) || (error == EREDRIVEOPEN) || ref_failed) {
 			/*
 			 * We'll retry here but it may be possible that we get
@@ -685,6 +728,9 @@ bad:
 				tsleep(&nretries, PVFS, "vn_open_auth_retry",
 				    MIN((nretries * (hz/100)), hz));
 			}
+=======
+		if (((error == ENOENT) && (*fmodep & O_CREAT)) || (error == EREDRIVEOPEN)) {
+>>>>>>> origin/10.5
 			goto again;
 		}
 	}
@@ -768,12 +814,35 @@ vn_close(struct vnode *vp, int flags, vfs_context_t ctx)
 	}
 #endif
 
+<<<<<<< HEAD
 	if (!vnode_isspec(vp))
 		(void)vnode_rele_ext(vp, flags, 0);
 	
 	if (flusherror) {
 		error = flusherror;
 	}
+=======
+#if NAMEDRSRCFORK
+	/* Sync data from resource fork shadow file if needed. */
+	if ((vp->v_flag & VISNAMEDSTREAM) && 
+	    (vp->v_parent != NULLVP) &&
+	    (vnode_isshadow(vp))) {
+		if (flags & FWASWRITTEN) {
+			(void) vnode_flushnamedstream(vp->v_parent, vp, ctx);
+		}
+	}
+#endif
+	
+	/* work around for foxhound */
+	if (vp->v_type == VBLK)
+		(void)vnode_rele_ext(vp, flags, 0);
+
+	error = VNOP_CLOSE(vp, flags, ctx);
+
+	if (vp->v_type != VBLK)
+		(void)vnode_rele_ext(vp, flags, 0);
+	
+>>>>>>> origin/10.5
 	return (error);
 }
 

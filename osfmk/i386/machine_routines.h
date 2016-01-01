@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -90,6 +112,47 @@ vm_offset_t
 ml_static_ptovirt(
 	vm_offset_t);
 
+/* PCI config cycle probing */
+boolean_t ml_probe_read(
+	vm_offset_t paddr,
+	unsigned int *val);
+
+/* Read physical address byte */
+unsigned int ml_phys_read_byte(
+	vm_offset_t paddr);
+
+/* Read physical address half word */
+unsigned int ml_phys_read_half(
+	vm_offset_t paddr);
+
+/* Read physical address word*/
+unsigned int ml_phys_read(
+	vm_offset_t paddr);
+unsigned int ml_phys_read_word(
+	vm_offset_t paddr);
+
+/* Read physical address double word */
+unsigned long long ml_phys_read_double(
+	vm_offset_t paddr);
+
+/* Write physical address byte */
+void ml_phys_write_byte(
+	vm_offset_t paddr, unsigned int data);
+
+/* Write physical address half word */
+void ml_phys_write_half(
+	vm_offset_t paddr, unsigned int data);
+
+/* Write physical address word */
+void ml_phys_write(
+	vm_offset_t paddr, unsigned int data);
+void ml_phys_write_word(
+	vm_offset_t paddr, unsigned int data);
+
+/* Write physical address double word */
+void ml_phys_write_double(
+	vm_offset_t paddr, unsigned long long data);
+
 void ml_static_mfree(
 	vm_offset_t,
 	vm_size_t);
@@ -102,6 +165,7 @@ vm_offset_t ml_static_malloc(
 vm_offset_t ml_vtophys(
 	vm_offset_t vaddr);
 
+<<<<<<< HEAD
 vm_size_t ml_nofault_copy(
 	vm_offset_t virtsrc, vm_offset_t virtdst, vm_size_t size);
 
@@ -130,6 +194,26 @@ extern uint32_t idle_entry_timer_processing_hdeadline_threshold;
 #else
 #define TCOAL_DEBUG(x, a, b, c, d, e) do { } while(0)
 #endif /* TCOAL_INSTRUMENT */
+=======
+/* Struct for ml_cpu_get_info */
+struct ml_cpu_info {
+	unsigned long		vector_unit;
+	unsigned long		cache_line_size;
+	unsigned long		l1_icache_size;
+	unsigned long		l1_dcache_size;
+	unsigned long		l2_settings;
+	unsigned long		l2_cache_size;
+	unsigned long		l3_settings;
+	unsigned long		l3_cache_size;
+};
+
+typedef struct ml_cpu_info ml_cpu_info_t;
+
+/* Get processor info */
+void ml_cpu_get_info(ml_cpu_info_t *cpu_info);
+
+#endif /* __APPLE_API_UNSTABLE */
+>>>>>>> origin/10.2
 
 #if	defined(PEXPERT_KERNEL_PRIVATE) || defined(MACH_KERNEL_PRIVATE)
 /* IO memory map services */
@@ -147,9 +231,17 @@ void	ml_get_bouncepool_info(
 boolean_t machine_timeout_suspended(void);
 #endif /* PEXPERT_KERNEL_PRIVATE || MACH_KERNEL_PRIVATE  */
 
+<<<<<<< HEAD
 /* Warm up a CPU to receive an interrupt */
 kern_return_t ml_interrupt_prewarm(uint64_t deadline);
 
+=======
+
+void interrupt_latency_tracker_setup(void);
+void interrupt_reset_latency_stats(void);
+void interrupt_populate_latency_stats(char *, unsigned);
+boolean_t ml_fpu_avx_enabled(void);
+>>>>>>> origin/10.6
 #endif /* XNU_KERNEL_PRIVATE */
 
 #ifdef KERNEL_PRIVATE
@@ -273,10 +365,18 @@ void ml_thread_policy(
 #define MACHINE_NETWORK_WORKLOOP		0x00000001
 #define MACHINE_NETWORK_NETISR			0x00000002
 
+<<<<<<< HEAD
+=======
+/* Initialize the maximum number of CPUs */
+void ml_init_max_cpus(
+	unsigned long max_cpus);
+
+>>>>>>> origin/10.2
 /* Return the maximum number of CPUs set by ml_init_max_cpus() */
 int ml_get_max_cpus(
 	void);
 
+<<<<<<< HEAD
 /*
  * The following are in pmCPU.c not machine_routines.c.
  */
@@ -286,7 +386,10 @@ extern void ml_set_maxbusdelay(uint32_t mdelay);
 extern uint32_t ml_get_maxbusdelay(void);
 extern void ml_set_maxintdelay(uint64_t mdelay);
 extern uint64_t ml_get_maxintdelay(void);
+<<<<<<< HEAD
 extern boolean_t ml_get_interrupt_prewake_applicable(void);
+=======
+>>>>>>> origin/10.5
 
 
 extern uint64_t tmrCvt(uint64_t time, uint64_t conversion);
@@ -334,6 +437,7 @@ void ml_install_interrupt_handler(
 
 __END_DECLS
 
+<<<<<<< HEAD
 #ifdef	XNU_KERNEL_PRIVATE
 
 boolean_t ml_fpu_avx_enabled(void);
@@ -342,6 +446,7 @@ void interrupt_latency_tracker_setup(void);
 void interrupt_reset_latency_stats(void);
 void interrupt_populate_latency_stats(char *, unsigned);
 void ml_get_power_state(boolean_t *, boolean_t *);
+<<<<<<< HEAD
 
 void timer_queue_expire_local(void*);
 void timer_queue_expire_rescan(void*);
@@ -354,6 +459,20 @@ boolean_t ml_recent_wake(void);
 
 extern uint64_t reportphyreaddelayabs;
 extern uint32_t reportphyreadosbt;
+=======
+/* Return the current number of CPUs */
+int ml_get_current_cpus(
+	void);
 
+#endif /* __APPLE_API_PRIVATE */
+>>>>>>> origin/10.2
+=======
+>>>>>>> origin/10.8
+
+boolean_t ml_recent_wake(void);
 #endif /* XNU_KERNEL_PRIVATE */
+=======
+
+
+>>>>>>> origin/10.6
 #endif /* _I386_MACHINE_ROUTINES_H_ */

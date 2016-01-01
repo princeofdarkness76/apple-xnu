@@ -198,9 +198,15 @@ init_predicates(KXLDSym *sym, u_char n_type, u_short n_desc)
          * section-based on OS X.  We must mark them as such so they get
          * relocated.
          */
+<<<<<<< HEAD
         case N_RBRAC:
         case N_LBRAC:
             sym->is_section = 1;
+=======
+        case N_LBRAC:
+        case N_RBRAC:
+            sym->predicates.is_section = 1;
+>>>>>>> origin/10.6
             break;
         default:
             rval = KERN_FAILURE;
@@ -214,6 +220,26 @@ init_predicates(KXLDSym *sym, u_char n_type, u_short n_desc)
     } else {
         u_char type = n_type & N_TYPE;
 
+<<<<<<< HEAD
+=======
+        /* Set the type-independent fields */
+        if ((n_type & N_EXT) && !(n_type & N_PEXT)) {
+            sym->predicates.is_external = 1;
+        }
+
+        if (n_desc & N_DESC_DISCARDED) {
+            sym->predicates.is_obsolete = 1;
+        }
+
+        if (n_desc & N_WEAK_REF) {
+            sym->predicates.is_weak = 1;
+        }
+
+        if (n_desc & N_ARM_THUMB_DEF) {
+            sym->predicates.is_thumb = 1;
+        }
+
+>>>>>>> origin/10.6
         /* The first set of type fields are mutually exclusive, so they can be
          * set with a switch statement.
          */

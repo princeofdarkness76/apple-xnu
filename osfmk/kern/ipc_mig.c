@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -150,6 +172,7 @@ mach_msg_send_from_kernel_proper(
 	if (mr != MACH_MSG_SUCCESS)
 		return mr;
 
+<<<<<<< HEAD
 	mr = ipc_kmsg_copyin_from_kernel(kmsg);
 	if (mr != MACH_MSG_SUCCESS) {
 		ipc_kmsg_free(kmsg);
@@ -159,6 +182,11 @@ mach_msg_send_from_kernel_proper(
 	mr = ipc_kmsg_send(kmsg, 
 			   MACH_SEND_KERNEL_DEFAULT,
 			   MACH_MSG_TIMEOUT_NONE);
+=======
+	ipc_kmsg_copyin_from_kernel(kmsg);
+
+	mr = ipc_kmsg_send_always(kmsg);
+>>>>>>> origin/10.5
 	if (mr != MACH_MSG_SUCCESS) {
 		ipc_kmsg_destroy(kmsg);
 	}
@@ -224,6 +252,7 @@ mach_msg_send_from_kernel_with_options_legacy(
 
 	mr = ipc_kmsg_copyin_from_kernel_legacy(kmsg);
 	if (mr != MACH_MSG_SUCCESS) {
+<<<<<<< HEAD
 		ipc_kmsg_free(kmsg);
 		return mr;
 	}
@@ -239,6 +268,8 @@ mach_msg_send_from_kernel_with_options_legacy(
 	mr = ipc_kmsg_send(kmsg, option, timeout_val);
 
 	if (mr != MACH_MSG_SUCCESS) {
+=======
+>>>>>>> origin/10.5
 		ipc_kmsg_destroy(kmsg);
 	}
 	
@@ -330,6 +361,7 @@ mach_msg_rpc_from_kernel_body(
 	kmsg->ikm_header->msgh_bits |=
 		MACH_MSGH_BITS(0, MACH_MSG_TYPE_MAKE_SEND_ONCE);
 
+<<<<<<< HEAD
 #if IKM_SUPPORT_LEGACY
     if(legacy)
         mr = ipc_kmsg_copyin_from_kernel_legacy(kmsg);
@@ -345,6 +377,13 @@ mach_msg_rpc_from_kernel_body(
 	mr = ipc_kmsg_send(kmsg, 
 			   MACH_SEND_KERNEL_DEFAULT,
 			   MACH_MSG_TIMEOUT_NONE);
+=======
+	ipc_port_reference(reply);
+
+	ipc_kmsg_copyin_from_kernel(kmsg);
+
+	mr = ipc_kmsg_send_always(kmsg);
+>>>>>>> origin/10.5
 	if (mr != MACH_MSG_SUCCESS) {
 		ipc_kmsg_destroy(kmsg);
 		return mr;

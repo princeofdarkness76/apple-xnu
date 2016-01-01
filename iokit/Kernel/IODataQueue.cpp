@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -36,12 +58,15 @@
 #include <IOKit/IOLib.h>
 #include <IOKit/IOMemoryDescriptor.h>
 #include <libkern/OSAtomic.h>
+<<<<<<< HEAD
 
 struct IODataQueueInternal
 {
     mach_msg_header_t msg;
     UInt32            queueSize;
 };
+=======
+>>>>>>> origin/10.9
 
 #ifdef enqueue
 #undef enqueue
@@ -118,6 +143,16 @@ Boolean IODataQueue::initWithCapacity(UInt32 size)
     dataQueue->queueSize    = size;
 //  dataQueue->head         = 0;
 //  dataQueue->tail         = 0;
+<<<<<<< HEAD
+=======
+
+    if (!notifyMsg) {
+        notifyMsg = IOMalloc(sizeof(mach_msg_header_t));
+        if (!notifyMsg)
+            return false;
+    }
+    bzero(notifyMsg, sizeof(mach_msg_header_t));
+>>>>>>> origin/10.10
 
     return true;
 }
@@ -166,10 +201,15 @@ Boolean IODataQueue::enqueue(void * data, UInt32 dataSize)
     if (dataSize > UINT32_MAX - DATA_QUEUE_ENTRY_HEADER_SIZE) {
         return false;
     }
+<<<<<<< HEAD
 
     // Check for underflow of (dataQueue->queueSize - tail)
     queueSize = ((IODataQueueInternal *) notifyMsg)->queueSize;
     if ((queueSize < tail) || (queueSize < head)) {
+=======
+    // Check for underflow of (dataQueue->queueSize - tail)
+    if (dataQueue->queueSize < tail) {
+>>>>>>> origin/10.9
         return false;
     }
 
@@ -177,7 +217,11 @@ Boolean IODataQueue::enqueue(void * data, UInt32 dataSize)
     {
         // Is there enough room at the end for the entry?
         if ((entrySize <= UINT32_MAX - tail) &&
+<<<<<<< HEAD
             ((tail + entrySize) <= queueSize) )
+=======
+            ((tail + entrySize) <= dataQueue->queueSize) )
+>>>>>>> origin/10.9
         {
             entry = (IODataQueueEntry *)((UInt8 *)dataQueue->queue + tail);
 

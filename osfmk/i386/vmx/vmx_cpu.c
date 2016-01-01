@@ -360,9 +360,13 @@ void
 vmx_resume()
 {
 	VMX_KPRINTF("vmx_resume\n");
+<<<<<<< HEAD
 
 	vmx_enable();
 
+=======
+	vmx_init(); /* init VMX on CPU #0 */
+>>>>>>> origin/10.5
 	if (vmx_use_count)
 		vmx_on(NULL);
 }

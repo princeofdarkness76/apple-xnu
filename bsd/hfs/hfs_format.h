@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -54,6 +76,7 @@ extern "C" {
 enum {
 	kHFSSigWord		= 0x4244,	/* 'BD' in ASCII */
 	kHFSPlusSigWord		= 0x482B,	/* 'H+' in ASCII */
+<<<<<<< HEAD
 	kHFSXSigWord		= 0x4858,	/* 'HX' in ASCII */
 
 	kHFSPlusVersion		= 0x0004,	/* 'H+' volumes are version 4 only */
@@ -62,6 +85,13 @@ enum {
 	kHFSPlusMountVersion	= 0x31302E30,	/* '10.0' for Mac OS X */
 	kHFSJMountVersion	= 0x4846534a,	/* 'HFSJ' for journaled HFS+ on OS X */
 	kFSKMountVersion	= 0x46534b21	/* 'FSK!' for failed journal replay */
+=======
+	kHFSJSigWord		= 0x484a,	/* 'HJ' in ASCII */
+	kHFSPlusVersion		= 0x0004,	/* will change as format changes */
+						/* version 4 shipped with Mac OS 8.1 */
+	kHFSPlusMountVersion	= 0x31302E30,	/* '10.0' for Mac OS X */
+	kHFSJMountVersion	= 0x4846534a	/* 'HFSJ' for journaled HFS+ on OS X */
+>>>>>>> origin/10.2
 };
 
 
@@ -595,6 +625,7 @@ enum {
 	kHFSBootVolumeInconsistentBit = 11,		/* boot volume is inconsistent (System 7.6 and later) */
 	kHFSCatalogNodeIDsReusedBit = 12,
 	kHFSVolumeJournaledBit = 13,			/* this volume has a journal on it */
+<<<<<<< HEAD
 	kHFSVolumeInconsistentBit = 14,			/* serious inconsistencies detected at runtime */
 	kHFSVolumeSoftwareLockBit	= 15,		/* volume is locked by software */
 	/*
@@ -621,6 +652,20 @@ enum {
 	kHFSUnusedNodeFixMask 			= 0x80000000,
 	
 	kHFSMDBAttributesMask			= 0x8380
+=======
+							/* Bit 14 is reserved for future use */
+	kHFSVolumeSoftwareLockBit	= 15,		/* volume is locked by software */
+
+	kHFSVolumeHardwareLockMask	= 1 << kHFSVolumeHardwareLockBit,
+	kHFSVolumeUnmountedMask		= 1 << kHFSVolumeUnmountedBit,
+	kHFSVolumeSparedBlocksMask	= 1 << kHFSVolumeSparedBlocksBit,
+	kHFSVolumeNoCacheRequiredMask = 1 << kHFSVolumeNoCacheRequiredBit,
+	kHFSBootVolumeInconsistentMask = 1 << kHFSBootVolumeInconsistentBit,
+	kHFSCatalogNodeIDsReusedMask = 1 << kHFSCatalogNodeIDsReusedBit,
+	kHFSVolumeJournaledMask	= 1 << kHFSVolumeJournaledBit,
+	kHFSVolumeSoftwareLockMask	= 1 << kHFSVolumeSoftwareLockBit,
+	kHFSMDBAttributesMask		= 0x8380
+>>>>>>> origin/10.2
 };
 
 enum {
@@ -678,6 +723,10 @@ struct HFSPlusVolumeHeader {
 	u_int16_t 	version;		/* == kHFSPlusVersion */
 	u_int32_t 	attributes;		/* volume attributes */
 	u_int32_t 	lastMountedVersion;	/* implementation version which last mounted volume */
+<<<<<<< HEAD
+=======
+//XXXdbg	u_int32_t 	reserved;		/* reserved - initialized as zero */
+>>>>>>> origin/10.2
 	u_int32_t 	journalInfoBlock;	/* block addr of journal info (if volume is journaled, zero otherwise) */
 
 	u_int32_t 	createDate;		/* date and time of volume creation */
@@ -770,6 +819,7 @@ enum {
 	kBTVariableIndexKeysMask = 0x00000004	/* keys in index nodes are variable length */
 };
 
+<<<<<<< HEAD
 
 /* Catalog Key Name Comparison Type */
 enum {
@@ -789,15 +839,23 @@ enum {
 //
 #define JIB_RESERVED_SIZE  ((32*sizeof(u_int32_t)) - sizeof(uuid_string_t) - 48)
 
+=======
+/* JournalInfoBlock - Structure that describes where our journal lives */
+>>>>>>> origin/10.2
 struct JournalInfoBlock {
 	u_int32_t	flags;
     	u_int32_t       device_signature[8];  // signature used to locate our device.
 	u_int64_t       offset;               // byte offset to the journal on the device
 	u_int64_t       size;                 // size in bytes of the journal
+<<<<<<< HEAD
 	uuid_string_t   ext_jnl_uuid;
 	char            machine_serial_num[48];
 	char    	reserved[JIB_RESERVED_SIZE];
 } __attribute__((aligned(2), packed));
+=======
+	u_int32_t 	reserved[32];
+};
+>>>>>>> origin/10.2
 typedef struct JournalInfoBlock JournalInfoBlock;
 
 enum {
@@ -806,6 +864,7 @@ enum {
     kJIJournalNeedInitMask      = 0x00000004
 };
 
+<<<<<<< HEAD
 //
 // This the content type uuid for "external journal" GPT 
 // partitions.  Each instance of a partition also has a
@@ -813,6 +872,10 @@ enum {
 //
 #define EXTJNL_CONTENT_TYPE_UUID "4A6F7572-6E61-11AA-AA11-00306543ECAC"
 
+=======
+
+#pragma options align=reset
+>>>>>>> origin/10.2
 
 #ifdef __cplusplus
 }

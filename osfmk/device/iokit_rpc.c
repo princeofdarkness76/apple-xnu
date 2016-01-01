@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -348,9 +370,13 @@ iokit_destroy_object_port( ipc_port_t port )
 EXTERN kern_return_t
 iokit_switch_object_port( ipc_port_t port, io_object_t obj, ipc_kobject_type_t type )
 {
+<<<<<<< HEAD
     iokit_lock_port(port);
     ipc_kobject_set( port, (ipc_kobject_t) obj, type);
     iokit_unlock_port(port);
+=======
+    ipc_kobject_set( port, (ipc_kobject_t) obj, type);
+>>>>>>> origin/10.2
 
     return( KERN_SUCCESS);
 }
@@ -618,7 +644,17 @@ kern_return_t IOUnmapPages(vm_map_t map, vm_offset_t va, vm_size_t length)
     boolean_t	b;
 
 #if __ppc__
+<<<<<<< HEAD
     b = mapping_remove(pmap, va);
+=======
+    for (idx = 0; idx < pmap_mem_regions_count; idx++)
+    {
+	lastPage = pmap_mem_regions[idx].mrEnd;
+#elif __i386__
+    for (idx = 0; idx < pmap_memory_region_count; idx++)
+    {
+	lastPage = pmap_memory_regions[idx].end - 1;
+>>>>>>> origin/10.5
 #else
     pmap_remove(pmap, va, va + length);
     b = TRUE;

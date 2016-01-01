@@ -108,6 +108,7 @@ static strategy_fcn_t	mdevstrategy;
 static int				mdevbioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p);
 static int				mdevcioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p);
 static int 				mdevrw(dev_t dev, struct uio *uio, int ioflag);
+<<<<<<< HEAD
 
 #ifdef CONFIG_MEMDEV_INSECURE
 
@@ -115,6 +116,12 @@ static char *			nonspace(char *pos, char *end);
 static char *			getspace(char *pos, char *end);
 static char *			cvtnum(char *pos, char *end, uint64_t *num);
 
+=======
+#ifdef CONFIG_MEMDEV_INSECURE
+static char *			nonspace(char *pos, char *end);
+static char *			getspace(char *pos, char *end);
+static char *			cvtnum(char *pos, char *end, unsigned int *num);
+>>>>>>> origin/10.5
 #endif /* CONFIG_MEMDEV_INSECURE */
 
 extern void		bcopy_phys(addr64_t from, addr64_t to, vm_size_t bytes);
@@ -446,13 +453,16 @@ static	int mdevsize(dev_t dev) {
 void mdevinit(__unused int the_cnt) {
 
 #ifdef CONFIG_MEMDEV_INSECURE
+<<<<<<< HEAD
 
+=======
+	
+>>>>>>> origin/10.5
 	int devid, phys;
 	uint64_t base;
 	uint64_t size;
 	char *ba, *lp;
 	dev_t dev;
-	
 	
 	ba = PE_boot_args();								/* Get the boot arguments */
 	lp = ba + 256;										/* Point to the end */
@@ -490,15 +500,23 @@ void mdevinit(__unused int the_cnt) {
 		
 		dev = mdevadd(devid, base >> 12, (unsigned)size >> 12, phys);	/* Go add the device */ 
 	}
+<<<<<<< HEAD
 
 #endif /* CONFIG_MEMDEV_INSECURE */
 
+=======
+	
+#endif /* CONFIG_MEMDEV_INSECURE */
+>>>>>>> origin/10.5
 	return;
 
 }
 
 #ifdef CONFIG_MEMDEV_INSECURE
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.5
 char *nonspace(char *pos, char *end) {					/* Find next non-space in string */
 
 	if(pos >= end) return end;							/* Don't go past end */
@@ -552,6 +570,7 @@ char *cvtnum(char *pos, char *end, uint64_t *num) {		/* Convert to a number */
 		pos++;											/* Step on */
 	}
 }
+#endif /* CONFIG_MEMDEV_INSECURE */
 
 #endif /* CONFIG_MEMDEV_INSECURE */
 

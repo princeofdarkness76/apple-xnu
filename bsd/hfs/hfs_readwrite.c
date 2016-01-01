@@ -1,8 +1,22 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+>>>>>>> origin/10.8
+=======
+ * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+>>>>>>> origin/10.10
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +28,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -55,8 +89,11 @@
 #include <sys/fsctl.h>
 #include <sys/mount_internal.h>
 #include <sys/file_internal.h>
+<<<<<<< HEAD
 
 #include <libkern/OSDebug.h>
+=======
+>>>>>>> origin/10.9
 
 #include <miscfs/specfs/specdev.h>
 
@@ -87,12 +124,19 @@ enum {
 	MAXHFSFILESIZE = 0x7FFFFFFF		/* this needs to go in the mount structure */
 };
 
+<<<<<<< HEAD
 /* from bsd/hfs/hfs_vfsops.c */
 extern int hfs_vfs_vget (struct mount *mp, ino64_t ino, struct vnode **vpp, vfs_context_t context);
 
 /* from hfs_hotfiles.c */
 extern int hfs_pin_overflow_extents (struct hfsmount *hfsmp, uint32_t fileid,
 		                              uint8_t forktype, uint32_t *pinned);
+=======
+/* from bsd/vfs/vfs_cluster.c */
+extern int is_file_clean(vnode_t vp, off_t filesize);
+/* from bsd/hfs/hfs_vfsops.c */
+extern int hfs_vfs_vget(struct mount *mp, ino64_t ino, struct vnode **vpp, vfs_context_t context);
+>>>>>>> origin/10.5
 
 static int  hfs_clonefile(struct vnode *, int, int, int);
 static int  hfs_clonesysfile(struct vnode *, int, int, int, kauth_cred_t, struct proc *);
@@ -351,6 +395,7 @@ hfs_vnop_write(struct vnop_write_args *ap)
 	off_t bytesToAdd = 0;
 	off_t actualBytesAdded;
 	off_t filebytes;
+<<<<<<< HEAD
 	off_t offset;
 	ssize_t resid;
 	int eflags;
@@ -362,8 +407,12 @@ hfs_vnop_write(struct vnop_write_args *ap)
 	int do_snapshot = 1;
 	time_t orig_ctime=VTOC(vp)->c_ctime;
 	int took_truncate_lock = 0;
+<<<<<<< HEAD
 	int io_return_on_throttle = 0;
 	int throttled_count = 0;
+=======
+	struct rl_entry *invalid_range;
+>>>>>>> origin/10.7
 
 #if HFS_COMPRESSION
 	if ( hfs_file_is_compressed(VTOC(vp), 1) ) { /* 1 == don't take the cnode lock */
@@ -403,6 +452,11 @@ hfs_vnop_write(struct vnop_write_args *ap)
 		return EPERM;
 	}
 #endif
+=======
+	u_long fileblocks;
+	struct hfsmount *hfsmp;
+	int started_tr = 0, grabbed_lock = 0;
+>>>>>>> origin/10.2
 
 	resid = uio_resid(uio);
 	offset = uio_offset(uio);
@@ -438,12 +492,30 @@ hfs_vnop_write(struct vnop_write_args *ap)
 	}
 #endif /* HFS_SPARSE_DEV */
 
+<<<<<<< HEAD
 	if ((ioflag & (IO_SINGLE_WRITER | IO_SYSCALL_DISPATCH)) == 
 			(IO_SINGLE_WRITER | IO_SYSCALL_DISPATCH)) {
 		io_return_on_throttle = IO_RETURN_ON_THROTTLE;
 	}
+=======
+	// XXXdbg - don't allow modification of the journal or journal_info_block
+	if (VTOHFS(vp)->jnl && cp->c_datafork) {
+		struct HFSPlusExtentDescriptor *extd;
+
+		extd = &cp->c_datafork->ff_data.cf_extents[0];
+		if (extd->startBlock == VTOVCB(vp)->vcbJinfoBlock || extd->startBlock == VTOHFS(vp)->jnl_start) {
+			return EPERM;
+		}
+	}
+
+	writelimit = uio->uio_offset + uio->uio_resid;
+>>>>>>> origin/10.2
 
 again:
+<<<<<<< HEAD
+=======
+	/* Protect against a size change. */
+>>>>>>> origin/10.7
 	/*
 	 * Protect against a size change.
 	 *
@@ -452,7 +524,11 @@ again:
 	 * start.
 	 */
 	if (ioflag & IO_APPEND || took_truncate_lock) {
+<<<<<<< HEAD
 		hfs_lock_truncate(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT);
+=======
+		hfs_lock_truncate(cp, HFS_EXCLUSIVE_LOCK);
+>>>>>>> origin/10.7
 	}	
 	else {
 		hfs_lock_truncate(cp, HFS_SHARED_LOCK, HFS_LOCK_DEFAULT);
@@ -492,11 +568,22 @@ again:
 	 *    old EOF and new EOF are in the same block, we still need to
 	 *    protect that range of bytes until they are written for the
 	 *    first time.
+<<<<<<< HEAD
+=======
+	 * 3. The write overlaps some invalid ranges (delayed zero fill; that
+	 *    part of the file has been allocated, but not yet written).
+>>>>>>> origin/10.7
 	 *
 	 * If we had a shared lock with the above cases, we need to try to upgrade
 	 * to an exclusive lock.  If the upgrade fails, we will lose the shared
 	 * lock, and will need to take the truncate lock again; the took_truncate_lock
 	 * flag will still be set, causing us to try for an exclusive lock next time.
+<<<<<<< HEAD
+=======
+	 *
+	 * NOTE: Testing for #3 (delayed zero fill) needs to be done while the cnode
+	 * lock is held, since it protects the range lists.
+>>>>>>> origin/10.7
 	 */
 	if ((cp->c_truncatelockowner == HFS_SHARED_OWNER) &&
 	    ((fp->ff_unallocblocks != 0) ||
@@ -519,6 +606,7 @@ again:
 		goto exit;
 	}
 	cnode_locked = 1;
+<<<<<<< HEAD
 
 	filebytes = hfs_blk_to_bytes(fp->ff_blocks, hfsmp->blockSize);
 
@@ -527,15 +615,46 @@ again:
 							 hfsmp->blockSize) < offset - filebytes)) {
 		retval = ENOSPC;
 		goto exit;
+=======
+	
+	/*
+	 * Now that we have the cnode lock, see if there are delayed zero fill ranges
+	 * overlapping our write.  If so, we need the truncate lock exclusive (see above).
+	 */
+	if ((cp->c_truncatelockowner == HFS_SHARED_OWNER) &&
+	    (rl_scan(&fp->ff_invalidranges, offset, writelimit-1, &invalid_range) != RL_NOOVERLAP)) {
+	    	/*
+		 * When testing, it appeared that calling lck_rw_lock_shared_to_exclusive() causes
+		 * a deadlock, rather than simply returning failure.  (That is, it apparently does
+		 * not behave like a "try_lock").  Since this condition is rare, just drop the
+		 * cnode lock and try again.  Since took_truncate_lock is set, we will
+		 * automatically take the truncate lock exclusive.
+		 */
+		hfs_unlock(cp);
+		cnode_locked = 0;
+		hfs_unlock_truncate(cp, 0);
+		goto again;
+>>>>>>> origin/10.7
 	}
+	
+	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 0)) | DBG_FUNC_START,
+		     (int)offset, uio_resid(uio), (int)fp->ff_size,
+		     (int)filebytes, 0);
 
 	KERNEL_DEBUG(HFSDBG_WRITE | DBG_FUNC_START,
 		     (int)offset, uio_resid(uio), (int)fp->ff_size,
 		     (int)filebytes, 0);
 
+<<<<<<< HEAD
 	/* Check if we do not need to extend the file */
 	if (writelimit <= filebytes) {
 		goto sizeok;
+=======
+		retval = hfs_chkdq(cp, (int64_t)(roundup(bytesToAdd, vcb->blockSize)), 
+				   ap->a_cred, 0);
+		if (retval)
+			return (retval);
+>>>>>>> origin/10.2
 	}
 
 	bytesToAdd = writelimit - filebytes;
@@ -547,9 +666,23 @@ again:
 		goto exit;
 #endif /* QUOTA */
 
+<<<<<<< HEAD
 	if (hfs_start_transaction(hfsmp) != 0) {
 		retval = EINVAL;
 		goto exit;
+=======
+	hfsmp = VTOHFS(vp);
+	if (writelimit > filebytes) {
+		hfs_global_shared_lock_acquire(hfsmp);
+		grabbed_lock = 1;
+	}
+	if (hfsmp->jnl && (writelimit > filebytes)) {
+		if (journal_start_transaction(hfsmp->jnl) != 0) {
+			hfs_global_shared_lock_release(hfsmp);
+			return EINVAL;
+		}
+		started_tr = 1;
+>>>>>>> origin/10.2
 	}
 
 	while (writelimit > filebytes) {
@@ -582,6 +715,7 @@ again:
 	(void) hfs_volupdate(hfsmp, VOL_UPDATE, 0);
 	(void) hfs_end_transaction(hfsmp);
 
+<<<<<<< HEAD
 	/*
 	 * If we didn't grow the file enough try a partial write.
 	 * POSIX expects this behavior.
@@ -595,6 +729,20 @@ again:
 	}
 sizeok:
 	if (retval == E_NONE) {
+=======
+	// XXXdbg
+	if (started_tr) {
+		hfs_flushvolumeheader(hfsmp, MNT_NOWAIT, 0);
+		journal_end_transaction(hfsmp->jnl);
+		started_tr = 0;
+	}
+	if (grabbed_lock) {
+		hfs_global_shared_lock_release(hfsmp);
+		grabbed_lock = 0;
+	}
+
+	if (UBCISVALID(vp) && retval == E_NONE) {
+>>>>>>> origin/10.2
 		off_t filesize;
 		off_t head_off;
 		int lflag;
@@ -634,7 +782,11 @@ sizeok:
 
 		hfs_unlock(cp);
 		cnode_locked = 0;
+<<<<<<< HEAD
 
+=======
+		
+>>>>>>> origin/10.5
 		/*
 		 * We need to tell UBC the fork's new size BEFORE calling
 		 * cluster_write, in case any of the new pages need to be
@@ -655,6 +807,7 @@ sizeok:
 		 * zero, unless we are extending the file via write.
 		 */
 		if (filesize > fp->ff_size) {
+<<<<<<< HEAD
 			retval = hfs_zero_eof_page(vp, offset);
 			if (retval)
 				goto exit;
@@ -696,6 +849,15 @@ sizeok:
 				}
 				goto exit;
 			}
+=======
+			fp->ff_new_size = filesize;
+			ubc_setsize(vp, filesize);
+		}
+		retval = cluster_write(vp, uio, fp->ff_size, filesize, zero_off,
+				tail_off, lflag | IO_NOZERODIRTY);
+		if (retval) {
+			fp->ff_new_size = 0;	/* no longer extending; use ff_size */
+>>>>>>> origin/10.5
 			if (filesize > origFileSize) {
 				ubc_setsize(vp, origFileSize);
 			}
@@ -710,7 +872,17 @@ sizeok:
 				fp->ff_bytesread = 0;
 			}
 		}
+<<<<<<< HEAD
 		fp->ff_new_size = 0;	/* ff_size now has the correct size */		
+=======
+		fp->ff_new_size = 0;	/* ff_size now has the correct size */
+		
+		/* If we wrote some bytes, then touch the change and mod times */
+		if (resid > uio_resid(uio)) {
+			cp->c_touch_chgtime = TRUE;
+			cp->c_touch_modtime = TRUE;
+		}
+>>>>>>> origin/10.5
 	}
 	if (partialwrite) {
 		uio_setresid(uio, (uio_resid(uio) + bytesToAdd));
@@ -1038,6 +1210,7 @@ do_attr_lookup(struct hfsmount *hfsmp, struct access_cache *cache, cnid_t cnid,
 		cnattrp->ca_recflags = skip_cp->c_attr.ca_recflags;
 		keyp->hfsPlus.parentID = skip_cp->c_parentcnid;
     } else {
+<<<<<<< HEAD
 		struct cinfo c_info;
 
 		/* otherwise, check the cnode hash incase the file/dir is incore */
@@ -1062,6 +1235,24 @@ do_attr_lookup(struct hfsmount *hfsmp, struct access_cache *cache, cnid_t cnid,
 
 			/* lookup this cnid in the catalog */
 			error = cat_getkeyplusattr(hfsmp, cnid, keyp, cnattrp);
+=======
+	struct cinfo c_info;
+
+	/* otherwise, check the cnode hash incase the file/dir is incore */
+	if (hfs_chash_snoop(hfsmp, cnid, 0, snoop_callback, &c_info) == 0) {
+	    cnattrp->ca_uid = c_info.uid;
+	    cnattrp->ca_gid = c_info.gid;
+	    cnattrp->ca_mode = c_info.mode;
+	    cnattrp->ca_recflags = c_info.recflags;
+	    keyp->hfsPlus.parentID = c_info.parentcnid;
+	} else {
+	    int lockflags;
+			
+	    lockflags = hfs_systemfile_lock(hfsmp, SFL_CATALOG, HFS_SHARED_LOCK);
+			
+	    /* lookup this cnid in the catalog */
+	    error = cat_getkeyplusattr(hfsmp, cnid, keyp, cnattrp);
+>>>>>>> origin/10.7
 			
 			hfs_systemfile_unlock(hfsmp, lockflags);
 			
@@ -1086,6 +1277,7 @@ do_access_check(struct hfsmount *hfsmp, int *err, struct access_cache *cache, HF
     cnid_t* parents,
     uint32_t num_parents)
 {
+<<<<<<< HEAD
     int                     myErr = 0;
     int                     myResult;
     HFSCatalogNodeID        thisNodeID;
@@ -1120,8 +1312,20 @@ do_access_check(struct hfsmount *hfsmp, int *err, struct access_cache *cache, HF
 	    myResult = (myErr == 0) ? 1 : 0;
 	    goto ExitThisRoutine;
 	}
+=======
+    struct hfsmount *hfsmp = VTOHFS(ap->a_vp);
+    struct filefork *fp = VTOF(ap->a_vp);
+    size_t				bytesContAvail = 0;
+    int			retval = E_NONE;
+    int lockExtBtree = 0;
+    struct proc		*p = NULL;
+    struct rl_entry *invalid_range;
+    enum rl_overlaptype overlaptype;
+    int started_tr = 0, grabbed_lock = 0;
+>>>>>>> origin/10.2
 
 
+<<<<<<< HEAD
 	if (parents) {
 	    int tmp;
 	    tmp = cache_binSearch(parents, num_parents-1, thisNodeID, NULL);
@@ -1140,6 +1344,40 @@ do_access_check(struct hfsmount *hfsmp, int *err, struct access_cache *cache, HF
 	// Inefficient (using modulo) and we might want to use a hash function, not rely on the node id to be "nice"...
 	if (bitmap && map_size) {
 	    bitmap[(thisNodeID/8)%(map_size)]|=(1<<(thisNodeID&7));	       
+=======
+	p = current_proc();
+  retry:
+	if (fp->ff_unallocblocks) {
+		lockExtBtree = 1;
+
+		// XXXdbg
+		hfs_global_shared_lock_acquire(hfsmp);
+		grabbed_lock = 1;
+
+		if (hfsmp->jnl) {
+			if (journal_start_transaction(hfsmp->jnl) != 0) {
+				hfs_global_shared_lock_release(hfsmp);
+				return EINVAL;
+			} else {
+				started_tr = 1;
+			}
+		} 
+
+		if (retval = hfs_metafilelocking(hfsmp, kHFSExtentsFileID, LK_EXCLUSIVE | LK_CANRECURSE, p)) {
+			if (started_tr) {
+				journal_end_transaction(hfsmp->jnl);
+			}
+			if (grabbed_lock) {
+				hfs_global_shared_lock_release(hfsmp);
+			}
+			return (retval);
+		}
+	} else if (overflow_extents(fp)) {
+		lockExtBtree = 1;
+		if (retval = hfs_metafilelocking(hfsmp, kHFSExtentsFileID, LK_EXCLUSIVE | LK_CANRECURSE, p)) {
+			return retval;
+		}
+>>>>>>> origin/10.2
 	}
 	       
 
@@ -1149,12 +1387,45 @@ do_access_check(struct hfsmount *hfsmp, int *err, struct access_cache *cache, HF
 	    goto ExitThisRoutine; /* no access */
 	}
 
+<<<<<<< HEAD
 	/* Root always gets access. */
 	if (suser(myp_ucred, NULL) == 0) {
 		thisNodeID = catkey.hfsPlus.parentID;
 		myResult = 1;
 		continue;
 	}
+=======
+		//
+		// Make sure we have a transaction.  It's possible
+		// that we came in and fp->ff_unallocblocks was zero
+		// but during the time we blocked acquiring the extents
+		// btree, ff_unallocblocks became non-zero and so we
+		// will need to start a transaction.
+		//
+		if (hfsmp->jnl && started_tr == 0) {
+		    if (lockExtBtree) {
+			(void) hfs_metafilelocking(hfsmp, kHFSExtentsFileID, LK_RELEASE, p);
+			lockExtBtree = 0;
+		    }
+    
+		    goto retry;
+		}
+
+		reqbytes = (SInt64)fp->ff_unallocblocks *
+		             (SInt64)HFSTOVCB(hfsmp)->blockSize;
+		/*
+		 * Release the blocks on loan and aquire some real ones.
+		 * Note that we can race someone else for these blocks
+		 * (and lose) so cmap needs to handle a failure here.
+		 * Currently this race can't occur because all allocations
+		 * are protected by an exclusive lock on the  Extents
+		 * Overflow file.
+		 */
+		HFSTOVCB(hfsmp)->loanedBlocks -= fp->ff_unallocblocks;
+		FTOC(fp)->c_blocks            -= fp->ff_unallocblocks;
+		fp->ff_blocks                 -= fp->ff_unallocblocks;
+		fp->ff_unallocblocks           = 0;
+>>>>>>> origin/10.2
 
 	// if the thing has acl's, do the full permission check
 	if ((cnattr.ca_recflags & kHFSHasSecurityMask) != 0) {
@@ -1198,14 +1469,30 @@ do_access_check(struct hfsmount *hfsmp, int *err, struct access_cache *cache, HF
 			goto ExitThisRoutine;   /* no access */
 		}
 
+<<<<<<< HEAD
 	    /* up the hierarchy we go */
 	    thisNodeID = catkey.hfsPlus.parentID;
+=======
+		if (retval) {
+			(void) hfs_metafilelocking(hfsmp, kHFSExtentsFileID, LK_RELEASE, p);
+			if (started_tr) {
+				hfs_flushvolumeheader(hfsmp, MNT_NOWAIT, 0);
+				journal_end_transaction(hfsmp->jnl);
+			}
+			if (grabbed_lock) {
+				hfs_global_shared_lock_release(hfsmp);
+			}
+			return (retval);
+		}
+		VTOC(ap->a_vp)->c_flag |= C_MODIFIED;
+>>>>>>> origin/10.2
 	}
     }
 
     /* if here, we have access to this node */
     myResult = 1;
 
+<<<<<<< HEAD
   ExitThisRoutine:
     if (parents && myErr == 0 && scope_index == -1) {
 	myErr = ESRCH;
@@ -1215,6 +1502,67 @@ do_access_check(struct hfsmount *hfsmp, int *err, struct access_cache *cache, HF
 	myResult = 0;
     }
     *err = myErr;
+=======
+	if (lockExtBtree)
+    		(void) hfs_metafilelocking(hfsmp, kHFSExtentsFileID, LK_RELEASE, p);
+
+	// XXXdbg
+	if (started_tr) {
+		hfs_flushvolumeheader(hfsmp, MNT_NOWAIT, 0);
+		journal_end_transaction(hfsmp->jnl);
+		started_tr = 0;
+	}
+	if (grabbed_lock) {
+		hfs_global_shared_lock_release(hfsmp);
+		grabbed_lock = 0;
+	}
+			
+    if (retval == E_NONE) {
+        /* Adjust the mapping information for invalid file ranges: */
+        overlaptype = rl_scan(&fp->ff_invalidranges,
+                            ap->a_foffset,
+                            ap->a_foffset + (off_t)bytesContAvail - 1,
+                            &invalid_range);
+        if (overlaptype != RL_NOOVERLAP) {
+            switch(overlaptype) {
+                case RL_MATCHINGOVERLAP:
+                case RL_OVERLAPCONTAINSRANGE:
+                case RL_OVERLAPSTARTSBEFORE:
+                    /* There's no valid block for this byte offset: */
+                    *ap->a_bpn = (daddr_t)-1;
+                    
+                    /* There's no point limiting the amount to be returned if the
+                       invalid range that was hit extends all the way to the EOF
+                       (i.e. there's no valid bytes between the end of this range
+                       and the file's EOF):
+                     */
+                    if ((fp->ff_size > (invalid_range->rl_end + 1)) &&
+        				(invalid_range->rl_end + 1 - ap->a_foffset < bytesContAvail)) {
+                    	bytesContAvail = invalid_range->rl_end + 1 - ap->a_foffset;
+                    };
+                    break;
+                
+                case RL_OVERLAPISCONTAINED:
+                case RL_OVERLAPENDSAFTER:
+                    /* The range of interest hits an invalid block before the end: */
+                    if (invalid_range->rl_start == ap->a_foffset) {
+                    	/* There's actually no valid information to be had starting here: */
+                    	*ap->a_bpn = (daddr_t)-1;
+						if ((fp->ff_size > (invalid_range->rl_end + 1)) &&
+							(invalid_range->rl_end + 1 - ap->a_foffset < bytesContAvail)) {
+                    		bytesContAvail = invalid_range->rl_end + 1 - ap->a_foffset;
+                    	};
+                    } else {
+                    	bytesContAvail = invalid_range->rl_start - ap->a_foffset;
+                    };
+                    break;
+            };
+            if (bytesContAvail > ap->a_size) bytesContAvail = ap->a_size;
+        };
+        
+        if (ap->a_run) *ap->a_run = bytesContAvail;
+    };
+>>>>>>> origin/10.2
 
     /* cache the parent directory(ies) */
     for (i = 0; i < ids_to_cache; i++) {
@@ -1481,6 +1829,7 @@ do_bulk_access_check(struct hfsmount *hfsmp, struct vnode *vp,
 	    continue;
 	}
 	
+<<<<<<< HEAD
 	myaccess = do_access_check(hfsmp, &error, &cache, catkey.hfsPlus.parentID, 
 	    skip_cp, p, cred, context,bitmap, map_size, parents, num_parents);
 			
@@ -1504,6 +1853,19 @@ do_bulk_access_check(struct hfsmount *hfsmp, struct vnode *vp,
 	    goto err_exit_bulk_access;
 	}
     }
+=======
+	frag->b_vp = NULL;
+	//
+	// XXXdbg - in the case that this is a meta-data block, it won't affect
+	//          the journal because this bp is for a physical disk block,
+	//          not a logical block that is part of the catalog or extents
+	//          files.
+	SET(frag->b_flags, B_INVAL);
+	brelse(frag);
+	
+	if ((bp->b_error = retval) != 0)
+		SET(bp->b_flags, B_ERROR);
+>>>>>>> origin/10.2
 	
 		
   err_exit_bulk_access:
@@ -1615,6 +1977,13 @@ hfs_vnop_ioctl( struct vnop_ioctl_args /* {
 		 * hfs_vget, since we will need the parent for build_path call.
 		 */
 
+<<<<<<< HEAD
+=======
+		/* We need to call hfs_vfs_vget to leverage the code that will fix the
+		 * origin list for us if needed, as opposed to calling hfs_vget, since
+		 * we will need it for the subsequent build_path call.  
+		 */
+>>>>>>> origin/10.5
 		if ((error = hfs_vfs_vget(HFSTOVFS(hfsmp), cnid, &file_vp, context))) {
 			return (error);
 		}
@@ -1622,6 +1991,285 @@ hfs_vnop_ioctl( struct vnop_ioctl_args /* {
 		vnode_put(file_vp);
 
 		return (error);
+	}
+
+	case HFS_TRANSFER_DOCUMENT_ID:
+	{
+		struct cnode *cp = NULL;
+		int error;
+		u_int32_t to_fd = *(u_int32_t *)ap->a_data;
+		struct fileproc *to_fp;
+		struct vnode *to_vp;
+		struct cnode *to_cp;
+
+		cp = VTOC(vp);
+
+<<<<<<< HEAD
+		if ((error = fp_getfvp(p, to_fd, &to_fp, &to_vp)) != 0) {
+			//printf("could not get the vnode for fd %d (err %d)\n", to_fd, error);
+			return error;
+		}
+		if ( (error = vnode_getwithref(to_vp)) ) {
+			file_drop(to_fd);
+			return error;
+		}
+
+		if (VTOHFS(to_vp) != hfsmp) {
+			error = EXDEV;
+			goto transfer_cleanup;
+		}
+
+		int need_unlock = 1;
+		to_cp = VTOC(to_vp);
+		error = hfs_lockpair(cp, to_cp, HFS_EXCLUSIVE_LOCK);
+		if (error != 0) {
+			//printf("could not lock the pair of cnodes (error %d)\n", error);
+			goto transfer_cleanup;
+		}
+			
+		if (!(cp->c_bsdflags & UF_TRACKED)) {
+			error = EINVAL;
+		} else if (to_cp->c_bsdflags & UF_TRACKED) {
+			//
+			// if the destination is already tracked, return an error
+			// as otherwise it's a silent deletion of the target's
+			// document-id
+			//
+			error = EEXIST;
+		} else if (S_ISDIR(cp->c_attr.ca_mode) || S_ISREG(cp->c_attr.ca_mode) || S_ISLNK(cp->c_attr.ca_mode)) {
+			//
+			// we can use the FndrExtendedFileInfo because the doc-id is the first
+			// thing in both it and the ExtendedDirInfo struct which is fixed in
+			// format and can not change layout
+			//
+			struct FndrExtendedFileInfo *f_extinfo = (struct FndrExtendedFileInfo *)((u_int8_t*)cp->c_finderinfo + 16);
+			struct FndrExtendedFileInfo *to_extinfo = (struct FndrExtendedFileInfo *)((u_int8_t*)to_cp->c_finderinfo + 16);
+
+			if (f_extinfo->document_id == 0) {
+				uint32_t new_id;
+
+				hfs_unlockpair(cp, to_cp);  // have to unlock to be able to get a new-id
+				
+				if ((error = hfs_generate_document_id(hfsmp, &new_id)) == 0) {
+					//
+					// re-lock the pair now that we have the document-id
+					//
+					hfs_lockpair(cp, to_cp, HFS_EXCLUSIVE_LOCK);
+					f_extinfo->document_id = new_id;
+				} else {
+					goto transfer_cleanup;
+=======
+		if (!vnode_isdir(vp) && !(vnode_isreg(vp)) &&
+				!(vnode_islnk(vp))) {
+			error = EBADF;
+			*counter = 0;
+			return error;
+		}
+		
+		error = hfs_lock (cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT);
+		if (error == 0) {
+			struct ubc_info *uip;
+			int is_mapped_writable = 0;
+			
+			if (UBCINFOEXISTS(vp)) {
+				uip = vp->v_ubcinfo;
+				if ((uip->ui_flags & UI_ISMAPPED) && (uip->ui_flags & UI_MAPPEDWRITE)) {
+					is_mapped_writable = 1;
+>>>>>>> origin/10.9
+				}
+			}
+					
+			to_extinfo->document_id = f_extinfo->document_id;
+			f_extinfo->document_id = 0;
+			//printf("TRANSFERRING: doc-id %d from ino %d to ino %d\n", to_extinfo->document_id, cp->c_fileid, to_cp->c_fileid);
+
+			// make sure the destination is also UF_TRACKED
+			to_cp->c_bsdflags |= UF_TRACKED;
+			cp->c_bsdflags &= ~UF_TRACKED;
+
+<<<<<<< HEAD
+			// mark the cnodes dirty
+			cp->c_flag |= C_MODIFIED;
+			to_cp->c_flag |= C_MODIFIED;
+
+			int lockflags;
+			if ((error = hfs_start_transaction(hfsmp)) == 0) {
+
+				lockflags = hfs_systemfile_lock(hfsmp, SFL_CATALOG, HFS_EXCLUSIVE_LOCK);
+
+				(void) cat_update(hfsmp, &cp->c_desc, &cp->c_attr, NULL, NULL);
+				(void) cat_update(hfsmp, &to_cp->c_desc, &to_cp->c_attr, NULL, NULL);
+
+				hfs_systemfile_unlock (hfsmp, lockflags);
+				(void) hfs_end_transaction(hfsmp);
+=======
+			if (S_ISREG(cp->c_attr.ca_mode) || S_ISLNK(cp->c_attr.ca_mode)) {
+				uint32_t gcount = hfs_get_gencount(cp);
+				//
+				// Even though we return EBUSY for files that are mmap'ed
+				// we also want to bump the value so that the write-gen
+				// counter will always be different once the file is unmapped
+				// (since the file may be unmapped but the pageouts have not
+				// yet happened).
+				//
+				if (is_mapped_writable) {
+					hfs_incr_gencount (cp);
+					gcount = hfs_get_gencount(cp);
+				}
+
+				*counter = gcount;
+			} else if (S_ISDIR(cp->c_attr.ca_mode)) {
+				*counter = hfs_get_gencount(cp);
+			} else {
+				/* not a file or dir? silently return */
+				*counter = 0;
+>>>>>>> origin/10.9
+			}
+
+<<<<<<< HEAD
+#if CONFIG_FSE
+			add_fsevent(FSE_DOCID_CHANGED, context,
+				    FSE_ARG_DEV,   hfsmp->hfs_raw_dev,
+				    FSE_ARG_INO,   (ino64_t)cp->c_fileid,       // src inode #
+				    FSE_ARG_INO,   (ino64_t)to_cp->c_fileid,    // dst inode #
+				    FSE_ARG_INT32, to_extinfo->document_id,
+				    FSE_ARG_DONE);
+
+			hfs_unlockpair(cp, to_cp);    // unlock this so we can send the fsevents
+			need_unlock = 0;
+
+			if (need_fsevent(FSE_STAT_CHANGED, vp)) {
+				add_fsevent(FSE_STAT_CHANGED, context, FSE_ARG_VNODE, vp, FSE_ARG_DONE);
+			}
+			if (need_fsevent(FSE_STAT_CHANGED, to_vp)) {
+				add_fsevent(FSE_STAT_CHANGED, context, FSE_ARG_VNODE, to_vp, FSE_ARG_DONE);
+=======
+			if (is_mapped_writable) {
+				error = EBUSY;
+>>>>>>> origin/10.9
+			}
+#else
+			hfs_unlockpair(cp, to_cp);    // unlock this so we can send the fsevents
+			need_unlock = 0;
+#endif
+		}
+		
+		if (need_unlock) {
+			hfs_unlockpair(cp, to_cp);
+		}
+
+	transfer_cleanup:
+		vnode_put(to_vp);
+		file_drop(to_fd);
+
+		return error;
+	}
+
+<<<<<<< HEAD
+
+=======
+	case HFS_GET_DOCUMENT_ID:
+	{
+		struct cnode *cp = NULL;
+		int error=0;
+		u_int32_t *document_id = (u_int32_t *)ap->a_data;
+
+		cp = VTOC(vp);
+
+		if (cp->c_desc.cd_cnid == kHFSRootFolderID) {
+			// the root-dir always has document id '2' (aka kHFSRootFolderID)
+			*document_id = kHFSRootFolderID;
+
+		} else if ((S_ISDIR(cp->c_attr.ca_mode) || S_ISREG(cp->c_attr.ca_mode) || S_ISLNK(cp->c_attr.ca_mode))) {
+			int mark_it = 0;
+			uint32_t tmp_doc_id;
+
+			//
+			// we can use the FndrExtendedFileInfo because the doc-id is the first
+			// thing in both it and the FndrExtendedDirInfo struct which is fixed 
+			// in format and can not change layout
+			//
+			struct FndrExtendedFileInfo *extinfo = (struct FndrExtendedFileInfo *)((u_int8_t*)cp->c_finderinfo + 16);
+
+			hfs_lock(cp, HFS_SHARED_LOCK, HFS_LOCK_DEFAULT);
+
+			//
+			// if the cnode isn't UF_TRACKED and the doc-id-allocate flag isn't set
+			// then just return a zero for the doc-id
+			//
+			if (!(cp->c_bsdflags & UF_TRACKED) && !(ap->a_fflag & HFS_DOCUMENT_ID_ALLOCATE)) {
+				*document_id = 0;
+				hfs_unlock(cp);
+				return 0;
+			}
+
+			//
+			// if the cnode isn't UF_TRACKED and the doc-id-allocate flag IS set,
+			// then set mark_it so we know to set the UF_TRACKED flag once the
+			// cnode is locked.
+			//
+			if (!(cp->c_bsdflags & UF_TRACKED) && (ap->a_fflag & HFS_DOCUMENT_ID_ALLOCATE)) {
+				mark_it = 1;
+			}
+			
+			tmp_doc_id = extinfo->document_id;   // get a copy of this
+			
+			hfs_unlock(cp);   // in case we have to call hfs_generate_document_id() 
+
+			//
+			// If the document_id isn't set, get a new one and then set it.
+			// Note: we first get the document id, then lock the cnode to
+			// avoid any deadlock potential between cp and the root vnode.
+			//
+			uint32_t new_id;
+			if (tmp_doc_id == 0 && (error = hfs_generate_document_id(hfsmp, &new_id)) == 0) {
+
+				if ((error = hfs_lock (cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT)) == 0) {
+					extinfo->document_id = tmp_doc_id = new_id;
+					//printf("ASSIGNING: doc-id %d to ino %d\n", extinfo->document_id, cp->c_fileid);
+						
+					if (mark_it) {
+						cp->c_bsdflags |= UF_TRACKED;
+					}
+
+					// mark the cnode dirty
+					cp->c_flag |= C_MODIFIED | C_FORCEUPDATE;
+
+					int lockflags;
+					if ((error = hfs_start_transaction(hfsmp)) == 0) {
+						lockflags = hfs_systemfile_lock(hfsmp, SFL_CATALOG, HFS_EXCLUSIVE_LOCK);
+
+						(void) cat_update(hfsmp, &cp->c_desc, &cp->c_attr, NULL, NULL);
+
+						hfs_systemfile_unlock (hfsmp, lockflags);
+						(void) hfs_end_transaction(hfsmp);
+					}
+
+#if CONFIG_FSE
+					add_fsevent(FSE_DOCID_CHANGED, context,
+						    FSE_ARG_DEV,   hfsmp->hfs_raw_dev,
+						    FSE_ARG_INO,   (ino64_t)0,             // src inode #
+						    FSE_ARG_INO,   (ino64_t)cp->c_fileid,  // dst inode #
+						    FSE_ARG_INT32, extinfo->document_id,
+						    FSE_ARG_DONE);
+
+					hfs_unlock (cp);    // so we can send the STAT_CHANGED event without deadlocking
+
+					if (need_fsevent(FSE_STAT_CHANGED, vp)) {
+						add_fsevent(FSE_STAT_CHANGED, context, FSE_ARG_VNODE, vp, FSE_ARG_DONE);
+					}
+#else
+					hfs_unlock (cp);
+#endif
+				}
+			}
+
+			*document_id = tmp_doc_id;
+		} else {
+			*document_id = 0;
+		}
+
+		return error;
 	}
 
 	case HFS_TRANSFER_DOCUMENT_ID:
@@ -1700,8 +2348,8 @@ hfs_vnop_ioctl( struct vnop_ioctl_args /* {
 			cp->c_bsdflags &= ~UF_TRACKED;
 
 			// mark the cnodes dirty
-			cp->c_flag |= C_MODIFIED;
-			to_cp->c_flag |= C_MODIFIED;
+			cp->c_flag |= C_MODIFIED | C_FORCEUPDATE;
+			to_cp->c_flag |= C_MODIFIED | C_FORCEUPDATE;
 
 			int lockflags;
 			if ((error = hfs_start_transaction(hfsmp)) == 0) {
@@ -1748,8 +2396,7 @@ hfs_vnop_ioctl( struct vnop_ioctl_args /* {
 
 		return error;
 	}
-
-
+>>>>>>> origin/10.9
 
 	case HFS_PREV_LINK:
 	case HFS_NEXT_LINK:
@@ -2255,6 +2902,22 @@ fail_change_next_allocation:
 			gen_counter = *((uint32_t*)ap->a_data);
 		}
 		else {
+<<<<<<< HEAD
+=======
+	    	user32_fbootstraptransfer_t *bootstrapp = (user32_fbootstraptransfer_t *)ap->a_data;
+			user_bootstrapp = &user_bootstrap;
+			user_bootstrap.fbt_offset = bootstrapp->fbt_offset;
+			user_bootstrap.fbt_length = bootstrapp->fbt_length;
+			user_bootstrap.fbt_buffer = CAST_USER_ADDR_T(bootstrapp->fbt_buffer);
+		}
+
+		if ((user_bootstrapp->fbt_offset < 0) || (user_bootstrapp->fbt_offset > 1024) ||
+				(user_bootstrapp->fbt_length > 1024)) {
+			return EINVAL;
+		}
+
+		if (user_bootstrapp->fbt_offset + user_bootstrapp->fbt_length > 1024) 
+>>>>>>> origin/10.6
 			return EINVAL;
 		}
 
@@ -2450,6 +3113,13 @@ fail_change_next_allocation:
 		return (error);
 	}
 
+<<<<<<< HEAD
+=======
+	case F_READBOOTSTRAP:
+	case F_WRITEBOOTSTRAP:
+		return 0;
+
+>>>>>>> origin/10.7
 	case _IOC(IOC_OUT,'h', 4, 0):     /* Create date in local time */
 	{
 		if (is64bit) {
@@ -2461,6 +3131,7 @@ fail_change_next_allocation:
 		return 0;
 	}
 
+<<<<<<< HEAD
 	case SPOTLIGHT_FSCTL_GET_MOUNT_TIME:
 	    *(uint32_t *)ap->a_data = hfsmp->hfs_mount_time;
 	    break;
@@ -2510,6 +3181,23 @@ fail_change_next_allocation:
 	case HFS_VOLUME_STATUS:
 	    *(uint32_t *)ap->a_data = hfsmp->hfs_notification_conditions;
 	    break;
+=======
+	case HFS_GET_MOUNT_TIME:
+	    if (is64bit) {
+	    	*(user_time_t *)(ap->a_data) = (user_time_t) hfsmp->hfs_mount_time;
+	    } else {
+	    	*(time_t *)(ap->a_data) = (time_t) hfsmp->hfs_mount_time;
+	    }
+		return 0;
+
+	case HFS_GET_LAST_MTIME:
+	    if (is64bit) {
+	    	*(user_time_t *)(ap->a_data) = (user_time_t) hfsmp->hfs_last_mounted_mtime;
+	    } else {
+	    	*(time_t *)(ap->a_data) = (time_t) hfsmp->hfs_last_mounted_mtime;
+	    }
+		return 0;
+>>>>>>> origin/10.5
 
 	case HFS_SET_BOOT_INFO:
 		if (!vnode_isvroot(vp))
@@ -4652,6 +5340,7 @@ hfs_vnop_pageout(struct vnop_pageout_args *ap)
 	};
 */
 {
+<<<<<<< HEAD
 	vnode_t vp = ap->a_vp;
 	struct cnode *cp;
 	struct filefork *fp;
@@ -4663,10 +5352,29 @@ hfs_vnop_pageout(struct vnop_pageout_args *ap)
 	int		a_flags;
 	int is_pageoutv2 = 0;
 	kern_return_t kret;
+<<<<<<< HEAD
+=======
+	register struct vnode *vp = ap->a_vp;
+	register struct cnode *cp = VTOC(vp);
+    	struct filefork *fp = VTOF(vp);
+	off_t length;
+	long vflags;
+	struct timeval tv;
+	int retval;
+	off_t bytesToAdd;
+	off_t actualBytesAdded;
+	off_t filebytes;
+	u_long fileblocks;
+	int blksize;
+	struct hfsmount *hfsmp;
+>>>>>>> origin/10.2
+=======
+>>>>>>> origin/10.6
 
 	cp = VTOC(vp);
 	fp = VTOF(vp);
 	
+<<<<<<< HEAD
 	a_flags = ap->a_flags;
 	a_pl_offset = ap->a_pl_offset;
 
@@ -4701,13 +5409,52 @@ hfs_vnop_pageout(struct vnop_pageout_args *ap)
 
 		if (a_flags & UPL_MSYNC) {
 			request_flags = UPL_UBC_MSYNC | UPL_RET_ONLY_DIRTY;
+=======
+	/*
+	 * Figure out where the file ends, for pageout purposes.  If
+	 * ff_new_size > ff_size, then we're in the middle of extending the
+	 * file via a write, so it is safe (and necessary) that we be able
+	 * to pageout up to that point.
+	 */
+	filesize = fp->ff_size;
+	if (fp->ff_new_size > filesize)
+		filesize = fp->ff_new_size;
+	
+	if (!vnode_isswap(vp)) {
+		off_t end_of_range;
+		int tooklock = 0;
+
+		if (cp->c_lockowner != current_thread()) {
+		    if ( (retval = hfs_lock(cp, HFS_EXCLUSIVE_LOCK))) {
+			if (!(ap->a_flags & UPL_NOCOMMIT)) {
+				ubc_upl_abort_range(ap->a_pl,
+						    ap->a_pl_offset,
+						    ap->a_size,
+						    UPL_ABORT_FREE_ON_EMPTY);
+			}
+			return (retval);
+		    }
+		    tooklock = 1;
+		}
+	
+		end_of_range = ap->a_f_offset + ap->a_size - 1;
+	
+		if (end_of_range >= filesize) {
+			end_of_range = (off_t)(filesize - 1);
+>>>>>>> origin/10.5
 		}
 		else {
 			request_flags = UPL_UBC_PAGEOUT | UPL_RET_ONLY_DIRTY;
 		}
+<<<<<<< HEAD
 		
 		kret = ubc_create_upl(vp, ap->a_f_offset, ap->a_size, &upl, &pl, request_flags); 
 
+<<<<<<< HEAD
+=======
+		kret = ubc_create_upl(vp, ap->a_f_offset, ap->a_size, &upl, &pl, request_flags); 
+
+>>>>>>> origin/10.6
 		if ((kret != KERN_SUCCESS) || (upl == (upl_t) NULL)) {
 			retval = EINVAL;
 			goto pageout_done;
@@ -4717,6 +5464,9 @@ hfs_vnop_pageout(struct vnop_pageout_args *ap)
 	 * from this point forward upl points at the UPL we're working with
 	 * it was either passed in or we succesfully created it
 	 */
+=======
+	hfsmp = VTOHFS(vp);
+>>>>>>> origin/10.2
 
 	/*
 	 * Figure out where the file ends, for pageout purposes.  If
@@ -4846,6 +5596,7 @@ hfs_vnop_pageout(struct vnop_pageout_args *ap)
 	 * but only if it's mapped writable; we will have touched the
 	 * modifcation time for direct writes.
 	 */
+<<<<<<< HEAD
 	if (retval == 0 && (ubc_is_mapped_writable(vp)
 						|| ISSET(cp->c_flag, C_MIGHT_BE_DIRTY_FROM_MAPPING))) {
 		hfs_lock(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_ALLOW_NOEXISTS);
@@ -4886,6 +5637,18 @@ pageout_done:
 		 * we may have taken the lock recursively by 
 		 * being invoked via ubc_msync due to lockdown,
 		 * we should release it recursively, too.
+=======
+	if (length > fp->ff_size) {
+#if QUOTA
+		retval = hfs_chkdq(cp, (int64_t)(roundup(length - filebytes, blksize)),
+				ap->a_cred, 0);
+		if (retval)
+			goto Err_Exit;
+#endif /* QUOTA */
+		/*
+		 * If we don't have enough physical space then
+		 * we need to extend the physical size.
+>>>>>>> origin/10.2
 		 */
 		hfs_unlock_truncate(cp, HFS_LOCK_SKIP_IF_EXCLUSIVE);
 	}
@@ -4909,6 +5672,7 @@ hfs_vnop_bwrite(struct vnop_bwrite_args *ap)
 	    (VTOC(vp)->c_fileid == kHFSAttributesFileID) ||
 	    (vp == VTOHFS(vp)->hfc_filevp)) {
 
+<<<<<<< HEAD
 		/* 
 		 * Swap and validate the node if it is in native byte order.
 		 * This is always be true on big endian, so we always validate
@@ -4931,6 +5695,27 @@ hfs_vnop_bwrite(struct vnop_bwrite_args *ap)
 				panic("hfs_vnop_bwrite: about to write corrupt node!\n");
 		}
 	}
+=======
+			// XXXdbg
+			hfs_global_shared_lock_acquire(hfsmp);
+			if (hfsmp->jnl) {
+				if (journal_start_transaction(hfsmp->jnl) != 0) {
+					retval = EINVAL;
+					goto Err_Exit;
+				}
+			}
+
+			/* lock extents b-tree (also protects volume bitmap) */
+			retval = hfs_metafilelocking(VTOHFS(vp), kHFSExtentsFileID, LK_EXCLUSIVE, ap->a_p);
+			if (retval) {
+				if (hfsmp->jnl) {
+					journal_end_transaction(hfsmp->jnl);
+				} 
+				hfs_global_shared_lock_release(hfsmp);
+
+				goto Err_Exit;
+			}
+>>>>>>> origin/10.2
 
 	/* This buffer shouldn't be locked anymore but if it is clear it */
 	if ((buf_flags(bp) & B_LOCKED)) {
@@ -4942,8 +5727,30 @@ hfs_vnop_bwrite(struct vnop_bwrite_args *ap)
 	}
 	retval = vn_bwrite (ap);
 
+<<<<<<< HEAD
 	return (retval);
 }
+=======
+				filebytes = (off_t)fp->ff_blocks * (off_t)blksize;
+				if (actualBytesAdded == 0 && retval == E_NONE) {
+					if (length > filebytes)
+						length = filebytes;
+					break;
+				}
+			} /* endwhile */
+
+			(void) hfs_metafilelocking(VTOHFS(vp), kHFSExtentsFileID, LK_RELEASE, ap->a_p);
+
+			// XXXdbg
+			if (hfsmp->jnl) {
+				hfs_flushvolumeheader(hfsmp, MNT_NOWAIT, 0);
+				journal_end_transaction(hfsmp->jnl);
+			} 
+			hfs_global_shared_lock_release(hfsmp);
+
+			if (retval)
+				goto Err_Exit;
+>>>>>>> origin/10.2
 
 
 int
@@ -5027,6 +5834,7 @@ hfs_pin_vnode(struct hfsmount *hfsmp, struct vnode *vp, int pin_state, uint32_t 
 			//printf("hfs: fileid %d resource fork nblocks: %d / size: %lld\n", VTOC(vp)->c_fileid,
 			//       VTOC(rsrc_vp)->c_rsrcfork->ff_blocks,VTOC(rsrc_vp)->c_rsrcfork->ff_size);
 
+<<<<<<< HEAD
 			fp = VTOC(rsrc_vp)->c_rsrcfork;
 			need_put = 1;
 		}
@@ -5041,6 +5849,28 @@ hfs_pin_vnode(struct hfsmount *hfsmp, struct vnode *vp, int pin_state, uint32_t 
 			err = EALREADY;
 		} else {
 			err = EINVAL;
+=======
+		/* 
+		 * Swap and validate the node if it is in native byte order.
+		 * This is always be true on big endian, so we always validate
+		 * before writing here.  On little endian, the node typically has
+		 * been swapped and validated when it was written to the journal,
+		 * so we won't do anything here.
+		 */
+		if (((u_int16_t *)((char *)buf_dataptr(bp) + buf_count(bp) - 2))[0] == 0x000e) {
+			/* Prepare the block pointer */
+			block.blockHeader = bp;
+			block.buffer = (char *)buf_dataptr(bp);
+			block.blockNum = buf_lblkno(bp);
+			/* not found in cache ==> came from disk */
+			block.blockReadFromDisk = (buf_fromcache(bp) == 0);
+			block.blockSize = buf_count(bp);
+    
+			/* Endian un-swap B-Tree node */
+			retval = hfs_swap_BTNode (&block, vp, kSwapBTNodeHostToBig, false);
+			if (retval)
+				panic("hfs_vnop_bwrite: about to write corrupt node!\n");
+>>>>>>> origin/10.5
 		}
 		goto out;
 	}
@@ -5156,6 +5986,7 @@ hfs_relocate(struct  vnode *vp, u_int32_t  blockHint, kauth_cred_t cred,
 	daddr64_t  sector_a,  sector_b;
 	int eflags;
 	off_t  newbytes;
+<<<<<<< HEAD
 	int  retval;
 	int lockflags = 0;
 	int took_trunc_lock = 0;
@@ -5164,7 +5995,16 @@ hfs_relocate(struct  vnode *vp, u_int32_t  blockHint, kauth_cred_t cred,
 
 	vnodetype = vnode_vtype(vp);
 	if (vnodetype != VREG) {
+<<<<<<< HEAD
 		/* Not allowed to move symlinks. */
+=======
+	int  retval, need_vinval=0;
+
+	if (vp->v_type != VREG && vp->v_type != VLNK) {
+>>>>>>> origin/10.3
+=======
+		/* Note symlinks are not allowed to be relocated */
+>>>>>>> origin/10.8
 		return (EPERM);
 	}
 	
@@ -5197,7 +6037,11 @@ hfs_relocate(struct  vnode *vp, u_int32_t  blockHint, kauth_cred_t cred,
 	if (blockHint == 0)
 		blockHint = hfsmp->nextAllocation;
 
+<<<<<<< HEAD
 	if (fp->ff_size > 0x7fffffff) {
+=======
+	if ((fp->ff_size > 0x7fffffff)) {
+>>>>>>> origin/10.8
 		return (EFBIG);
 	}
 
@@ -5315,9 +6159,55 @@ hfs_relocate(struct  vnode *vp, u_int32_t  blockHint, kauth_cred_t cred,
 		/*
 		 * Check to see if failure is due to excessive fragmentation.
 		 */
+<<<<<<< HEAD
 		if ((retval == ENOSPC) &&
 		    (hfs_freeblks(hfsmp, 0) > (datablks * 2))) {
 			hfsmp->hfs_flags |= HFS_FRAGMENTED_FREESPACE;
+=======
+		if ((ap->a_flags & IO_NDELAY) || (!ISSET(ap->a_p->p_flag, P_TBE))) {
+#if QUOTA
+		  off_t savedbytes = ((off_t)fp->ff_blocks * (off_t)blksize);
+#endif /* QUOTA */
+		  // XXXdbg
+		  hfs_global_shared_lock_acquire(hfsmp);
+			if (hfsmp->jnl) {
+				if (journal_start_transaction(hfsmp->jnl) != 0) {
+					retval = EINVAL;
+					goto Err_Exit;
+				}
+			}
+
+			/* lock extents b-tree (also protects volume bitmap) */
+			retval = hfs_metafilelocking(VTOHFS(vp), kHFSExtentsFileID, LK_EXCLUSIVE, ap->a_p);
+			if (retval) {
+				if (hfsmp->jnl) {
+					journal_end_transaction(hfsmp->jnl);
+				}
+				hfs_global_shared_lock_release(hfsmp);
+				goto Err_Exit;
+			}
+			
+			if (fp->ff_unallocblocks == 0)
+				retval = MacToVFSError(TruncateFileC(VTOVCB(vp),
+						(FCB*)fp, length, false));
+
+			(void) hfs_metafilelocking(VTOHFS(vp), kHFSExtentsFileID, LK_RELEASE, ap->a_p);
+
+			// XXXdbg
+			if (hfsmp->jnl) {
+				hfs_flushvolumeheader(hfsmp, MNT_NOWAIT, 0);
+				journal_end_transaction(hfsmp->jnl);
+			}
+			hfs_global_shared_lock_release(hfsmp);
+
+			filebytes = (off_t)fp->ff_blocks * (off_t)blksize;
+			if (retval)
+				goto Err_Exit;
+#if QUOTA
+			/* These are bytesreleased */
+			(void) hfs_chkdq(cp, (int64_t)-(savedbytes - filebytes), NOCRED, 0);
+#endif /* QUOTA */
+>>>>>>> origin/10.2
 		}
 		goto out;
 	}
@@ -5325,19 +6215,39 @@ hfs_relocate(struct  vnode *vp, u_int32_t  blockHint, kauth_cred_t cred,
 	 * STEP 2 - clone file data into the new allocation blocks.
 	 */
 
+<<<<<<< HEAD
 	if (vnodetype == VLNK)
 		retval = EPERM;
 	else if (vnode_issystem(vp))
+=======
+	// XXXdbg - unlock the extents overflow file because hfs_clonefile()
+	//          calls vinvalbuf() which calls hfs_fsync() which can
+	//          call hfs_metasync() which may need to lock the catalog
+	//          file -- but the catalog file may be locked and blocked
+	//          waiting for the extents overflow file if we're unlucky.
+	//          see radar 3742973 for more details.
+	(void) hfs_metafilelocking(VTOHFS(vp), kHFSExtentsFileID, LK_RELEASE, p);
+
+	if (vp->v_type == VLNK)
+		retval = hfs_clonelink(vp, blksize, cred, p);
+	else if (vp->v_flag & VSYSTEM)
+>>>>>>> origin/10.3
 		retval = hfs_clonesysfile(vp, headblks, datablks, blksize, cred, p);
 	else
 		retval = hfs_clonefile(vp, headblks, datablks, blksize);
 
+<<<<<<< HEAD
 	/* Start transaction for step 3 or for a restore. */
 	if (hfs_start_transaction(hfsmp) != 0) {
 		retval = EINVAL;
 		goto out;
 	}
 	started_tr = 1;
+=======
+	// XXXdbg - relock the extents overflow file
+	(void)hfs_metafilelocking(hfsmp, kHFSExtentsFileID, LK_EXCLUSIVE, p);
+
+>>>>>>> origin/10.3
 	if (retval)
 		goto restore;
 
@@ -5359,6 +6269,7 @@ out:
 	if (took_trunc_lock)
 		hfs_unlock_truncate(cp, HFS_LOCK_DEFAULT);
 
+<<<<<<< HEAD
 	if (lockflags) {
 		hfs_systemfile_unlock(hfsmp, lockflags);
 		lockflags = 0;
@@ -5368,6 +6279,26 @@ out:
 	if (retval == 0) {
 		hfs_update(vp, 0);
 	}
+=======
+	fp->ff_size = realsize;
+	if (UBCISVALID(vp)) {
+		(void) ubc_setsize(vp, realsize);
+		need_vinval = 1;
+	}
+
+	CLR(VTOC(vp)->c_flag, C_RELOCATING);  /* Resume page-outs for this file. */
+out:
+	(void) hfs_metafilelocking(VTOHFS(vp), kHFSExtentsFileID, LK_RELEASE, p);
+
+	// XXXdbg - do this after unlocking the extents-overflow
+	// file to avoid deadlocks (see comment above by STEP 2)
+	if (need_vinval) {
+	    (void) vinvalbuf(vp, V_SAVE, cred, p, 0, 0);
+	}
+
+	retval = VOP_FSYNC(vp, cred, MNT_WAIT, p);
+out2:
+>>>>>>> origin/10.3
 	if (hfsmp->jnl) {
 		if (cp->c_cnid < kHFSFirstUserCatalogNodeID)
 			(void) hfs_flushvolumeheader(hfsmp, HFS_FVH_WAIT | HFS_FVH_WRITE_ALT);
@@ -5396,8 +6327,65 @@ restore:
 		lockflags = hfs_systemfile_lock(hfsmp, lockflags, HFS_EXCLUSIVE_LOCK);
 	}
 
+<<<<<<< HEAD
 	(void) TruncateFileC(hfsmp, (FCB*)fp, fp->ff_size, 0, FORK_IS_RSRC(fp), 
 						 FTOC(fp)->c_fileid, false);
+=======
+/*
+#
+#% allocate	vp	L L L
+#
+vop_allocate {
+	IN struct vnode *vp;
+	IN off_t length;
+	IN int flags;
+	OUT off_t *bytesallocated;
+	IN off_t offset;
+	IN struct ucred *cred;
+	IN struct proc *p;
+};
+ * allocate a cnode to at most length size
+ */
+int hfs_allocate(ap)
+	struct vop_allocate_args /* {
+		struct vnode *a_vp;
+		off_t a_length;
+		u_int32_t  a_flags;
+		off_t *a_bytesallocated;
+		off_t a_offset;
+		struct ucred *a_cred;
+		struct proc *a_p;
+	} */ *ap;
+{
+	struct vnode *vp = ap->a_vp;
+	struct cnode *cp = VTOC(vp);
+	struct filefork *fp = VTOF(vp);
+	off_t length = ap->a_length;
+	off_t startingPEOF;
+	off_t moreBytesRequested;
+	off_t actualBytesAdded;
+	off_t filebytes;
+	u_long fileblocks;
+	long vflags;
+	struct timeval tv;
+	int retval, retval2;
+	UInt32 blockHint;
+	UInt32 extendFlags =0;   /* For call to ExtendFileC */
+	struct hfsmount *hfsmp;
+
+	hfsmp = VTOHFS(vp);
+
+	*(ap->a_bytesallocated) = 0;
+	fileblocks = fp->ff_blocks;
+	filebytes = (off_t)fileblocks * (off_t)VTOVCB(vp)->blockSize;
+
+	if (length < (off_t)0)
+		return (EINVAL);
+	if (vp->v_type != VREG && vp->v_type != VLNK)
+		return (EISDIR);
+	if ((ap->a_flags & ALLOCATEFROMVOL) && (length <= filebytes))
+		return (EINVAL);
+>>>>>>> origin/10.2
 
 	hfs_systemfile_unlock(hfsmp, lockflags);
 	lockflags = 0;
@@ -5448,6 +6436,7 @@ hfs_clonefile(struct vnode *vp, int blkstart, int blkcnt, int blksize)
 	while (offset < copysize) {
 		iosize = MIN(copysize - offset, iosize);
 
+<<<<<<< HEAD
 		uio_reset(auio, offset, UIO_SYSSPACE, UIO_READ);
 		uio_addiov(auio, (uintptr_t)bufp, iosize);
 
@@ -5460,11 +6449,47 @@ hfs_clonefile(struct vnode *vp, int blkstart, int blkcnt, int blksize)
 			printf("hfs_clonefile: cluster_read: uio_resid = %lld\n", (int64_t)uio_resid(auio));
 			error = EIO;		
 			break;
+=======
+	/*
+	 * Lengthen the size of the file. We must ensure that the
+	 * last byte of the file is allocated. Since the smallest
+	 * value of filebytes is 0, length will be at least 1.
+	 */
+	if (length > filebytes) {
+		moreBytesRequested = length - filebytes;
+		
+#if QUOTA
+		retval = hfs_chkdq(cp,
+				(int64_t)(roundup(moreBytesRequested, VTOVCB(vp)->blockSize)), 
+				ap->a_cred, 0);
+		if (retval)
+			return (retval);
+
+#endif /* QUOTA */
+		// XXXdbg
+		hfs_global_shared_lock_acquire(hfsmp);
+		if (hfsmp->jnl) {
+			if (journal_start_transaction(hfsmp->jnl) != 0) {
+				retval = EINVAL;
+				goto Err_Exit;
+			}
+		}
+
+		/* lock extents b-tree (also protects volume bitmap) */
+		retval = hfs_metafilelocking(VTOHFS(vp), kHFSExtentsFileID, LK_EXCLUSIVE, ap->a_p);
+		if (retval) {
+			if (hfsmp->jnl) {
+				journal_end_transaction(hfsmp->jnl);
+			}
+			hfs_global_shared_lock_release(hfsmp);
+			goto Err_Exit;
+>>>>>>> origin/10.2
 		}
 
 		uio_reset(auio, writebase + offset, UIO_SYSSPACE, UIO_WRITE);
 		uio_addiov(auio, (uintptr_t)bufp, iosize);
 
+<<<<<<< HEAD
 		error = cluster_write(vp, auio, writebase + offset,
 		                      writebase + offset + iosize,
 		                      uio_offset(auio), 0, IO_NOCACHE | IO_SYNC);
@@ -5482,6 +6507,20 @@ hfs_clonefile(struct vnode *vp, int blkstart, int blkcnt, int blksize)
 	uio_free(auio);
 
 	if ((blksize & PAGE_MASK)) {
+=======
+		*(ap->a_bytesallocated) = actualBytesAdded;
+		filebytes = (off_t)fp->ff_blocks * (off_t)VTOVCB(vp)->blockSize;
+
+		(void) hfs_metafilelocking(VTOHFS(vp), kHFSExtentsFileID, LK_RELEASE, ap->a_p);
+
+		// XXXdbg
+		if (hfsmp->jnl) {
+			hfs_flushvolumeheader(hfsmp, MNT_NOWAIT, 0);
+			journal_end_transaction(hfsmp->jnl);
+		}
+		hfs_global_shared_lock_release(hfsmp);
+
+>>>>>>> origin/10.2
 		/*
 		 * since the copy may not have started on a PAGE
 		 * boundary (or may not have ended on one), we 
@@ -5502,6 +6541,7 @@ hfs_clonefile(struct vnode *vp, int blkstart, int blkcnt, int blksize)
 	}
 	kmem_free(kernel_map, (vm_offset_t)bufp, bufsize);
 
+<<<<<<< HEAD
 	hfs_lock(VTOC(vp), HFS_EXCLUSIVE_LOCK, HFS_LOCK_ALLOW_NOEXISTS);	
 	return (error);
 }
@@ -5540,6 +6580,44 @@ hfs_clonesysfile(struct vnode *vp, int blkstart, int blkcnt, int blksize,
 	blkno = 0;
 
 	while (blkno < last_blk) {
+=======
+		// XXXdbg
+		hfs_global_shared_lock_acquire(hfsmp);
+		if (hfsmp->jnl) {
+			if (journal_start_transaction(hfsmp->jnl) != 0) {
+				retval = EINVAL;
+				goto Err_Exit;
+			}
+		}
+
+		/* lock extents b-tree (also protects volume bitmap) */
+		retval = hfs_metafilelocking(VTOHFS(vp), kHFSExtentsFileID, LK_EXCLUSIVE, ap->a_p);
+		if (retval) {
+			if (hfsmp->jnl) {
+				journal_end_transaction(hfsmp->jnl);
+			}
+			hfs_global_shared_lock_release(hfsmp);
+
+			goto Err_Exit;
+		}			
+
+		retval = MacToVFSError(
+                            TruncateFileC(
+                                            VTOVCB(vp),
+                                            (FCB*)fp,
+                                            length,
+                                            false));
+		(void) hfs_metafilelocking(VTOHFS(vp), kHFSExtentsFileID, LK_RELEASE, ap->a_p);
+		filebytes = (off_t)fp->ff_blocks * (off_t)VTOVCB(vp)->blockSize;
+
+		if (hfsmp->jnl) {
+			hfs_flushvolumeheader(hfsmp, MNT_NOWAIT, 0);
+			journal_end_transaction(hfsmp->jnl);
+		}
+		hfs_global_shared_lock_release(hfsmp);
+		
+
+>>>>>>> origin/10.2
 		/*
 		 * Read up to a megabyte
 		 */
@@ -5686,10 +6764,18 @@ struct vop_bwrite_args /* {
     struct buf *a_bp;
 } */ *ap;
 {
+<<<<<<< HEAD
     register struct buf *bp = ap->a_bp;
     register struct vnode *vp = bp->b_vp;
     BlockDescriptor block;
     int retval = 0;
+=======
+	int retval = 0;
+	register struct buf *bp = ap->a_bp;
+	register struct vnode *vp = bp->b_vp;
+#if BYTE_ORDER == LITTLE_ENDIAN
+	BlockDescriptor block;
+>>>>>>> origin/10.2
 
 	DBG_FUNC_NAME("hfs_bwrite");
 
@@ -5711,7 +6797,23 @@ struct vop_bwrite_args /* {
         }
 >>>>>>> origin/10.1
 
+<<<<<<< HEAD
 exit:
+=======
+		/* We don't check to make sure that it's 0x0e00 because it could be all zeros */
+	}
+#endif
+	/* This buffer shouldn't be locked anymore but if it is clear it */
+	if (ISSET(bp->b_flags, B_LOCKED)) {
+	    // XXXdbg
+	    if (VTOHFS(vp)->jnl) {
+			panic("hfs: CLEARING the lock bit on bp 0x%x\n", bp);
+	    }
+		CLR(bp->b_flags, B_LOCKED);
+		printf("hfs_bwrite: called with lock bit set\n");
+	}
+	retval = vn_bwrite (ap);
+>>>>>>> origin/10.2
 
 	if (exts != exts_buf)
 		FREE(exts, M_TEMP);

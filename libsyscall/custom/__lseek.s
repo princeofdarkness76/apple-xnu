@@ -34,7 +34,11 @@ __SYSCALL(___lseek, lseek, 3)
 
 #elif defined(__i386__)
 
+<<<<<<< HEAD
 __SYSCALL_INT(___lseek, lseek, 3)
+=======
+__SYSCALL_INT(__lseek, lseek, 3)
+>>>>>>> origin/10.5
 
 #else
 #error Unsupported architecture

@@ -29,6 +29,14 @@
 #ifndef _IOPOLLEDINTERFACE_H_
 #define _IOPOLLEDINTERFACE_H_
 
+<<<<<<< HEAD
+=======
+#include <libkern/c++/OSObject.h>
+
+#define kIOPolledInterfaceSupportKey "IOPolledInterface"
+#define kIOPolledInterfaceActiveKey  "IOPolledInterfaceActive"
+
+>>>>>>> origin/10.8
 enum
 {
     kIOPolledPreflightState   = 1,

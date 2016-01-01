@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2011 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -344,10 +348,17 @@ rip6_output(
 	struct ip6_moptions *im6o = NULL;
 	struct ifnet *oifp = NULL;
 	int type = 0, code = 0;		/* for ICMPv6 output statistics only */
+<<<<<<< HEAD
 	mbuf_svc_class_t msc = MBUF_SC_UNSPEC;
 	struct ip6_out_args ip6oa =
 	    { IFSCOPE_NONE, { 0 }, IP6OAF_SELECT_SRCIF, 0 };
 	int flags = IPV6_OUTARGS;
+=======
+	int priv = 0;
+#if PKT_PRIORITY
+	mbuf_traffic_class_t mtc = MBUF_TC_NONE;
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 
 	in6p = sotoin6pcb(so);
 
@@ -380,10 +391,18 @@ rip6_output(
 
 	dst = &dstsock->sin6_addr;
 	if (control) {
+<<<<<<< HEAD
 		msc = mbuf_service_class_from_control(control);
 
 		if ((error = ip6_setpktopts(control, &opt, NULL,
 		    SOCK_PROTO(so))) != 0)
+=======
+#if PKT_PRIORITY
+		mtc = mbuf_traffic_class_from_control(control);
+#endif /* PKT_PRIORITY */
+
+		if ((error = ip6_setpktoptions(control, &opt, priv, 0)) != 0)
+>>>>>>> origin/10.6
 			goto bad;
 		optp = &opt;
 	} else
@@ -623,6 +642,7 @@ rip6_output(
 		ROUTE_RELEASE(&in6p->in6p_route);
 	}
 
+<<<<<<< HEAD
 	/*
 	 * If output interface was cellular/expensive, and this socket is
 	 * denied access to it, generate an event.
@@ -633,6 +653,30 @@ rip6_output(
 		    SO_FILT_HINT_IFDENIED));
 
 	if (SOCK_PROTO(so) == IPPROTO_ICMPV6) {
+=======
+#if PKT_PRIORITY
+	set_traffic_class(m, so, mtc);
+#endif /* PKT_PRIORITY */
+
+	error = ip6_output(m, optp, &in6p->in6p_route, 0,
+			   in6p->in6p_moptions, &oifp, 0);
+
+#if IFNET_ROUTE_REFCNT
+	/*
+	 * Always discard the cached route for unconnected socket
+	 * or if it is a multicast route.
+	 */
+	if (in6p->in6p_route.ro_rt != NULL &&
+	    ((in6p->in6p_route.ro_rt->rt_flags & RTF_MULTICAST) ||
+	    in6p->in6p_socket == NULL ||
+	    in6p->in6p_socket->so_state != SS_ISCONNECTED)) {
+		rtfree(in6p->in6p_route.ro_rt);
+		in6p->in6p_route.ro_rt = NULL;
+	}
+#endif /* IFNET_ROUTE_REFCNT */
+
+	if (so->so_proto->pr_protocol == IPPROTO_ICMPV6) {
+>>>>>>> origin/10.6
 		if (oifp)
 			icmp6_ifoutstat_inc(oifp, type, code);
 		icmp6stat.icp6s_outhist[type]++;
@@ -704,9 +748,23 @@ rip6_ctloutput(
 				error = ENOPROTOOPT;
 			break;
 #endif
+<<<<<<< HEAD
 		case IPV6_CHECKSUM:
 			error = ip6_raw_ctloutput(so, sopt);
+=======
+
+		case MRT6_INIT:
+		case MRT6_DONE:
+		case MRT6_ADD_MIF:
+		case MRT6_DEL_MIF:
+		case MRT6_ADD_MFC:
+		case MRT6_DEL_MFC:
+		case MRT6_PIM:
+#if MROUTING
+			error = ip6_mrouter_get(so, sopt);
+>>>>>>> origin/10.6
 			break;
+#endif
 		default:
 			error = ip6_ctloutput(so, sopt);
 			break;
@@ -729,6 +787,7 @@ rip6_ctloutput(
 			break;
 #endif
 
+<<<<<<< HEAD
 		case IPV6_CHECKSUM:
 			error = ip6_raw_ctloutput(so, sopt);
 			break;
@@ -741,6 +800,19 @@ rip6_ctloutput(
 			error = inp_flush(sotoinpcb(so), optval);
 			break;
 
+=======
+		case MRT6_INIT:
+		case MRT6_DONE:
+		case MRT6_ADD_MIF:
+		case MRT6_DEL_MIF:
+		case MRT6_ADD_MFC:
+		case MRT6_DEL_MFC:
+		case MRT6_PIM:
+#if MROUTING
+			error = ip6_mrouter_set(so, sopt);
+			break;
+#endif
+>>>>>>> origin/10.6
 		default:
 			error = ip6_ctloutput(so, sopt);
 			break;
@@ -791,6 +863,13 @@ rip6_detach(struct socket *so)
 	if (inp == 0)
 		panic("rip6_detach");
 	/* xxx: RSVP */
+<<<<<<< HEAD
+=======
+#if MROUTING
+	if (so == ip6_mrouter)
+		ip6_mrouter_done();
+#endif
+>>>>>>> origin/10.6
 	if (inp->in6p_icmp6filt) {
 		FREE(inp->in6p_icmp6filt, M_PCB);
 		inp->in6p_icmp6filt = NULL;

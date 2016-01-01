@@ -1,5 +1,13 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2004-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2004-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
+=======
+ * Copyright (c) 2004-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -77,7 +85,10 @@
 #include <net/if_dl.h>
 #include <net/dlil.h>
 #include <net/if_types.h>
+<<<<<<< HEAD
 #include <net/if_llreach.h>
+=======
+>>>>>>> origin/10.6
 #include <net/route.h>
 
 #include <netinet/if_ether.h>
@@ -628,11 +639,16 @@ in_arpdrain(void *arg)
 	lck_mtx_unlock(rnh_lock);
 }
 
+<<<<<<< HEAD
 /*
  * Timeout routine.  Age arp_tab entries periodically.
  */
 static void
 arp_timeout(void *arg)
+=======
+void
+in_arpdrain(void *ignored_arg)
+>>>>>>> origin/10.6
 {
 #pragma unused(arg)
 	struct llinfo_arp *la, *ola;
@@ -661,6 +677,7 @@ arp_timeout(void *arg)
 	lck_mtx_unlock(rnh_lock);
 }
 
+<<<<<<< HEAD
 static void
 arp_sched_timeout(struct timeval *atv)
 {
@@ -682,6 +699,18 @@ arp_sched_timeout(struct timeval *atv)
 		arp_timeout_run = 1;
 		timeout(arp_timeout, NULL, tvtohz(atv));
 	}
+=======
+/*
+ * Timeout routine.  Age arp_tab entries periodically.
+ */
+/* ARGSUSED */
+static void
+arptimer(void *ignored_arg)
+{
+#pragma unused (ignored_arg)
+	in_arpdrain(NULL);
+	timeout(arptimer, (caddr_t)0, arpt_prune * hz);
+>>>>>>> origin/10.6
 }
 
 /*
@@ -721,6 +750,7 @@ arp_rtrequest(int req, struct rtentry *rt, struct sockaddr *sa)
 			/*
 			 * Case 1: This route should come from a route to iface.
 			 */
+<<<<<<< HEAD
 			if (rt_setgate(rt, rt_key(rt), SA(&null_sdl)) == 0) {
 				gate = rt->rt_gateway;
 				SDL(gate)->sdl_type = rt->rt_ifp->if_type;
@@ -731,6 +761,15 @@ arp_rtrequest(int req, struct rtentry *rt, struct sockaddr *sa)
 				 */
 				rt_setexpire(rt, MAX(timenow, 1));
 			}
+=======
+			rt_setgate(rt, rt_key(rt),
+					(struct sockaddr *)&null_sdl);
+			gate = rt->rt_gateway;
+			SDL(gate)->sdl_type = rt->rt_ifp->if_type;
+			SDL(gate)->sdl_index = rt->rt_ifp->if_index;
+			/* In case we're called before 1.0 sec. has elapsed */
+			rt->rt_expire = MAX(timenow.tv_sec, 1);
+>>>>>>> origin/10.5
 			break;
 		}
 		/* Announce a new entry if requested. */
@@ -806,12 +845,18 @@ arp_rtrequest(int req, struct rtentry *rt, struct sockaddr *sa)
 			    &broadcast_len);
 			gate_ll->sdl_alen = broadcast_len;
 			gate_ll->sdl_family = AF_LINK;
+<<<<<<< HEAD
 			gate_ll->sdl_len = sizeof (struct sockaddr_dl);
 			/* In case we're called before 1.0 sec. has elapsed */
 			rt_setexpire(rt, MAX(timenow, 1));
 		} else if (IN_LINKLOCAL(ntohl(SIN(rt_key(rt))->
 		    sin_addr.s_addr))) {
 			rt->rt_flags |= RTF_STATIC;
+=======
+			gate_ll->sdl_len = sizeof(struct sockaddr_dl);
+			/* In case we're called before 1.0 sec. has elapsed */
+			rt->rt_expire = MAX(timenow.tv_sec, 1);
+>>>>>>> origin/10.5
 		}
 
 		/* Set default maximum number of retries */
@@ -822,6 +867,7 @@ arp_rtrequest(int req, struct rtentry *rt, struct sockaddr *sa)
 		IFA_LOCK_SPIN(rt->rt_ifa);
 		if (SIN(rt_key(rt))->sin_addr.s_addr ==
 		    (IA_SIN(rt->rt_ifa))->sin_addr.s_addr) {
+<<<<<<< HEAD
 			IFA_UNLOCK(rt->rt_ifa);
 			/*
 			 * This test used to be
@@ -844,6 +890,31 @@ arp_rtrequest(int req, struct rtentry *rt, struct sockaddr *sa)
 					 */
 					if (rt->rt_llinfo_purge != NULL)
 						rt->rt_llinfo_purge(rt);
+=======
+		    /*
+		     * This test used to be
+		     *	if (loif.if_flags & IFF_UP)
+		     * It allowed local traffic to be forced
+		     * through the hardware by configuring the loopback down.
+		     * However, it causes problems during network configuration
+		     * for boards that can't receive packets they send.
+		     * It is now necessary to clear "useloopback" and remove
+		     * the route to force traffic out to the hardware.
+		     */
+			rt->rt_expire = 0;
+			ifnet_lladdr_copy_bytes(rt->rt_ifp, LLADDR(SDL(gate)), SDL(gate)->sdl_alen = 6);
+			if (useloopback) {
+#if IFNET_ROUTE_REFCNT
+				/* Adjust route ref count for the interfaces */
+				if (rt->rt_if_ref_fn != NULL &&
+				    rt->rt_ifp != lo_ifp) {
+					rt->rt_if_ref_fn(lo_ifp, 1);
+					rt->rt_if_ref_fn(rt->rt_ifp, -1);
+				}
+#endif /* IFNET_ROUTE_REFCNT */
+				rt->rt_ifp = lo_ifp;
+			}
+>>>>>>> origin/10.6
 
 					/*
 					 * Adjust route ref count for the
@@ -928,8 +999,17 @@ sdl_addr_to_hex(const struct sockaddr_dl *sdl, char *orig_buf, int buflen)
  * is responsible for unlocking it and releasing its reference.
  */
 static errno_t
+<<<<<<< HEAD
 arp_lookup_route(const struct in_addr *addr, int create, int proxy,
     route_t *route, unsigned int ifscope)
+=======
+arp_lookup_route(
+	const struct in_addr *addr,
+	int	create,
+	int proxy,
+	route_t *route,
+	unsigned int ifscope)
+>>>>>>> origin/10.5
 {
 	struct sockaddr_inarp sin =
 	    { sizeof (sin), AF_INET, 0, { 0 }, { 0 }, 0, 0 };
@@ -942,6 +1022,7 @@ arp_lookup_route(const struct in_addr *addr, int create, int proxy,
 	sin.sin_addr.s_addr = addr->s_addr;
 	sin.sin_other = proxy ? SIN_PROXY : 0;
 
+<<<<<<< HEAD
 	/*
 	 * If the destination is a link-local address, don't
 	 * constrain the lookup (don't scope it).
@@ -956,6 +1037,16 @@ arp_lookup_route(const struct in_addr *addr, int create, int proxy,
 	RT_LOCK(rt);
 
 	if (rt->rt_flags & RTF_GATEWAY) {
+=======
+	*route = rtalloc1_scoped_locked((struct sockaddr*)&sin,
+	    create, 0, ifscope);
+	if (*route == NULL)
+		return ENETUNREACH;
+	
+	rtunref(*route);
+	
+	if ((*route)->rt_flags & RTF_GATEWAY) {
+>>>>>>> origin/10.5
 		why = "host is not on local network";
 		error = ENETUNREACH;
 	} else if (!(rt->rt_flags & RTF_LLINFO)) {
@@ -965,6 +1056,7 @@ arp_lookup_route(const struct in_addr *addr, int create, int proxy,
 		why = "gateway route is not ours";
 		error = EPROTONOSUPPORT;
 	}
+<<<<<<< HEAD
 
 	if (error != 0) {
 		if (create && (arp_verbose || log_arp_warnings)) {
@@ -972,6 +1064,58 @@ arp_lookup_route(const struct in_addr *addr, int create, int proxy,
 			log(LOG_DEBUG, "%s: link#%d %s failed: %s\n",
 			    __func__, ifscope, inet_ntop(AF_INET, addr, tmp,
 			    sizeof (tmp)), why);
+=======
+	
+	if (why && create && log_arp_warnings) {
+		char	tmp[MAX_IPv4_STR_LEN];
+		log(LOG_DEBUG, "arplookup link#%d %s failed: %s\n", ifscope,
+			inet_ntop(AF_INET, addr, tmp, sizeof(tmp)), why);
+	}
+	
+	return error;
+}
+
+
+__private_extern__ errno_t
+arp_route_to_gateway_route(
+	const struct sockaddr *net_dest,
+	route_t	hint,
+	route_t *out_route);
+/*
+ * arp_route_to_gateway_route will find the gateway route for a given route.
+ *
+ * If the route is down, look the route up again.
+ * If the route goes through a gateway, get the route to the gateway.
+ * If the gateway route is down, look it up again.
+ * If the route is set to reject, verify it hasn't expired.
+ */
+__private_extern__ errno_t
+arp_route_to_gateway_route(
+	const struct sockaddr *net_dest,
+	route_t	hint,
+	route_t *out_route)
+{
+	struct timeval timenow;
+	route_t route = hint;
+	*out_route = NULL;
+	
+	/* If we got a hint from the higher layers, check it out */
+	if (route) {
+		lck_mtx_lock(rt_mtx);
+		
+		if ((route->rt_flags & RTF_UP) == 0) {
+			/* route is down, find a new one */
+			hint = route = rtalloc1_scoped_locked(net_dest,
+			    1, 0, route->rt_ifp->if_index);
+			if (hint) {
+				rtunref(hint);
+			}
+			else {
+				/* No route to host */
+				lck_mtx_unlock(rt_mtx);
+				return EHOSTUNREACH;
+			}
+>>>>>>> origin/10.5
 		}
 
 		/*
@@ -988,6 +1132,7 @@ arp_lookup_route(const struct in_addr *addr, int create, int proxy,
 			 * rt_gateway via rt_setgate() after rt_lock is
 			 * dropped by marking the route as defunct.
 			 */
+<<<<<<< HEAD
 			rt->rt_flags |= RTF_CONDEMNED;
 			RT_UNLOCK(rt);
 			rtrequest(RTM_DELETE, rt_key(rt), rt->rt_gateway,
@@ -996,6 +1141,32 @@ arp_lookup_route(const struct in_addr *addr, int create, int proxy,
 		} else {
 			RT_REMREF_LOCKED(rt);
 			RT_UNLOCK(rt);
+=======
+			if (route->rt_gwroute == 0 ||
+				(route->rt_gwroute->rt_flags & RTF_UP) == 0) {
+				if (route->rt_gwroute != 0)
+					rtfree_locked(route->rt_gwroute);
+				
+				route->rt_gwroute = rtalloc1_scoped_locked(
+				    route->rt_gateway, 1, 0,
+				    route->rt_ifp->if_index);
+				if (route->rt_gwroute == 0) {
+					lck_mtx_unlock(rt_mtx);
+					return EHOSTUNREACH;
+				}
+			}
+			
+			route = route->rt_gwroute;
+		}
+		
+		if (route->rt_flags & RTF_REJECT) {
+			getmicrotime(&timenow);
+			if (route->rt_rmx.rmx_expire == 0 ||
+				timenow.tv_sec < route->rt_rmx.rmx_expire) {
+				lck_mtx_unlock(rt_mtx);
+				return route == hint ? EHOSTDOWN : EHOSTUNREACH;
+			}
+>>>>>>> origin/10.5
 		}
 		return (error);
 	}
@@ -1081,6 +1252,7 @@ arp_lookup_ip(ifnet_t ifp, const struct sockaddr_in *net_dest,
 	 * link layer information, trigger the creation of the
 	 * route and link layer information.
 	 */
+<<<<<<< HEAD
 	if (route == NULL || route->rt_llinfo == NULL) {
 		/* Clean up now while we can */
 		if (route != NULL) {
@@ -1116,6 +1288,21 @@ arp_lookup_ip(ifnet_t ifp, const struct sockaddr_in *net_dest,
 		goto release;
 	}
 
+=======
+	if (route == NULL || route->rt_llinfo == NULL)
+		result = arp_lookup_route(&net_dest->sin_addr, 1, 0, &route,
+		    ifp->if_index);
+	
+	if (result || route == NULL || route->rt_llinfo == NULL) {
+		char	tmp[MAX_IPv4_STR_LEN];
+		lck_mtx_unlock(rt_mtx);
+		if (log_arp_warnings)
+			log(LOG_DEBUG, "arpresolve: can't allocate llinfo for %s\n",
+				inet_ntop(AF_INET, &net_dest->sin_addr, tmp, sizeof(tmp)));
+		return result;
+	}
+	
+>>>>>>> origin/10.5
 	/*
 	 * Now that we have the right route, is it filled in?
 	 */
@@ -1248,8 +1435,13 @@ arp_lookup_ip(ifnet_t ifp, const struct sockaddr_in *net_dest,
 				goto release;
 			} else {
 				route->rt_flags |= RTF_REJECT;
+<<<<<<< HEAD
 				rt_setexpire(route,
 				    route->rt_expire + arpt_down);
+=======
+				route->rt_rmx.rmx_expire = rt_expiry(route,
+				    route->rt_rmx.rmx_expire, arpt_down);
+>>>>>>> origin/10.6
 				llinfo->la_asked = 0;
 				/*
 				 * Clear la_hold; don't free the packet since
@@ -1300,12 +1492,21 @@ arp_ip_handle_input(ifnet_t ifp, u_short arpop,
 	errno_t	error;
 	int created_announcement = 0;
 	int bridged = 0, is_bridge = 0;
+<<<<<<< HEAD
 
 	arpstat.received++;
 
+=======
+	
+>>>>>>> origin/10.6
 	/* Do not respond to requests for 0.0.0.0 */
 	if (target_ip->sin_addr.s_addr == INADDR_ANY && arpop == ARPOP_REQUEST)
 		goto done;
+	
+ 	if (ifp->if_bridge)
+		bridged = 1;
+	if (ifp->if_type == IFT_BRIDGE)
+		is_bridge = 1;
 
 	if (ifp->if_bridge)
 		bridged = 1;
@@ -1317,11 +1518,16 @@ arp_ip_handle_input(ifnet_t ifp, u_short arpop,
 
 	/*
 	 * Determine if this ARP is for us
+<<<<<<< HEAD
 	 * For a bridge, we want to check the address irrespective
+=======
+	 * For a bridge, we want to check the address irrespective 
+>>>>>>> origin/10.6
 	 * of the receive interface.
 	 */
 	lck_rw_lock_shared(in_ifaddr_rwlock);
 	TAILQ_FOREACH(ia, INADDR_HASH(target_ip->sin_addr.s_addr), ia_hash) {
+<<<<<<< HEAD
 		IFA_LOCK_SPIN(&ia->ia_ifa);
 		if (((bridged && ia->ia_ifp->if_bridge != NULL) ||
 		    (ia->ia_ifp == ifp)) &&
@@ -1332,11 +1538,21 @@ arp_ip_handle_input(ifnet_t ifp, u_short arpop,
 			IFA_UNLOCK(&ia->ia_ifa);
 			lck_rw_done(in_ifaddr_rwlock);
 			goto match;
+=======
+		if (((bridged && ia->ia_ifp->if_bridge != NULL) ||
+			(ia->ia_ifp == ifp)) &&
+		    ia->ia_addr.sin_addr.s_addr == target_ip->sin_addr.s_addr) {
+				best_ia = ia;
+				ifaref(&best_ia->ia_ifa);
+				lck_rw_done(in_ifaddr_rwlock);
+				goto match;
+>>>>>>> origin/10.6
 		}
 		IFA_UNLOCK(&ia->ia_ifa);
 	}
 
 	TAILQ_FOREACH(ia, INADDR_HASH(sender_ip->sin_addr.s_addr), ia_hash) {
+<<<<<<< HEAD
 		IFA_LOCK_SPIN(&ia->ia_ifa);
 		if (((bridged && ia->ia_ifp->if_bridge != NULL) ||
 		    (ia->ia_ifp == ifp)) &&
@@ -1347,6 +1563,37 @@ arp_ip_handle_input(ifnet_t ifp, u_short arpop,
 			IFA_UNLOCK(&ia->ia_ifa);
 			lck_rw_done(in_ifaddr_rwlock);
 			goto match;
+=======
+		if (((bridged && ia->ia_ifp->if_bridge != NULL) ||
+			(ia->ia_ifp == ifp)) &&
+		    ia->ia_addr.sin_addr.s_addr == sender_ip->sin_addr.s_addr) {
+				best_ia = ia;
+				ifaref(&best_ia->ia_ifa);
+				lck_rw_done(in_ifaddr_rwlock);
+				goto match;
+		}
+	}
+
+#define BDG_MEMBER_MATCHES_ARP(addr, ifp, ia)								\
+	(ia->ia_ifp->if_bridge == ifp->if_softc &&								\
+	!bcmp(ifnet_lladdr(ia->ia_ifp), ifnet_lladdr(ifp), ifp->if_addrlen) &&	\
+	addr == ia->ia_addr.sin_addr.s_addr)
+	/*
+	 * Check the case when bridge shares its MAC address with
+	 * some of its children, so packets are claimed by bridge
+	 * itself (bridge_input() does it first), but they are really
+	 * meant to be destined to the bridge member.
+	 */
+	if (is_bridge) {
+		TAILQ_FOREACH(ia, INADDR_HASH(target_ip->sin_addr.s_addr), ia_hash) {
+			if (BDG_MEMBER_MATCHES_ARP(target_ip->sin_addr.s_addr, ifp, ia)) {
+				ifp = ia->ia_ifp;
+				best_ia = ia;
+				ifaref(&best_ia->ia_ifa);
+				lck_rw_done(in_ifaddr_rwlock);
+				goto match;
+			}
+>>>>>>> origin/10.6
 		}
 		IFA_UNLOCK(&ia->ia_ifa);
 	}
@@ -1394,9 +1641,13 @@ arp_ip_handle_input(ifnet_t ifp, u_short arpop,
 			continue;
 		}
 		best_ia = (struct in_ifaddr *)ifa;
+<<<<<<< HEAD
 		best_ia_sin = best_ia->ia_addr;
 		IFA_ADDREF_LOCKED(ifa);
 		IFA_UNLOCK(ifa);
+=======
+		ifaref(&best_ia->ia_ifa);
+>>>>>>> origin/10.6
 		ifnet_lock_done(ifp);
 		goto match;
 	}
@@ -1416,9 +1667,14 @@ match:
 		goto done;
 
 	/* Check for a conflict */
+<<<<<<< HEAD
 	if (!bridged &&
 	    sender_ip->sin_addr.s_addr == best_ia_sin.sin_addr.s_addr) {
 		struct kev_msg ev_msg;
+=======
+	if (!bridged && sender_ip->sin_addr.s_addr == best_ia->ia_addr.sin_addr.s_addr) {
+		struct kev_msg        ev_msg;
+>>>>>>> origin/10.6
 		struct kev_in_collision	*in_collision;
 		u_char storage[sizeof (struct kev_in_collision) + MAX_HW_LEN];
 
@@ -1457,6 +1713,7 @@ match:
 	/*
 	 * Look up the routing entry. If it doesn't exist and we are the
 	 * target, and the sender isn't 0.0.0.0, go ahead and create one.
+<<<<<<< HEAD
 	 * Callee holds a reference on the route and returns with the route
 	 * entry locked, upon success.
 	 */
@@ -1469,6 +1726,14 @@ match:
 
 	if (error || route == NULL || route->rt_gateway == NULL) {
 		if (arpop != ARPOP_REQUEST)
+=======
+	 */
+	error = arp_lookup_route(&sender_ip->sin_addr,
+	    (target_ip->sin_addr.s_addr == best_ia->ia_addr.sin_addr.s_addr &&
+	    sender_ip->sin_addr.s_addr != 0), 0, &route, ifp->if_index);
+	if (error || route == 0 || route->rt_gateway == 0) {
+		if (arpop != ARPOP_REQUEST) {
+>>>>>>> origin/10.5
 			goto respond;
 
 		if (arp_sendllconflict && send_conflicting_probes != 0 &&
@@ -1479,6 +1744,7 @@ match:
 			 * Verify this ARP probe doesn't conflict with
 			 * an IPv4LL we know of on another interface.
 			 */
+<<<<<<< HEAD
 			if (route != NULL) {
 				RT_REMREF_LOCKED(route);
 				RT_UNLOCK(route);
@@ -1565,6 +1831,58 @@ match:
 					RT_REMREF_LOCKED(route);
 					RT_UNLOCK(route);
 					route = NULL;
+=======
+			error = arp_lookup_route(&target_ip->sin_addr, 0, 0,
+			    &route, ifp->if_index);
+			if (error == 0 && route && route->rt_gateway) {
+				gateway = SDL(route->rt_gateway);
+				if (route->rt_ifp != ifp && gateway->sdl_alen != 0 
+				    && (gateway->sdl_alen != sender_hw->sdl_alen 
+					|| bcmp(CONST_LLADDR(gateway), CONST_LLADDR(sender_hw),
+						gateway->sdl_alen) != 0)) {
+					/*
+					 * A node is probing for an IPv4LL we know exists on a
+					 * different interface. We respond with a conflicting probe
+					 * to force the new device to pick a different IPv4LL
+					 * address.
+					 */
+					if (log_arp_warnings) {
+					    log(LOG_INFO,
+						"arp: %s on %s%d sent probe for %s, already on %s%d\n",
+						sdl_addr_to_hex(sender_hw, buf, sizeof(buf)),
+						ifp->if_name, ifp->if_unit,
+						inet_ntop(AF_INET, &target_ip->sin_addr, ipv4str,
+								  sizeof(ipv4str)),
+						route->rt_ifp->if_name, route->rt_ifp->if_unit);
+					    log(LOG_INFO,
+						"arp: sending conflicting probe to %s on %s%d\n",
+						sdl_addr_to_hex(sender_hw, buf, sizeof(buf)),
+						ifp->if_name, ifp->if_unit);
+					}
+					/*
+					 * Send a conservative unicast "ARP probe".
+					 * This should force the other device to pick a new number.
+					 * This will not force the device to pick a new number if the device
+					 * has already assigned that number.
+					 * This will not imply to the device that we own that address.
+					 */
+					dlil_send_arp_internal(ifp, ARPOP_REQUEST,
+						(struct sockaddr_dl*)TAILQ_FIRST(&ifp->if_addrhead)->ifa_addr,
+						(const struct sockaddr*)sender_ip, sender_hw,
+						(const struct sockaddr*)target_ip);
+			 	}
+			}
+			goto respond;
+		} else if (keep_announcements != 0
+			   && target_ip->sin_addr.s_addr == sender_ip->sin_addr.s_addr) {
+			/* don't create entry if link-local address and link-local is disabled */
+			if (!IN_LINKLOCAL(ntohl(sender_ip->sin_addr.s_addr)) 
+			    || (ifp->if_eflags & IFEF_ARPLL) != 0) {
+				error = arp_lookup_route(&sender_ip->sin_addr,
+				    1, 0, &route, ifp->if_index);
+				if (error == 0 && route != NULL && route->rt_gateway != NULL) {
+					created_announcement = 1;
+>>>>>>> origin/10.5
 				}
 				/*
 				 * Callee holds a reference on the route and
@@ -1594,6 +1912,7 @@ match:
 
 	gateway = SDL(route->rt_gateway);
 	if (!bridged && route->rt_ifp != ifp) {
+<<<<<<< HEAD
 		if (!IN_LINKLOCAL(ntohl(sender_ip->sin_addr.s_addr)) ||
 		    !(ifp->if_eflags & IFEF_ARPLL)) {
 			if (arp_verbose || log_arp_warnings)
@@ -1604,6 +1923,17 @@ match:
 				    if_name(route->rt_ifp),
 				    sdl_addr_to_hex(sender_hw, buf,
 				    sizeof (buf)), if_name(ifp));
+=======
+		if (!IN_LINKLOCAL(ntohl(sender_ip->sin_addr.s_addr)) || (ifp->if_eflags & IFEF_ARPLL) == 0) {
+			if (log_arp_warnings)
+				log(LOG_ERR, "arp: %s is on %s%d but got reply from %s on %s%d\n",
+					inet_ntop(AF_INET, &sender_ip->sin_addr, ipv4str,
+							  sizeof(ipv4str)),
+					route->rt_ifp->if_name,
+					route->rt_ifp->if_unit,
+					sdl_addr_to_hex(sender_hw, buf, sizeof(buf)),
+					ifp->if_name, ifp->if_unit);
+>>>>>>> origin/10.6
 			goto respond;
 		} else {
 			/* Don't change a permanent address */
@@ -1638,6 +1968,7 @@ match:
 				lck_mtx_unlock(rnh_lock);
 				goto respond;
 			}
+<<<<<<< HEAD
 			if (route->rt_ifp != ifp) {
 				/*
 				 * Purge any link-layer info caching.
@@ -1651,6 +1982,16 @@ match:
 					route->rt_if_ref_fn(route->rt_ifp, -1);
 				}
 			}
+=======
+#if IFNET_ROUTE_REFCNT
+			/* Adjust route ref count for the interfaces */
+			if (route->rt_if_ref_fn != NULL &&
+			    route->rt_ifp != ifp) {
+				route->rt_if_ref_fn(ifp, 1);
+				route->rt_if_ref_fn(route->rt_ifp, -1);
+			}
+#endif /* IFNET_ROUTE_REFCNT */
+>>>>>>> origin/10.6
 			/* Change the interface when the existing route is on */
 			route->rt_ifp = ifp;
 			/*
@@ -1704,8 +2045,18 @@ match:
 	bcopy(CONST_LLADDR(sender_hw), LLADDR(gateway), gateway->sdl_alen);
 
 	/* Update the expire time for the route and clear the reject flag */
+<<<<<<< HEAD
 	if (route->rt_expire != 0)
 		rt_setexpire(route, net_uptime() + arpt_keep);
+=======
+	if (route->rt_rmx.rmx_expire) {
+		struct timeval timenow;
+
+		getmicrotime(&timenow);
+		route->rt_rmx.rmx_expire =
+		    rt_expiry(route, timenow.tv_sec, arpt_keep);
+	}
+>>>>>>> origin/10.6
 	route->rt_flags &= ~RTF_REJECT;
 
 	/* cache the gateway (sender HW) address */
@@ -1765,6 +2116,7 @@ respond:
 	arpstat.rxrequests++;
 
 	/* If we are not the target, check if we should proxy */
+<<<<<<< HEAD
 	if (target_ip->sin_addr.s_addr != best_ia_sin.sin_addr.s_addr) {
 		/*
 		 * Find a proxy route; callee holds a reference on the
@@ -1783,12 +2135,44 @@ respond:
 			 * proxying for.
 			 */
 			if (route->rt_ifp != ifp &&
+<<<<<<< HEAD
 			    (route->rt_ifp->if_bridge != ifp->if_bridge ||
 			    ifp->if_bridge == NULL)) {
 				RT_REMREF_LOCKED(route);
 				RT_UNLOCK(route);
 				goto done;
+=======
+	if (target_ip->sin_addr.s_addr != best_ia->ia_addr.sin_addr.s_addr) {
+	
+		/* Find a proxy route */
+		error = arp_lookup_route(&target_ip->sin_addr, 0, SIN_PROXY,
+		    &route, ifp->if_index);
+		if (error || route == NULL) {
+			
+			/* We don't have a route entry indicating we should use proxy */
+			/* If we aren't supposed to proxy all, we are done */
+			if (!arp_proxyall) {
+				lck_mtx_unlock(rt_mtx);
+				return 0;
 			}
+			
+			/* See if we have a route to the target ip before we proxy it */
+			route = rtalloc1_scoped_locked(
+			    (const struct sockaddr *)target_ip, 0, 0,
+			    ifp->if_index);
+			if (!route) {
+				lck_mtx_unlock(rt_mtx);
+				return 0;
+>>>>>>> origin/10.5
+			}
+=======
+				(route->rt_ifp->if_bridge != ifp->if_bridge ||
+				 ifp->if_bridge == NULL)) {
+					RT_REMREF_LOCKED(route);
+					RT_UNLOCK(route);
+					goto done;
+				}
+>>>>>>> origin/10.6
 			proxied = *SDL(route->rt_gateway);
 			target_hw = &proxied;
 		} else {

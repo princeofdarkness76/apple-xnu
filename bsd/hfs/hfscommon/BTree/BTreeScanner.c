@@ -1,5 +1,8 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.5
  * Copyright (c) 1996-2008 Apple Inc. All rights reserved.
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -298,10 +301,14 @@ static int ReadMultipleNodes( BTScanState *theScanStatePtr )
 	if ( theScanStatePtr->bufferPtr != NULL )
 	{
 <<<<<<< HEAD
+<<<<<<< HEAD
 	        buf_markinvalid(theScanStatePtr->bufferPtr);
 		buf_brelse( theScanStatePtr->bufferPtr );
 =======
 		theScanStatePtr->bufferPtr->b_flags |= (B_INVAL | B_AGE);
+=======
+	    theScanStatePtr->bufferPtr->b_flags |= (B_INVAL | B_AGE);
+>>>>>>> origin/10.2
 		brelse( theScanStatePtr->bufferPtr );
 >>>>>>> origin/10.1
 		theScanStatePtr->bufferPtr = NULL;
@@ -342,11 +349,18 @@ static int ReadMultipleNodes( BTScanState *theScanStatePtr )
 	                       &theScanStatePtr->bufferPtr );
 =======
 	myErr = bread( 	myDevPtr, 
+<<<<<<< HEAD
 					myPhyBlockNum, 
 					myBufferSize,  
 					NOCRED, 
 					&theScanStatePtr->bufferPtr );
 >>>>>>> origin/10.1
+=======
+							myPhyBlockNum, 
+							myBufferSize,  
+							NOCRED, 
+							&theScanStatePtr->bufferPtr );
+>>>>>>> origin/10.2
 	if ( myErr != E_NONE )
 	{
 		goto ExitThisRoutine;
@@ -481,8 +495,12 @@ int	 BTScanTerminate(	BTScanState *		scanState,
 		buf_brelse( scanState->bufferPtr );
 =======
 		scanState->bufferPtr->b_flags |= (B_INVAL | B_AGE);
+<<<<<<< HEAD
 		brelse( scanState->bufferPtr ); 
 >>>>>>> origin/10.1
+=======
+		brelse( scanState->bufferPtr );
+>>>>>>> origin/10.2
 		scanState->bufferPtr = NULL;
 		scanState->currentNodePtr = NULL;
 	}

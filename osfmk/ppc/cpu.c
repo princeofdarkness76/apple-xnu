@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -28,6 +32,11 @@
 #include <kern/machine.h>
 #include <kern/misc_protos.h>
 #include <kern/thread.h>
+<<<<<<< HEAD
+=======
+#include <kern/sched_prim.h>
+#include <kern/timer_queue.h>
+>>>>>>> origin/10.5
 #include <kern/processor.h>
 #include <mach/machine.h>
 #include <mach/processor_info.h>
@@ -45,6 +54,9 @@ int real_ncpus = 1;
 
 int wncpu = NCPUS;
 resethandler_t	resethandler_target;
+
+decl_simple_lock_data(static,SignalReadyLock);
+static unsigned int     SignalReadyWait = 0xFFFFFFFFU;
 
 #define MMCR0_SUPPORT_MASK 0xf83f1fff
 #define MMCR1_SUPPORT_MASK 0xffc00000
@@ -380,9 +392,16 @@ cpu_init(
 
 	cpu = cpu_number();
 
+<<<<<<< HEAD
 	machine_slot[cpu].running = TRUE;
 	machine_slot[cpu].cpu_type = CPU_TYPE_POWERPC;
 	machine_slot[cpu].cpu_subtype = (cpu_subtype_t)per_proc_info[cpu].pf.rptdProc;
+=======
+	queue_init(&proc_info->rtclock_timer.queue);
+	proc_info->rtclock_timer.deadline = EndOfAllTime;
+
+	return proc_info;
+>>>>>>> origin/10.5
 
 }
 
@@ -406,7 +425,16 @@ cpu_machine_init(
 		cpu_sync_timebase();
 	}
 	ml_init_interrupt();
+	if (cpu != master_cpu)
+		simple_lock(&SignalReadyLock);
 	tproc_info->cpu_flags |= BootDone|SignalReady;
+	if (cpu != master_cpu) {
+		if (SignalReadyWait != 0) {
+			SignalReadyWait--;
+			thread_wakeup(&tproc_info->cpu_flags);
+		}
+		simple_unlock(&SignalReadyLock);
+	}
 }
 
 kern_return_t
@@ -458,6 +486,11 @@ cpu_start(
 	} else {
 		extern void _start_cpu(void);
 
+		if (SignalReadyWait == 0xFFFFFFFFU) {
+			SignalReadyWait = 0;
+			simple_lock_init(&SignalReadyLock,0);
+		}
+
 		proc_info->cpu_number = cpu;
 		proc_info->cpu_flags &= BootDone;
 		proc_info->istackptr = (vm_offset_t)&intstack + (INTSTACK_SIZE*(cpu+1)) - sizeof (struct ppc_saved_state);
@@ -471,10 +504,19 @@ cpu_start(
 		proc_info->cpu_data = (unsigned int)&cpu_data[cpu];
 		proc_info->active_stacks = (unsigned int)&active_stacks[cpu];
 		proc_info->need_ast = (unsigned int)&need_ast[cpu];
+<<<<<<< HEAD
 		proc_info->FPU_thread = 0;
 		proc_info->FPU_vmmCtx = 0;
 		proc_info->VMX_thread = 0;
 		proc_info->VMX_vmmCtx = 0;
+=======
+		proc_info->FPU_owner = 0;
+		proc_info->VMX_owner = 0;
+		proc_info->rtcPop = 0xFFFFFFFFFFFFFFFFULL;
+		mp = (mapping *)(&proc_info->ppCIOmp);
+		mp->mpFlags = 0x01000000 | mpSpecial | 1;
+		mp->mpSpace = invalSpace;
+>>>>>>> origin/10.3
 
 		if (proc_info->start_paddr == EXCEPTION_VECTOR(T_RESET)) {
 
@@ -506,15 +548,101 @@ cpu_start(
 		ret = PE_cpu_start(proc_info->cpu_id, 
 					proc_info->start_paddr, (vm_offset_t)proc_info);
 
+<<<<<<< HEAD
 		if (ret != KERN_SUCCESS && 
 		    proc_info->start_paddr == EXCEPTION_VECTOR(T_RESET)) {
-
-			/* TODO: realese mutex lock reset_handler_lock */
+=======
 		}
 		return(ret);
 	}
 }
 
+/*
+ *	Routine:	cpu_exit_wait
+ *	Function:
+ */
+void
+cpu_exit_wait(
+	int	cpu)
+{
+	struct per_proc_info	*tpproc;
+
+	if ( cpu != master_cpu) {
+		tpproc = PerProcTable[cpu].ppe_vaddr;
+		while (!((*(volatile short *)&tpproc->cpu_flags) & SleepState)) {};
+	}
+}
+
+
+/*
+ *	Routine:	cpu_doshutdown
+ *	Function:
+ */
+void
+cpu_doshutdown(
+	void)
+{
+	enable_preemption();
+	processor_offline(current_processor());
+}
+
+
+/*
+ *	Routine:	cpu_sleep
+ *	Function:
+ */
+void
+cpu_sleep(
+	void)
+{
+	struct per_proc_info	*proc_info;
+	unsigned int			i;
+	unsigned int			wait_ncpus_sleep, ncpus_sleep;
+	facility_context		*fowner;
+
+	proc_info = getPerProc();
+
+	proc_info->running = FALSE;
+
+	if (proc_info->cpu_number != master_cpu) {
+		timer_queue_shutdown(&proc_info->rtclock_timer.queue);
+		proc_info->rtclock_timer.deadline = EndOfAllTime;
+	}
+
+	fowner = proc_info->FPU_owner;					/* Cache this */
+	if(fowner) /* If anyone owns FPU, save it */
+		fpu_save(fowner);
+	proc_info->FPU_owner = NULL;						/* Set no fpu owner now */
+>>>>>>> origin/10.5
+
+			/* TODO: realese mutex lock reset_handler_lock */
+		} else {
+			simple_lock(&SignalReadyLock);
+
+			while (!((*(volatile short *)&per_proc_info[cpu].cpu_flags) & SignalReady)) {
+				SignalReadyWait++;
+				thread_sleep_simple_lock((event_t)&per_proc_info[cpu].cpu_flags,
+							&SignalReadyLock, THREAD_UNINT);
+			}
+			simple_unlock(&SignalReadyLock);
+		}
+		return(ret);
+	}
+}
+
+<<<<<<< HEAD
+=======
+void
+cpu_exit_wait(
+	int cpu)
+{
+	if ( cpu != master_cpu)
+		while (!((*(volatile short *)&per_proc_info[cpu].cpu_flags) & SleepState)) {};
+}
+
+perfTrap perfCpuSigHook = 0;            /* Pointer to CHUD cpu signal hook routine */
+
+>>>>>>> origin/10.3
 /*
  *	Here is where we implement the receiver of the signaling protocol.
  *	We wait for the signal status area to be passed to us. Then we snarf
@@ -533,15 +661,20 @@ cpu_signal_handler(
 	int cpu;
 	struct SIGtimebase *timebaseAddr;
 	natural_t tbu, tbu2, tbl;
-	
+	broadcastFunc xfunc;
 	cpu = cpu_number();								/* Get the CPU number */
 	pproc = &per_proc_info[cpu];					/* Point to our block */
-
+	
 /*
- *	Since we've been signaled, wait just under 1ms for the signal lock to pass
+ *	Since we've been signaled, wait about 31 ms for the signal lock to pass
  */
+<<<<<<< HEAD
 	if(!hw_lock_mbits(&pproc->MPsigpStat, MPsigpMsgp, (MPsigpBusy | MPsigpPass),
 	  (MPsigpBusy | MPsigpPass), (gPEClockFrequencyInfo.bus_clock_rate_hz >> 7))) {
+=======
+	if(!hw_lock_mbits(&pproc->MPsigpStat, (MPsigpMsgp | MPsigpAck), (MPsigpBusy | MPsigpPass),
+	  (MPsigpBusy | MPsigpPass | MPsigpAck), (gPEClockFrequencyInfo.timebase_frequency_hz >> 5))) {
+>>>>>>> origin/10.2
 		panic("cpu_signal_handler: Lock pass timed out\n");
 	}
 	
@@ -616,6 +749,41 @@ cpu_signal_handler(
 
 							return;
 
+<<<<<<< HEAD
+=======
+						case CPRQsegload:
+							return;
+						
+ 						case CPRQchud:
+ 							parmAddr = (unsigned int *)holdParm2;	/* Get the destination address */
+ 							if(perfCpuSigHook) {
+ 								struct savearea *ssp = current_act()->mact.pcb;
+ 								if(ssp) {
+ 									(perfCpuSigHook)(parmAddr[1] /* request */, ssp, 0, 0);
+ 								}
+   							}
+ 							parmAddr[1] = 0;
+ 							parmAddr[0] = 0;		/* Show we're done */
+  							return;
+						
+						case CPRQscom:
+							if(((scomcomm *)holdParm2)->scomfunc) {	/* Are we writing */
+								((scomcomm *)holdParm2)->scomstat = ml_scom_write(((scomcomm *)holdParm2)->scomreg, ((scomcomm *)holdParm2)->scomdata);	/* Write scom */
+							}
+							else {					/* No, reading... */
+								((scomcomm *)holdParm2)->scomstat = ml_scom_read(((scomcomm *)holdParm2)->scomreg, &((scomcomm *)holdParm2)->scomdata);	/* Read scom */
+							}
+							return;
+
+						case CPRQsps:
+							{
+								extern void ml_set_processor_speed_slave(unsigned long speed);
+
+								ml_set_processor_speed_slave(holdParm2);
+								return;
+							}
+							
+>>>>>>> origin/10.3
 						default:
 							panic("cpu_signal_handler: unknown CPU request - %08X\n", holdParm1);
 							return;
@@ -633,6 +801,12 @@ cpu_signal_handler(
 				case SIGPwake:						/* Wake up CPU */
 					pproc->numSIGPwake++;			/* Count this one */
 					return;							/* No need to do anything, the interrupt does it all... */
+					
+				case SIGPcall:						/* Call function on CPU */
+					pproc->hwCtr.numSIGPcall++;		/* Count this one */
+					xfunc = holdParm1;				/* Do this since I can't seem to figure C out */
+					xfunc(holdParm2);				/* Call the passed function */
+					return;							/* Done... */
 					
 				default:
 					panic("cpu_signal_handler: unknown SIGP message order - %08X\n", holdParm0);
@@ -696,8 +870,15 @@ cpu_signal(
 		}
 	}	
 	
+<<<<<<< HEAD
 	if(!hw_lock_mbits(&tpproc->MPsigpStat, MPsigpMsgp, 0, MPsigpBusy, 
 	  (gPEClockFrequencyInfo.bus_clock_rate_hz >> 13))) {	/* Try to lock the message block with a .5ms timeout */
+=======
+	if((busybitset == 0) && 
+	   (!hw_lock_mbits(&tpproc->MPsigpStat, MPsigpMsgp, 0, MPsigpBusy, 
+	   (gPEClockFrequencyInfo.timebase_frequency_hz >> 11)))) {	/* Try to lock the message block with a .5ms timeout */
+		mpproc->numSIGPtimo++;						/* Account for timeouts */
+>>>>>>> origin/10.2
 		return KERN_FAILURE;						/* Timed out, take your ball and go home... */
 	}
 
@@ -819,4 +1000,43 @@ cpu_sync_timebase(
 		continue;
 
 	(void)ml_set_interrupts_enabled(intr);
+}
+
+/*
+ *	Call a function on all running processors
+ *
+ *	Note that the synch paramter is used to wait until all functions are complete.
+ *	It is not passed to the other processor and must be known by the called function.
+ *	The called function must do a thread_wakeup on the synch if it decrements the
+ *	synch count to 0.
+ */
+
+
+int32_t cpu_broadcast(uint32_t *synch, broadcastFunc func, uint32_t parm) {
+
+	int sigproc, cpu, ocpu;
+
+	cpu = cpu_number();									/* Who are we? */
+	sigproc = 0;										/* Clear called processor count */
+
+	if(real_ncpus > 1) {								/* Are we just a uni? */
+	
+		assert_wait((event_t)synch, THREAD_UNINT);		/* If more than one processor, we may have to wait */
+
+		for(ocpu = 0; ocpu < real_ncpus; ocpu++) {		/* Tell everyone to call */
+			if(ocpu == cpu) continue;					/* If we talk to ourselves, people will wonder... */
+			hw_atomic_add(synch, 1);					/* Tentatively bump synchronizer  */
+			sigproc++;									/* Tentatively bump signal sent count */
+			if(KERN_SUCCESS != cpu_signal(ocpu, SIGPcall, (uint32_t)func, parm)) {	/* Call the function on the other processor */
+				hw_atomic_sub(synch, 1);				/* Other guy isn't really there, ignore it  */
+				sigproc--;								/* and don't count it */
+			}
+		}
+
+		if(!sigproc) clear_wait(current_thread(), THREAD_AWAKENED);	/* Clear wait if we never signalled */
+		else thread_block(THREAD_CONTINUE_NULL);		/* Wait for everyone to get into step... */
+	}
+
+	return sigproc;										/* Return the number of guys actually signalled */
+
 }

@@ -2705,6 +2705,7 @@ def ShowTaskLoadInfo(cmd_args=None, cmd_options={}):
             end_addr = m[2]
             #print "Load address: %s" % hex(m[1])
     print print_format.format(load_addr, end_addr, libname, uuid_out_string, filepath)
+<<<<<<< HEAD
     return None
 
 @header("{0: <20s} {1: <20s} {2: <20s}".format("vm_page_t", "offset", "object"))
@@ -2956,3 +2957,6 @@ def show_apple_protect_pager(pager, qcnt, idx):
     vnode_pager = Cast(object.pager,'vnode_pager *')
     filename = GetVnodePath(vnode_pager.vnode_handle)
     print "{:>3}/{:<3d} {:#018x} {:>5d} {:>5d} {:>6d} {:#018x} {:#018x} {:#018x} {:#018x} {:#018x} {:#018x}\n\tcrypt_info:{:#018x} <decrypt:{:#018x} end:{:#018x} ops:{:#018x} refs:{:<d}>\n\tvnode:{:#018x} {:s}\n".format(idx, qcnt, pager, pager.ref_count, pager.is_ready, pager.is_mapped, pager.pager_control, pager.backing_object, pager.backing_offset, pager.crypto_backing_offset, pager.crypto_start, pager.crypto_end, pager.crypt_info, pager.crypt_info.page_decrypt, pager.crypt_info.crypt_end, pager.crypt_info.crypt_ops, pager.crypt_info.crypt_refcnt, vnode_pager.vnode_handle, filename)
+=======
+    return None    
+>>>>>>> origin/10.10

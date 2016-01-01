@@ -1,6 +1,11 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +20,24 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +45,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /*
  * Copyright (c) 1982, 1986, 1989, 1990, 1993
@@ -85,11 +122,16 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/kernel.h>
+<<<<<<< HEAD
 #include <sys/uio_internal.h>
 #include <sys/kauth.h>
 #include <kern/task.h>
 #include <sys/priv.h>
 #include <sys/sysctl.h>
+=======
+
+#include <bsm/audit_kernel.h>
+>>>>>>> origin/10.3
 
 #include <security/audit/audit.h>
 
@@ -148,8 +190,11 @@ static int getsockaddr(struct socket *, struct sockaddr **, user_addr_t,
     size_t, boolean_t);
 static int getsockaddr_s(struct socket *, struct sockaddr_storage *,
     user_addr_t, size_t, boolean_t);
+<<<<<<< HEAD
 static int getsockaddrlist(struct socket *, struct sockaddr_list **,
     user_addr_t, socklen_t, boolean_t);
+=======
+>>>>>>> origin/10.5
 #if SENDFILE
 static void alloc_sendpkt(int, size_t, unsigned int *, struct mbuf **,
     boolean_t);
@@ -715,7 +760,11 @@ connect_nocancel(proc_t p, struct connect_nocancel_args *uap, int32_t *retval)
 		error = getsockaddr(so, &sa, uap->name, uap->namelen, !dgram);
 	} else {
 		error = getsockaddr_s(so, &ss, uap->name, uap->namelen, !dgram);
+<<<<<<< HEAD
 		if (error == 0)
+=======
+		if (error == 0) {
+>>>>>>> origin/10.5
 			sa = (struct sockaddr *)&ss;
 	}
 	if (error != 0)
@@ -2701,8 +2750,13 @@ sockargs(struct mbuf **mp, user_addr_t data, int buflen, int type)
 	int error;
 
 	size_t alloc_buflen = (size_t)buflen;
+<<<<<<< HEAD
 
 	if (alloc_buflen > INT_MAX/2)
+=======
+	
+	if(alloc_buflen > INT_MAX/2) 
+>>>>>>> origin/10.7
 		return (EINVAL);
 #ifdef __LP64__
 	/*
@@ -2715,7 +2769,11 @@ sockargs(struct mbuf **mp, user_addr_t data, int buflen, int type)
 #endif
 	if (alloc_buflen > MLEN) {
 		if (type == MT_SONAME && alloc_buflen <= 112)
+<<<<<<< HEAD
 			alloc_buflen = MLEN;	/* unix domain compat. hack */
+=======
+			alloc_buflen = MLEN;		/* unix domain compat. hack */
+>>>>>>> origin/10.7
 		else if (alloc_buflen > MCLBYTES)
 			return (EINVAL);
 	}
@@ -2791,7 +2849,11 @@ getsockaddr(struct socket *so, struct sockaddr **namp, user_addr_t uaddr,
 		 * handle it.
 		 */
 		if (translate_unspec && sa->sa_family == AF_UNSPEC &&
+<<<<<<< HEAD
 		    SOCK_CHECK_DOM(so, PF_INET) &&
+=======
+		    INP_CHECK_SOCKAF(so, AF_INET) &&
+>>>>>>> origin/10.5
 		    len == sizeof (struct sockaddr_in))
 			sa->sa_family = AF_INET;
 
@@ -2828,7 +2890,11 @@ getsockaddr_s(struct socket *so, struct sockaddr_storage *ss,
 		 * handle it.
 		 */
 		if (translate_unspec && ss->ss_family == AF_UNSPEC &&
+<<<<<<< HEAD
 		    SOCK_CHECK_DOM(so, PF_INET) &&
+=======
+		    INP_CHECK_SOCKAF(so, AF_INET) &&
+>>>>>>> origin/10.5
 		    len == sizeof (struct sockaddr_in))
 			ss->ss_family = AF_INET;
 

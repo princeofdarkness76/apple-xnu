@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2004-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2004-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -1810,7 +1814,11 @@ extern errno_t ifnet_set_eflags(ifnet_t interface, u_int32_t new_flags,
  */
 extern u_int32_t ifnet_eflags(ifnet_t interface);
 
+<<<<<<< HEAD
 /*
+=======
+/*!
+>>>>>>> origin/10.6
 	@function ifnet_set_idle_flags
 	@discussion Sets the if_idle_flags to new_flags. This function
 		lets you specify which flags you want to change using the
@@ -1830,7 +1838,11 @@ extern u_int32_t ifnet_eflags(ifnet_t interface);
 extern errno_t ifnet_set_idle_flags(ifnet_t interface, u_int32_t new_flags,
     u_int32_t mask);
 
+<<<<<<< HEAD
 /*
+=======
+/*!
+>>>>>>> origin/10.6
 	@function ifnet_idle_flags
 	@discussion Returns the value of if_idle_flags.
 	@param interface Interface to retrieve the flags from.
@@ -1838,6 +1850,7 @@ extern errno_t ifnet_set_idle_flags(ifnet_t interface, u_int32_t new_flags,
 */
 extern u_int32_t ifnet_idle_flags(ifnet_t interface);
 
+<<<<<<< HEAD
 /*
 	@function ifnet_set_link_quality
 	@discussion Sets the Link Quality Metric for the ifnet.
@@ -1954,6 +1967,8 @@ extern errno_t ifnet_inet_defrouter_llreachinfo(ifnet_t interface,
  */
 extern errno_t ifnet_inet6_defrouter_llreachinfo(ifnet_t interface,
     struct ifnet_llreach_info *pinfo);
+=======
+>>>>>>> origin/10.6
 #endif /* KERNEL_PRIVATE */
 
 /*!
@@ -2869,6 +2884,25 @@ extern errno_t ifnet_list_get_all(ifnet_family_t family, ifnet_t **interfaces,
     u_int32_t *count);
 #endif /* KERNEL_PRIVATE */
 
+#ifdef KERNEL_PRIVATE
+/*!
+	@function ifnet_list_get_all
+	@discussion Get a list of attached interfaces. List will be set to
+		point to an array allocated by ifnet_list_get. The interfaces
+		are refcounted and the counts will be incremented before the
+		function returns. The list of interfaces must be freed using
+		ifnet_list_free.  This is similar to ifnet_list_get, except
+		that it includes interfaces that are detaching.
+	@param family The interface family (i.e. IFNET_FAMILY_ETHERNET). To
+		find interfaces of all families, use IFNET_FAMILY_ANY.
+	@param interfaces A pointer to an array of interface references.
+	@param count A pointer that will be filled in with the number of
+		matching interfaces in the array.
+	@result 0 on success otherwise the errno error.
+ */
+errno_t ifnet_list_get_all(ifnet_family_t family, ifnet_t **interfaces, u_int32_t *count);
+#endif /* KERNEL_PRIVATE */
+
 /*!
 	@function ifnet_list_free
 	@discussion Free a list of interfaces returned by ifnet_list_get.
@@ -3089,7 +3123,11 @@ typedef errno_t (*ifnet_clone_create_func)(if_clone_t ifcloner, u_int32_t unit, 
 
 /*
 	@typedef ifnet_clone_destroy_func
+<<<<<<< HEAD
 	@discussion ifnet_clone_create_func is called to destroy an interface created
+=======
+	@discussion ifnet_clone_create_func is called to destroy an interface created 
+>>>>>>> origin/10.6
 		by an interface cloner.
 	@param interface The interface to destroy.
 	@result Return zero on success or an errno error value on failure.
@@ -3113,9 +3151,15 @@ struct ifnet_clone_params {
 	@function ifnet_clone_attach
 	@discussion Attaches a new interface cloner.
 	@param cloner_params The structure that defines an interface cloner.
+<<<<<<< HEAD
 	@param interface A pointer to an opaque handle that represent the interface cloner
 		that is attached upon success.
 	@result Returns 0 on success.
+=======
+	@param interface A pointer to an opaque handle that represent the interface cloner 
+		that is attached upon success.
+	@result Returns 0 on success. 
+>>>>>>> origin/10.6
 		May return ENOBUFS if there is insufficient memory.
 		May return EEXIST if an interface cloner with the same name is already attached.
  */
@@ -3125,6 +3169,7 @@ extern errno_t ifnet_clone_attach(struct ifnet_clone_params *cloner_params, if_c
 	@function ifnet_clone_detach
 	@discussion Detaches a previously attached interface cloner.
 	@param ifcloner The opaque handle returned when the interface cloner was attached.
+<<<<<<< HEAD
 	@result Returns 0 on success.
  */
 extern errno_t ifnet_clone_detach(if_clone_t ifcloner);
@@ -3451,6 +3496,12 @@ extern u_int32_t ifnet_packetpreamblelen(ifnet_t interface);
 extern u_int32_t ifnet_maxpacketpreamblelen(void);
 
 
+=======
+	@result Returns 0 on success. 
+ */
+extern errno_t ifnet_clone_detach(if_clone_t ifcloner);
+
+>>>>>>> origin/10.6
 #endif /* KERNEL_PRIVATE */
 
 __END_DECLS

@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+>>>>>>> origin/10.10
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -212,6 +238,7 @@ ReplaceBTreeRecord				(FileReference 				refNum,
 /*	Prototypes for exported routines in VolumeAllocation.c*/
 
 /* 
+<<<<<<< HEAD
  * Flags for BlockAllocate(), BlockDeallocate() and hfs_block_alloc.
  * Some of these are for internal use only.  See the comment at the
  * top of hfs_alloc_int for more details on the semantics of these
@@ -293,6 +320,34 @@ BlockDeallocate					(ExtendedVCB *			 vcb,
 
 EXTERN_API_C ( void )
 ResetVCBFreeExtCache(struct hfsmount *hfsmp);
+=======
+ * Flags for BlockAllocate() and BlockDeallocate()
+ */ 
+/* Force contiguous block allocation and to force minBlocks to actually be allocated */
+#define HFS_ALLOC_FORCECONTIG	0x1	
+/* Can use metadata zone blocks */
+#define HFS_ALLOC_METAZONE	0x2	
+/* Skip checking and updating of free blocks during allocation and deallocation */
+#define HFS_ALLOC_SKIPFREEBLKS	0x4	
+
+EXTERN_API_C( OSErr )
+BlockAllocate					(ExtendedVCB *			vcb,
+								 u_int32_t 				startingBlock,
+								 u_int32_t 				minBlocks,
+								 u_int32_t 				maxBlocks,
+								 u_int32_t				flags,
+								 u_int32_t *			startBlock,
+								 u_int32_t *			actualBlocks);
+
+EXTERN_API_C( OSErr )
+BlockDeallocate					(ExtendedVCB *			vcb,
+								 u_int32_t 				firstBlock,
+								 u_int32_t 				numBlocks,
+								 u_int32_t				flags);
+
+EXTERN_API_C ( void )
+invalidate_free_extent_cache	(ExtendedVCB *			vcb);
+>>>>>>> origin/10.6
 
 EXTERN_API_C( OSErr )
 BlockMarkAllocated(ExtendedVCB *vcb, u_int32_t startingBlock, u_int32_t numBlocks);
@@ -321,9 +376,12 @@ hfs_init_summary (struct hfsmount *hfsmp);
 errno_t hfs_find_free_extents(struct hfsmount *hfsmp,
 							  void (*callback)(void *data, off_t), void *callback_arg);
 
+<<<<<<< HEAD
 void hfs_free_tentative(hfsmount_t *hfsmp, struct rl_entry **reservation);
 void hfs_free_locked(hfsmount_t *hfsmp, struct rl_entry **reservation);
 
+=======
+>>>>>>> origin/10.10
 /*	File Extent Mapping routines*/
 EXTERN_API_C( OSErr )
 FlushExtentFile					(ExtendedVCB *			vcb);

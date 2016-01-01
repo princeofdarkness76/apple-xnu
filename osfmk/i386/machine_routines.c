@@ -1,8 +1,18 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +24,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -40,7 +70,10 @@
 #include <prng/random.h>
 #include <i386/machine_cpu.h>
 #include <i386/lapic.h>
+<<<<<<< HEAD
 #include <i386/bit_routines.h>
+=======
+>>>>>>> origin/10.5
 #include <i386/mp_events.h>
 #include <i386/pmCPU.h>
 #include <i386/trap.h>
@@ -51,9 +84,23 @@
 #include <i386/pmap.h>
 #include <i386/pmap_internal.h>
 #include <i386/misc_protos.h>
+<<<<<<< HEAD
 #include <kern/timer_queue.h>
 #if KPC
 #include <kern/kpc.h>
+=======
+#include <i386/mp.h>
+
+#if MACH_KDB
+#include <machine/db_machdep.h>
+#include <ddb/db_aout.h>
+#include <ddb/db_access.h>
+#include <ddb/db_sym.h>
+#include <ddb/db_variables.h>
+#include <ddb/db_command.h>
+#include <ddb/db_output.h>
+#include <ddb/db_expr.h>
+>>>>>>> origin/10.6
 #endif
 #include <architecture/i386/pio.h>
 
@@ -369,16 +416,46 @@ void ml_install_interrupt_handler(
 void
 machine_signal_idle(
         processor_t processor)
+<<<<<<< HEAD
 {
 	cpu_interrupt(processor->cpu_id);
 }
 
 void
+<<<<<<< HEAD
 machine_signal_idle_deferred(
 	__unused processor_t processor)
 {
 	panic("Unimplemented");
 }
+=======
+ml_cpu_get_info(ml_cpu_info_t *cpu_info)
+{
+}
+
+void
+ml_init_max_cpus(unsigned long max_cpus)
+{
+=======
+{
+	cpu_interrupt(processor->cpu_num);
+>>>>>>> origin/10.5
+}
+
+int
+ml_get_max_cpus(void)
+{
+	return(machine_info.max_cpus);
+}
+
+int
+ml_get_current_cpus(void)
+{
+ 	return machine_info.avail_cpus;
+}
+
+/* Stubs for pc tracing mechanism */
+>>>>>>> origin/10.2
 
 void
 machine_signal_idle_cancel(
@@ -540,10 +617,14 @@ ml_cpu_get_info(ml_cpu_info_t *cpu_infop)
 	 * As distinct from whether the cpu has these capabilities.
 	 */
 	os_supports_sse = !!(get_cr4() & CR4_OSXMM);
+<<<<<<< HEAD
 
 	if (ml_fpu_avx_enabled())
 		cpu_infop->vector_unit = 9;
 	else if ((cpuid_features() & CPUID_FEATURE_SSE4_2) && os_supports_sse)
+=======
+	if ((cpuid_features() & CPUID_FEATURE_SSE4_2) && os_supports_sse)
+>>>>>>> origin/10.6
 		cpu_infop->vector_unit = 8;
 	else if ((cpuid_features() & CPUID_FEATURE_SSE4_1) && os_supports_sse)
 		cpu_infop->vector_unit = 7;
@@ -647,6 +728,7 @@ ml_init_lock_timeout(void)
 	LockTimeOut = (uint32_t) abstime;
 	LockTimeOutTSC = (uint32_t) tmrCvt(abstime, tscFCvtn2t);
 
+<<<<<<< HEAD
 	/*
 	 * TLBTimeOut dictates the TLB flush timeout period. It defaults to
 	 * LockTimeOut but can be overriden separately. In particular, a
@@ -667,6 +749,8 @@ ml_init_lock_timeout(void)
 		reportphyreaddelayabs = abstime;
 	}
 
+=======
+>>>>>>> origin/10.5
 	if (PE_parse_boot_argn("mtxspin", &mtxspin, sizeof (mtxspin))) {
 		if (mtxspin > USEC_PER_SEC>>4)
 			mtxspin =  USEC_PER_SEC>>4;
@@ -677,11 +761,15 @@ ml_init_lock_timeout(void)
 	MutexSpin = (unsigned int)abstime;
 
 	nanoseconds_to_absolutetime(4ULL * NSEC_PER_SEC, &LastDebuggerEntryAllowance);
+<<<<<<< HEAD
 	if (PE_parse_boot_argn("panic_restart_timeout", &prt, sizeof (prt)))
 		nanoseconds_to_absolutetime(prt * NSEC_PER_SEC, &panic_restart_timeout);
 	virtualized = ((cpuid_features() & CPUID_FEATURE_VMM) != 0);
 	interrupt_latency_tracker_setup();
 	simple_lock_init(&ml_timer_evaluation_slock, 0);
+=======
+	interrupt_latency_tracker_setup();
+>>>>>>> origin/10.6
 }
 
 /*
@@ -795,11 +883,19 @@ vm_offset_t ml_stack_remaining(void)
 	}
 }
 
+<<<<<<< HEAD
 void
 kernel_preempt_check(void)
 {
 	boolean_t	intr;
 	unsigned long flags;
+=======
+boolean_t machine_timeout_suspended(void) {
+	return (mp_recent_debugger_activity() || panic_active() || pmap_tlb_flush_timeout || spinlock_timed_out);
+}
+
+#if MACH_KDB
+>>>>>>> origin/10.6
 
 	assert(get_preemption_level() == 0);
 

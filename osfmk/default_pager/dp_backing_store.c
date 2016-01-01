@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -12,16 +13,37 @@
  * circumvent, violate, or enable the circumvention or violation of, any
  * terms of an Apple operating system software license agreement.
  * 
+<<<<<<< HEAD
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -101,7 +123,11 @@
 int physical_transfer_cluster_count = 0;
 
 #define VM_SUPER_CLUSTER	0x40000
+<<<<<<< HEAD
 #define VM_SUPER_PAGES          (VM_SUPER_CLUSTER / PAGE_MIN_SIZE)
+=======
+#define VM_SUPER_PAGES          (VM_SUPER_CLUSTER / PAGE_SIZE)
+>>>>>>> origin/10.6
 
 /*
  * 0 means no shift to pages, so == 1 page/cluster. 1 would mean
@@ -180,6 +206,10 @@ boolean_t	dp_encryption_inited = FALSE;
 boolean_t	dp_encryption = FALSE;
 
 boolean_t	dp_isssd = FALSE;
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.6
 
 /*
  * Object sizes are rounded up to the next power of 2,
@@ -2925,7 +2955,11 @@ pvs_cluster_read(
 	int			cl_index;
 	unsigned int		xfer_size;
 	dp_offset_t		orig_vs_offset;
+<<<<<<< HEAD
 	dp_offset_t		ps_offset[(VM_SUPER_CLUSTER / PAGE_SIZE) >> VSTRUCT_MIN_CLSHIFT];
+=======
+	dp_offset_t       ps_offset[(VM_SUPER_CLUSTER / PAGE_SIZE) >> VSTRUCT_MIN_CLSHIFT];
+>>>>>>> origin/10.6
 	paging_segment_t        psp[(VM_SUPER_CLUSTER / PAGE_SIZE) >> VSTRUCT_MIN_CLSHIFT];
 	struct clmap		clmap;
 	upl_t			upl;
@@ -3094,14 +3128,27 @@ again:
 	while (cnt && error == KERN_SUCCESS) {
 	        int     ps_info_valid;
 
+<<<<<<< HEAD
 		if ((vs_offset & cl_mask) && (cnt > (VM_SUPER_CLUSTER - (vs_offset & cl_mask)))) {
 			size = VM_SUPER_CLUSTER;
 			size -= vs_offset & cl_mask;
 	        } else if (cnt > VM_SUPER_CLUSTER)
+=======
+		if((vs_offset & cl_mask) && 
+			(cnt > (VM_SUPER_CLUSTER - 
+				(vs_offset & cl_mask)))) {
+			size = VM_SUPER_CLUSTER;
+			size -= vs_offset & cl_mask;
+	        } else if (cnt > VM_SUPER_CLUSTER) {
+>>>>>>> origin/10.2
 		        size = VM_SUPER_CLUSTER;
-		else
+		} else {
 		        size = cnt;
+<<<<<<< HEAD
 
+=======
+		}
+>>>>>>> origin/10.2
 		cnt -= size;
 
 		ps_info_valid = 0;
@@ -3177,9 +3224,14 @@ again:
 			 */
 			for (xfer_size = 0; xfer_size < size; ) {
 
-			        while (cl_index < pages_in_cl && xfer_size < size) {
+			        while (cl_index < pages_in_cl 
+						&& xfer_size < size) {
 				        /*
+<<<<<<< HEAD
 					 * accumulate allocated pages within 
+=======
+					 * accumulate allocated pages within
+>>>>>>> origin/10.2
 					 * a physical segment
 					 */
 				        if (CLMAP_ISSET(clmap, cl_index)) {
@@ -3192,30 +3244,54 @@ again:
 					} else
 					        break;
 				}
-				if (cl_index < pages_in_cl || xfer_size >= size) {
+				if (cl_index < pages_in_cl 
+						|| xfer_size >= size) {
 				        /*
+<<<<<<< HEAD
 					 * we've hit an unallocated page or 
 					 * the end of this request... see if
 					 * it's time to fire the I/O
+=======
+					 * we've hit an unallocated page or
+					 * the end of this request... go fire
+					 * the I/O
+>>>>>>> origin/10.2
 					 */
 				        break;
 				}
 				/*
 				 * we've hit the end of the current physical
+<<<<<<< HEAD
 				 * segment and there's more to do, so try 
+=======
+				 * segment and there's more to do, so try
+>>>>>>> origin/10.2
 				 * moving to the next one
 				 */
 				seg_index++;
 				  
+<<<<<<< HEAD
 				ps_offset[seg_index] = ps_clmap(vs, cur_offset & ~cl_mask, &clmap, CL_FIND, 0, 0);
+=======
+				ps_offset[seg_index] = 
+					ps_clmap(vs,
+						cur_offset & ~cl_mask,
+						&clmap, CL_FIND, 0, 0);
+>>>>>>> origin/10.2
 				psp[seg_index] = CLMAP_PS(clmap);
 				ps_info_valid = 1;
 
 				if ((ps_offset[seg_index - 1] != (ps_offset[seg_index] - cl_size)) || (psp[seg_index - 1] != psp[seg_index])) {
 				        /*
+<<<<<<< HEAD
 					 * if the physical segment we're about 
 					 * to step into is not contiguous to 
 					 * the one we're currently in, or it's 
+=======
+					 * if the physical segment we're about
+					 * to step into is not contiguous to
+					 * the one we're currently in, or it's
+>>>>>>> origin/10.2
 					 * in a different paging file, or
 					 * it hasn't been allocated....
 					 * we stop this run and go check
@@ -3233,6 +3309,22 @@ again:
 			        /*
 				 * no I/O to generate for this segment
 				 */
+<<<<<<< HEAD
+=======
+				page_list_count = 0;
+			        memory_object_super_upl_request(vs->vs_control,
+					(memory_object_offset_t)vs_offset,
+					xfer_size, xfer_size, 
+					&upl, NULL, &page_list_count,
+					request_flags | UPL_SET_INTERNAL);
+
+				error = ps_read_file(psp[beg_pseg],
+					upl, (vm_offset_t) 0, 
+					ps_offset[beg_pseg] +
+						(beg_indx * vm_page_size),
+					xfer_size, &residual, 0);
+			} else
+>>>>>>> origin/10.2
 			        continue;
 			}
 			if (cur_offset <= orig_vs_offset) {
@@ -3266,11 +3358,19 @@ again:
 
 
 			/*
+<<<<<<< HEAD
 			 * Adjust counts and send response to VM.  Optimize 
 			 * for the common case, i.e. no error and/or partial
 			 * data. If there was an error, then we need to error
 			 * the entire range, even if some data was successfully
 			 * read. If there was a partial read we may supply some
+=======
+			 * Adjust counts and send response to VM.  Optimize
+			 * for the common case, i.e. no error and/or partial
+			 * data.  If there was an error, then we need to error
+			 * the entire range, even if some data was successfully
+			 * read.  If there was a partial read we may supply some
+>>>>>>> origin/10.2
 			 * data and may error some as well.  In all cases the
 			 * VM must receive some notification for every page 
 			 * in the range.
@@ -3278,6 +3378,7 @@ again:
 			if ((error == KERN_SUCCESS) && (residual == 0)) {
 			        /*
 				 * Got everything we asked for, supply the data
+<<<<<<< HEAD
 				 * to the VM.  Note that as a side effect of 
 				 * supplying the data, the buffer holding the 
 				 * supplied data is deallocated from the pager's
@@ -3285,12 +3386,22 @@ again:
 				 */
 				lsize = xfer_size;
 				failed_size = 0;
+=======
+				 * to the VM.  Note that as a side effect of
+				 * supplying * the data, the buffer holding the
+				 * supplied data is * deallocated from the pager's
+				 * address space.
+				 */
+			        pvs_object_data_provided(
+					vs, upl, vs_offset, xfer_size);
+>>>>>>> origin/10.2
 			} else {
 				lsize = 0;
 			        failed_size = xfer_size;
 
 				if (error == KERN_SUCCESS) {
 				        if (residual == xfer_size) {
+<<<<<<< HEAD
 					        /*
 						 * If a read operation returns no error
 						 * and no data moved, we turn it into
@@ -3318,10 +3429,45 @@ again:
 						        failed_size = xfer_size - lsize;
 
 						if (reclaim_all == FALSE)
+=======
+				        /*
+					 * If a read operation returns no error
+					 * and no data moved, we turn it into
+					 * an error, assuming we're reading at
+					 * or beyong EOF.
+					 * Fall through and error the entire
+					 * range.
+					 */
+					        error = KERN_FAILURE;
+					} else {
+				        /*
+					 * Otherwise, we have partial read. If
+					 * the part read is a integral number
+					 * of pages supply it. Otherwise round
+					 * it up to a page boundary, zero fill
+					 * the unread part, and supply it.
+					 * Fall through and error the remainder
+					 * of the range, if any.
+					 */
+					        int fill, lsize;
+
+						fill = residual 
+							& ~vm_page_size;
+						lsize = (xfer_size - residual) 
+									 + fill;
+						pvs_object_data_provided(
+							vs, upl,
+							vs_offset, lsize);
+
+						if (lsize < xfer_size) {
+						        failed_size = 
+							    xfer_size - lsize;
+>>>>>>> origin/10.2
 							error = KERN_FAILURE;
 					}
 				} 
 			}
+<<<<<<< HEAD
 			pvs_object_data_provided(vs, upl, vs_offset, lsize);
 
 			if (failed_size) {
@@ -3332,6 +3478,17 @@ again:
 				 */
 				BS_STAT(psp[beg_pseg]->ps_bs,
 					psp[beg_pseg]->ps_bs->bs_pages_in_fail += atop_32(failed_size));
+=======
+			/*
+			 * If there was an error in any part of the range, tell
+			 * the VM. Note that error is explicitly checked again
+			 * since it can be modified above.
+			 */
+			if (error != KERN_SUCCESS) {
+				BS_STAT(psp[beg_pseg]->ps_bs,
+					psp[beg_pseg]->ps_bs->bs_pages_in_fail 
+						+= atop(failed_size));
+>>>>>>> origin/10.2
 			}
 			/*
 			 * we've issued a single I/O that encompassed the original offset
@@ -3378,6 +3535,7 @@ vs_cluster_write(
 	unsigned int	upl_offset_in_object;
 	boolean_t	minimal_clustering = FALSE;
 	boolean_t	found_dirty;
+<<<<<<< HEAD
 
 	if (!dp_encryption_inited) {
 		/*
@@ -3396,16 +3554,25 @@ vs_cluster_write(
 		 */
 		flags |= UPL_PAGING_ENCRYPTED;
 	}
+=======
+>>>>>>> origin/10.6
 
 	pages_in_cl = 1 << vs->vs_clshift;
 	cl_size = pages_in_cl * vm_page_size;
 	
 #if CONFIG_FREEZE
 	minimal_clustering = TRUE;
+<<<<<<< HEAD
 #else
 	if (dp_isssd == TRUE)
 		minimal_clustering = TRUE;
 #endif
+=======
+#endif
+	if (dp_isssd == TRUE)
+		minimal_clustering = TRUE;
+
+>>>>>>> origin/10.6
 	if (!dp_internal) {
 		unsigned int page_list_count;
 		int	     request_flags;
@@ -3439,7 +3606,6 @@ vs_cluster_write(
 			request_flags |= UPL_ENCRYPT;
 			flags |= UPL_PAGING_ENCRYPTED;
 		}
-
 		page_list_count = 0;
 		memory_object_super_upl_request(vs->vs_control,
 				(memory_object_offset_t)offset,
@@ -3458,6 +3624,7 @@ vs_cluster_write(
 
 		pl = UPL_GET_INTERNAL_PAGE_LIST(upl);
 
+<<<<<<< HEAD
 		seg_size = cl_size - (upl_offset_in_object % cl_size);
 		upl_offset_aligned = upl_offset_in_object & ~(cl_size - 1);
 		page_index = 0;
@@ -3465,13 +3632,28 @@ vs_cluster_write(
 		found_dirty = TRUE;
 
 		for (seg_index = 0, transfer_size = upl->size; transfer_size > 0; ) {
+<<<<<<< HEAD
 
 			unsigned int	seg_pgcnt;
+=======
+		for (seg_index = 0, transfer_size = upl->size; 
+						transfer_size > 0; ) {
+
+		        ps_offset[seg_index] = 
+				ps_clmap(vs, upl->offset + (seg_index * cl_size),
+				       &clmap, CL_ALLOC, 
+				       transfer_size < cl_size ? 
+				       transfer_size : cl_size, 0);
+>>>>>>> origin/10.2
+=======
+			unsigned int	seg_pgcnt;
+>>>>>>> origin/10.6
 
 			seg_pgcnt = seg_size / PAGE_SIZE;
 
 			if (minimal_clustering == TRUE) {
 				unsigned int	non_dirty;
+<<<<<<< HEAD
 
 				non_dirty = 0;
 				found_dirty = FALSE;
@@ -3480,6 +3662,16 @@ vs_cluster_write(
 					if ((page_index + non_dirty) >= page_max_index)
 						break;
 
+=======
+
+				non_dirty = 0;
+				found_dirty = FALSE;
+
+				for (; non_dirty < seg_pgcnt; non_dirty++) {
+					if ((page_index + non_dirty) >= page_max_index)
+						break;
+
+>>>>>>> origin/10.6
 					if (UPL_DIRTY_PAGE(pl, page_index + non_dirty) ||
 					    UPL_PRECIOUS_PAGE(pl, page_index + non_dirty)) {
 						found_dirty = TRUE;
@@ -3506,11 +3698,16 @@ vs_cluster_write(
 				page_index += seg_pgcnt;
 			        transfer_size -= seg_size;
 				upl_offset_aligned += cl_size;
+<<<<<<< HEAD
 				seg_size = cl_size;
+=======
+				seg_size    = cl_size;
+>>>>>>> origin/10.6
 				seg_index++;
 			} else
 			        transfer_size = 0;
 		}
+<<<<<<< HEAD
 		/*
 		 * Ignore any non-present pages at the end of the
 		 * UPL.
@@ -3536,21 +3733,38 @@ vs_cluster_write(
 		base_index = (upl_offset_in_object % cl_size) / PAGE_SIZE;
 
 		for (page_index = 0; page_index < num_of_pages; ) {
+=======
+		for (page_index = 0,
+				num_of_pages = upl->size / vm_page_size;
+				page_index < num_of_pages; ) {
+>>>>>>> origin/10.2
 			/*
 			 * skip over non-dirty pages
 			 */
 			for ( ; page_index < num_of_pages; page_index++) {
+<<<<<<< HEAD
 			        if (UPL_DIRTY_PAGE(pl, page_index) 
 					|| UPL_PRECIOUS_PAGE(pl, page_index))
 				        /*
 					 * this is a page we need to write
 					 * go see if we can buddy it up with 
+=======
+			        if (UPL_DIRTY_PAGE(pl, page_index)
+					|| UPL_PRECIOUS_PAGE(pl, page_index))
+				        /*
+					 * this is a page we need to write
+					 * go see if we can buddy it up with
+>>>>>>> origin/10.2
 					 * others that are contiguous to it
 					 */
 				        break;
 				/*
 				 * if the page is not-dirty, but present we 
+<<<<<<< HEAD
 				 * need to commit it...  This is an unusual 
+=======
+				 * need to commit it...  This is an unusual
+>>>>>>> origin/10.2
 				 * case since we only asked for dirty pages
 				 */
 				if (UPL_PAGE_PRESENT(pl, page_index)) {
@@ -3576,15 +3790,26 @@ vs_cluster_write(
 			        break;
 
 			/*
+<<<<<<< HEAD
 			 * gather up contiguous dirty pages... we have at 
 			 * least 1 * otherwise we would have bailed above
+=======
+			 * gather up contiguous dirty pages... we have at
+			 * least 1 otherwise we would have bailed above
+>>>>>>> origin/10.2
 			 * make sure that each physical segment that we step
 			 * into is contiguous to the one we're currently in
 			 * if it's not, we have to stop and write what we have
 			 */
+<<<<<<< HEAD
 			for (first_dirty = page_index; 
 					page_index < num_of_pages; ) {
 				if ( !UPL_DIRTY_PAGE(pl, page_index) 
+=======
+			for (first_dirty = page_index;
+					page_index < num_of_pages; ) {
+			        if ( !UPL_DIRTY_PAGE(pl, page_index)
+>>>>>>> origin/10.2
 					&& !UPL_PRECIOUS_PAGE(pl, page_index))
 				        break;
 				page_index++;
@@ -3597,6 +3822,7 @@ vs_cluster_write(
 				        int cur_seg;
 				        int nxt_seg;
 
+<<<<<<< HEAD
 				        cur_seg = (base_index + (page_index - 1))/pages_in_cl;
 					nxt_seg = (base_index + page_index)/pages_in_cl;
 
@@ -3609,6 +3835,21 @@ vs_cluster_write(
 						 * currently in, or it's in a 
 						 * different paging file....
 						 * we stop here and generate 
+=======
+				        cur_seg =
+						(page_index - 1) / pages_in_cl;
+					nxt_seg = page_index / pages_in_cl;
+
+					if (cur_seg != nxt_seg) {
+					        if ((ps_offset[cur_seg] != (ps_offset[nxt_seg] - cl_size)) || (psp[cur_seg] != psp[nxt_seg]))
+					        /*
+						 * if the segment we're about
+						 * to step into is not
+						 * contiguous to the one we're
+						 * currently in, or it's in a
+						 * different paging file....
+						 * we stop here and generate
+>>>>>>> origin/10.2
 						 * the I/O
 						 */
 						        break;
@@ -3621,6 +3862,7 @@ vs_cluster_write(
 			        upl_offset = first_dirty * vm_page_size;
 				transfer_size = num_dirty * vm_page_size;
 
+<<<<<<< HEAD
 				while (transfer_size) {
 
 					if ((seg_size = cl_size - 
@@ -3635,20 +3877,52 @@ vs_cluster_write(
 						 upl_offset), 
 						seg_size, error);
 
+=======
+
+				while (transfer_size) {
+				        int seg_size;
+
+					if ((seg_size = cl_size - 
+						(upl_offset % cl_size)) 
+							> transfer_size)
+					        seg_size = transfer_size;
+
+					ps_vs_write_complete(vs, 
+						upl->offset + upl_offset, 
+						seg_size, error);
+
+>>>>>>> origin/10.2
 					transfer_size -= seg_size;
 					upl_offset += seg_size;
 				}
 			        upl_offset = first_dirty * vm_page_size;
 				transfer_size = num_dirty * vm_page_size;
+<<<<<<< HEAD
 
 			        seg_index  = (base_index + first_dirty) / pages_in_cl;
 				seg_offset = (upl_offset_in_object + upl_offset) % cl_size;
 
+=======
+>>>>>>> origin/10.2
 				error = ps_write_file(psp[seg_index], 
 						upl, upl_offset,
 						ps_offset[seg_index] 
 								+ seg_offset, 
 						transfer_size, flags);
+<<<<<<< HEAD
+=======
+				must_abort = 0;
+			}
+			if (must_abort) {
+				boolean_t empty = FALSE;
+			        upl_abort_range(upl,
+						first_dirty * vm_page_size, 
+						num_dirty   * vm_page_size,
+						UPL_ABORT_NOTIFY_EMPTY,
+						&empty);
+				if (empty)
+					upl_deallocate(upl);
+>>>>>>> origin/10.2
 			}
 		}
 
@@ -3687,7 +3961,11 @@ vs_cluster_write(
 						cnt, flags);
 				if (error)
 				        break;
+<<<<<<< HEAD
 		   	   }
+=======
+		   	}
+>>>>>>> origin/10.2
 			if (error)
 				break;
 		   	actual_offset += cnt;

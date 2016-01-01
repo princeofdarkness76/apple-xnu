@@ -74,7 +74,11 @@
 #include <kern/kalloc.h>
 #include <kern/zalloc.h>
 
+<<<<<<< HEAD
 #if CONFIG_AUDIT
+=======
+#if AUDIT
+>>>>>>> origin/10.5
 
 /* The zone allocator is initialized in mac_base.c. */
 zone_t mac_audit_data_zone;
@@ -412,4 +416,14 @@ mac_audit_text(__unused char *text, __unused mac_policy_handle_t handle)
 {
 	return (0);
 }
+<<<<<<< HEAD
 #endif	/* !CONFIG_AUDIT */
+=======
+
+int
+mac_audit_text(__unused char *text, __unused mac_policy_handle_t handle)
+{
+	return (0);
+}
+#endif	/* !AUDIT */
+>>>>>>> origin/10.5

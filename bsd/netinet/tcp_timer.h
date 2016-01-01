@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -252,6 +274,7 @@ struct tcptimerlist {
 	uint32_t maxentries;	/* Max number of entries at any time */
 
 	/* Set desired mode when timer list running */
+<<<<<<< HEAD
 	boolean_t running;	/* Set when timer list is being processed */
 	boolean_t scheduled;	/* set when the timer is scheduled */
 #define TCP_TIMERLIST_10MS_MODE 0x1
@@ -263,6 +286,17 @@ struct tcptimerlist {
 	uint32_t idleruns;	/* Number of times the list has been idle in fast mode */
 	struct tcptimerentry *next_te;	/* next timer entry pointer to process */
 	u_int16_t probe_if_index; /* Interface index that needs to send probes */
+=======
+	boolean_t running;		/* Set when timer list is being processed */
+	boolean_t scheduled;		/* Set when timer is scheduled */
+#define TCP_TIMERLIST_FASTMODE 0x1
+#define TCP_TIMERLIST_SLOWMODE 0x2
+	uint32_t mode;			/* Current mode, fast or slow */
+	uint32_t pref_mode;		/* Preferred mode set by a connection, fast or slow */
+	uint32_t pref_offset;		/* Preferred offset set by a connection */
+	uint32_t idlegen;		/* Number of times the list has been idle in fast mode */
+	struct tcptimerentry *next_te;	/* Store the next timer entry pointer to process */
+>>>>>>> origin/10.9
 
 };
 

@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2008, 2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -231,6 +257,9 @@ OSStatus BTOpenPath(FCB *filePtr, KeyCompareProcPtr keyCompareProc)
 	filePtr->fcbBTCBPtr			= (Ptr) btreePtr;	// attach btree cb to file
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.5
 	/* Prefer doing I/O a physical block at a time */
 	nodeRec.blockSize = VTOHFS(btreePtr->fileRefNum)->hfs_physical_block_size;
 
@@ -312,6 +341,7 @@ OSStatus BTOpenPath(FCB *filePtr, KeyCompareProcPtr keyCompareProc)
 	// set kBadClose attribute bit, and UpdateNode
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	/* b-tree node size must be at least as big as the logical block size */
 	if (btreePtr->nodeSize < VTOHFS(btreePtr->fileRefNum)->hfs_logical_block_size)
 =======
@@ -325,6 +355,10 @@ OSStatus BTOpenPath(FCB *filePtr, KeyCompareProcPtr keyCompareProc)
 
 	if ( btreePtr->nodeSize == nodeRec.blockSize )
 >>>>>>> origin/10.1
+=======
+	/* b-tree node size must be at least as big as the logical block size */
+	if (btreePtr->nodeSize < VTOHFS(btreePtr->fileRefNum)->hfs_logical_block_size)
+>>>>>>> origin/10.5
 	{
 		/*
 		 * If this tree has any records or the media is writeable then
@@ -503,6 +537,9 @@ OSStatus	BTSearchRecord		(FCB						*filePtr,
 	{
 		return	paramErr;
 	}
+
+	node.buffer = nil;
+	node.blockHeader = nil;
 
 	node.buffer = nil;
 	node.blockHeader = nil;
@@ -1359,9 +1396,12 @@ OSStatus	BTInsertRecord		(FCB						*filePtr,
 								btreePtr->firstLeafNode		= insertNodeNum;
 								btreePtr->lastLeafNode		= insertNodeNum;
 
+<<<<<<< HEAD
 								err = UpdateNode (btreePtr, &nodeRec, 0, kLockTransaction);
 								M_ExitOnError (err);
 
+=======
+>>>>>>> origin/10.2
 								M_BTreeHeaderDirty (btreePtr);
 
 								goto Success;
@@ -1549,6 +1589,10 @@ OSStatus	BTReplaceRecord		(FCB						*filePtr,
 		M_ExitOnError (err);
 	}
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.2
 	// XXXdbg
 	ModifyBlockStart(btreePtr->fileRefNum, &nodeRec);
 								
@@ -1605,7 +1649,6 @@ BTUpdateRecord(FCB *filePtr, BTreeIterator *iterator,
 	u_int16_t				index;
 	Boolean					validHint;
 
-
 	////////////////////////// Priliminary Checks ///////////////////////////////
 
 	nodeRec.buffer = nil;					// so we can call ReleaseNode
@@ -1636,7 +1679,11 @@ BTUpdateRecord(FCB *filePtr, BTreeIterator *iterator,
 				// XXXdbg
 				ModifyBlockStart(btreePtr->fileRefNum, &nodeRec);
 								
+<<<<<<< HEAD
 				err = callBackProc(keyPtr, recordPtr, callBackState);
+=======
+				err = callBackProc(keyPtr, recordPtr, recordLen, callBackState);
+>>>>>>> origin/10.2
 				M_ExitOnError (err);
 
 				err = UpdateNode (btreePtr, &nodeRec, 0, 0);
@@ -1671,7 +1718,11 @@ BTUpdateRecord(FCB *filePtr, BTreeIterator *iterator,
 	// XXXdbg
 	ModifyBlockStart(btreePtr->fileRefNum, &nodeRec);
 								
+<<<<<<< HEAD
 	err = callBackProc(keyPtr, recordPtr, callBackState);
+=======
+	err = callBackProc(keyPtr, recordPtr, recordLen, callBackState);
+>>>>>>> origin/10.2
 	M_ExitOnError (err);
 
 	err = UpdateNode (btreePtr, &nodeRec, 0, 0);
@@ -1689,9 +1740,9 @@ Success:
 	////////////////////////////// Error Exit ///////////////////////////////////
 
 ErrorExit:
-
+	
 	(void) ReleaseNode (btreePtr, &nodeRec);
-
+	
 	iterator->hint.writeCount 	= 0;
 	iterator->hint.nodeNum		= 0;
 	iterator->hint.index		= 0;
@@ -2121,3 +2172,62 @@ BTSetUserData(FCB *filePtr, void * dataPtr, int dataSize)
 	return	(err);
 }
 
+/*-------------------------------------------------------------------------------
+Routine:	BTCheckFreeSpace
+
+Function:	Makes sure there is enough free space so that a tree operation
+            will succeed.
+
+Input:		fcb	- pointer file control block
+
+Output:		none
+
+Result:		noErr			- success
+            
+-------------------------------------------------------------------------------*/
+
+__private_extern__
+OSStatus	BTCheckFreeSpace		(FCB					*filePtr)
+{
+	BTreeControlBlockPtr	btreePtr;
+	int 					nodesNeeded, err = noErr;
+
+
+	M_ReturnErrorIf (filePtr == nil, 	paramErr);
+
+	btreePtr = (BTreeControlBlockPtr) filePtr->fcbBTCBPtr;
+	
+	REQUIRE_FILE_LOCK(btreePtr->fileRefNum, true);
+
+	M_ReturnErrorIf (btreePtr == nil,	fsBTInvalidFileErr);
+
+	// XXXdbg this is highly conservative but so much better than
+	//        winding up with turds on your disk.
+	//
+	nodesNeeded = (btreePtr->treeDepth + 1) * 10;
+	
+	if (btreePtr->freeNodes < nodesNeeded) {
+		err = ExtendBTree(btreePtr, nodesNeeded + btreePtr->totalNodes - btreePtr->freeNodes);
+	}
+
+	return err;
+}
+
+
+__private_extern__
+OSStatus	BTHasContiguousNodes	(FCB	 				*filePtr)
+{
+	BTreeControlBlockPtr	btreePtr;
+	int 					nodesNeeded, err = noErr;
+
+
+	M_ReturnErrorIf (filePtr == nil, 	paramErr);
+
+	btreePtr = (BTreeControlBlockPtr) filePtr->fcbBTCBPtr;
+	
+	REQUIRE_FILE_LOCK(btreePtr->fileRefNum, true);
+
+	M_ReturnErrorIf (btreePtr == nil,	fsBTInvalidFileErr);
+
+	return NodesAreContiguous(FCBTOVCB(filePtr), filePtr, btreePtr->nodeSize);
+}

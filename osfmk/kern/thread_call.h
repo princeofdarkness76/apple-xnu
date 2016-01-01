@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -40,6 +62,7 @@
 
 #include <sys/cdefs.h>
 
+<<<<<<< HEAD
 struct thread_call;
 typedef struct thread_call *thread_call_t;
 
@@ -130,6 +153,55 @@ extern boolean_t	thread_call_enter1_delayed(
 						thread_call_param_t	param1,
 						uint64_t		deadline);
 #ifdef XNU_KERNEL_PRIVATE
+=======
+typedef struct call_entry	*thread_call_t;
+typedef void				*thread_call_param_t;
+typedef void				(*thread_call_func_t)(
+									thread_call_param_t		param0,
+									thread_call_param_t		param1);
+__BEGIN_DECLS
+
+extern boolean_t	thread_call_enter(
+						thread_call_t		call);
+
+extern boolean_t	thread_call_enter1(
+						thread_call_t			call,
+						thread_call_param_t		param1);
+
+extern boolean_t	thread_call_enter_delayed(
+						thread_call_t		call,
+						uint64_t			deadline);
+
+extern boolean_t	thread_call_enter1_delayed(
+						thread_call_t			call,
+						thread_call_param_t		param1,
+						uint64_t				deadline);
+
+extern boolean_t	thread_call_cancel(
+						thread_call_t		call);
+
+extern thread_call_t	thread_call_allocate(
+							thread_call_func_t		func,
+							thread_call_param_t		param0);
+
+extern boolean_t		thread_call_free(
+							thread_call_t		call);
+
+__END_DECLS
+
+#ifdef	MACH_KERNEL_PRIVATE
+
+#include <kern/call_entry.h>
+
+typedef struct call_entry	thread_call_data_t;
+
+extern void		thread_call_initialize(void);
+
+extern void		thread_call_setup(
+					thread_call_t			call,
+					thread_call_func_t		func,
+					thread_call_param_t		param0);
+>>>>>>> origin/10.5
 
 /*
  * Flags to alter the default timer/timeout coalescing behavior
@@ -274,6 +346,7 @@ boolean_t		thread_call_isactive(
 						thread_call_t call);
 __END_DECLS
 
+<<<<<<< HEAD
 #ifdef	MACH_KERNEL_PRIVATE
 
 #include <kern/call_entry.h>
@@ -287,7 +360,29 @@ struct thread_call {
 	thread_call_priority_t		tc_pri;
 	uint32_t			tc_flags;
 	int32_t				tc_refs;
+
+	uint64_t			ttd; /* Time to deadline at creation */
 }; 
+=======
+extern boolean_t	thread_call_is_delayed(
+						thread_call_t		call,
+						uint64_t			*deadline);
+
+extern void		thread_call_func(
+					thread_call_func_t		func,
+					thread_call_param_t		param,
+					boolean_t				unique_call);
+
+extern void		thread_call_func_delayed(
+					thread_call_func_t		func,
+					thread_call_param_t		param,
+					uint64_t				deadline);
+
+extern boolean_t	thread_call_func_cancel(
+						thread_call_func_t		func,
+						thread_call_param_t		param,
+						boolean_t				cancel_all);
+>>>>>>> origin/10.5
 
 #define THREAD_CALL_ALLOC		0x01
 #define THREAD_CALL_WAIT		0x02

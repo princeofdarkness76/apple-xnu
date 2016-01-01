@@ -1,6 +1,11 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +20,24 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +45,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /* Copyright (c) 1998, 1999 Apple Computer, Inc. All Rights Reserved */
 /* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */
@@ -242,6 +279,7 @@ struct protosw {
  *	is only relevant if PR_CONNREQUIRED is set (otherwise sendto is allowed
  *	anyhow).
  */
+<<<<<<< HEAD
 #define	PR_ATOMIC	0x01	/* exchange atomic messages only */
 #define	PR_ADDR		0x02	/* addresses given with messages */
 #define	PR_CONNREQUIRED	0x04	/* connection required by protocol */
@@ -312,6 +350,19 @@ char	*prcrequests[] = {
 	"PARAMPROB", "ADMIN-UNREACH"
 };
 #endif /* PRCREQUESTS */
+=======
+#define	PR_ATOMIC			0x01		/* exchange atomic messages only */
+#define	PR_ADDR			0x02		/* addresses given with messages */
+#define	PR_CONNREQUIRED	0x04		/* connection required by protocol */
+#define	PR_WANTRCVD		0x08		/* want PRU_RCVD calls */
+#define	PR_RIGHTS			0x10		/* passes capabilities */
+#define	PR_IMPLOPCL		0x20		/* implied open/close */
+#define	PR_LASTHDR		0x40		/* enforce ipsec policy; last header */
+#define	PR_PROTOLOCK		0x80		/* protocol takes care of it's own locking */
+#define	PR_PCBLOCK		0x100	/* protocol supports per pcb finer grain locking */
+#define	PR_DISPOSE		0x200	/* protocol requires late lists disposal */
+#define	PR_AGGDRAIN		0x400	/* protocol requires aggressive draining */
+>>>>>>> origin/10.6
 
 /*
  * The arguments to ctloutput are:

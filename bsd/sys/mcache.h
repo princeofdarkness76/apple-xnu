@@ -58,6 +58,7 @@ extern "C" {
 #define	ASSERT(EX)	((void)0)
 #endif
 
+<<<<<<< HEAD
 /*
  * Compile time assert; this should be on its own someday.
  */
@@ -94,6 +95,10 @@ extern "C" {
 #define	atomic_get_64(n, a) do {					\
 	(n) = *(a);							\
 } while (0)
+=======
+#if defined(__ppc__)
+#define	CPU_CACHE_SIZE	128
+>>>>>>> origin/10.5
 #else
 #define	atomic_get_64(n, a) do {					\
 	(n) = atomic_add_64_ov(a, 0);					\

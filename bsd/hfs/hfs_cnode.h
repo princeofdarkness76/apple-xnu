@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -124,11 +146,18 @@ typedef u_int8_t atomicflag_t;
 /*
  * Hardlink Origin (for hardlinked directories).
  */
+<<<<<<< HEAD
 struct linkorigin {
 	TAILQ_ENTRY(linkorigin)  lo_link;  /* chain */
 	void *  lo_thread;      /* thread that performed the lookup */
 	cnid_t  lo_cnid;        /* hardlink's cnid */
 	cnid_t  lo_parentcnid;  /* hardlink's parent cnid */
+=======
+struct	hfs_index {
+	SLIST_ENTRY(hfs_index) hi_link;
+	int	hi_index;
+	char	hi_name[1];
+>>>>>>> origin/10.3
 };
 typedef struct linkorigin linkorigin_t;
 
@@ -335,7 +364,11 @@ enum { kFinderInvisibleMask = 1 << 14 };
  * upon the VNOP in question.  Sometimes it is OK to use an open-unlinked file, for example, in,
  * reading.  But other times, such as on the source of a VNOP_RENAME, it should be disallowed.
  */
+<<<<<<< HEAD
 int hfs_checkdeleted(struct cnode *cp);
+=======
+int hfs_checkdeleted (struct cnode *cp);
+>>>>>>> origin/10.6
 
 /*
  * Test for a resource fork
@@ -427,8 +460,13 @@ extern u_int32_t hfs_get_dateadded_from_blob(const uint8_t * /* finderinfo */, m
 /* Gen counter methods */
 extern void hfs_write_gencount(struct cat_attr *cattrp, uint32_t gencount);
 extern uint32_t hfs_get_gencount(struct cnode *cp);
+extern uint32_t hfs_get_gencount_from_blob (const uint8_t *finfoblob, mode_t mode);
 extern uint32_t hfs_incr_gencount (struct cnode *cp);
 extern uint32_t hfs_get_gencount_from_blob(const uint8_t * /* finderinfo */, mode_t /* mode */);
+
+/* Document id methods */
+extern uint32_t hfs_get_document_id(struct cnode * /* cp */);
+extern uint32_t hfs_get_document_id_from_blob(const uint8_t * /* finderinfo */, mode_t /* mode */);
 
 /* Document id methods */
 extern uint32_t hfs_get_document_id(struct cnode * /* cp */);
@@ -459,7 +497,12 @@ extern struct vnode * hfs_chash_getvnode(struct hfsmount *hfsmp, ino_t inum, int
 										int skiplock, int allow_deleted);
 extern struct cnode * hfs_chash_getcnode(struct hfsmount *hfsmp, ino_t inum, struct vnode **vpp, 
 										 int wantrsrc, int skiplock, int *out_flags, int *hflags);
+<<<<<<< HEAD
 extern int hfs_chash_snoop(struct hfsmount *, ino_t, int, int (*)(const cnode_t *, void *), void *);
+=======
+extern int hfs_chash_snoop(struct hfsmount *, ino_t, int, int (*)(const struct cat_desc *,
+                            const struct cat_attr *, void *), void *);
+>>>>>>> origin/10.7
 extern int hfs_valid_cnode(struct hfsmount *hfsmp, struct vnode *dvp, struct componentname *cnp, 
 							cnid_t cnid, struct cat_attr *cattr, int *error);
 
@@ -495,8 +538,11 @@ extern int hfs_chash_set_childlinkbit(struct hfsmount *hfsmp, cnid_t cnid);
  *       D. Allocation Bitmap file (always exclusive, supports recursion)
  *       E. Overflow Extents B-tree file (always exclusive, supports recursion)
  *
+<<<<<<< HEAD
  *  7. hfs mount point (always last)
  *
+=======
+>>>>>>> origin/10.7
  *
  * I. HFS cnode hash lock (must not acquire any new locks while holding this lock, always taken last)
  */

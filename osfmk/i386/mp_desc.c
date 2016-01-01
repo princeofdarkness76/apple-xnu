@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -62,6 +88,7 @@
 #include <kern/cpu_data.h>
 #include <mach/mach_types.h>
 #include <mach/machine.h>
+#include <kern/etimer.h>
 #include <mach/vm_map.h>
 #include <mach/machine/vm_param.h>
 #include <vm/vm_kern.h>
@@ -175,12 +202,22 @@ extern uint32_t		low_eintstack[];	/* top */
  * The master cpu (cpu 0) has its data area statically allocated;
  * others are allocated dynamically and this array is updated at runtime.
  */
+<<<<<<< HEAD
 static cpu_data_t	cpu_data_master = {
 	.cpu_this = &cpu_data_master,
 	.cpu_nanotime = &pal_rtc_nanotime_info,
 	.cpu_int_stack_top = (vm_offset_t) low_eintstack,
 };
 cpu_data_t	*cpu_data_ptr[MAX_CPUS] = { [0] = &cpu_data_master };
+=======
+cpu_data_t	cpu_data_master = {
+			.cpu_this = &cpu_data_master,
+			.cpu_nanotime = &rtc_nanotime_info,
+			.cpu_is64bit = FALSE,
+			.cpu_int_stack_top = (vm_offset_t) low_eintstack,
+		};
+cpu_data_t	*cpu_data_ptr[MAX_CPUS] = { [0] &cpu_data_master };
+>>>>>>> origin/10.5
 
 decl_simple_lock_data(,ncpus_lock);	/* protects real_ncpus */
 unsigned int	real_ncpus = 1;
@@ -522,6 +559,20 @@ cpu_desc_load64(cpu_data_t *cdp)
 	 * for the case of reloading descriptors at wake to avoid
 	 * their complete re-initialization.
 	 */
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+	gdtptr64.length = GDTSZ * sizeof(struct real_descriptor) - 1;
+	gdtptr64.offset[0] = (uint32_t) cdi->cdi_gdt.ptr;
+	gdtptr64.offset[1] = KERNEL_UBER_BASE_HI32;
+	idtptr64.length = 0x1000 + cdp->cpu_number;
+	idtptr64.offset[0] = (uint32_t) cdi->cdi_idt.ptr;
+	idtptr64.offset[1] = KERNEL_UBER_BASE_HI32;
+
+	/* Make sure busy bit is cleared in the TSS */
+>>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.9
 	gdt_desc_p(KERNEL_TSS)->access &= ~ACC_TSS_BUSY;
 
 	/* Load the GDT, LDT, IDT and TSS */
@@ -567,6 +618,20 @@ fast_syscall_init64(__unused cpu_data_t *cdp)
 	 */
 	wrmsr64(MSR_IA32_FMASK, EFL_DF|EFL_IF|EFL_TF|EFL_NT);
 
+<<<<<<< HEAD
+=======
+	/*
+	 * Set the Kernel GS base MSR to point to per-cpu data in uber-space.
+	 * The uber-space handler (hi64_syscall) uses the swapgs instruction.
+	 */
+	wrmsr64(MSR_IA32_KERNEL_GS_BASE,
+		UBER64((unsigned long)current_cpu_datap()));
+
+#if ONLY_SAFE_FOR_LINDA_SERIAL
+	kprintf("fast_syscall_init64() KERNEL_GS_BASE=0x%016llx\n",
+		rdmsr64(MSR_IA32_KERNEL_GS_BASE));
+#endif
+>>>>>>> origin/10.5
 }
 
 
@@ -578,13 +643,26 @@ cpu_data_alloc(boolean_t is_boot_cpu)
 
 	if (is_boot_cpu) {
 		assert(real_ncpus == 1);
+<<<<<<< HEAD
 		cdp = cpu_datap(0);
 		if (cdp->cpu_processor == NULL) {
 			simple_lock_init(&ncpus_lock, 0);
+=======
+		cdp = &cpu_data_master;
+		if (cdp->cpu_processor == NULL) {
+			simple_lock_init(&cpu_lock, 0);
+>>>>>>> origin/10.5
 			cdp->cpu_processor = cpu_processor_alloc(TRUE);
 #if NCOPY_WINDOWS > 0
 			cdp->cpu_pmap = pmap_cpu_alloc(TRUE);
+<<<<<<< HEAD
 #endif
+=======
+			cpu_desc_init(cdp, TRUE);
+			fast_syscall_init();
+			queue_init(&cdp->rtclock_timer.queue);
+			cdp->rtclock_timer.deadline = EndOfAllTime;
+>>>>>>> origin/10.5
 		}
 		return cdp;
 	}
@@ -660,6 +738,10 @@ cpu_data_alloc(boolean_t is_boot_cpu)
 	cdp->cpu_active_thread = (thread_t) (uintptr_t) cdp->cpu_number;
 
 	cdp->cpu_nanotime = &pal_rtc_nanotime_info;
+
+	cdp->cpu_nanotime = &rtc_nanotime_info;
+	queue_init(&cdp->rtclock_timer.queue);
+	cdp->rtclock_timer.deadline = EndOfAllTime;
 
 	kprintf("cpu_data_alloc(%d) %p desc_table: %p "
 		"ldt: %p "
@@ -820,11 +902,19 @@ void
 cpu_physwindow_init(int cpu)
 {
 	cpu_data_t		*cdp = cpu_data_ptr[cpu];
+<<<<<<< HEAD
+=======
+	cpu_desc_index_t	*cdi = &cdp->cpu_desc_index;
+>>>>>>> origin/10.5
         vm_offset_t 		phys_window = cdp->cpu_physwindow_base;
 
 	if (phys_window == 0) {
 		if (vm_allocate(kernel_map, &phys_window,
+<<<<<<< HEAD
 				PAGE_SIZE, VM_FLAGS_ANYWHERE | VM_MAKE_TAG(VM_KERN_MEMORY_CPU))
+=======
+				PAGE_SIZE, VM_FLAGS_ANYWHERE)
+>>>>>>> origin/10.5
 				!= KERN_SUCCESS)
 		        panic("cpu_physwindow_init: "
 				"couldn't allocate phys map window");
@@ -834,7 +924,18 @@ cpu_physwindow_init(int cpu)
 		 * pte pointer we're interested in actually
 		 * exists in the page table
 		 */
+<<<<<<< HEAD
 		pmap_expand(kernel_pmap, phys_window, PMAP_EXPAND_OPTIONS_NONE);
+=======
+		pmap_expand(kernel_pmap, phys_window);
+
+		cdp->cpu_physwindow_base = phys_window;
+		cdp->cpu_physwindow_ptep = vtopte(phys_window);
+	}
+
+	cdi->cdi_gdt[sel_idx(PHYS_WINDOW_SEL)] = physwindow_desc_pattern;
+	cdi->cdi_gdt[sel_idx(PHYS_WINDOW_SEL)].offset = phys_window;
+>>>>>>> origin/10.5
 
 		cdp->cpu_physwindow_base = phys_window;
 		cdp->cpu_physwindow_ptep = vtopte(phys_window);
@@ -848,7 +949,35 @@ cpu_physwindow_init(int cpu)
 void
 cpu_mode_init(cpu_data_t *cdp)
 {
+<<<<<<< HEAD
 	fast_syscall_init64(cdp);
+=======
+	cpu_desc_index_t	*cdi = &cdp->cpu_desc_index;
+
+ 	/*
+	 * Load up the new descriptors etc
+	 * ml_load_desc64() expects these global pseudo-descriptors:
+	 *   gdtptr64 -> master_gdt
+	 *   idtptr64 -> master_idt64
+	 * These are 10-byte descriptors with 64-bit addresses into
+	 * uber-space.
+	 */
+	gdtptr64.length = sizeof(master_gdt) - 1;
+	gdtptr64.offset[0] = (uint32_t) cdi->cdi_gdt;
+	gdtptr64.offset[1] = KERNEL_UBER_BASE_HI32;
+	idtptr64.length = sizeof(master_idt64) - 1;
+	idtptr64.offset[0] = (uint32_t) cdi->cdi_idt;
+	idtptr64.offset[1] = KERNEL_UBER_BASE_HI32;
+
+	/* Make sure busy bit is cleared in the TSS */
+	gdt_desc_p(KERNEL_TSS)->access &= ~ACC_TSS_BUSY;
+	
+	ml_load_desc64();
+
+#if ONLY_SAFE_FOR_LINDA_SERIAL
+	kprintf("64-bit descriptor tables loaded\n");
+#endif
+>>>>>>> origin/10.5
 }
 
 /*

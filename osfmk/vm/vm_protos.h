@@ -131,6 +131,7 @@ extern kern_return_t vm_region_object_create
 extern mach_vm_offset_t mach_get_vm_start(vm_map_t);
 extern mach_vm_offset_t mach_get_vm_end(vm_map_t);
 
+<<<<<<< HEAD
 #if CONFIG_CODE_DECRYPTION
 #define VM_MAP_DEBUG_APPLE_PROTECT	MACH_ASSERT
 struct pager_crypt_info;
@@ -160,6 +161,28 @@ extern memory_object_control_t swapfile_pager_control(memory_object_t mem_obj);
 #define SIXTEENK_PAGE_MASK	0x3FFF
 #define SIXTEENK_PAGE_SHIFT	14
 #endif /* __arm64__ || ((__ARM_ARCH_7K__ >= 2) && defined(PLATFORM_WatchOS)) */
+=======
+/*
+ * Legacy routines to get the start and end for a vm_map_t.  They
+ * return them in the vm_offset_t format.  So, they should only be
+ * called on maps that are the same size as the kernel map for
+ * accurate results.
+ */
+extern vm_offset_t get_vm_start(vm_map_t);
+extern vm_offset_t get_vm_end(vm_map_t);
+
+#if CONFIG_CODE_DECRYPTION
+struct pager_crypt_info;
+extern kern_return_t vm_map_apple_protected(
+					    vm_map_t	map,
+					    vm_map_offset_t	start,
+					    vm_map_offset_t	end,
+					    struct pager_crypt_info *crypt_info);
+extern void apple_protect_pager_bootstrap(void);
+extern memory_object_t apple_protect_pager_setup(vm_object_t backing_object,
+						 struct pager_crypt_info *crypt_info);
+#endif	/* CONFIG_CODE_DECRYPTION */
+>>>>>>> origin/10.5
 
 
 /*
@@ -476,6 +499,7 @@ extern int macx_swapinfo(
 	boolean_t		*encrypted_p);
 
 extern void log_stack_execution_failure(addr64_t vaddr, vm_prot_t prot);
+<<<<<<< HEAD
 extern void log_unnest_badness(vm_map_t, vm_map_offset_t, vm_map_offset_t);
 
 struct proc;
@@ -484,6 +508,12 @@ extern int cs_invalid_page(addr64_t vaddr);
 
 #define CS_VALIDATE_TAINTED	0x00000001
 #define CS_VALIDATE_NX		0x00000002
+<<<<<<< HEAD
+=======
+extern int cs_invalid_page(addr64_t vaddr);
+>>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.10
 extern boolean_t cs_validate_page(void *blobs,
 				  memory_object_t pager,
 				  memory_object_offset_t offset, 

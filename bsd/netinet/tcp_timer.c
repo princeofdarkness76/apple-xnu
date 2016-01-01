@@ -1,8 +1,18 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+>>>>>>> origin/10.9
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +24,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -349,7 +379,11 @@ struct tcp_last_report_stats {
 #define TIMER_IS_ON_LIST(tp) ((tp)->t_flags & TF_TIMER_ONLIST)
 
 /* Run the TCP timerlist atleast once every hour */
+<<<<<<< HEAD
 #define TCP_TIMERLIST_MAX_OFFSET (60 * 60 * TCP_RETRANSHZ)
+=======
+#define	TCP_TIMERLIST_MAX_OFFSET	(60 * 60 * TCP_RETRANSHZ)
+>>>>>>> origin/10.9
 
 
 static void add_to_time_wait_locked(struct tcpcb *tp, uint32_t delay);
@@ -509,9 +543,14 @@ tcp_garbage_collect(struct inpcb *inp, int istimewait)
 			struct tcpcb *, tp, int32_t, TCPS_CLOSED);
 		/* Become a regular mutex */
 		lck_mtx_convert_spin(&inp->inpcb_mtx);
+<<<<<<< HEAD
 
 		/*
 		 * If this tp still happens to be on the timer list, 
+=======
+		
+		/* If this tp still happens to be on the timer list, 
+>>>>>>> origin/10.7
 		 * take it out
 		 */
 		if (TIMER_IS_ON_LIST(tp)) {
@@ -544,7 +583,13 @@ void
 tcp_gc(struct inpcbinfo *ipi)
 {
 	struct inpcb *inp, *nxt;
+<<<<<<< HEAD
 	struct tcpcb *tw_tp, *tw_ntp;
+=======
+	struct tcpcb *tp;
+	struct socket *so;
+	int i;
+>>>>>>> origin/10.5
 #if TCPDEBUG
 	int ostate;
 #endif
@@ -552,7 +597,82 @@ tcp_gc(struct inpcbinfo *ipi)
 	static int tws_checked = 0;
 #endif
 
+<<<<<<< HEAD
 	KERNEL_DEBUG(DBG_FNC_TCP_SLOW | DBG_FUNC_START, 0, 0, 0, 0, 0);
+=======
+	struct inpcbinfo *pcbinfo		= &tcbinfo;
+
+	KERNEL_DEBUG(DBG_FNC_TCP_SLOW | DBG_FUNC_START, 0,0,0,0,0);
+
+	tcp_maxidle = tcp_keepcnt * tcp_keepintvl;
+
+	lck_rw_lock_shared(pcbinfo->mtx);
+
+	bg_cnt++;
+
+    	LIST_FOREACH(inp, &tcb, inp_list) {
+
+		so = inp->inp_socket;
+
+		if (in_pcb_checkstate(inp, WNT_ACQUIRE, 0) == WNT_STOPUSING) 
+			continue;
+
+		tcp_lock(so, 1, 0);
+
+		if ((in_pcb_checkstate(inp, WNT_RELEASE,1) == WNT_STOPUSING)  && so->so_usecount == 1) {
+			tcp_unlock(so, 1, 0);
+			continue;
+		}
+		tp = intotcpcb(inp);
+		if (tp == 0 || tp->t_state == TCPS_LISTEN) {
+			tcp_unlock(so, 1, 0);
+			continue; 
+		}
+
+		tp = intotcpcb(inp);
+
+		if (tp == 0 || tp->t_state == TCPS_LISTEN) 
+			goto tpgone;
+
+#if TRAFFIC_MGT
+	        if (so->so_traffic_mgt_flags & TRAFFIC_MGT_SO_BG_REGULATE && 
+	        	bg_cnt > BG_COUNTER_MAX) {
+			u_int32_t	curr_recvtotal = tcpstat.tcps_rcvtotal;
+			u_int32_t	curr_bg_recvtotal = tcpstat.tcps_bg_rcvtotal;
+			u_int32_t	bg_recvdiff = curr_bg_recvtotal - tp->bg_recv_snapshot;
+			u_int32_t	tot_recvdiff = curr_recvtotal - tp->tot_recv_snapshot;
+			u_int32_t	fg_recv_change = tot_recvdiff - bg_recvdiff;
+			u_int32_t	recv_change;
+			
+			if (!(so->so_traffic_mgt_flags & TRAFFIC_MGT_SO_BG_SUPPRESSED)) {
+				if (tot_recvdiff) 
+					recv_change = (fg_recv_change * 100) / tot_recvdiff;
+				else 
+					recv_change = 0;
+
+				if (recv_change > background_io_trigger) {
+					socket_set_traffic_mgt_flags(so, TRAFFIC_MGT_SO_BG_SUPPRESSED);
+				}
+				
+				tp->tot_recv_snapshot = curr_recvtotal;
+				tp->bg_recv_snapshot = curr_bg_recvtotal;
+			}
+			else {	// SUPPRESSED
+				// this allows for bg traffic to subside before we start measuring total traffic change
+				if (tot_recvdiff)
+					recv_change = (bg_recvdiff * 100) / tot_recvdiff;
+				else
+					recv_change = 0;
+					
+				if (recv_change < background_io_trigger) {
+					// Draconian for now: if there is any change at all, keep suppressed
+					if (!tot_recvdiff) {
+						socket_clear_traffic_mgt_flags(so, TRAFFIC_MGT_SO_BG_SUPPRESSED);
+						tp->t_unacksegs = 0;
+						(void) tcp_output(tp);	// open window
+					}
+				}
+>>>>>>> origin/10.6
 
 	/*
 	 * Update tcp_now here as it may get used while
@@ -609,12 +729,54 @@ tcp_gc(struct inpcbinfo *ipi)
 
 	lck_rw_done(ipi->ipi_lock);
 
+<<<<<<< HEAD
 	/* Clean up the socache while we are here */
 	if (so_cache_timer())
 		atomic_add_32(&ipi->ipi_gc_req.intimer_lazy, 1);
+=======
+	for (ip = time_wait_slots[cur_tw_slot].lh_first; ip; ip = ipnxt)
+	{
+#if KDEBUG
+	        tws_checked++;
+#endif
+		ipnxt = ip->inp_list.le_next;
+		tp = intotcpcb(ip);
+		if (tp == NULL) { /* tp already closed, remove from list */
+			LIST_REMOVE(ip, inp_list);
+			continue; 
+		}
+		if (tp->t_timer[TCPT_2MSL] >= N_TIME_WAIT_SLOTS) {
+		    tp->t_timer[TCPT_2MSL] -= N_TIME_WAIT_SLOTS;
+		    tp->t_rcvtime += N_TIME_WAIT_SLOTS;
+		}
+		else
+		    tp->t_timer[TCPT_2MSL] = 0;
+>>>>>>> origin/10.3
 
+<<<<<<< HEAD
 	KERNEL_DEBUG(DBG_FNC_TCP_SLOW | DBG_FUNC_END, tws_checked,
 	    cur_tw_slot, 0, 0, 0);
+=======
+		if (tp->t_timer[TCPT_2MSL] == 0)  {
+
+			/* That pcb is ready for a close */	
+			tcp_free_sackholes(tp);
+			tp = tcp_close(tp);
+		}
+twunlock:
+		tcp_unlock(inp->inp_socket, 1, 0);
+	}
+
+
+    	LIST_FOREACH_SAFE(inp, &tcb, inp_list, nxt) {
+		tcp_garbage_collect(inp, 0);
+	}
+
+	/* Now cleanup the time wait ones */
+    	LIST_FOREACH_SAFE(inp, &time_wait_slots[cur_tw_slot], inp_list, nxt) {
+		tcp_garbage_collect(inp, 1);
+	}
+>>>>>>> origin/10.5
 
 	return;
 }
@@ -1019,6 +1181,7 @@ tcp_timers(tp, timer)
 		 * been retransmitted by way of the retransmission timer at
 		 * least once, the value of ssthresh is held constant
 		 */
+<<<<<<< HEAD
 		if (tp->t_rxtshift == 1 && 
 		    CC_ALGO(tp)->after_timeout != NULL) {
 			CC_ALGO(tp)->after_timeout(tp);
@@ -1029,6 +1192,17 @@ tcp_timers(tp, timer)
 			 */
 			if (TCP_ECN_ENABLED(tp))
 				tp->ecn_flags |= TE_SENDCWR;
+=======
+		if (tp->t_state >=  TCPS_ESTABLISHED) {
+			u_int win = min(tp->snd_wnd, tp->snd_cwnd) / 2 / tp->t_maxseg;
+			if (win < 2)
+				win = 2;
+			tp->snd_cwnd = tp->t_maxseg;
+			tp->snd_ssthresh = win * tp->t_maxseg;
+			tp->t_bytes_acked = 0;
+			tp->t_dupacks = 0;
+			tp->t_unacksegs = 0;
+>>>>>>> origin/10.5
 		}
 
 		EXIT_FASTRECOVERY(tp);
@@ -1122,6 +1296,7 @@ fc_output:
 			tcpstat.tcps_keepprobe++;
 			t_template = tcp_maketemplate(tp);
 			if (t_template) {
+<<<<<<< HEAD
 				struct inpcb *inp = tp->t_inpcb;
 				struct tcp_respond_args tra;
 
@@ -1136,6 +1311,18 @@ fc_output:
 				tcp_respond(tp, t_template->tt_ipgen,
 				    &t_template->tt_t, (struct mbuf *)NULL,
 				    tp->rcv_nxt, tp->snd_una - 1, 0, &tra);
+=======
+				unsigned int ifscope;
+
+				if (tp->t_inpcb->inp_flags & INP_BOUND_IF)
+					ifscope = tp->t_inpcb->inp_boundif;
+				else
+					ifscope = IFSCOPE_NONE;
+
+				tcp_respond(tp, t_template->tt_ipgen,
+				    &t_template->tt_t, (struct mbuf *)NULL,
+				    tp->rcv_nxt, tp->snd_una - 1, 0, ifscope);
+>>>>>>> origin/10.5
 				(void) m_free(dtom(t_template));
 				if (tp->t_flagsext & TF_DETECT_READSTALL)
 					tp->t_rtimo_probes++;
@@ -1417,6 +1604,14 @@ need_to_resched_timerlist(u_int32_t runtime, u_int16_t mode)
 {
 	struct tcptimerlist *listp = &tcp_timer_list;
 	int32_t diff;
+<<<<<<< HEAD
+=======
+	boolean_t is_fast;
+
+	if (index == TCPT_NONE)
+		return FALSE;
+	is_fast = !(IS_TIMER_SLOW(index));
+>>>>>>> origin/10.9
 
 	/*
 	 * If the list is being processed then the state of the list is
@@ -1424,7 +1619,11 @@ need_to_resched_timerlist(u_int32_t runtime, u_int16_t mode)
 	 * correctly.
 	 */
 	if (listp->running)
+<<<<<<< HEAD
 		return (TRUE);
+=======
+		return TRUE;
+>>>>>>> origin/10.9
 
 	if (!listp->scheduled)
 		return (TRUE);
@@ -1458,10 +1657,15 @@ tcp_sched_timerlist(uint32_t offset)
 
 	offset = min(offset, TCP_TIMERLIST_MAX_OFFSET);
 	listp->runtime = tcp_now + offset;
+<<<<<<< HEAD
 	if (listp->runtime == 0) {
 		listp->runtime++;
 		offset++;
 	}
+=======
+	if (listp->runtime == 0)
+		listp->runtime++;
+>>>>>>> origin/10.9
 
 	clock_interval_to_deadline(offset, USEC_PER_SEC, &deadline);
 
@@ -1509,6 +1713,7 @@ tcp_run_conn_timer(struct tcpcb *tp, u_int16_t *te_mode,
 		goto done;
 	}
 
+<<<<<<< HEAD
 	/*
 	 * If this connection is over an interface that needs to
 	 * be probed, send probe packets to reinitiate communication.
@@ -1529,6 +1734,14 @@ tcp_run_conn_timer(struct tcpcb *tp, u_int16_t *te_mode,
 	if ((index = tp->tentry.index) == TCPT_NONE)
 		goto done;
 	
+=======
+        /* Since the timer thread needs to wait for tcp lock, it may race
+         * with another thread that can cancel or reschedule the timer that is
+         * about to run. Check if we need to run anything.
+         */
+	if ((index = tp->tentry.index) == TCPT_NONE)
+		goto done;
+>>>>>>> origin/10.9
 	timer_val = tp->t_timer[index];
 
 	diff = timer_diff(tp->tentry.runtime, 0, tcp_now, 0);
@@ -1573,11 +1786,16 @@ tcp_run_conn_timer(struct tcpcb *tp, u_int16_t *te_mode,
 	
 	tp->tentry.timer_start = tcp_now;
 	tp->tentry.index = lo_index;
+<<<<<<< HEAD
 	VERIFY(tp->tentry.index == TCPT_NONE || tp->tentry.mode > 0);
 
 	if (tp->tentry.index != TCPT_NONE) {
 		tp->tentry.runtime = tp->tentry.timer_start +
 			tp->t_timer[tp->tentry.index];
+=======
+	if (lo_index != TCPT_NONE) {
+		tp->tentry.runtime = tp->tentry.timer_start + tp->t_timer[lo_index];
+>>>>>>> origin/10.9
 		if (tp->tentry.runtime == 0)
 			tp->tentry.runtime++;
 	}
@@ -1590,7 +1808,11 @@ tcp_run_conn_timer(struct tcpcb *tp, u_int16_t *te_mode,
 				tp = tcp_timers(tp, i);
 				if (tp == NULL) {
 					offset = 0;
+<<<<<<< HEAD
 					*(te_mode) = 0;
+=======
+					*(next_index) = TCPT_NONE;
+>>>>>>> origin/10.9
 					goto done;
 				}
 			}
@@ -1766,7 +1988,12 @@ tcp_sched_timers(struct tcpcb *tp)
 	u_int16_t mode = te->mode;
 	struct tcptimerlist *listp = &tcp_timer_list;
 	int32_t offset = 0;
+<<<<<<< HEAD
 	boolean_t list_locked = FALSE;
+=======
+	boolean_t is_fast;
+	int list_locked = 0;
+>>>>>>> origin/10.9
 
 	if (tp->t_inpcb->inp_state == INPCB_STATE_DEAD) {
 		/* Just return without adding the dead pcb to the list */
@@ -1782,10 +2009,14 @@ tcp_sched_timers(struct tcpcb *tp)
 		return;
 	}
 
+<<<<<<< HEAD
 	/*
 	 * compute the offset at which the next timer for this connection
 	 * has to run.
 	 */
+=======
+	is_fast = !(IS_TIMER_SLOW(index));
+>>>>>>> origin/10.9
 	offset = timer_diff(te->runtime, 0, tcp_now, 0);
 	if (offset <= 0) {
 		offset = 1;
@@ -1827,15 +2058,26 @@ tcp_sched_timers(struct tcpcb *tp)
 		VERIFY_PREV_LINK(te, le);
 
 		if (listp->running) {
+<<<<<<< HEAD
 			listp->pref_mode |= mode;
 			if (listp->pref_offset == 0 ||
+=======
+			if (is_fast) {
+				listp->pref_mode = TCP_TIMERLIST_FASTMODE;
+			} else if (listp->pref_offset == 0 ||
+>>>>>>> origin/10.9
 				offset < listp->pref_offset) {
 				listp->pref_offset = offset;
 			}
 		} else {
 			/*
+<<<<<<< HEAD
 			 * The list could have got rescheduled while
 			 * this thread was waiting for the lock
+=======
+			 * The list could have got scheduled while this
+			 * thread was waiting for the lock
+>>>>>>> origin/10.9
 			 */
 			if (listp->scheduled) {
 				int32_t diff;
@@ -1892,12 +2134,17 @@ tcp_set_lotimer_index(struct tcpcb *tp)
 		}
 	}
 	tp->tentry.index = lo_index;
+<<<<<<< HEAD
 	tp->tentry.mode = mode;
 	VERIFY(tp->tentry.index == TCPT_NONE || tp->tentry.mode > 0);
 
 	if (tp->tentry.index != TCPT_NONE) {
 		tp->tentry.runtime = tp->tentry.timer_start 
 		    + tp->t_timer[tp->tentry.index];
+=======
+	if (lo_index != TCPT_NONE) {
+		tp->tentry.runtime = tp->tentry.timer_start + tp->t_timer[lo_index];
+>>>>>>> origin/10.9
 		if (tp->tentry.runtime == 0)
 			tp->tentry.runtime++;
 	}

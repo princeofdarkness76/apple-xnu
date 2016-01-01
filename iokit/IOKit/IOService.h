@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -1817,12 +1839,20 @@ public:
     IOReturn quiescePowerTree( void * target, IOPMCompletionAction action, void * param );
     uint32_t getPowerStateForClient( const OSSymbol * client );
     static const char * getIOMessageString( uint32_t msg );
+<<<<<<< HEAD
     static void setAdvisoryTickleEnable( bool enable );
     void reset_watchdog_timer( void );
     void start_watchdog_timer ( void );
     bool stop_watchdog_timer ( void );
     IOReturn registerInterestForNotifer( IONotifier *notify, const OSSymbol * typeOfInterest,
                   IOServiceInterestHandler handler, void * target, void * ref );
+=======
+    IOReturn setIgnoreIdleTimer( bool ignore );
+<<<<<<< HEAD
+>>>>>>> origin/10.7
+=======
+    static void setAdvisoryTickleEnable( bool enable );
+>>>>>>> origin/10.8
 
 #ifdef __LP64__
     static IOWorkLoop * getPMworkloop( void );
@@ -1879,17 +1909,23 @@ private:
     void all_done ( void );
     void start_ack_timer ( void );
     void stop_ack_timer ( void );
+<<<<<<< HEAD
     void start_ack_timer( UInt32 value, UInt32 scale );
     void startSettleTimer( void );
     void start_spindump_timer( const char * delay_type );
     void stop_spindump_timer( void );
+=======
+    void startSettleTimer( void );
+>>>>>>> origin/10.6
     bool checkForDone ( void );
+<<<<<<< HEAD
     bool responseValid ( uint32_t x, int pid );
     void computeDesiredState( unsigned long tempDesire, bool computeOnly );
     void trackSystemSleepPreventers( IOPMPowerStateIndex, IOPMPowerStateIndex, IOPMPowerChangeFlags );
     void tellSystemCapabilityChange( uint32_t nextMS );
     void restartIdleTimer( void );
 
+<<<<<<< HEAD
     static void ack_timer_expired( thread_call_param_t, thread_call_param_t );
     static void watchdog_timer_expired ( thread_call_param_t arg0, thread_call_param_t arg1 );
     static void spindump_timer_expired( thread_call_param_t arg0, thread_call_param_t arg1 );
@@ -1903,6 +1939,16 @@ private:
     static void pmDriverCallout( IOService * from );
     static void pmTellAppWithResponse( OSObject * object, void * context );
     static void pmTellClientWithResponse( OSObject * object, void * context );
+=======
+	static void ack_timer_expired( thread_call_param_t, thread_call_param_t );
+	static IOReturn actionAckTimerExpired(OSObject *, void *, void *, void *, void * );
+ 	static IOReturn actionDriverCalloutDone(OSObject *, void *, void *, void *, void * );
+	static IOPMRequest * acquirePMRequest( IOService * target, IOOptionBits type, IOPMRequest * active = 0 );
+	static void releasePMRequest( IOPMRequest * request );
+	static void pmDriverCallout( IOService * from );
+	static void pmTellAppWithResponse( OSObject * object, void * context );
+	static void pmTellClientWithResponse( OSObject * object, void * context );
+>>>>>>> origin/10.8
     static void pmTellCapabilityAppWithResponse ( OSObject * object, void * arg );
     static void pmTellCapabilityClientWithResponse( OSObject * object, void * arg );
     static void submitPMRequest( IOPMRequest * request );
@@ -1944,13 +1990,23 @@ private:
     void updatePowerClient( const OSSymbol * client, uint32_t powerState );
     void removePowerClient( const OSSymbol * client );
     IOReturn requestPowerState( const OSSymbol * client, uint32_t state );
+<<<<<<< HEAD
     IOReturn requestDomainPower( IOPMPowerStateIndex ourPowerState, IOOptionBits options = 0 );
     IOReturn configurePowerStatesReport( IOReportConfigureAction action, void *result );
     IOReturn updatePowerStatesReport( IOReportConfigureAction action, void *result, void *destination );
     IOReturn configureSimplePowerReport(IOReportConfigureAction action, void *result );
     IOReturn updateSimplePowerReport( IOReportConfigureAction action, void *result, void *destination );
     void waitForPMDriverCall( IOService * target = 0 );
+=======
+    IOReturn requestDomainPower( unsigned long ourPowerState, IOOptionBits options = 0 );
+>>>>>>> origin/10.6
 #endif /* XNU_KERNEL_PRIVATE */
+=======
+    bool responseValid ( unsigned long x );
+    IOReturn allowCancelCommon ( void );
+    void computeDesiredState ( void );
+    void rebuildChildClampBits ( void );
+>>>>>>> origin/10.2
 };
 
 #endif /* ! _IOKIT_IOSERVICE_H */

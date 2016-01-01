@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -74,11 +96,13 @@
  * special devices. It is allocated in checkalias and freed
  * in vgone.
  */
+struct lockf;
 struct specinfo {
 	struct	vnode **si_hashchain;
 	struct	vnode *si_specnext;
 	long	si_flags;
 	dev_t	si_rdev;
+<<<<<<< HEAD
 	int32_t si_opencount;
 	daddr_t	si_size;		/* device block size in bytes */
 	daddr64_t	si_lastr;	/* last read blkno (read-ahead) */
@@ -89,6 +113,14 @@ struct specinfo {
 	u_int16_t	si_isssd;
 	u_int32_t	si_devbsdunit;
 	u_int64_t	si_throttle_mask;
+<<<<<<< HEAD
+=======
+	daddr_t si_size;                  /* device block size in bytes */
+	u_int64_t	si_devsize;	  /* actual device size in bytes */
+	struct lockf	*si_lockf;	/* head of advisory lock list */
+>>>>>>> origin/10.3
+=======
+>>>>>>> origin/10.7
 };
 /*
  * Exported shorthand
@@ -140,6 +172,7 @@ int spec_kqfilter (vnode_t vp, struct knote *kn);
 
 int	spec_ebadf(void *);
 
+<<<<<<< HEAD
 int	spec_lookup (struct vnop_lookup_args *);
 #define spec_create (int (*) (struct  vnop_access_args *))err_create
 #define spec_mknod (int (*) (struct  vnop_access_args *))err_mknod
@@ -176,6 +209,56 @@ int	spec_pathconf (struct vnop_pathconf_args *);
 #define spec_vfree (int (*) (struct  vnop_access_args *))err_vfree
 #define spec_bwrite (int (*) (struct  vnop_bwrite_args *))nop_bwrite
 __END_DECLS
+=======
+int	spec_lookup __P((struct vop_lookup_args *));
+#define spec_create ((int (*) __P((struct  vop_access_args *)))err_create)
+#define spec_mknod ((int (*) __P((struct  vop_access_args *)))err_mknod)
+int	spec_open __P((struct vop_open_args *));
+int	spec_close __P((struct vop_close_args *));
+#define spec_access ((int (*) __P((struct  vop_access_args *)))spec_ebadf)
+#define spec_getattr ((int (*) __P((struct  vop_getattr_args *)))spec_ebadf)
+#define spec_setattr ((int (*) __P((struct  vop_setattr_args *)))spec_ebadf)
+int	spec_read __P((struct vop_read_args *));
+int	spec_write __P((struct vop_write_args *));
+#define spec_lease_check ((int (*) __P((struct  vop_access_args *)))nop_lease)
+int	spec_ioctl __P((struct vop_ioctl_args *));
+int	spec_select __P((struct vop_select_args *));
+#define spec_revoke ((int (*) __P((struct  vop_access_args *)))nop_revoke)
+#define spec_mmap ((int (*) __P((struct  vop_access_args *)))err_mmap)
+int	spec_fsync __P((struct  vop_fsync_args *));
+#define spec_seek ((int (*) __P((struct  vop_access_args *)))err_seek)
+#define spec_remove ((int (*) __P((struct  vop_access_args *)))err_remove)
+#define spec_link ((int (*) __P((struct  vop_access_args *)))err_link)
+#define spec_rename ((int (*) __P((struct  vop_access_args *)))err_rename)
+#define spec_mkdir ((int (*) __P((struct  vop_access_args *)))err_mkdir)
+#define spec_rmdir ((int (*) __P((struct  vop_access_args *)))err_rmdir)
+#define spec_symlink ((int (*) __P((struct  vop_access_args *)))err_symlink)
+#define spec_readdir ((int (*) __P((struct  vop_access_args *)))err_readdir)
+#define spec_readlink ((int (*) __P((struct  vop_access_args *)))err_readlink)
+#define spec_abortop ((int (*) __P((struct  vop_access_args *)))err_abortop)
+#define spec_inactive ((int (*) __P((struct  vop_access_args *)))nop_inactive)
+#define spec_reclaim ((int (*) __P((struct  vop_access_args *)))nop_reclaim)
+#define spec_lock ((int (*) __P((struct  vop_access_args *)))nop_lock)
+#define spec_unlock ((int (*) __P((struct  vop_access_args *)))nop_unlock)
+int	spec_bmap __P((struct vop_bmap_args *));
+int	spec_strategy __P((struct vop_strategy_args *));
+int	spec_print __P((struct vop_print_args *));
+#define spec_islocked ((int (*) __P((struct  vop_access_args *)))nop_islocked)
+int	spec_pathconf __P((struct vop_pathconf_args *));
+int	spec_advlock __P((struct  vop_advlock_args *));
+#define spec_blkatoff ((int (*) __P((struct  vop_access_args *)))err_blkatoff)
+#define spec_valloc ((int (*) __P((struct  vop_access_args *)))err_valloc)
+#define spec_vfree ((int (*) __P((struct  vop_access_args *)))err_vfree)
+#define spec_truncate ((int (*) __P((struct  vop_access_args *)))nop_truncate)
+#define spec_update ((int (*) __P((struct  vop_access_args *)))nop_update)
+#define spec_reallocblks \
+	((int (*) __P((struct  vop_reallocblks_args *)))err_reallocblks)
+#define spec_bwrite ((int (*) __P((struct  vop_bwrite_args *)))nop_bwrite)
+int     spec_devblocksize __P((struct vop_devblocksize_args *));
+int spec_blktooff __P((struct  vop_blktooff_args *));
+int spec_offtoblk __P((struct  vop_offtoblk_args *));
+int spec_cmap __P((struct  vop_cmap_args *));
+>>>>>>> origin/10.3
 
 #endif /* __APPLE_API_PRIVATE */
 #endif /* _MISCFS_SPECFS_SPECDEV_H_ */

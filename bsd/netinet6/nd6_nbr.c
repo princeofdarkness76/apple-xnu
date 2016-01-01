@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -173,7 +177,11 @@ nd6_llreach_alloc(struct rtentry *rt, struct ifnet *ifp, void *addr,
 
 	if (nd6_llreach_base != 0 &&
 	    (ln->ln_expire != 0 || (ifp->if_eflags & IFEF_IPV6_ND6ALT) != 0) &&
+<<<<<<< HEAD
 	    !(rt->rt_ifp->if_flags & IFF_LOOPBACK) &&
+=======
+	    rt->rt_ifp != lo_ifp &&
+>>>>>>> origin/10.8
 	    ifp->if_addrlen == IF_LLREACH_MAXLEN &&	/* Ethernet */
 	    alen == ifp->if_addrlen) {
 		struct if_llreach *lr;
@@ -264,6 +272,11 @@ nd6_ns_input(
 	boolean_t advrouter;
 	boolean_t is_dad_probe;
 	int oflgclr = 0;
+
+	if ((ifp->if_eflags & IFEF_IPV6_ND6ALT) != 0) {
+		nd6log((LOG_INFO, "nd6_ns_input: on ND6ALT interface!\n"));
+		return;
+	}
 
 	if ((ifp->if_eflags & IFEF_IPV6_ND6ALT) != 0) {
 		nd6log((LOG_INFO, "nd6_ns_input: on ND6ALT interface!\n"));
@@ -865,6 +878,11 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 		return;
 	}
 
+	if ((ifp->if_eflags & IFEF_IPV6_ND6ALT) != 0) {
+		nd6log((LOG_INFO, "nd6_na_input: on ND6ALT interface!\n"));
+		return;
+	}
+
 	/* Expect 32-bit aligned data pointer on strict-align platforms */
 	MBUF_STRICT_DATA_ALIGNMENT_CHECK_32(m);
 
@@ -1001,6 +1019,7 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 		if (is_solicited) {
 			send_nc_alive_kev = (rt->rt_flags & RTF_ROUTER) ? true : false;
 			ln->ln_state = ND6_LLINFO_REACHABLE;
+<<<<<<< HEAD
 			if (ln->ln_expire != 0) {
 				struct nd_ifinfo *ndi = NULL;
 
@@ -1018,6 +1037,19 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 		} else {
 			ln->ln_state = ND6_LLINFO_STALE;
 			ln_setexpire(ln, timenow + nd6_gctimer);
+=======
+			ln->ln_byhint = 0;
+			if (ln->ln_expire) {
+				lck_rw_lock_shared(nd_if_rwlock);
+				ln->ln_expire = rt_expiry(rt, timenow.tv_sec,
+				    nd_ifinfo[rt->rt_ifp->if_index].reachable);
+				lck_rw_done(nd_if_rwlock);
+			}
+		} else {
+			ln->ln_state = ND6_LLINFO_STALE;
+			ln->ln_expire = rt_expiry(rt, timenow.tv_sec,
+			    nd6_gctimer);
+>>>>>>> origin/10.6
 		}
 		if ((ln->ln_router = is_router) != 0) {
 			/*
@@ -1075,7 +1107,12 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 			 */
 			if (ln->ln_state == ND6_LLINFO_REACHABLE) {
 				ln->ln_state = ND6_LLINFO_STALE;
+<<<<<<< HEAD
 				ln_setexpire(ln, timenow + nd6_gctimer);
+=======
+				ln->ln_expire = rt_expiry(rt, timenow.tv_sec,
+				    nd6_gctimer);
+>>>>>>> origin/10.6
 			}
 			RT_REMREF_LOCKED(rt);
 			RT_UNLOCK(rt);
@@ -1098,6 +1135,7 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 			 */
 			if (is_solicited) {
 				ln->ln_state = ND6_LLINFO_REACHABLE;
+<<<<<<< HEAD
 				if (ln->ln_expire != 0) {
 					struct nd_ifinfo *ndi = NULL;
 
@@ -1112,11 +1150,25 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 					nd6_sched_timeout(NULL, NULL);
 					lck_mtx_unlock(rnh_lock);
 					RT_LOCK(rt);
+=======
+				ln->ln_byhint = 0;
+				if (ln->ln_expire) {
+					lck_rw_lock_shared(nd_if_rwlock);
+					ln->ln_expire =
+					    rt_expiry(rt, timenow.tv_sec,
+					    nd_ifinfo[ifp->if_index].reachable);
+					lck_rw_done(nd_if_rwlock);
+>>>>>>> origin/10.6
 				}
 			} else {
 				if (lladdr && llchange) {
 					ln->ln_state = ND6_LLINFO_STALE;
+<<<<<<< HEAD
 					ln_setexpire(ln, timenow + nd6_gctimer);
+=======
+					ln->ln_expire = rt_expiry(rt,
+					    timenow.tv_sec, nd6_gctimer);
+>>>>>>> origin/10.6
 				}
 			}
 		}
@@ -2375,6 +2427,10 @@ nd6_alt_node_present(struct ifnet *ifp, struct sockaddr_in6 *sin6,
 		nd6log((LOG_DEBUG, "%s: host route to %s [lr=0x%llx]\n",
 		    __func__, ip6_sprintf(&sin6->sin6_addr),
 		    (uint64_t)VM_KERNEL_ADDRPERM(lr)));
+	}
+	else {
+		nd6log((LOG_DEBUG, "%s: host route to %s [lr=%p]\n", __func__,
+			ip6_sprintf(&sin6->sin6_addr), lr));
 	}
 }
 

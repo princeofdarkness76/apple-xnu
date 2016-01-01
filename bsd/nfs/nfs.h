@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -336,6 +362,28 @@ struct user_nfs_args {
 #define	NFSMNT_MUTEJUKEBOX	0x04000000  /* don't treat jukebox errors as unresponsive */
 #define	NFSMNT_NOQUOTA		0x08000000  /* don't support QUOTA requests */
 
+<<<<<<< HEAD
+=======
+#define NFSSTA_LOCKTIMEO	0x00002000  /* experienced a lock req timeout */
+#define	NFSSTA_MOUNTED		0x00004000  /* completely mounted */
+#define NFSSTA_LOCKSWORK	0x00008000  /* lock ops have worked. */   
+#define NFSSTA_TIMEO		0x00010000  /* experienced a timeout. */
+#define NFSSTA_FORCE		0x00020000  /* doing a forced unmount. */
+#define NFSSTA_HASWRITEVERF	0x00040000  /* Has write verifier for V3 */
+#define NFSSTA_GOTPATHCONF	0x00080000  /* Got the V3 pathconf info */
+#define NFSSTA_GOTFSINFO	0x00100000  /* Got the V3 fsinfo */
+#define	NFSSTA_MNTD		0x00200000  /* Mnt server for mnt point */
+#define	NFSSTA_DISMINPROG	0x00400000  /* Dismount in progress */
+#define	NFSSTA_DISMNT		0x00800000  /* Dismounted */
+#define	NFSSTA_SNDLOCK		0x01000000  /* Send socket lock */
+#define	NFSSTA_WANTSND		0x02000000  /* Want above */
+#define	NFSSTA_RCVLOCK		0x04000000  /* Rcv socket lock */
+#define	NFSSTA_WANTRCV		0x08000000  /* Want above */
+#define	NFSSTA_WAITAUTH		0x10000000  /* Wait for authentication */
+#define	NFSSTA_HASAUTH		0x20000000  /* Has authenticator */
+#define	NFSSTA_WANTAUTH		0x40000000  /* Wants an authenticator */
+#define	NFSSTA_AUTHERR		0x80000000  /* Authentication error */
+>>>>>>> origin/10.3
 
 /*
  * fs.nfs sysctl(3) NFS_MOUNTINFO defines
@@ -1562,6 +1610,7 @@ int	nfsrv_getcache __P((struct nfsrv_descript *, struct nfssvc_sock *,
 			    struct mbuf **));
 void	nfsrv_updatecache __P((struct nfsrv_descript *, int, struct mbuf *));
 void	nfsrv_cleancache __P((void));
+int	nfs_bind_resv_thread_wake __P((void));
 int	nfs_connect __P((struct nfsmount *, struct nfsreq *));
 void	nfs_disconnect __P((struct nfsmount *));
 int	nfs_getattrcache __P((struct vnode *, struct vattr *));
@@ -1644,6 +1693,11 @@ int	nfsrv_write __P((struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
 			 struct proc *procp, struct mbuf **mrq));
 void	nfsrv_rcv __P((struct socket *so, caddr_t arg, int waitflag));
 void	nfsrv_slpderef __P((struct nfssvc_sock *slp));
+
+void	nfs_up(struct nfsreq *, struct nfsmount *, struct proc *,
+		const char *, int);
+void	nfs_down(struct nfsreq *, struct nfsmount *, struct proc *,
+		const char *, int, int);
 
 /*
  * NFSTRACE points were changed to FSDBG (KERNEL_DEBUG)

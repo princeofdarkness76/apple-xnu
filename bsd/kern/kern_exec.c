@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2011 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -112,6 +138,7 @@
 #include <sys/codesign.h>
 #include <crypto/sha1.h>
 
+<<<<<<< HEAD
 #include <libkern/libkern.h>
 
 #include <security/audit/audit.h>
@@ -125,6 +152,10 @@
 #include <mach/thread_act.h>
 #include <mach/vm_map.h>
 #include <mach/mach_vm.h>
+=======
+#include <bsm/audit_kernel.h>
+
+>>>>>>> origin/10.3
 #include <mach/vm_param.h>
 
 #include <kern/sched_prim.h> /* thread_wakeup() */
@@ -206,6 +237,7 @@ __attribute__((noinline)) int __EXEC_WAITING_ON_TASKGATED_CODE_SIGNATURE_UPCALL_
 #include <mach-o/fat.h>
 #include <mach-o/loader.h>
 #include <machine/vmparam.h>
+<<<<<<< HEAD
 #include <sys/imgact.h>
 
 #include <sys/sdt.h>
@@ -217,6 +249,15 @@ __attribute__((noinline)) int __EXEC_WAITING_ON_TASKGATED_CODE_SIGNATURE_UPCALL_
  *			it as malformed/corrupt.
  */
 #define EAI_ITERLIMIT		3
+<<<<<<< HEAD
+=======
+#if KTRACE   
+#include <sys/ktrace.h>
+#include <sys/ubc.h>
+#endif
+>>>>>>> origin/10.3
+=======
+>>>>>>> origin/10.10
 
 /*
  * For #! interpreter parsing
@@ -256,7 +297,26 @@ static errno_t exec_handle_spawnattr_policy(proc_t p, int psa_apptype, uint64_t 
 int execve(struct proc *p, struct execve_args *uap, register_t *retval);
 static int execargs_alloc(vm_offset_t *addrp);
 static int execargs_free(vm_offset_t addr);
+<<<<<<< HEAD
 >>>>>>> origin/10.1
+=======
+static int sugid_scripts = 0;
+SYSCTL_INT (_kern, OID_AUTO, sugid_scripts, CTLFLAG_RW, &sugid_scripts, 0, "");
+
+int
+execv(p, args, retval)
+	struct proc *p;
+	void *args;
+	int *retval;
+{
+	((struct execve_args *)args)->envp = NULL;
+	return (execve(p, args, retval));
+}
+
+extern char classichandler[32];
+extern long classichandler_fsid;
+extern long classichandler_fileid;
+>>>>>>> origin/10.3
 
 /*
  * exec_add_user_string
@@ -504,6 +564,83 @@ exec_shell_imgact(struct image_params *imgp)
 		/* All whitespace, like "#!           " */
 		return (ENOEXEC);
 	}
+<<<<<<< HEAD
+=======
+#endif /* lint */
+	mach_header = &exdata.mach_header;
+	fat_header = &exdata.fat_header;
+	if ((mach_header->magic == MH_CIGAM) &&
+	    (classichandler[0] == 0)) {
+		error = EBADARCH;
+		goto bad;
+	} else if ((mach_header->magic == MH_MAGIC) || 
+               (mach_header->magic == MH_CIGAM)) {
+	    is_fat = FALSE;
+	} else if ((fat_header->magic == FAT_MAGIC) ||
+		       (fat_header->magic == FAT_CIGAM)) {
+	    is_fat = TRUE;
+	} else {
+	  /* If we've already redirected once from an interpreted file
+	   * to an interpreter, don't permit the second time.
+	   */
+		if (exdata.ex_shell[0] != '#' ||
+		    exdata.ex_shell[1] != '!' ||
+		    executingInterpreter) {
+			error = ENOEXEC;
+			goto bad;
+		}
+		if (executingClassic == 1) {
+		  error = EBADARCH;
+		  goto bad;
+		}
+
+		/* Check to see if SUGID scripts are permitted.  If they aren't then
+		 * clear the SUGID bits.
+		 */
+	        if (sugid_scripts == 0) {
+		   origvattr.va_mode &= ~(VSUID | VSGID);
+        	}
+
+		cp = &exdata.ex_shell[2];		/* skip "#!" */
+		while (cp < &exdata.ex_shell[SHSIZE]) {
+			if (*cp == '\t')		/* convert all tabs to spaces */
+				*cp = ' ';
+			else if (*cp == '\n' || *cp == '#') {
+				*cp = '\0';			/* trunc the line at nl or comment */
+
+ 				/* go back and remove the spaces before the /n or # */
+ 				/* todo: do we have to do this if we fix the passing of args to shells ? */
+				if ( cp != &exdata.ex_shell[2] ) {
+					do {
+						if ( *(cp-1) != ' ')
+							break;
+						*(--cp) = '\0';
+					} while ( cp != &exdata.ex_shell[2] );
+				}
+				break;
+			}
+			cp++;
+		}
+		if (*cp != '\0') {
+			error = ENOEXEC;
+			goto bad;
+		}
+		cp = &exdata.ex_shell[2];
+		while (*cp == ' ')
+			cp++;
+		execnamep = cp;
+		while (*cp && *cp != ' ')
+			cp++;
+		cfarg[0] = '\0';
+		cpnospace = cp;
+		if (*cp) {
+			*cp++ = '\0';
+			while (*cp == ' ')
+				cp++;
+			if (*cp)
+				bcopy((caddr_t)cp, (caddr_t)cfarg, SHSIZE);
+		}
+>>>>>>> origin/10.3
 
 	line_startp = ihp;
 
@@ -643,6 +780,9 @@ exec_fat_imgact(struct image_params *imgp)
 		uint32_t pr = 0;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 		/* Check each preference listed against all arches in header */
 		for (pr = 0; pr < NBINPREFS; pr++) {
 			cpu_type_t pref = psa->psa_binprefs[pr];
@@ -670,6 +810,9 @@ exec_fat_imgact(struct image_params *imgp)
 			struct vnode *tvp = p->p_tracep;
 			p->p_tracep = NULL;
 			p->p_traceflag = 0;
+
+			if (UBCINFOEXISTS(tvp))
+			        ubc_rele(tvp);
 			vrele(tvp);
 		}
 #endif
@@ -679,11 +822,26 @@ exec_fat_imgact(struct image_params *imgp)
 			p->p_ucred->cr_gid = origvattr.va_gid;
 >>>>>>> origin/10.1
 
+<<<<<<< HEAD
 			if (pref == CPU_TYPE_ANY) {
 				/* Fall through to regular grading */
 				goto regular_grading;
 			}
+=======
+		/*
+		 * Have mach reset the task port.  We don't want
+		 * anyone who had the task port before a setuid
+		 * exec to be able to access/control the task
+		 * after.
+		 */
+		ipc_task_reset(task);
 
+<<<<<<< HEAD
+		p->p_flag |= P_SUGID;
+>>>>>>> origin/10.3
+
+=======
+>>>>>>> origin/10.10
 			lret = fatfile_getbestarch_for_cputype(pref,
 							(vm_offset_t)fat_header,
 							PAGE_SIZE,
@@ -692,12 +850,29 @@ exec_fat_imgact(struct image_params *imgp)
 				goto use_arch;
 			}
 		}
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+=======
 
+		/* Requested binary preference was not honored */
+		error = EBADEXEC;
+		goto bad;
+>>>>>>> origin/10.10
+	}
+	p->p_cred->p_svuid = p->p_ucred->cr_uid;
+	p->p_cred->p_svgid = p->p_ucred->cr_gid;
+	set_security_token(p);
+>>>>>>> origin/10.3
+
+<<<<<<< HEAD
 		/* Requested binary preference was not honored */
 		error = EBADEXEC;
 		goto bad;
 	}
 
+=======
+>>>>>>> origin/10.10
 regular_grading:
 	/* Look up our preferred architecture in the fat file. */
 	lret = fatfile_getbestarch((vm_offset_t)fat_header,
@@ -974,6 +1149,7 @@ grade:
 		goto badtoolate;
 	}	
 
+<<<<<<< HEAD
 	/*
 	 * deal with voucher on exec-calling thread.
 	 */
@@ -984,6 +1160,22 @@ grade:
 	if (!vfexec && !spawn && (p->p_lflag & P_LTRACED))
 		psignal(p, SIGTRAP);
 
+=======
+	if (!vfexec && (p->p_lflag & P_LTRACED))
+		psignal(p, SIGTRAP);
+
+	if (error) {
+		goto badtoolate;
+	}
+	
+#if CONFIG_MACF
+	/* Determine if the map will allow VM_PROT_COPY */
+	error = mac_proc_check_map_prot_copy_allow(p);
+	vm_map_set_prot_copy_allow(get_task_map(task), 
+				   error ? FALSE : TRUE);
+#endif	
+
+>>>>>>> origin/10.5
 	if (load_result.unixproc &&
 		create_unix_stack(get_task_map(task),
 				  &load_result,
@@ -1192,6 +1384,7 @@ grade:
 	goto done;
 
 badtoolate:
+<<<<<<< HEAD
 	/* Don't allow child process to execute any instructions */
 	if (!spawn) {
 		if (vfexec) {
@@ -1213,6 +1406,11 @@ done:
 
 	/* Drop extra references for cases where we don't expect the caller to clean up */
 	if (vfexec || (spawn && error == 0)) {
+=======
+	proc_knote(p, NOTE_EXEC);
+
+	if (vfexec) {
+>>>>>>> origin/10.5
 		task_deallocate(new_task);
 		thread_deallocate(thread);
 	}
@@ -1289,7 +1487,15 @@ exec_activate_image(struct image_params *imgp)
 	int resid;
 	int once = 1;	/* save SGUID-ness for interpreted files */
 	int i;
+<<<<<<< HEAD
+<<<<<<< HEAD
 	int itercount = 0;
+=======
+	int iterlimit = EAI_ITERLIMIT;
+>>>>>>> origin/10.5
+=======
+	int itercount = 0;
+>>>>>>> origin/10.10
 	proc_t p = vfs_context_proc(imgp->ip_vfs_context);
 
 	error = execargs_alloc(imgp);
@@ -1317,6 +1523,7 @@ again:
 	error = namei(ndp);
 	if (error)
 		goto bad_notrans;
+<<<<<<< HEAD
 	imgp->ip_ndp = ndp;	/* successful namei(); call nameidone() later */
 	imgp->ip_vp = ndp->ni_vp;	/* if set, need to vnode_put() at some point */
 
@@ -1336,6 +1543,12 @@ again:
 	proc_unlock(p);
 	if (error)
 		goto bad_notrans;
+=======
+	imgp->ip_ndp = &nd;	/* successful namei(); call nameidone() later */
+	imgp->ip_vp = nd.ni_vp;	/* if set, need to vnode_put() at some point */
+
+	proc_transstart(p, 0);
+>>>>>>> origin/10.5
 
 	error = exec_check_permissions(imgp);
 	if (error)
@@ -1410,6 +1623,11 @@ encapsulated_binary:
 			NDINIT(ndp, LOOKUP, OP_LOOKUP, FOLLOW | LOCKLEAF,
 				   UIO_SYSSPACE, CAST_USER_ADDR_T(excpath), imgp->ip_vfs_context);
 
+<<<<<<< HEAD
+=======
+			nd.ni_segflg = UIO_SYSSPACE32;
+			nd.ni_dirp = CAST_USER_ADDR_T(imgp->ip_interp_name);
+>>>>>>> origin/10.5
 			proc_transend(p, 0);
 			goto again;
 
@@ -2013,11 +2231,18 @@ posix_spawn(proc_t ap, struct posix_spawn_args *uap, int32_t *retval)
 {
 	proc_t p = ap;		/* quiet bogus GCC vfork() warning */
 	user_addr_t pid = uap->pid;
+<<<<<<< HEAD
 	int ival[2];		/* dummy retval for setpgid() */
 	char *bufp = NULL; 
 	struct image_params *imgp;
 	struct vnode_attr *vap;
 	struct vnode_attr *origvap;
+=======
+	register_t ival[2];		/* dummy retval for vfork() */
+	struct image_params image_params, *imgp;
+	struct vnode_attr va;
+	struct vnode_attr origva;
+>>>>>>> origin/10.5
 	struct uthread	*uthread = 0;	/* compiler complains if not set to 0*/
 	int error, sig;
 	int is_64 = IS_64BIT_PROCESS(p);
@@ -2909,8 +3134,29 @@ __mac_execve(proc_t p, struct __mac_execve_args *uap, int32_t *retval)
 	imgp->ip_mac_return = 0;
 
 	uthread = get_bsdthread_info(current_thread());
+<<<<<<< HEAD
 	if (uthread->uu_flag & UT_VFORK) {
 		imgp->ip_flags |= IMGPF_VFORK_EXEC;
+=======
+
+	/* If we're not in vfork, don't permit a mutithreaded task to exec */
+	if (!(uthread->uu_flag & UT_VFORK)) {
+		if (task != kernel_task) { 
+			proc_lock(p);
+			numthreads = get_task_numactivethreads(task);
+			if (numthreads <= 0 ) {
+				proc_unlock(p);
+				kauth_cred_unref(&context.vc_ucred);
+				return(EINVAL);
+			}
+			if (numthreads > 1) {
+				proc_unlock(p);
+				kauth_cred_unref(&context.vc_ucred);
+				return(ENOTSUP);
+			}
+			proc_unlock(p);
+		}
+>>>>>>> origin/10.5
 	}
 
 #if CONFIG_MACF
@@ -3810,11 +4056,18 @@ exec_handle_sugid(struct image_params *imgp)
 	proc_t			p = vfs_context_proc(imgp->ip_vfs_context);
 	int			i;
 	int			leave_sugid_clear = 0;
+<<<<<<< HEAD
 	int			mac_reset_ipc = 0;
+=======
+>>>>>>> origin/10.5
 	int			error = 0;
 #if CONFIG_MACF
+<<<<<<< HEAD
 	int			mac_transition, disjoint_cred = 0;
 	int 		label_update_return = 0;
+=======
+	int			mac_transition;
+>>>>>>> origin/10.5
 
 	/*
 	 * Determine whether a call to update the MAC label will result in the
@@ -3828,12 +4081,17 @@ exec_handle_sugid(struct image_params *imgp)
 	mac_transition = mac_cred_check_label_update_execve(
 							imgp->ip_vfs_context,
 							imgp->ip_vp,
+<<<<<<< HEAD
 							imgp->ip_arch_offset,
 							imgp->ip_scriptvp,
 							imgp->ip_scriptlabelp,
 							imgp->ip_execlabelp,
 							p,
 							imgp->ip_px_smpx);
+=======
+							imgp->ip_scriptlabelp,
+							imgp->ip_execlabelp, p);
+>>>>>>> origin/10.5
 #endif
 
 	OSBitAndAtomic(~((uint32_t)P_SUGID), &p->p_flag);
@@ -3856,7 +4114,16 @@ exec_handle_sugid(struct image_params *imgp)
 	     kauth_cred_getuid(cred) != imgp->ip_origvattr->va_uid) ||
 	    ((imgp->ip_origvattr->va_mode & VSGID) != 0 &&
 		 ((kauth_cred_ismember_gid(cred, imgp->ip_origvattr->va_gid, &leave_sugid_clear) || !leave_sugid_clear) ||
+<<<<<<< HEAD
 		 (kauth_cred_getgid(cred) != imgp->ip_origvattr->va_gid)))) {
+
+#if CONFIG_MACF
+/* label for MAC transition and neither VSUID nor VSGID */
+handle_mac_transition:
+#endif
+=======
+		 (cred->cr_gid != imgp->ip_origvattr->va_gid)))) {
+>>>>>>> origin/10.5
 
 #if CONFIG_MACF
 /* label for MAC transition and neither VSUID nor VSGID */
@@ -3898,6 +4165,7 @@ handle_mac_transition:
 		 * modifying any others sharing it.
 		 */
 		if (mac_transition) { 
+<<<<<<< HEAD
 			kauth_proc_label_update_execve(p,
 						imgp->ip_vfs_context,
 						imgp->ip_vp, 
@@ -3911,6 +4179,14 @@ handle_mac_transition:
 						&label_update_return);
 
 			if (disjoint_cred) {
+=======
+			kauth_cred_t	my_cred;
+			if (kauth_proc_label_update_execve(p,
+						imgp->ip_vfs_context,
+						imgp->ip_vp, 
+						imgp->ip_scriptlabelp,
+						imgp->ip_execlabelp)) {
+>>>>>>> origin/10.5
 				/*
 				 * If updating the MAC label resulted in a
 				 * disjoint credential, flag that we need to
@@ -3922,12 +4198,20 @@ handle_mac_transition:
 				 */
 				leave_sugid_clear = 0;
 			}
+<<<<<<< HEAD
 			
 			imgp->ip_mac_return = label_update_return;
 		}
 		
 		mac_reset_ipc = mac_proc_check_inherit_ipc_ports(p, p->p_textvp, p->p_textoff, imgp->ip_vp, imgp->ip_arch_offset, imgp->ip_scriptvp);
 
+=======
+
+			my_cred = kauth_cred_proc_ref(p);
+			mac_task_label_update_cred(my_cred, p->task);
+			kauth_cred_unref(&my_cred);
+		}
+>>>>>>> origin/10.5
 #endif	/* CONFIG_MACF */
 
 		/*
@@ -3939,6 +4223,7 @@ handle_mac_transition:
 		 * So we don't set the P_SUGID or reset mach ports and fds 
 		 * on the basis of simply running this code.
 		 */
+<<<<<<< HEAD
 		if (mac_reset_ipc || !leave_sugid_clear) {
 			/*
 			 * Have mach reset the task and thread ports.
@@ -3950,13 +4235,33 @@ handle_mac_transition:
 			ipc_thread_reset((imgp->ip_new_thread != NULL) ?
 				 	 imgp->ip_new_thread : current_thread());
 		}
+=======
+		ipc_task_reset(p->task);
+		ipc_thread_reset((imgp->ip_new_thread != NULL) ?
+				 imgp->ip_new_thread : current_thread());
+>>>>>>> origin/10.6
 
+<<<<<<< HEAD
 		if (!leave_sugid_clear) {
 			/*
 			 * Flag the process as setuid.
 			 */
 			OSBitOrAtomic(P_SUGID, &p->p_flag);
+=======
+		/*
+		 * If 'leave_sugid_clear' is non-zero, then we passed the
+		 * VSUID and MACF checks, and successfully determined that
+		 * the previous cred was a member of the VSGID group, but
+		 * that it was not the default at the time of the execve,
+		 * and that the post-labelling credential was not disjoint.
+		 * So we don't set the P_SUGID on the basis of simply
+		 * running this code.
+		 */
+		if (!leave_sugid_clear)
+			OSBitOrAtomic(P_SUGID, (UInt32 *)&p->p_flag);
+>>>>>>> origin/10.5
 
+<<<<<<< HEAD
 			/*
 			 * Radar 2261856; setuid security hole fix
 			 * XXX For setuid processes, attempt to ensure that
@@ -4023,6 +4328,58 @@ handle_mac_transition:
 
 				FREE(ndp, M_TEMP);
 			}
+=======
+		/*
+		 * Radar 2261856; setuid security hole fix
+		 * XXX For setuid processes, attempt to ensure that
+		 * stdin, stdout, and stderr are already allocated.
+		 * We do not want userland to accidentally allocate
+		 * descriptors in this range which has implied meaning
+		 * to libc.
+		 */
+		for (i = 0; i < 3; i++) {
+
+			if (p->p_fd->fd_ofiles[i] != NULL)
+				continue;
+
+			/*
+			 * Do the kernel equivalent of
+			 *
+			 * 	(void) open("/dev/null", O_RDONLY);
+			 */
+
+			struct fileproc *fp;
+			int indx;
+
+			if ((error = falloc(p,
+			    &fp, &indx, imgp->ip_vfs_context)) != 0)
+				continue;
+
+			struct nameidata nd1;
+
+			NDINIT(&nd1, LOOKUP, OP_OPEN, FOLLOW, UIO_SYSSPACE,
+			    CAST_USER_ADDR_T("/dev/null"),
+			    imgp->ip_vfs_context);
+
+			if ((error = vn_open(&nd1, FREAD, 0)) != 0) {
+				fp_free(p, indx, fp);
+				break;
+			}
+
+			struct fileglob *fg = fp->f_fglob;
+
+			fg->fg_flag = FREAD;
+			fg->fg_type = DTYPE_VNODE;
+			fg->fg_ops = &vnops;
+			fg->fg_data = nd1.ni_vp;
+
+			vnode_put(nd1.ni_vp);
+
+			proc_fdlock(p);
+			procfdtbl_releasefd(p, indx, NULL);
+			fp_drop(p, indx, fp, 1);
+			proc_fdunlock(p);
+>>>>>>> origin/10.7
 		}
 	}
 #if CONFIG_MACF
@@ -4039,7 +4396,10 @@ handle_mac_transition:
 			goto handle_mac_transition;
 		}
 	}
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.5
 #endif	/* CONFIG_MACF */
 
 	/*

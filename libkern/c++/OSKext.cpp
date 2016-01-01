@@ -236,7 +236,10 @@ static IORecursiveLock    * sKextLock                  = NULL;
 static OSDictionary       * sKextsByID                 = NULL;
 static OSDictionary       * sExcludeListByID           = NULL;
 static OSArray            * sLoadedKexts               = NULL;
+<<<<<<< HEAD
 static OSArray            * sUnloadedPrelinkedKexts    = NULL;
+=======
+>>>>>>> origin/10.6
 
 // Requests to kextd waiting to be picked up.
 static OSArray            * sKernelRequests            = NULL;
@@ -1067,7 +1070,11 @@ OSKext::setKextdActive(Boolean active)
     IORecursiveLockLock(sKextLock);
     sKextdActive = active;
     if (sKernelRequests->getCount()) {
+<<<<<<< HEAD
         OSKext::pingKextd();
+=======
+        OSKextPingKextd();
+>>>>>>> origin/10.6
     }
     IORecursiveLockUnlock(sKextLock);
 
@@ -1169,7 +1176,11 @@ OSKext::willShutdown(void)
         goto finish;
     }
 
+<<<<<<< HEAD
     OSKext::pingKextd();
+=======
+    OSKextPingKextd();
+>>>>>>> origin/10.6
 
 finish:
 #endif
@@ -4392,6 +4403,7 @@ OSKext::load(
     Boolean              alreadyLoaded                = false;
     OSKext             * lastLoadedKext               = NULL;
 
+<<<<<<< HEAD
     if (isInExcludeList()) {
         OSKextLog(this,
                   kOSKextLogErrorLevel | kOSKextLogGeneralFlag |
@@ -4403,6 +4415,8 @@ OSKext::load(
         goto finish;
     }
 
+=======
+>>>>>>> origin/10.6
     if (isLoaded()) {
         alreadyLoaded = true;
         result = kOSReturnSuccess;
@@ -4434,6 +4448,16 @@ OSKext::load(
         }
    }
 #endif
+
+    if (!sLoadEnabled) {
+        OSKextLog(this,
+            kOSKextLogErrorLevel |
+            kOSKextLogLoadFlag,
+            "Kext loading is disabled (attempt to load kext %s).",
+            getIdentifierCString());
+        result = kOSKextReturnDisabled;
+        goto finish;
+    }
 
     if (!sLoadEnabled) {
         OSKextLog(this,
@@ -4617,6 +4641,7 @@ OSKext::load(
     */
     OSKext::saveLoadedKextPanicList();
 
+<<<<<<< HEAD
     if (isExecutable()) {
         OSKext::updateLoadedKextSummaries();
         savePanicString(/* isLoading */ true);
@@ -4634,6 +4659,19 @@ OSKext::load(
          */
         jettisonDATASegmentPadding();
 #endif
+=======
+loaded:
+
+    if (declaresExecutable() && (startOpt == kOSKextExcludeNone)) {
+        result = start();
+        if (result != kOSReturnSuccess) {
+            OSKextLog(this,
+                kOSKextLogErrorLevel | kOSKextLogLoadFlag,
+                "Kext %s start failed (result 0x%x).",
+                getIdentifierCString(), result);
+            result = kOSKextReturnStartStopError;
+        }
+>>>>>>> origin/10.6
     }
 
 loaded:
@@ -4658,7 +4696,10 @@ loaded:
     if (result == kOSReturnSuccess && startMatchingOpt == kOSKextExcludeNone) {
         result = sendPersonalitiesToCatalog(true, personalityNames);
     }
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.6
 finish:
 
    /* More hack! If the kext doesn't declare an executable, even if we
@@ -5342,7 +5383,9 @@ OSKext::jettisonLinkeditSegment(void)
     kernel_segment_command_t * linkedit = NULL;
     vm_offset_t                start;
     vm_size_t                  linkeditsize, kextsize;
+    vm_offset_t                linkeditaddr = 0;
     OSData                   * data = NULL;
+<<<<<<< HEAD
 
 #if NO_KEXTD
     /* We can free symbol tables for all embedded kexts because we don't
@@ -5352,6 +5395,10 @@ OSKext::jettisonLinkeditSegment(void)
 #else
     if (sKeepSymbols || isLibrary() || !isExecutable() || !linkedExecutable || flags.jettisonLinkeditSeg) {
 #endif
+=======
+	
+    if (sKeepSymbols || isLibrary() || !isExecutable() || !linkedExecutable) {
+>>>>>>> origin/10.7
         goto finish;
     }
 
@@ -5374,8 +5421,15 @@ OSKext::jettisonLinkeditSegment(void)
     */
     linkeditsize = round_page(linkedit->vmsize);
     kextsize = kmod_info->size - linkeditsize;
+<<<<<<< HEAD
     start = linkedit->vmaddr;
 
+=======
+	
+	/* Save linkedit address as removeLinkeditHeaders() will zero it */
+	linkeditaddr = trunc_page(linkedit->vmaddr);
+	
+>>>>>>> origin/10.7
     data = OSData::withBytesNoCopy((void *)kmod_info->address, kextsize);
     if (!data) {
         goto finish;
@@ -5397,11 +5451,15 @@ OSKext::jettisonLinkeditSegment(void)
         
    /* Free the linkedit segment.
     */
+<<<<<<< HEAD
 #if VM_MAPPED_KEXTS
     kext_free(start, linkeditsize);
 #else
     ml_static_mfree(start, linkeditsize);
 #endif
+=======
+    kext_free(linkeditaddr, linkeditsize);
+>>>>>>> origin/10.7
 
 finish:
     return;
@@ -8360,7 +8418,10 @@ OSKext::copyInfo(OSArray * infoKeys)
                 linkedExecutable->getBytesNoCopy();
 
 #if !SECURE_KERNEL
+<<<<<<< HEAD
             // do not return macho header info on shipping iOS - 19095897
+=======
+>>>>>>> origin/10.10
             if (!infoKeys || _OSArrayContainsCString(infoKeys, kOSBundleMachOHeadersKey)) {
                 kernel_mach_header_t *  temp_kext_mach_hdr;
                 struct load_command *   lcp;
@@ -8401,11 +8462,20 @@ OSKext::copyInfo(OSArray * infoKeys)
                                   __FUNCTION__, segp->segname, segp->vmaddr,
                                   VM_KERNEL_UNSLIDE(segp->vmaddr),
                                   segp->vmsize, segp->nsects);
+<<<<<<< HEAD
+<<<<<<< HEAD
                         if ( (VM_KERNEL_IS_SLID(segp->vmaddr) == false) &&
                             (VM_KERNEL_IS_KEXT(segp->vmaddr) == false) &&
                             (VM_KERNEL_IS_PRELINKTEXT(segp->vmaddr) == false) &&
                             (VM_KERNEL_IS_PRELINKINFO(segp->vmaddr) == false) &&
                             (VM_KERNEL_IS_KEXT_LINKEDIT(segp->vmaddr) == false) ) {
+=======
+                        if ( (VM_KERNEL_IS_SLID(segp->vmaddr) == false) &&
+                             (VM_KERNEL_IS_KEXT(segp->vmaddr) == false) &&
+                             (VM_KERNEL_IS_PRELINKTEXT(segp->vmaddr) == false) &&
+                             (VM_KERNEL_IS_PRELINKINFO(segp->vmaddr) == false) &&
+                             (VM_KERNEL_IS_KEXT_LINKEDIT(segp->vmaddr) == false) ) {
+>>>>>>> origin/10.10
                             OSKextLog(/* kext */ NULL,
                                       kOSKextLogErrorLevel |
                                       kOSKextLogGeneralFlag,
@@ -8415,6 +8485,11 @@ OSKext::copyInfo(OSArray * infoKeys)
 #endif
                         segp->vmaddr = VM_KERNEL_UNSLIDE(segp->vmaddr);
                         
+=======
+#endif
+                        segp->vmaddr = VM_KERNEL_UNSLIDE(segp->vmaddr);
+
+>>>>>>> origin/10.8
                         for (secp = firstsect(segp); secp != NULL; secp = nextsect(segp, secp)) {
                             secp->addr = VM_KERNEL_UNSLIDE(secp->addr);
                         }
@@ -8888,7 +8963,11 @@ OSKext::requestResource(
         goto finish;
     }
 
+<<<<<<< HEAD
     OSKext::pingKextd();
+=======
+    OSKextPingKextd();
+>>>>>>> origin/10.6
 
     result = kOSReturnSuccess;
     if (requestTagOut) {

@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2003-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2003-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -1025,6 +1029,7 @@ sock_getlistener(socket_t sock)
 	return (sock->so_head);
 }
 
+<<<<<<< HEAD
 static inline void
 sock_set_tcp_stream_priority(socket_t sock)
 {
@@ -1034,10 +1039,13 @@ sock_set_tcp_stream_priority(socket_t sock)
 	}
 }
 
+=======
+>>>>>>> origin/10.6
 /*
  * Caller must have ensured socket is valid and won't be going away.
  */
 void
+<<<<<<< HEAD
 socket_set_traffic_mgt_flags_locked(socket_t sock, u_int8_t flags)
 {
 	(void) OSBitOrAtomic8(flags, &sock->so_traffic_mgt_flags);
@@ -1050,12 +1058,18 @@ socket_set_traffic_mgt_flags(socket_t sock, u_int8_t flags)
 	socket_lock(sock, 1);
 	socket_set_traffic_mgt_flags_locked(sock, flags);
 	socket_unlock(sock, 1);
+=======
+socket_set_traffic_mgt_flags(socket_t sock, u_int32_t flags)
+{
+	(void) OSBitOrAtomic(flags, &sock->so_traffic_mgt_flags);
+>>>>>>> origin/10.6
 }
 
 /*
  * Caller must have ensured socket is valid and won't be going away.
  */
 void
+<<<<<<< HEAD
 socket_clear_traffic_mgt_flags_locked(socket_t sock, u_int8_t flags)
 {
 	(void) OSBitAndAtomic8(~flags, &sock->so_traffic_mgt_flags);
@@ -1199,4 +1213,48 @@ int
 sock_iskernel(socket_t so)
 {
 	return (so && so->last_pid == 0);
+=======
+socket_clear_traffic_mgt_flags(socket_t sock, u_int32_t flags)
+{
+	(void) OSBitAndAtomic(~flags, &sock->so_traffic_mgt_flags);
+}
+
+__private_extern__ void
+set_traffic_class(struct mbuf *m, struct socket *so, int mtc)
+{
+#if !PKT_PRIORITY
+#pragma unused(m)
+#pragma unused(so)
+#pragma unused(mtc)
+	return;
+#else /* PKT_PRIORITY */
+	if (!(m->m_flags & M_PKTHDR))
+		return;
+
+	if (soisbackground(so)) {
+		m->m_pkthdr.prio = MBUF_TC_BK;			
+	} else if (mtc != MBUF_TC_NONE) {
+		if (mtc >= MBUF_TC_BE && mtc <= MBUF_TC_VO)
+			m->m_pkthdr.prio = mtc;
+	} else {
+		switch (so->so_traffic_class) {
+			case SO_TC_BE:
+				m->m_pkthdr.prio = MBUF_TC_BE;
+				break;
+			case SO_TC_BK:
+				m->m_pkthdr.prio = MBUF_TC_BK;
+				break;
+			case SO_TC_VI:
+				m->m_pkthdr.prio = MBUF_TC_VI;
+				break;
+			case SO_TC_VO:
+				m->m_pkthdr.prio = MBUF_TC_VO;
+				break;
+			default:
+				break;
+		}
+	}
+	return;
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 }

@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -251,6 +273,7 @@ struct vm_page {
 	 */
 			clustered:1,	/* page is not the faulted page (O) or (O-shared AND pmap_page) */
 			pmapped:1,     	/* page has been entered at some
+<<<<<<< HEAD
                				 * point into a pmap (O) or (O-shared AND pmap_page) */
 		        xpmapped:1,	/* page has been entered with execute permission (O)
 					   or (O-shared AND pmap_page) */
@@ -258,6 +281,11 @@ struct vm_page {
 			wpmapped:1,     /* page has been entered at some
 					 * point into a pmap for write (O) */
 			pageout:1,	/* page wired & busy for pageout (O) */
+=======
+					 * point into a pmap (O) */
+			wpmapped:1,     /* page has been entered at some
+					 * point into a pmap for write (O) */
+>>>>>>> origin/10.5
 			absent:1,	/* Data has been requested, but is
 					 *  not yet available (O) */
 			error:1,	/* Data manager was unable to provide
@@ -278,13 +306,42 @@ struct vm_page {
 			encrypted_cleaning:1,	/* encrypting page */
 			cs_validated:1,    /* code-signing: page was checked */	
 			cs_tainted:1,	   /* code-signing: page is tainted */
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.10
 			cs_nx:1,	   /* code-signing: page is nx */
 			reusable:1,
 		        lopage:1,
 			slid:1,
 		        compressor:1,	/* page owned by compressor pool */
 		        written_by_kernel:1,	/* page was written by kernel (i.e. decompressed) */
+<<<<<<< HEAD
+<<<<<<< HEAD
 			__unused_object_bits:4;  /* 5 bits available here */
+=======
+			no_cache:1,	   /* page is not to be cached and */
+					   /* should be reused ahead of    */
+					   /* other pages		   */
+	                deactivated:1,
+			zero_fill:1,
+<<<<<<< HEAD
+			__unused_object_bits:8;  /* 8 bits available here */
+=======
+			reusable:1,
+		        lopage:1,
+			__unused_object_bits:6;  /* 6 bits available here */
+>>>>>>> origin/10.6
+=======
+			__unused_object_bits:5;	/* 5 bits available here */
+>>>>>>> origin/10.9
+
+	ppnum_t		phys_page;	/* Physical address of page, passed
+					 *  to pmap_enter (read-only) */
+>>>>>>> origin/10.5
+=======
+			__unused_object_bits:4;  /* 5 bits available here */
+>>>>>>> origin/10.10
 };
 
 #define DEBUG_ENCRYPTED_SWAP	1
@@ -313,7 +370,11 @@ typedef struct vm_locks_array {
 
 #define VM_PAGE_WIRED(m)	((!(m)->local && (m)->wire_count))
 #define VM_PAGE_NULL		((vm_page_t) 0)
+<<<<<<< HEAD
 #define NEXT_PAGE(m)		((vm_page_t) (m)->pageq.next)
+=======
+#define NEXT_PAGE(m)    	((vm_page_t) (m)->pageq.next)
+>>>>>>> origin/10.3
 #define NEXT_PAGE_PTR(m)	((vm_page_t *) &(m)->pageq.next)
 
 /*
@@ -471,10 +532,13 @@ extern unsigned int	vm_page_pageable_external_count;
 extern
 unsigned int	vm_page_xpmapped_external_count;	/* How many pages are mapped executable? */
 extern
+<<<<<<< HEAD
 unsigned int	vm_page_external_count;	/* How many pages are file-backed? */
 extern
 unsigned int	vm_page_internal_count;	/* How many pages are anonymous? */
 extern
+=======
+>>>>>>> origin/10.8
 unsigned int	vm_page_wire_count;		/* How many pages are wired? */
 extern
 unsigned int	vm_page_wire_count_initial;	/* How many pages wired at startup */
@@ -529,8 +593,11 @@ extern ppnum_t	vm_page_guard_addr;
 
 extern boolean_t	vm_page_deactivate_hint;
 
+<<<<<<< HEAD
 extern int		vm_compressor_mode;
 
+=======
+>>>>>>> origin/10.6
 /*
    0 = all pages avail ( default. )
    1 = disable high mem ( cap max pages to 4G)
@@ -601,7 +668,11 @@ extern vm_page_t	vm_page_alloc_guard(
 extern void		vm_page_init(
 					vm_page_t	page,
 					ppnum_t		phys_page,
+<<<<<<< HEAD
 					boolean_t 	lopage);
+=======
+					boolean_t	lopage);
+>>>>>>> origin/10.6
 
 extern void		vm_page_free(
 	                                vm_page_t	page);
@@ -647,6 +718,7 @@ extern void		vm_page_insert(
 					vm_object_t		object,
 					vm_object_offset_t	offset);
 
+<<<<<<< HEAD
 extern void		vm_page_insert_wired(
 					vm_page_t		page,
 					vm_object_t		object,
@@ -663,6 +735,13 @@ extern void		vm_page_insert_internal(
 					boolean_t		batch_pmap_op,
 					boolean_t               delayed_accounting,
 					uint64_t		*delayed_ledger_update);
+=======
+extern void		vm_page_insert_internal(
+	                                vm_page_t		page,
+					vm_object_t		object,
+					vm_object_offset_t	offset,
+					boolean_t		queues_lock_held);
+>>>>>>> origin/10.5
 
 extern void		vm_page_replace(
 					vm_page_t		mem,
@@ -710,6 +789,7 @@ extern void		vm_page_validate_cs(vm_page_t	page);
 extern void		vm_page_validate_cs_mapped(
 	vm_page_t	page,
 	const void	*kaddr);
+<<<<<<< HEAD
 extern void		vm_page_validate_cs_mapped_chunk(
 	vm_page_t	page,
 	const void	*kaddr,
@@ -751,6 +831,8 @@ extern void memorystatus_pages_update(unsigned int pages_avail);
 
 
 #endif /* CONFIG_JETSAM */
+=======
+>>>>>>> origin/10.5
 
 /*
  *	Functions implemented as macros. m->wanted and m->busy are
@@ -836,7 +918,68 @@ extern void vm_page_queues_assert(vm_page_t mem, int val);
 #if DEVELOPMENT || DEBUG
 #define VM_PAGE_SPECULATIVE_USED_ADD()				\
 	MACRO_BEGIN						\
+<<<<<<< HEAD
 	OSAddAtomic(1, &vm_page_speculative_used);	\
+=======
+	assert(!mem->laundry);					\
+	if (mem->active) {					\
+		assert(mem->object != kernel_object);		\
+		assert(!mem->inactive && !mem->speculative);	\
+		assert(!mem->throttled);			\
+		queue_remove(&vm_page_queue_active,		\
+			mem, vm_page_t, pageq);			\
+		mem->active = FALSE;				\
+		if (!mem->fictitious) {				\
+			vm_page_active_count--;			\
+		} else {					\
+			assert(mem->phys_page ==		\
+			       vm_page_fictitious_addr);	\
+		}						\
+	}							\
+								\
+	else if (mem->inactive) {				\
+		assert(mem->object != kernel_object);		\
+		assert(!mem->active && !mem->speculative);	\
+		assert(!mem->throttled);			\
+		if (mem->zero_fill) {				\
+			queue_remove(&vm_page_queue_zf,		\
+			mem, vm_page_t, pageq);			\
+			vm_zf_queue_count--;			\
+		} else {					\
+			queue_remove(&vm_page_queue_inactive,	\
+			mem, vm_page_t, pageq);			\
+		}						\
+		mem->inactive = FALSE;				\
+		if (!mem->fictitious) {				\
+			vm_page_inactive_count--;		\
+			vm_purgeable_q_advance_all();		\
+		} else {					\
+			assert(mem->phys_page ==		\
+			       vm_page_fictitious_addr);	\
+		}						\
+	}							\
+								\
+	else if (mem->throttled) {				\
+		assert(!mem->active && !mem->inactive);		\
+		assert(!mem->speculative);			\
+		queue_remove(&vm_page_queue_throttled,		\
+			     mem, vm_page_t, pageq);		\
+		mem->throttled = FALSE;				\
+		if (!mem->fictitious)				\
+			vm_page_throttled_count--;		\
+	}							\
+								\
+	else if (mem->speculative) {				\
+		assert(!mem->active && !mem->inactive);		\
+		assert(!mem->throttled);			\
+		assert(!mem->fictitious);			\
+                remque(&mem->pageq);				\
+		mem->speculative = FALSE;			\
+		vm_page_speculative_count--;			\
+	}							\
+	mem->pageq.next = NULL;					\
+	mem->pageq.prev = NULL;					\
+>>>>>>> origin/10.5
 	MACRO_END
 #else
 #define	VM_PAGE_SPECULATIVE_USED_ADD()
@@ -930,11 +1073,14 @@ extern vm_page_t vm_object_page_grab(vm_object_t);
 #if VM_PAGE_BUCKETS_CHECK
 extern void vm_page_buckets_check(void);
 #endif /* VM_PAGE_BUCKETS_CHECK */
+<<<<<<< HEAD
 
 extern void vm_page_queues_remove(vm_page_t mem);
 extern void vm_page_remove_internal(vm_page_t page);
 extern void vm_page_enqueue_inactive(vm_page_t mem, boolean_t first);
 extern void vm_page_check_pageable_safe(vm_page_t page);
 
+=======
+>>>>>>> origin/10.9
 
 #endif	/* _VM_VM_PAGE_H_ */

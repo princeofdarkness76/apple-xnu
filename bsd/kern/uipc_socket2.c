@@ -1,6 +1,11 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 1998-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 1998-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +20,24 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +45,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */
 /*
@@ -394,10 +431,19 @@ sonewconn_internal(struct socket *head, int connstatus)
 #endif
 
 	/* inherit traffic management properties of listener */
+<<<<<<< HEAD
 	so->so_traffic_mgt_flags =
 	    head->so_traffic_mgt_flags & (TRAFFIC_MGT_SO_BACKGROUND);
 	so->so_background_thread = head->so_background_thread;
 	so->so_traffic_class = head->so_traffic_class;
+=======
+	so->so_traffic_mgt_flags = head->so_traffic_mgt_flags &
+	    (TRAFFIC_MGT_SO_BACKGROUND | TRAFFIC_MGT_SO_BG_REGULATE);
+	so->so_background_thread = head->so_background_thread;
+#if PKT_PRIORITY
+	so->so_traffic_class = head->so_traffic_class;
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 
 	if (soreserve(so, head->so_snd.sb_hiwat, head->so_rcv.sb_hiwat)) {
 		sodealloc(so);
@@ -2938,6 +2984,73 @@ sbtoxsockbuf(struct sockbuf *sb, struct xsockbuf *xsb)
 	    (sb->sb_timeo.tv_sec * hz) + sb->sb_timeo.tv_usec / tick;
 	if (xsb->sb_timeo == 0 && sb->sb_timeo.tv_usec != 0)
 		xsb->sb_timeo = 1;
+}
+
+int
+soisbackground(struct socket *so)
+{
+	return (so->so_traffic_mgt_flags & TRAFFIC_MGT_SO_BACKGROUND);
+}
+
+#if PKT_PRIORITY
+#define _MIN_NXT_CMSGHDR_PTR(cmsg)                              \
+	((char *)(cmsg) +                                       \
+	    __DARWIN_ALIGN32((__uint32_t)(cmsg)->cmsg_len) +    \
+	    __DARWIN_ALIGN32(sizeof(struct cmsghdr)))
+
+#define M_FIRST_CMSGHDR(m)                                                                      \
+        ((char *)(m) != (char *)0L && (size_t)(m)->m_len >= sizeof(struct cmsghdr) &&           \
+	  (socklen_t)(m)->m_len >= __DARWIN_ALIGN32(((struct cmsghdr *)(m)->m_data)->cmsg_len) ?\
+         (struct cmsghdr *)(m)->m_data :                                                        \
+         (struct cmsghdr *)0L)
+
+#define M_NXT_CMSGHDR(m, cmsg)                                                  \
+        ((char *)(cmsg) == (char *)0L ? M_FIRST_CMSGHDR(m) :                    \
+            _MIN_NXT_CMSGHDR_PTR(cmsg) > ((char *)(m)->m_data) + (m)->m_len ||  \
+            _MIN_NXT_CMSGHDR_PTR(cmsg) < (char *)(m)->m_data ?                  \
+                (struct cmsghdr *)0L /* NULL */ :                               \
+                (struct cmsghdr *)((unsigned char *)(cmsg) +                    \
+                            __DARWIN_ALIGN32((__uint32_t)(cmsg)->cmsg_len)))
+#endif /* PKT_PRIORITY */
+
+__private_extern__ int
+mbuf_traffic_class_from_control(struct mbuf *control)
+{
+#if !PKT_PRIORITY
+#pragma unused(control)
+	return MBUF_TC_NONE;
+#else /* PKT_PRIORITY */
+	struct cmsghdr *cm;
+	
+	for (cm = M_FIRST_CMSGHDR(control); cm; cm = M_NXT_CMSGHDR(control, cm)) {
+		int tc;	
+
+		if (cm->cmsg_len < sizeof(struct cmsghdr))
+			break;
+	
+		if (cm->cmsg_level != SOL_SOCKET || cm->cmsg_type != SO_TRAFFIC_CLASS)
+			continue;
+		if (cm->cmsg_len != CMSG_LEN(sizeof(int)))
+			continue;
+
+		tc = *(int *)CMSG_DATA(cm);
+
+		switch (tc) {
+			case SO_TC_BE:
+				return MBUF_TC_BE;
+			case SO_TC_BK:
+				return MBUF_TC_BK;
+			case SO_TC_VI:
+				return MBUF_TC_VI;
+			case SO_TC_VO:
+				return MBUF_TC_VO;
+			default:
+				break;
+		}
+	}
+	
+	return MBUF_TC_NONE;
+#endif /* PKT_PRIORITY */
 }
 
 /*

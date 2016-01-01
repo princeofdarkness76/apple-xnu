@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2007, 2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -91,6 +117,7 @@
 #include <sys/vnode_internal.h>
 #include <sys/file_internal.h>
 #include <sys/acct.h>
+<<<<<<< HEAD
 #include <sys/codesign.h>
 #include <sys/sysproto.h>
 
@@ -108,6 +135,15 @@ extern void dtrace_lazy_dofs_duplicate(proc_t, proc_t);
 static void (*dtrace_proc_waitfor_hook)(proc_t) = NULL;
 
 #include <sys/dtrace_ptss.h>
+=======
+#include <sys/wait.h>
+
+#include <bsm/audit_kernel.h>
+
+#if KTRACE
+#include <sys/ktrace.h>
+#include <sys/ubc.h>
+>>>>>>> origin/10.3
 #endif
 
 #include <security/audit/audit.h>
@@ -436,6 +472,7 @@ fork1(proc_t parent_proc, thread_t *child_threadp, int kind, coalition_t *coalit
 			goto bad;
 		}
 
+<<<<<<< HEAD
 		/*
 		 * Flag us in progress; if we chose to support vfork() in
 		 * vfork(), we would chain our parent at this point (in
@@ -451,6 +488,21 @@ fork1(proc_t parent_proc, thread_t *child_threadp, int kind, coalition_t *coalit
 			err = ENOMEM;
 			goto bad;
 		}
+=======
+	AUDIT_ARG(pid, newproc->p_pid);
+
+	LIST_INSERT_AFTER(p, newproc, p_pglist);
+	newproc->p_pptr = p;
+	newproc->task = p->task;
+	LIST_INSERT_HEAD(&p->p_children, newproc, p_sibling);
+	LIST_INIT(&newproc->p_children);
+	LIST_INSERT_HEAD(&allproc, newproc, p_list);
+	LIST_INSERT_HEAD(PIDHASH(newproc->p_pid), newproc, p_hash);
+	TAILQ_INIT(& newproc->p_evlist);
+	newproc->p_stat = SRUN;
+	newproc->p_flag  |= P_INVFORK;
+	newproc->p_vforkact = cur_act;
+>>>>>>> origin/10.3
 
 // XXX BEGIN: wants to move to be common code (and safe)
 #if CONFIG_MACF
@@ -719,6 +771,7 @@ bad:
 void
 vfork_return(proc_t child_proc, int32_t *retval, int rval)
 {
+<<<<<<< HEAD
 	task_t parent_task = get_threadtask(child_proc->p_vforkact);
 	proc_t parent_proc = get_bsdtask_info(parent_task);
 	thread_t th = current_thread();
@@ -746,6 +799,34 @@ vfork_return(proc_t child_proc, int32_t *retval, int rval)
 	proc_unlock(child_proc);
 
 	thread_set_parent(th, rval);
+=======
+	long flags;
+	register uid_t uid;
+	int s, count;
+	task_t t;
+	uthread_t ut;
+	
+	ut = (struct uthread *)get_bsdthread_info(th_act);
+
+	act_thread_catt(ut->uu_userstate);
+
+	/* Make sure only one at this time */
+	if (p) {
+		p->p_vforkcnt--;
+		if (p->p_vforkcnt <0)
+			panic("vfork cnt is -ve");
+		if (p->p_vforkcnt <=0)
+			p->p_flag  &= ~P_VFORK;
+	}
+	ut->uu_userstate = 0;
+	ut->uu_flag &= ~P_VFORK;
+	ut->uu_proc = 0;
+	ut->uu_sigmask = ut->uu_vforkmask;
+	p2->p_flag  &= ~P_INVFORK;
+	p2->p_vforkact = (void *)0;
+
+	thread_set_parent(th_act, p2->p_pid);
+>>>>>>> origin/10.3
 
 	if (retval) {
 		retval[0] = rval;
@@ -837,12 +918,30 @@ fork_create_child(task_t parent_task, coalition_t *parent_coalitions, proc_t chi
 	}
 
 	/*
+<<<<<<< HEAD
          * Tag thread as being the first thread in its task.
          */
 	thread_set_tag(child_thread, THREAD_TAG_MAINTHREAD);
 
+<<<<<<< HEAD
+=======
+	 * Tag thread as being the first thread in its task.
+	 */
+	thread_set_tag(child_thread, THREAD_TAG_MAINTHREAD);
+
+>>>>>>> origin/10.8
 bad:
 	thread_yield_internal(1);
+=======
+	/* The newly created process comes with signal lock held */
+	newth = cloneproc(p1, 1);
+	thread_dup(newth);
+	/* p2 = newth->task->proc; */
+	p2 = (struct proc *)(get_bsdtask_info(get_threadtask(newth)));
+	set_security_token(p2);         /* propagate change of PID */
+
+	AUDIT_ARG(pid, p2->p_pid);
+>>>>>>> origin/10.3
 
 	return(child_thread);
 }
@@ -1119,9 +1218,14 @@ forkproc_free(proc_t p)
 proc_t
 forkproc(proc_t parent_proc)
 {
+<<<<<<< HEAD
 	proc_t child_proc;	/* Our new process */
 	static int nextpid = 0, pidwrap = 0, nextpidversion = 0;
 	static uint64_t nextuniqueid = 0;
+=======
+	struct proc *  child;	/* Our new process */
+	static int nextpid = 0, pidwrap = 0, nextpidversion = 0;
+>>>>>>> origin/10.5
 	int error = 0;
 	struct session *sessp;
 	uthread_t parent_uthread = (uthread_t)get_bsdthread_info(current_thread());
@@ -1198,11 +1302,16 @@ retry:
 		}	
 	}
 	nprocs++;
+<<<<<<< HEAD
 	child_proc->p_pid = nextpid;
 	child_proc->p_responsible_pid = nextpid;	/* initially responsible for self */
 	child_proc->p_idversion = nextpidversion++;
 	/* kernel process is handcrafted and not from fork, so start from 1 */
 	child_proc->p_uniqueid = ++nextuniqueid;
+=======
+	child->p_pid = nextpid;
+	child->p_idversion = nextpidversion++;
+>>>>>>> origin/10.5
 #if 1
 	if (child_proc->p_pid != 0) {
 		if (pfind_locked(child_proc->p_pid) != PROC_NULL)
@@ -1215,6 +1324,7 @@ retry:
 	proc_list_unlock();
 
 
+	p2->p_shutdownstate = 0;
 	/*
 	 * We've identified the PID we are going to use; initialize the new
 	 * process structure.
@@ -1346,6 +1456,7 @@ retry:
 	 * All processes have work queue locks; cleaned up by
 	 * reap_child_locked()
 	 */
+<<<<<<< HEAD
 	workqueue_init_lock(child_proc);
 
 	/*
@@ -1365,6 +1476,15 @@ retry:
 	child_proc->p_targconc = parent_proc->p_targconc;
 	if ((parent_proc->p_lflag & P_LREGISTER) != 0) {
 		child_proc->p_lflag |= P_LREGISTER;
+=======
+	if (p1->p_traceflag&KTRFAC_INHERIT) {
+		p2->p_traceflag = p1->p_traceflag;
+		if ((p2->p_tracep = p1->p_tracep) != NULL) {
+			if (UBCINFOEXISTS(p2->p_tracep))
+			        ubc_hold(p2->p_tracep);
+			VREF(p2->p_tracep);
+		}
+>>>>>>> origin/10.3
 	}
 	child_proc->p_wqkqueue = NULL;
 	child_proc->p_dispatchqueue_offset = parent_proc->p_dispatchqueue_offset;
@@ -1564,11 +1684,24 @@ uthread_cleanup_name(void *uthread)
  * It does not free the uthread structure as well
  */
 void
+<<<<<<< HEAD
 uthread_cleanup(task_t task, void *uthread, void * bsd_info, boolean_t is_corpse)
 {
 	struct _select *sel;
 	uthread_t uth = (uthread_t)uthread;
 	proc_t p = (proc_t)bsd_info;
+=======
+uthread_free(task_t task, thread_t act, void *uthread, void * bsd_info)
+{
+	struct _select *sel;
+	struct uthread *uth = (struct uthread *)uthread;
+	struct proc * p = (struct proc *)bsd_info;
+	extern task_t kernel_task;
+	int size;
+	boolean_t funnel_state;
+	struct nlminfo *nlmp;
+	struct proc * vproc;
+>>>>>>> origin/10.3
 
 #if PROC_REF_DEBUG
 	if (__improbable(uthread_get_proc_refcount(uthread) != 0)) {
@@ -1576,18 +1709,29 @@ uthread_cleanup(task_t task, void *uthread, void * bsd_info, boolean_t is_corpse
 	}
 #endif
 
+<<<<<<< HEAD
 	if (uth->uu_lowpri_window || uth->uu_throttle_info) {
 		/*
+=======
+
+	if (uth->uu_lowpri_window) {
+	        /*
+>>>>>>> origin/10.5
 		 * task is marked as a low priority I/O type
 		 * and we've somehow managed to not dismiss the throttle
 		 * through the normal exit paths back to user space...
 		 * no need to throttle this thread since its going away
 		 * but we do need to update our bookeeping w/r to throttled threads
+<<<<<<< HEAD
 		 *
 		 * Calling this routine will clean up any throttle info reference
 		 * still inuse by the thread.
 		 */
 		throttle_lowpri_io(0);
+=======
+		 */
+		throttle_lowpri_io(FALSE);
+>>>>>>> origin/10.5
 	}
 	/*
 	 * Per-thread audit state should never last beyond system
@@ -1626,6 +1770,7 @@ uthread_cleanup(task_t task, void *uthread, void * bsd_info, boolean_t is_corpse
 		uthread_cleanup_name(uth);
 	}
 
+<<<<<<< HEAD
 	if ((task != kernel_task) && p) {
 
 		if (((uth->uu_flag & UT_VFORK) == UT_VFORK) && (uth->uu_proc != PROC_NULL))  {
@@ -1648,6 +1793,21 @@ uthread_cleanup(task_t task, void *uthread, void * bsd_info, boolean_t is_corpse
 			dtrace_ptss_release_entry(p, tmpptr);
 		}
 #endif
+=======
+	if ((task != kernel_task) ) {
+		int vfork_exit(struct proc *, int);
+
+		funnel_state = thread_funnel_set(kernel_flock, TRUE);
+		if (p)
+			TAILQ_REMOVE(&p->p_uthlist, uth, uu_list);
+		if ((uth->uu_flag & P_VFORK) && (vproc = uth->uu_proc) 
+					&& (vproc->p_flag & P_INVFORK)) {
+			if (!vfork_exit(vproc, W_EXITCODE(0, SIGKILL)))	
+				vfork_return(act, p, vproc, NULL);
+
+		}
+		(void)thread_funnel_set(kernel_flock, funnel_state);
+>>>>>>> origin/10.3
 	}
 }
 

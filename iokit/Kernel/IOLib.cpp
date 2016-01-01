@@ -508,7 +508,11 @@ IOKernelFreePhysical(mach_vm_address_t address, mach_vm_size_t size)
 
 mach_vm_address_t
 IOKernelAllocateWithPhysicalRestrict(mach_vm_size_t size, mach_vm_address_t maxPhys, 
+<<<<<<< HEAD
 			                mach_vm_size_t alignment, bool contiguous)
+=======
+				     mach_vm_size_t alignment, bool contiguous)
+>>>>>>> origin/10.6
 {
     kern_return_t	    kr;
     mach_vm_address_t	    address;
@@ -529,6 +533,12 @@ IOKernelAllocateWithPhysicalRestrict(mach_vm_size_t size, mach_vm_address_t maxP
     contiguous = (contiguous && (adjustedSize > page_size))
                    || (alignment > page_size);
 
+<<<<<<< HEAD
+=======
+    contiguous = (contiguous && (adjustedSize > page_size))
+                   || (alignment > page_size);
+
+>>>>>>> origin/10.6
     if (contiguous || maxPhys)
     {
         int options = 0;
@@ -538,6 +548,10 @@ IOKernelAllocateWithPhysicalRestrict(mach_vm_size_t size, mach_vm_address_t maxP
         contiguous = (contiguous && (adjustedSize > page_size))
                            || (alignment > page_size);
 
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.7
 	if (!contiguous)
 	{
 	    if (maxPhys <= 0xFFFFFFFF)
@@ -550,6 +564,17 @@ IOKernelAllocateWithPhysicalRestrict(mach_vm_size_t size, mach_vm_address_t maxP
 		maxPhys = 0;
 	    }
 	}
+<<<<<<< HEAD
+=======
+        if ((!contiguous) && (maxPhys <= 0xFFFFFFFF))
+        {
+            maxPhys = 0;
+            options |= KMA_LOMEM;
+        }
+
+>>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.7
 	if (contiguous || maxPhys)
 	{
 	    kr = kmem_alloc_contig(kernel_map, &virt, size,
@@ -558,7 +583,11 @@ IOKernelAllocateWithPhysicalRestrict(mach_vm_size_t size, mach_vm_address_t maxP
 	else
 	{
 	    kr = kernel_memory_allocate(kernel_map, &virt,
+<<<<<<< HEAD
 					size, alignMask, options, IOMemoryTag(kernel_map));
+=======
+					size, alignMask, options);
+>>>>>>> origin/10.6
 	}
 	if (KERN_SUCCESS == kr)
 	{
@@ -603,7 +632,11 @@ IOKernelAllocateWithPhysicalRestrict(mach_vm_size_t size, mach_vm_address_t maxP
     if (address) {
     IOStatisticsAlloc(kIOStatisticsMallocContiguous, size);
 #if IOALLOCDEBUG
+<<<<<<< HEAD
     OSAddAtomic(size, &debug_iomalloc_size);
+=======
+	debug_iomalloc_size += size;
+>>>>>>> origin/10.7
 #endif
     }
 

@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -91,7 +113,20 @@ const OSSymbol *		gIOPlatformPanicActionKey;
 static queue_head_t     	gActionQueues[kQueueCount];
 static const OSSymbol *		gActionSymbols[kQueueCount];
 
+<<<<<<< HEAD
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+=======
+queue_head_t * iocpu_get_platform_active_queue(void)
+{
+    if (!iocpu_active_queue.next)
+    {
+	queue_init(&iocpu_quiesce_queue);
+	queue_init(&iocpu_active_queue);
+	iocpu_platform_cpu_action_init(&iocpu_quiesce_queue, &iocpu_active_queue);
+    }
+    return (&iocpu_active_queue);
+}
+>>>>>>> origin/10.6
 
 static void
 iocpu_add_platform_action(queue_head_t * queue, iocpu_platform_action_entry_t * entry)
@@ -375,8 +410,12 @@ void IOCPUSleepKernel(void)
     long cnt, numCPUs;
     IOCPU *target;
     IOCPU *bootCPU = NULL;
+<<<<<<< HEAD
     IOPMrootDomain  *rootDomain = IOService::getPMRootDomain();
 
+=======
+  
+>>>>>>> origin/10.5
     kprintf("IOCPUSleepKernel\n");
 
     IORegistryIterator * iter;
@@ -437,15 +476,22 @@ void IOCPUSleepKernel(void)
         }
     }
 
+<<<<<<< HEAD
     rootDomain->tracePoint( kIOPMTracePointSleepPlatformDriver );
 
+=======
+>>>>>>> origin/10.5
     // Now sleep the boot CPU.
     if (bootCPU)
         bootCPU->haltCPU();
 
+<<<<<<< HEAD
     rootDomain->tracePoint( kIOPMTracePointWakePlatformActions );
 
     iocpu_run_platform_actions(&gActionQueues[kQueueWake], 0, 0U-1,
+=======
+    iocpu_run_platform_actions(&gIOWakeActionQueue, 0, 0UL-1,
+>>>>>>> origin/10.5
 				    NULL, NULL, NULL);
 
     iocpu_platform_action_entry_t * entry;
@@ -507,6 +553,7 @@ bool IOCPU::start(IOService *provider)
   gIOCPUs->setObject(this);
   
   // Correct the bus, cpu and timebase frequencies in the device tree.
+<<<<<<< HEAD
   if (gPEClockFrequencyInfo.bus_frequency_hz < 0x100000000ULL) {
     busFrequency = OSData::withBytesNoCopy((void *)&gPEClockFrequencyInfo.bus_clock_rate_hz, 4);
   } else {
@@ -522,6 +569,25 @@ bool IOCPU::start(IOService *provider)
   }
   provider->setProperty("clock-frequency", cpuFrequency);
   cpuFrequency->release();
+=======
+  if (gPEClockFrequencyInfo.bus_frequency_hz < 0x100000000ULL) 
+    busFrequency = OSData::withBytesNoCopy((void *)((char *)&gPEClockFrequencyInfo.bus_frequency_hz + 4), 4);
+  else
+    busFrequency = OSData::withBytesNoCopy((void *)&gPEClockFrequencyInfo.bus_clock_rate_hz, 8);
+  provider->setProperty("bus-frequency", busFrequency);
+  busFrequency->release();
+    
+  if (gPEClockFrequencyInfo.cpu_frequency_hz < 0x100000000ULL) 
+    cpuFrequency = OSData::withBytesNoCopy((void *)((char *)&gPEClockFrequencyInfo.cpu_frequency_hz + 4), 4);
+  else
+    cpuFrequency = OSData::withBytesNoCopy((void *)&gPEClockFrequencyInfo.cpu_clock_rate_hz, 8);
+  provider->setProperty("clock-frequency", cpuFrequency);
+  cpuFrequency->release();
+  
+  timebaseFrequency = OSData::withBytesNoCopy((void *)&gPEClockFrequencyInfo.timebase_frequency_hz, 4);
+  provider->setProperty("timebase-frequency", timebaseFrequency);
+  timebaseFrequency->release();
+>>>>>>> origin/10.2
   
   timebaseFrequency = OSData::withBytesNoCopy((void *)&gPEClockFrequencyInfo.timebase_frequency_hz, 4);
   provider->setProperty("timebase-frequency", timebaseFrequency);

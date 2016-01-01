@@ -183,6 +183,47 @@ is_ignored_directory(const char *path) {
     return 0;
 }
 
+
+/* From kdp_udp.c + user mode Libc - this ought to be in a library */
+static char *
+strnstr(char *s, const char *find, size_t slen)
+{
+  char c, sc;
+  size_t len;
+  
+  if ((c = *find++) != '\0') {
+    len = strlen(find);
+    do {
+      do {
+        if ((sc = *s++) == '\0' || slen-- < 1)
+          return (NULL);
+      } while (sc != c);
+      if (len > slen)
+        return (NULL);
+    } while (strncmp(s, find, len) != 0);
+    s--;
+  }
+  return (s);
+}
+
+static int
+is_ignored_directory(const char *path) {
+
+    if (!path) {
+      return 0;
+    }
+
+#define IS_TLD(x) strnstr((char *) path, x, MAXPATHLEN) 
+    if (IS_TLD("/.Spotlight-V100/") ||
+        IS_TLD("/.MobileBackups/") || 
+        IS_TLD("/Backups.backupdb/")) {
+        return 1;
+    }
+#undef IS_TLD
+    
+    return 0;
+}
+
 static void
 fsevents_internal_init(void)
 {
@@ -225,7 +266,11 @@ fsevents_internal_init(void)
     zone_change(event_zone, Z_COLLECT, FALSE);
     zone_change(event_zone, Z_CALLERACCT, FALSE);
 
+<<<<<<< HEAD
     if (zfill(event_zone, max_kfs_events) < max_kfs_events) {
+=======
+    if (zfill(event_zone, MAX_KFS_EVENTS) < MAX_KFS_EVENTS) {
+>>>>>>> origin/10.7
 	printf("fsevents: failed to pre-fill the event zone.\n");	
     }
     
@@ -392,7 +437,15 @@ add_fsevent(int type, vfs_context_t ctx, ...)
     // (as long as it's not an event type that can never be the
     // same as a previous event)
     //
+<<<<<<< HEAD
+<<<<<<< HEAD
     if (type != FSE_CREATE_FILE && type != FSE_DELETE && type != FSE_RENAME && type != FSE_EXCHANGE && type != FSE_CHOWN && type != FSE_DOCID_CHANGED && type != FSE_DOCID_CREATED) {
+=======
+    if (type != FSE_CREATE_FILE && type != FSE_DELETE && type != FSE_RENAME && type != FSE_EXCHANGE && type != FSE_CHOWN) {
+>>>>>>> origin/10.5
+=======
+    if (type != FSE_CREATE_FILE && type != FSE_DELETE && type != FSE_RENAME && type != FSE_EXCHANGE && type != FSE_CHOWN && type != FSE_DOCID_CHANGED && type != FSE_DOCID_CREATED) {
+>>>>>>> origin/10.9
 	void *ptr=NULL;
 	int   vid=0, was_str=0, nlen=0;
 
@@ -643,7 +696,14 @@ add_fsevent(int type, vfs_context_t ctx, ...)
 		VATTR_WANTED(&va, va_mode);
 		VATTR_WANTED(&va, va_uid);
 		VATTR_WANTED(&va, va_gid);
+<<<<<<< HEAD
+<<<<<<< HEAD
 		VATTR_WANTED(&va, va_nlink);
+=======
+>>>>>>> origin/10.5
+=======
+		VATTR_WANTED(&va, va_nlink);
+>>>>>>> origin/10.10
 		if ((ret = vnode_getattr(vp, &va, vfs_context_kernel())) != 0) {
 		    // printf("add_fsevent: failed to getattr on vp %p (%d)\n", cur->fref.vp, ret);
 		    cur->str = NULL;
@@ -970,6 +1030,19 @@ add_watcher(int8_t *event_list, int32_t num_events, int32_t eventq_size, fs_even
     } else {
       printf("fsevents: watcher %s (pid: %d) - Using /dev/fsevents directly is unsupported.  Migrate to FSEventsFramework\n",
 	     watcher->proc_name, watcher->pid);
+<<<<<<< HEAD
+=======
+    }
+
+    lock_watch_table();
+
+    // now update the global list of who's interested in
+    // events of a particular type...
+    for(i=0; i < num_events; i++) {
+	if (event_list[i] != FSE_IGNORE && i < FSE_MAX_EVENTS) {
+	    fs_event_type_watchers[i]++;
+	}
+>>>>>>> origin/10.8
     }
 
     lock_watch_table();
@@ -1535,13 +1608,25 @@ fmod_watch(fs_event_watcher *watcher, struct uio *uio)
 	// its type or which device it is for)
 	//
 	kfse = watcher->event_queue[watcher->rd];
+<<<<<<< HEAD
 	if (!kfse || kfse->type == FSE_INVALID || kfse->type >= watcher->num_events || kfse->refcount < 1) {
+=======
+	if (!kfse || kfse->type == FSE_INVALID || kfse->refcount < 1) {
+>>>>>>> origin/10.8
 	  break;
 	}
 
 	if (watcher->event_list[kfse->type] == FSE_REPORT && watcher_cares_about_dev(watcher, kfse->dev)) {
 
+<<<<<<< HEAD
+<<<<<<< HEAD
 	  if (!(watcher->flags & WATCHER_APPLE_SYSTEM_SERVICE) && kfse->type != FSE_DOCID_CHANGED && is_ignored_directory(kfse->str)) {
+=======
+	  if (!(watcher->flags & WATCHER_APPLE_SYSTEM_SERVICE) & is_ignored_directory(kfse->str)) {
+>>>>>>> origin/10.8
+=======
+	  if (!(watcher->flags & WATCHER_APPLE_SYSTEM_SERVICE) && kfse->type != FSE_DOCID_CHANGED && is_ignored_directory(kfse->str)) {
+>>>>>>> origin/10.9
 	    // If this is not an Apple System Service, skip specified directories
 	    // radar://12034844
 	    error = 0;

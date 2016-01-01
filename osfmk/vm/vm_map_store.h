@@ -114,11 +114,14 @@ struct vm_map_store {
 	(map)->hint = (value);	       \
 	MACRO_END
 
+<<<<<<< HEAD
 #define	SAVE_HINT_HOLE_WRITE(map,value) \
 	MACRO_BEGIN		       \
 	(map)->hole_hint = (value);	\
 	MACRO_END
 
+=======
+>>>>>>> origin/10.10
 #define SKIP_RB_TREE		0xBAADC0D1
 
 #define VM_MAP_ENTRY_CREATE	1

@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2006 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -76,11 +102,127 @@
 #include <sys/lock.h>
 #include <sys/param.h>
 #include <sys/event.h>
+<<<<<<< HEAD
 #ifdef KERNEL
 #include <sys/kernel_types.h>
 #include <uuid/uuid.h>
 #endif
 #include <mach/boolean.h>
+=======
+
+#ifdef __APPLE_API_PRIVATE
+
+/*
+ * One structure allocated per session.
+ */
+struct	session {
+	int	s_count;		/* Ref cnt; pgrps in session. */
+	struct	proc *s_leader;		/* Session leader. */
+	struct	vnode *s_ttyvp;		/* Vnode of controlling terminal. */
+	struct	tty *s_ttyp;		/* Controlling terminal. */
+	pid_t	s_sid;		/* Session ID */
+	char	s_login[MAXLOGNAME];	/* Setlogin() name. */
+};
+
+/*
+ * One structure allocated per process group.
+ */
+struct	pgrp {
+	LIST_ENTRY(pgrp) pg_hash;	/* Hash chain. */
+	LIST_HEAD(, proc) pg_members;	/* Pointer to pgrp members. */
+	struct	session *pg_session;	/* Pointer to session. */
+	pid_t	pg_id;			/* Pgrp id. */
+	int	pg_jobc;	/* # procs qualifying pgrp for job control */
+};
+
+/*
+ * Description of a process.
+ *
+ * This structure contains the information needed to manage a thread of
+ * control, known in UN*X as a process; it has references to substructures
+ * containing descriptions of things that the process uses, but may share
+ * with related processes.  The process structure and the substructures
+ * are always addressible except for those marked "(PROC ONLY)" below,
+ * which might be addressible only on a processor on which the process
+ * is running.
+ */
+struct	proc {
+	LIST_ENTRY(proc) p_list;	/* List of all processes. */
+
+	/* substructures: */
+	struct	pcred *p_cred;		/* Process owner's identity. */
+	struct	filedesc *p_fd;		/* Ptr to open files structure. */
+	struct	pstats *p_stats;	/* Accounting/statistics (PROC ONLY). */
+	struct	plimit *p_limit;	/* Process limits. */
+	struct	sigacts *p_sigacts;	/* Signal actions, state (PROC ONLY). */
+
+#define	p_ucred		p_cred->pc_ucred
+#define	p_rlimit	p_limit->pl_rlimit
+
+	int	p_flag;			/* P_* flags. */
+	char	p_stat;			/* S* process status. */
+        char	p_shutdownstate;
+	char	p_pad1[2];
+
+	pid_t	p_pid;			/* Process identifier. */
+	LIST_ENTRY(proc) p_pglist;	/* List of processes in pgrp. */
+	struct	proc *p_pptr;	 	/* Pointer to parent process. */
+	LIST_ENTRY(proc) p_sibling;	/* List of sibling processes. */
+	LIST_HEAD(, proc) p_children;	/* Pointer to list of children. */
+
+/* The following fields are all zeroed upon creation in fork. */
+#define	p_startzero	p_oppid
+
+	pid_t	p_oppid;	 /* Save parent pid during ptrace. XXX */
+	int	p_dupfd;	 /* Sideways return value from fdopen. XXX */
+
+	/* scheduling */
+	u_int	p_estcpu;	 /* Time averaged value of p_cpticks. */
+	int	p_cpticks;	 /* Ticks of cpu time. */
+	fixpt_t	p_pctcpu;	 /* %cpu for this process during p_swtime */
+	void	*p_wchan;	 /* Sleep address. */
+	char	*p_wmesg;	 /* Reason for sleep. */
+	u_int	p_swtime;	 /* DEPRECATED (Time swapped in or out.) */
+#define	p_argslen p_swtime	 /* Length of process arguments. */
+	u_int	p_slptime;	 /* Time since last blocked. */
+
+	struct	itimerval p_realtimer;	/* Alarm timer. */
+	struct	timeval p_rtime;	/* Real time. */
+	u_quad_t p_uticks;		/* Statclock hits in user mode. */
+	u_quad_t p_sticks;		/* Statclock hits in system mode. */
+	u_quad_t p_iticks;		/* Statclock hits processing intr. */
+
+	int	p_traceflag;		/* Kernel trace points. */
+	struct	vnode *p_tracep;	/* Trace to vnode. */
+
+	sigset_t p_siglist;		/* DEPRECATED. */
+
+	struct	vnode *p_textvp;	/* Vnode of executable. */
+
+/* End area that is zeroed on creation. */
+#define	p_endzero	p_hash.le_next
+
+	/*
+	 * Not copied, not zero'ed.
+	 * Belongs after p_pid, but here to avoid shifting proc elements.
+	 */
+	LIST_ENTRY(proc) p_hash;	/* Hash chain. */
+	TAILQ_HEAD( ,eventqelt) p_evlist;
+
+/* The following fields are all copied upon creation in fork. */
+#define	p_startcopy	p_sigmask
+
+	sigset_t p_sigmask;		/* DEPRECATED */
+	sigset_t p_sigignore;	/* Signals being ignored. */
+	sigset_t p_sigcatch;	/* Signals being caught by user. */
+
+	u_char	p_priority;	/* Process priority. */
+	u_char	p_usrpri;	/* User-priority based on p_cpu and p_nice. */
+	char	p_nice;		/* Process "nice" value. */
+	char	p_comm[MAXCOMLEN+1];
+
+	struct 	pgrp *p_pgrp;	/* Pointer to process group. */
+>>>>>>> origin/10.3
 
 #ifdef XNU_KERNEL_PRIVATE
 #include <mach/coalition.h>		/* COALITION_NUM_TYPES */
@@ -288,7 +430,65 @@ extern int proc_tbe(proc_t);
  @abstract Get the process group id for the current process, as with proc_pgrpid().
  @return pgrpid of current process.
  */
+<<<<<<< HEAD
 pid_t proc_selfpgrpid(void);
+=======
+extern int nprocs, maxproc;		/* Current and max number of procs. */
+__private_extern__ int hard_maxproc;	/* hard limit */
+
+#define	PID_MAX		30000
+#define	NO_PID		30001
+
+#define SESS_LEADER(p)	((p)->p_session->s_leader == (p))
+#define	SESSHOLD(s)	((s)->s_count++)
+#define	SESSRELE(s)	sessrele(s)
+
+#define	PIDHASH(pid)	(&pidhashtbl[(pid) & pidhash])
+extern LIST_HEAD(pidhashhead, proc) *pidhashtbl;
+extern u_long pidhash;
+
+#define	PGRPHASH(pgid)	(&pgrphashtbl[(pgid) & pgrphash])
+extern LIST_HEAD(pgrphashhead, pgrp) *pgrphashtbl;
+extern u_long pgrphash;
+
+LIST_HEAD(proclist, proc);
+extern struct proclist allproc;		/* List of all processes. */
+extern struct proclist zombproc;	/* List of zombie processes. */
+extern struct proc *initproc, *kernproc;
+extern void	pgdelete __P((struct pgrp *pgrp));
+extern void	sessrele __P((struct session *sess));
+extern void	procinit __P((void));
+__private_extern__ char *proc_core_name(const char *name, uid_t uid, pid_t pid);
+extern int proc_is_classic(struct proc *p);
+struct proc *current_proc_EXTERNAL(void);
+#endif /* __APPLE_API_PRIVATE */
+
+#ifdef __APPLE_API_UNSTABLE
+
+extern int isinferior(struct proc *, struct proc *);
+extern struct	proc *pfind __P((pid_t));	/* Find process by id. */
+__private_extern__ struct proc *pzfind(pid_t);	/* Find zombie by id. */
+extern struct	pgrp *pgfind __P((pid_t));	/* Find process group by id. */
+
+extern int	chgproccnt __P((uid_t uid, int diff));
+extern int	enterpgrp __P((struct proc *p, pid_t pgid, int mksess));
+extern void	fixjobc __P((struct proc *p, struct pgrp *pgrp, int entering));
+extern int	inferior __P((struct proc *p));
+extern int	leavepgrp __P((struct proc *p));
+#ifdef __APPLE_API_OBSOLETE
+extern void	mi_switch __P((void));
+#endif /* __APPLE_API_OBSOLETE */
+extern void	resetpriority __P((struct proc *));
+extern void	setrunnable __P((struct proc *));
+extern void	setrunqueue __P((struct proc *));
+extern int	sleep __P((void *chan, int pri));
+extern int	tsleep __P((void *chan, int pri, char *wmesg, int timo));
+extern int	tsleep0 __P((void *chan, int pri, char *wmesg, int timo, int (*continuation)(int)));
+extern int	tsleep1 __P((void *chan, int pri, char *wmesg, u_int64_t abstime, int (*continuation)(int)));
+extern void	unsleep __P((struct proc *));
+extern void	wakeup __P((void *chan));
+#endif /* __APPLE_API_UNSTABLE */
+>>>>>>> origin/10.3
 
 /*!
  @function proc_pgrpid
@@ -306,6 +506,7 @@ extern int IS_64BIT_PROCESS(proc_t);
 extern int	tsleep(void *chan, int pri, const char *wmesg, int timo);
 extern int	msleep1(void *chan, lck_mtx_t *mtx, int pri, const char *wmesg, u_int64_t timo);
 
+<<<<<<< HEAD
 task_t proc_task(proc_t);
 extern int proc_pidversion(proc_t);
 extern int proc_getcdhash(proc_t, unsigned char *);
@@ -356,6 +557,11 @@ extern void proc_coalitionids(proc_t, uint64_t [COALITION_NUM_TYPES]);
 #ifdef KERNEL_PRIVATE
 extern vnode_t proc_getexecutablevnode(proc_t); /* Returned with iocount, use vnode_put() to drop */
 #endif
+=======
+extern int proc_pidversion(proc_t);
+extern int proc_getcdhash(proc_t, unsigned char *);
+#endif /* KERNEL_PRIVATE */
+>>>>>>> origin/10.5
 
 __END_DECLS
 

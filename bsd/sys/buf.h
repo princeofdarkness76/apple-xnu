@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -640,6 +662,7 @@ errno_t	buf_setupl(buf_t, upl_t, uint32_t);
 buf_t	buf_clone(buf_t, int, int, void (*)(buf_t, void *), void *);
 
 
+<<<<<<< HEAD
 /*!
  @function buf_create_shadow
  @abstract Create a shadow buffer with optional private storage and an optional callback.
@@ -684,6 +707,22 @@ buf_t 	buf_alloc(vnode_t);
  @return void.
  */
 void	buf_free(buf_t);
+=======
+/* cluster_io definitions for use with io bufs */
+#define b_uploffset  b_bufsize
+#define b_trans_head b_freelist.tqe_prev
+#define b_trans_next b_freelist.tqe_next
+#define b_real_bp    b_saveaddr
+#define b_iostate    b_rcred
+
+/* journaling uses this cluster i/o field for its own
+ * purposes because meta data buf's should never go
+ * through the clustering code.
+ */
+#define b_transaction b_vectorlist
+
+   
+>>>>>>> origin/10.2
 
 /*
 <<<<<<< HEAD
@@ -722,7 +761,7 @@ void	buf_free(buf_t);
 #define	B_WRITE		0x00000000	/* Write buffer (pseudo flag). */
 #define	B_WRITEINPROG	0x01000000	/* Write in progress. */
 #define	B_HDRALLOC	0x02000000	/* zone allocated buffer header */
-#define	B_UNUSED1	0x04000000	/* Unused bit */
+#define	B_NORELSE	0x04000000	/* don't brelse() in bwrite() */
 #define B_NEED_IODONE   0x08000000
 								/* need to do a biodone on the */
 								/* real_bp associated with a cluster_io */
@@ -1078,6 +1117,7 @@ void	buf_set_redundancy_flags(buf_t, uint32_t);
  */
 bufattr_t buf_attr(buf_t);
 
+<<<<<<< HEAD
 /*!
  @function buf_markstatic
  @abstract Mark a buffer as being likely to contain static data.
@@ -1094,7 +1134,10 @@ bufattr_t buf_attr(buf_t);
  */
 int	buf_static(buf_t);
 
+=======
+>>>>>>> origin/10.7
 #ifdef KERNEL_PRIVATE
+<<<<<<< HEAD
 void	buf_setfilter(buf_t, void (*)(buf_t, void *), void *, void (**)(buf_t, void *), void **);
 
 /* bufattr allocation/duplication/deallocation functions */
@@ -1117,6 +1160,34 @@ struct cpx *bufattr_cpx(bufattr_t);
  @return void
  */
 void bufattr_setcpx(bufattr_t, struct cpx *cpx);
+=======
+void	buf_setfilter(buf_t, void (*)(buf_t, void *), void *, void **, void **);
+
+/*!
+ @function buf_getcpaddr
+ @abstract Set the address of cp_entry on a buffer.
+ @param bp Buffer whose cp entry value has to be set
+ @return void.
+ */
+void buf_setcpaddr(buf_t, void *);
+
+/*!
+ @function buf_getcpaddr
+ @abstract Get the address of cp_entry on a buffer.
+ @param bp Buffer whose error value to set.
+ @return int.
+ */
+void *buf_getcpaddr(buf_t);
+
+/*!
+ @function buf_throttled
+ @abstract Check if a buffer is throttled.
+ @param bap Buffer attribute to test.
+ @return Nonzero if the buffer is throttled, 0 otherwise.
+ */
+int bufattr_throttled(bufattr_t bap);
+#endif /* KERNEL_PRIVATE */
+>>>>>>> origin/10.6
 
 /*!
  @function bufattr_cpoff

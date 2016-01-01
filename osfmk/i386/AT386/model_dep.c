@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple, Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -112,7 +138,15 @@
 #include <IOKit/IOPlatformExpert.h>
 #include <IOKit/IOHibernatePrivate.h>
 
+<<<<<<< HEAD
 #include <pexpert/i386/efi.h>
+=======
+vm_size_t	mem_size = 0;
+uint64_t	max_mem;
+vm_offset_t	first_addr = 0;	/* set by start.s - keep out of bss */
+vm_offset_t	first_avail = 0;/* first after page tables */
+vm_offset_t	last_addr;
+>>>>>>> origin/10.2
 
 #include <kern/thread.h>
 #include <kern/sched.h>
@@ -122,8 +156,11 @@
 #include <libkern/kernel_mach_header.h>
 #include <libkern/OSKextLibPrivate.h>
 
+<<<<<<< HEAD
 #include <mach/branch_predicates.h>
 
+=======
+>>>>>>> origin/10.7
 #if	DEBUG
 #define DPRINTF(x...)	kprintf(x)
 #else
@@ -169,6 +206,8 @@ typedef struct _cframe_t {
 static unsigned panic_io_port;
 static unsigned	commit_paniclog_to_nvram;
 
+<<<<<<< HEAD
+<<<<<<< HEAD
 unsigned int debug_boot_arg;
 
 /*
@@ -258,6 +297,103 @@ print_one_backtrace(pmap_t pmap, vm_offset_t topfp, const char *cur_marker,
 		}
 	} while ((++i < FP_MAX_NUM_TO_EVALUATE) && (fp != topfp));
 }
+=======
+int debug_boot_arg;
+=======
+unsigned int debug_boot_arg;
+>>>>>>> origin/10.6
+
+<<<<<<< HEAD
+>>>>>>> origin/10.5
+=======
+/*
+ * Backtrace a single frame.
+ */
+void
+print_one_backtrace(pmap_t pmap, vm_offset_t topfp, const char *cur_marker,
+	boolean_t is_64_bit, boolean_t nvram_format) 
+{
+	int		    i = 0;
+	addr64_t	lr;
+	addr64_t	fp;
+	addr64_t	fp_for_ppn;
+	ppnum_t		ppn;
+	boolean_t	dump_kernel_stack;
+
+	fp = topfp;
+	fp_for_ppn = 0;
+	ppn = (ppnum_t)NULL;
+
+	if (fp >= VM_MIN_KERNEL_ADDRESS)
+		dump_kernel_stack = TRUE;
+	else
+		dump_kernel_stack = FALSE;
+
+	do {
+		if ((fp == 0) || ((fp & FP_ALIGNMENT_MASK) != 0))
+			break;
+		if (dump_kernel_stack && ((fp < VM_MIN_KERNEL_ADDRESS) || (fp > VM_MAX_KERNEL_ADDRESS)))
+			break;
+		if ((!dump_kernel_stack) && (fp >=VM_MIN_KERNEL_ADDRESS))
+			break;
+			
+        /* Check to see if current address will result in a different
+           ppn than previously computed (to avoid recomputation) via
+           (addr) ^ fp_for_ppn) >> PAGE_SHIFT) */
+
+		if ((((fp + FP_LR_OFFSET) ^ fp_for_ppn) >> PAGE_SHIFT) != 0x0U) {
+			ppn = pmap_find_phys(pmap, fp + FP_LR_OFFSET);
+			fp_for_ppn = fp + (is_64_bit ? FP_LR_OFFSET64 : FP_LR_OFFSET);
+		}
+		if (ppn != (ppnum_t)NULL) {
+			if (is_64_bit) {
+				lr = ml_phys_read_double_64(((((vm_offset_t)ppn) << PAGE_SHIFT)) | ((fp + FP_LR_OFFSET64) & PAGE_MASK));
+			} else {
+				lr = ml_phys_read_word(((((vm_offset_t)ppn) << PAGE_SHIFT)) | ((fp + FP_LR_OFFSET) & PAGE_MASK));
+			}
+		} else {
+			if (is_64_bit) {
+				kdb_printf("%s\t  Could not read LR from frame at 0x%016llx\n", cur_marker, fp + FP_LR_OFFSET64);
+			} else {
+				kdb_printf("%s\t  Could not read LR from frame at 0x%08x\n", cur_marker, (uint32_t)(fp + FP_LR_OFFSET));
+			}
+			break;
+		}
+		if (((fp ^ fp_for_ppn) >> PAGE_SHIFT) != 0x0U) {
+			ppn = pmap_find_phys(pmap, fp);
+			fp_for_ppn = fp;
+		}
+		if (ppn != (ppnum_t)NULL) {
+			if (is_64_bit) {
+				fp = ml_phys_read_double_64(((((vm_offset_t)ppn) << PAGE_SHIFT)) | (fp & PAGE_MASK));
+			} else {
+				fp = ml_phys_read_word(((((vm_offset_t)ppn) << PAGE_SHIFT)) | (fp & PAGE_MASK));
+			}
+		} else {
+			if (is_64_bit) {
+				kdb_printf("%s\t  Could not read FP from frame at 0x%016llx\n", cur_marker, fp);
+			} else {
+				kdb_printf("%s\t  Could not read FP from frame at 0x%08x\n", cur_marker, (uint32_t)fp);
+			}
+			break;
+		}
+
+		if (nvram_format) {
+			if (is_64_bit) {
+				kdb_printf("%s\t0x%016llx\n", cur_marker, lr);
+			} else {
+				kdb_printf("%s\t0x%08x\n", cur_marker, (uint32_t)lr);
+			}
+		} else {		
+			if (is_64_bit) {
+				kdb_printf("%s\t  lr: 0x%016llx  fp: 0x%016llx\n", cur_marker, lr, fp);
+			} else {
+				kdb_printf("%s\t  lr: 0x%08x  fp: 0x%08x\n", cur_marker, (uint32_t)lr, (uint32_t)fp);
+			}
+		}
+	} while ((++i < FP_MAX_NUM_TO_EVALUATE) && (fp != topfp));
+}
+>>>>>>> origin/10.10
 void
 machine_startup(void)
 {
@@ -268,6 +404,8 @@ machine_startup(void)
             halt_in_debugger = halt_in_debugger ? 0 : 1;
 #endif
 
+<<<<<<< HEAD
+<<<<<<< HEAD
 	if (PE_parse_boot_argn("debug", &debug_boot_arg, sizeof (debug_boot_arg))) {
 		panicDebugging = TRUE;
 #if DEVELOPMENT || DEBUG
@@ -284,6 +422,31 @@ machine_startup(void)
 #endif
 	} else {
 		debug_boot_arg = 0;
+=======
+	if (PE_parse_boot_argn("debug", &boot_arg, sizeof (boot_arg))) {
+		if (boot_arg & DB_HALT) halt_in_debugger=1;
+		if (boot_arg & DB_PRT) disable_debug_output=FALSE; 
+		if (boot_arg & DB_SLOG) systemLogDiags=TRUE; 
+		if (boot_arg & DB_NMI) panicDebugging=TRUE; 
+		if (boot_arg & DB_LOG_PI_SCRN) logPanicDataToScreen=TRUE;
+		debug_boot_arg = boot_arg;
+>>>>>>> origin/10.5
+=======
+	if (PE_parse_boot_argn("debug", &debug_boot_arg, sizeof (debug_boot_arg))) {
+		if (debug_boot_arg & DB_HALT) halt_in_debugger=1;
+		if (debug_boot_arg & DB_PRT) disable_debug_output=FALSE; 
+		if (debug_boot_arg & DB_SLOG) systemLogDiags=TRUE; 
+		if (debug_boot_arg & DB_NMI) panicDebugging=TRUE; 
+		if (debug_boot_arg & DB_LOG_PI_SCRN) logPanicDataToScreen=TRUE;
+#if KDEBUG_MOJO_TRACE
+		if (debug_boot_arg & DB_PRT_KDEBUG) {
+			kdebug_serial = TRUE;
+			disable_debug_output = FALSE;
+		}
+#endif
+	} else {
+		debug_boot_arg = 0;
+>>>>>>> origin/10.6
 	}
 
 	if (!PE_parse_boot_argn("nvram_paniclog", &commit_paniclog_to_nvram, sizeof (commit_paniclog_to_nvram)))
@@ -301,6 +464,33 @@ machine_startup(void)
 #endif
 	hw_lock_init(&pbtlock);		/* initialize print backtrace lock */
 
+<<<<<<< HEAD
+=======
+#if	MACH_KDB
+	/*
+	 * Initialize KDB
+	 */
+#if	DB_MACHINE_COMMANDS
+	db_machine_commands_install(ppc_db_commands);
+#endif	/* DB_MACHINE_COMMANDS */
+	ddb_init();
+
+	if (boot_arg & DB_KDB)
+		current_debugger = KDB_CUR_DB;
+
+	/*
+	 * Cause a breakpoint trap to the debugger before proceeding
+	 * any further if the proper option bit was specified in
+	 * the boot flags.
+	 */
+	if (halt_in_debugger && (current_debugger == KDB_CUR_DB)) {
+	        Debugger("inline call to debugger(machine_startup)");
+		halt_in_debugger = 0;
+		active_debugger =1;
+	}
+#endif /* MACH_KDB */
+
+>>>>>>> origin/10.5
 	if (PE_parse_boot_argn("preempt", &boot_arg, sizeof (boot_arg))) {
 		default_preemption_rate = boot_arg;
 	}
@@ -313,6 +503,15 @@ machine_startup(void)
 	if (PE_parse_boot_argn("yield", &boot_arg, sizeof (boot_arg))) {
 		sched_poll_yield_shift = boot_arg;
 	}
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+	if (PE_parse_boot_argn("idlehalt", &boot_arg, sizeof (boot_arg))) {
+		idlehalt = boot_arg;
+	}
+>>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.6
 /* The I/O port to issue a read from, in the event of a panic. Useful for
  * triggering logic analyzers.
  */
@@ -323,8 +522,11 @@ machine_startup(void)
 
 	machine_conf();
 
+<<<<<<< HEAD
 	panic_hooks_init();
 
+=======
+>>>>>>> origin/10.8
 	/*
 	 * Start the system.
 	 */
@@ -834,10 +1036,20 @@ panic_io_port_read(void) {
 /* For use with the MP rendezvous mechanism
  */
 
+<<<<<<< HEAD
+<<<<<<< HEAD
 uint64_t panic_restart_timeout = ~(0ULL);
 
 #define PANIC_RESTART_TIMEOUT (3ULL * NSEC_PER_SEC)
 
+<<<<<<< HEAD
+=======
+#if !CONFIG_EMBEDDED
+>>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.7
 static void
 machine_halt_cpu(void) {
 	uint64_t deadline;
@@ -863,6 +1075,10 @@ machine_halt_cpu(void) {
 	 * writing, this is routine is chained through AppleSMC->
 	 * AppleACPIPlatform
 	 */
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.7
 	if (PE_halt_restart)
 		(*PE_halt_restart)(kPERestartCPU);
 	pmCPUHalt(PM_HALT_DEBUG);
@@ -896,7 +1112,11 @@ Debugger(
 	int cn = cpu_number();
 	task_t task = current_task();
 	int	task_pid = pid_from_task(task);
+<<<<<<< HEAD
 	boolean_t old_doprnt_hide_pointers = doprnt_hide_pointers;
+=======
+
+>>>>>>> origin/10.10
 
 	hw_atomic_add(&debug_mode, 1);   
 	if (!panic_is_inited) {
@@ -916,8 +1136,20 @@ Debugger(
 	 * as a quiet way into the debugger.
 	 */
 
+<<<<<<< HEAD
 	if (panicstr) {
 		disable_preemption();
+=======
+	if (mem_size != 0) {
+	    if (mem_size < (last_addr) - bios_hole_size)
+		last_addr = mem_size + bios_hole_size;
+	}
+
+	first_addr = round_page(first_addr);
+	last_addr = trunc_page(last_addr);
+	mem_size = last_addr - bios_hole_size;
+	max_mem = mem_size;
+>>>>>>> origin/10.2
 
 /* Issue an I/O port read if one has been requested - this is an event logic
  * analyzers can use as a trigger point.
@@ -928,12 +1160,27 @@ Debugger(
 		__asm__ volatile("movq %%rbp, %0" : "=m" (stackptr));
 
 		/* Print backtrace - callee is internally synchronized */
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
 		if (task_pid == 1 && (init_task_died)) {
+=======
+		if ((task_pid == 1) && (init_task_died)) {
+>>>>>>> origin/10.10
 			/* Special handling of launchd died panics */
 			print_launchd_info();
 		} else {
 			panic_i386_backtrace(stackptr, ((panic_double_fault_cpu == cn) ? 80: 48), NULL, FALSE, NULL);
 		}
+<<<<<<< HEAD
+=======
+		panic_i386_backtrace(stackptr, 16, NULL, FALSE, NULL);
+>>>>>>> origin/10.5
+=======
+		panic_i386_backtrace(stackptr, 64, NULL, FALSE, NULL);
+>>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.10
 
 		/* everything should be printed now so copy to NVRAM
 		 */
@@ -945,8 +1192,13 @@ Debugger(
 		    if (commit_paniclog_to_nvram) {
 			unsigned int bufpos;
 			uintptr_t cr0;
+<<<<<<< HEAD
 			
 			debug_putc(0);
+=======
+
+                        debug_putc(0);
+>>>>>>> origin/10.5
 
 			/* Now call the compressor */
 			/* XXX Consider using the WKdm compressor in the
@@ -979,8 +1231,21 @@ Debugger(
 			clear_ts();
 
 			kprintf("Attempting to commit panic log to NVRAM\n");
+<<<<<<< HEAD
 			pi_size = PESavePanicInfo((unsigned char *)debug_buf,
 					(uint32_t)pi_size );
+=======
+/* The following sequence is a workaround for:
+ * <rdar://problem/5915669> SnowLeopard10A67: AppleEFINVRAM should not invoke
+ * any routines that use floating point (MMX in this case) when saving panic
+ * logs to nvram/flash.
+ */
+			cr0 = get_cr0();
+			clear_ts();
+
+                        pi_size = PESavePanicInfo((unsigned char *)debug_buf,
+			    pi_size );
+>>>>>>> origin/10.5
 			set_cr0(cr0);
 
 			/* Uncompress in-place, to permit examination of
@@ -992,13 +1257,29 @@ Debugger(
 			}
                     }
                 }
+<<<<<<< HEAD
+=======
 
+<<<<<<< HEAD
+		/* If the user won't be able to read the dialog,
+		 * don't bother trying to show it
+		 */
+		if (!PE_reboot_on_panic())
+			draw_panic_dialog();
+>>>>>>> origin/10.6
+
+=======
+>>>>>>> origin/10.8
 		if (!panicDebugging) {
 			unsigned cnum;
 			/* Clear the MP rendezvous function lock, in the event
 			 * that a panic occurred while in that codepath.
 			 */
 			mp_rendezvous_break_lock();
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.7
 
 			/* Non-maskably interrupt all other processors
 			 * If a restart timeout is specified, this processor
@@ -1011,6 +1292,18 @@ Debugger(
 				}
 			}
 			machine_halt_cpu();
+=======
+			if (PE_reboot_on_panic()) {
+				PEHaltRestart(kPEPanicRestartCPU);
+			}
+
+			/* Force all CPUs to disable interrupts and HLT.
+			 * We've panicked, and shouldn't depend on the
+			 * PEHaltRestart() mechanism, which relies on several
+			 * bits of infrastructure.
+			 */
+			mp_rendezvous_no_intrs(machine_halt_cpu, NULL);
+>>>>>>> origin/10.6
 			/* NOT REACHED */
 		}
         }
@@ -1166,6 +1459,7 @@ panic_i386_backtrace(void *_frame, int nframes, const char *msg, boolean_t regdu
 		pbtcpu = cn;
 	}
 
+<<<<<<< HEAD
 	if (__improbable(doprnt_hide_pointers == TRUE)) {
 		/* If we're called directly, the Debugger() function will not be called,
 		 * so we need to reset the value in here. */
@@ -1203,6 +1497,29 @@ panic_i386_backtrace(void *_frame, int nframes, const char *msg, boolean_t regdu
 #else
 	"Frame : Return Address\n", cn);
 #endif
+=======
+	PE_parse_boot_argn("keepsyms", &keepsyms, sizeof (keepsyms));
+
+	if (msg != NULL) {
+		kdb_printf(msg);
+	}
+
+	if ((regdump == TRUE) && (regs != NULL)) {
+		x86_saved_state32_t	*ss32p = saved_state32(regs);
+
+		kdb_printf(
+		    "EAX: 0x%08x, EBX: 0x%08x, ECX: 0x%08x, EDX: 0x%08x\n"
+		    "CR2: 0x%08x, EBP: 0x%08x, ESI: 0x%08x, EDI: 0x%08x\n"
+		    "EFL: 0x%08x, EIP: 0x%08x, CS:  0x%08x, DS:  0x%08x\n",
+		    ss32p->eax,ss32p->ebx,ss32p->ecx,ss32p->edx,
+		    ss32p->cr2,ss32p->ebp,ss32p->esi,ss32p->edi,
+		    ss32p->efl,ss32p->eip,ss32p->cs, ss32p->ds);
+		PC = ss32p->eip;
+	}
+
+	kdb_printf("Backtrace (CPU %d), "
+		"Frame : Return Address (4 potential args on stack)\n", cpu_number());
+>>>>>>> origin/10.5
 
 	for (frame_index = 0; frame_index < nframes; frame_index++) {
 		vm_offset_t curframep = (vm_offset_t) frame;
@@ -1264,9 +1581,17 @@ out:
 	if (PC != 0)
 		kmod_panic_dump(&PC, 1);
 
+	if (PC != 0)
+		kmod_dump(&PC, 1);
+
 	panic_display_system_configuration();
+<<<<<<< HEAD
 
 	doprnt_hide_pointers = old_doprnt_hide_pointers;
+=======
+	panic_display_zprint();
+	dump_kext_info(&kdb_log);
+>>>>>>> origin/10.5
 
 	/* Release print backtrace lock, to permit other callers in the
 	 * event of panics on multiple processors.
@@ -1459,6 +1784,187 @@ void print_launchd_info(void)
 	
 	print_uuid_info(task);
 	print_thread_num_that_crashed(task);
+	print_threads_registers(thread);
+	print_tasks_user_threads(task);
+	kdb_printf("Mac OS version: %s\n", (osversion[0] != 0) ? osversion : "Not yet set");
+	kdb_printf("Kernel version: %s\n", version);
+	panic_display_kernel_uuid();
+	panic_display_model_name();
+	
+	/* Release print backtrace lock, to permit other callers in the
+	 * event of panics on multiple processors.
+	 */
+	hw_lock_unlock(&pbtlock);
+	hw_atomic_sub(&pbtcnt, 1);
+	/* Wait for other processors to complete output
+	 * Timeout and continue after PBT_TIMEOUT_CYCLES.
+	 */
+	bt_tsc_timeout = rdtsc64() + PBT_TIMEOUT_CYCLES;
+	while(*ppbtcnt && (rdtsc64() < bt_tsc_timeout));
+
+}
+
+static boolean_t
+debug_copyin(pmap_t p, uint64_t uaddr, void *dest, size_t size)
+{
+        size_t rem = size;
+        char *kvaddr = dest;
+
+        while (rem) {
+                ppnum_t upn = pmap_find_phys(p, uaddr);
+                uint64_t phys_src = ptoa_64(upn) | (uaddr & PAGE_MASK);
+                uint64_t phys_dest = kvtophys((vm_offset_t)kvaddr);
+                uint64_t src_rem = PAGE_SIZE - (phys_src & PAGE_MASK);
+                uint64_t dst_rem = PAGE_SIZE - (phys_dest & PAGE_MASK);
+                size_t cur_size = (uint32_t) MIN(src_rem, dst_rem);
+                cur_size = MIN(cur_size, rem);
+
+                if (upn && pmap_valid_page(upn) && phys_dest) {
+                        bcopy_phys(phys_src, phys_dest, cur_size);
+                }
+                else
+                        break;
+                uaddr += cur_size;
+                kvaddr += cur_size;
+                rem -= cur_size;
+        }
+        return (rem == 0);
+}
+
+void
+print_threads_registers(thread_t thread)
+{
+	x86_saved_state_t *savestate;
+	
+	savestate = get_user_regs(thread);
+	kdb_printf(
+		"\nRAX: 0x%016llx, RBX: 0x%016llx, RCX: 0x%016llx, RDX: 0x%016llx\n"
+	    "RSP: 0x%016llx, RBP: 0x%016llx, RSI: 0x%016llx, RDI: 0x%016llx\n"
+	    "R8:  0x%016llx, R9:  0x%016llx, R10: 0x%016llx, R11: 0x%016llx\n"
+		"R12: 0x%016llx, R13: 0x%016llx, R14: 0x%016llx, R15: 0x%016llx\n"
+		"RFL: 0x%016llx, RIP: 0x%016llx, CS:  0x%016llx, SS:  0x%016llx\n\n",
+		savestate->ss_64.rax, savestate->ss_64.rbx, savestate->ss_64.rcx, savestate->ss_64.rdx,
+		savestate->ss_64.isf.rsp, savestate->ss_64.rbp, savestate->ss_64.rsi, savestate->ss_64.rdi,
+		savestate->ss_64.r8, savestate->ss_64.r9,  savestate->ss_64.r10, savestate->ss_64.r11,
+		savestate->ss_64.r12, savestate->ss_64.r13, savestate->ss_64.r14, savestate->ss_64.r15,
+		savestate->ss_64.isf.rflags, savestate->ss_64.isf.rip, savestate->ss_64.isf.cs,
+		savestate->ss_64.isf.ss);
+}
+
+void
+print_tasks_user_threads(task_t task)
+{
+	thread_t		thread = current_thread();
+	x86_saved_state_t *savestate;
+	pmap_t			pmap = 0;
+	uint64_t		rbp;
+	const char		*cur_marker = 0;
+	int             j;
+	
+	for (j = 0, thread = (thread_t) queue_first(&task->threads); j < task->thread_count;
+			++j, thread = (thread_t) queue_next(&thread->task_threads)) {
+
+		kdb_printf("Thread  %p\n", thread);
+		pmap = get_task_pmap(task);
+		savestate = get_user_regs(thread);
+		rbp = savestate->ss_64.rbp;
+		print_one_backtrace(pmap, (vm_offset_t)rbp, cur_marker, TRUE, TRUE);
+		kdb_printf("\n");
+		}
+}
+
+#define PANICLOG_UUID_BUF_SIZE 256
+
+void print_uuid_info(task_t task)
+{
+	uint32_t		uuid_info_count = 0;
+	mach_vm_address_t	uuid_info_addr = 0;
+	boolean_t		have_map = (task->map != NULL) &&	(ml_validate_nofault((vm_offset_t)(task->map), sizeof(struct _vm_map)));
+	boolean_t		have_pmap = have_map && (task->map->pmap != NULL) && (ml_validate_nofault((vm_offset_t)(task->map->pmap), sizeof(struct pmap)));
+	int				task_pid = pid_from_task(task);
+	char			uuidbuf[PANICLOG_UUID_BUF_SIZE] = {0};
+	char			*uuidbufptr = uuidbuf;
+	uint32_t		k;
+
+	if (have_pmap && task->active && task_pid > 0) {
+		/* Read dyld_all_image_infos struct from task memory to get UUID array count & location */
+		struct user64_dyld_all_image_infos task_image_infos;
+		if (debug_copyin(task->map->pmap, task->all_image_info_addr,
+			&task_image_infos, sizeof(struct user64_dyld_all_image_infos))) {
+			uuid_info_count = (uint32_t)task_image_infos.uuidArrayCount;
+			uuid_info_addr = task_image_infos.uuidArray;
+		}
+
+		/* If we get a NULL uuid_info_addr (which can happen when we catch dyld
+		 * in the middle of updating this data structure), we zero the
+		 * uuid_info_count so that we won't even try to save load info for this task
+		 */
+		if (!uuid_info_addr) {
+			uuid_info_count = 0;
+		}
+	}
+
+	if (task_pid > 0 && uuid_info_count > 0) {
+		uint32_t uuid_info_size = sizeof(struct user64_dyld_uuid_info);
+		uint32_t uuid_array_size = uuid_info_count * uuid_info_size;
+		uint32_t uuid_copy_size = 0;
+		uint32_t uuid_image_count = 0;
+		char *current_uuid_buffer = NULL;
+		/* Copy in the UUID info array. It may be nonresident, in which case just fix up nloadinfos to 0 */
+		
+		kdb_printf("\nuuid info:\n");
+		while (uuid_array_size) {
+			if (uuid_array_size <= PANICLOG_UUID_BUF_SIZE) {
+				uuid_copy_size = uuid_array_size;
+				uuid_image_count = uuid_array_size/uuid_info_size;
+			} else {
+				uuid_image_count = PANICLOG_UUID_BUF_SIZE/uuid_info_size;
+				uuid_copy_size = uuid_image_count * uuid_info_size;
+			}
+			if (have_pmap && !debug_copyin(task->map->pmap, uuid_info_addr, uuidbufptr,
+				uuid_copy_size)) {
+				kdb_printf("Error!! Failed to copy UUID info for task %p pid %d\n", task, task_pid);
+				uuid_image_count = 0;
+				break;
+			}
+
+			if (uuid_image_count > 0) {
+				current_uuid_buffer = uuidbufptr;
+				for (k = 0; k < uuid_image_count; k++) {
+					kdb_printf(" %#llx", *(uint64_t *)current_uuid_buffer);
+					current_uuid_buffer += sizeof(uint64_t);
+					uint8_t *uuid = (uint8_t *)current_uuid_buffer;
+					kdb_printf("\tuuid = <%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x>\n",
+					uuid[0], uuid[1], uuid[2], uuid[3], uuid[4], uuid[5], uuid[6], uuid[7], uuid[8],
+					uuid[9], uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15]);
+					current_uuid_buffer += 16;
+				}
+				bzero(&uuidbuf, sizeof(uuidbuf));
+			}
+			uuid_info_addr += uuid_copy_size;
+			uuid_array_size -= uuid_copy_size;
+		}
+	}
+}
+
+void print_launchd_info(void)
+{
+	task_t		task = current_task();
+	thread_t	thread = current_thread();
+	volatile	uint32_t *ppbtcnt = &pbtcnt;
+	uint64_t	bt_tsc_timeout;
+	int		cn = cpu_number();
+
+	if(pbtcpu != cn) {
+		hw_atomic_add(&pbtcnt, 1);
+		/* Spin on print backtrace lock, which serializes output
+		 * Continue anyway if a timeout occurs.
+		 */
+		hw_lock_to(&pbtlock, ~0U);
+		pbtcpu = cn;
+	}
+	
+	print_uuid_info(task);
 	print_threads_registers(thread);
 	print_tasks_user_threads(task);
 	kdb_printf("Mac OS version: %s\n", (osversion[0] != 0) ? osversion : "Not yet set");

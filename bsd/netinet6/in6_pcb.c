@@ -546,8 +546,12 @@ in6_pcbconnect(struct inpcb *inp, struct sockaddr *nam, struct proc *p)
 	socket_lock(so, 0);
 	if (pcb != NULL) {
 		in_pcb_checkstate(pcb, WNT_RELEASE, pcb == inp ? 1 : 0);
+<<<<<<< HEAD
 		error = EADDRINUSE;
 		goto done;
+=======
+		return (EADDRINUSE);
+>>>>>>> origin/10.6
 	}
 	if (IN6_IS_ADDR_UNSPECIFIED(&inp->in6p_laddr)) {
 		if (inp->inp_lport == 0) {
@@ -646,6 +650,7 @@ in6_pcbdetach(struct inpcb *inp)
 		inp->inp_vflag = 0;
 		if (inp->in6p_options != NULL) {
 			m_freem(inp->in6p_options);
+<<<<<<< HEAD
 			inp->in6p_options = NULL;
 		}
 		ip6_freepcbopts(inp->in6p_outputopts);
@@ -661,6 +666,18 @@ in6_pcbdetach(struct inpcb *inp)
 			IM6O_REMREF(im6o);
 
 		imo = inp->inp_moptions;
+=======
+ 		ip6_freepcbopts(inp->in6p_outputopts);
+ 		ip6_freemoptions(inp->in6p_moptions);
+		if (inp->in6p_route.ro_rt) {
+			rtfree(inp->in6p_route.ro_rt);
+			inp->in6p_route.ro_rt = NULL;
+		}
+		/* Check and free IPv4 related resources in case of mapped addr */
+		if (inp->inp_options)
+			(void)m_free(inp->inp_options);
+ 		ip_freemoptions(inp->inp_moptions);
+>>>>>>> origin/10.5
 		inp->inp_moptions = NULL;
 		if (imo != NULL)
 			IMO_REMREF(imo);

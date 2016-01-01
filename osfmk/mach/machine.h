@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -352,6 +374,7 @@ __END_DECLS
 #define CPU_SUBTYPE_ARM_V5TEJ           ((cpu_subtype_t) 7)
 #define CPU_SUBTYPE_ARM_XSCALE		((cpu_subtype_t) 8)
 #define CPU_SUBTYPE_ARM_V7		((cpu_subtype_t) 9)
+<<<<<<< HEAD
 #define CPU_SUBTYPE_ARM_V7F		((cpu_subtype_t) 10) /* Cortex A9 */
 #define CPU_SUBTYPE_ARM_V7S		((cpu_subtype_t) 11) /* Swift */
 #define CPU_SUBTYPE_ARM_V7K		((cpu_subtype_t) 12)
@@ -368,6 +391,8 @@ __END_DECLS
 #define CPU_SUBTYPE_ARM64_V8            ((cpu_subtype_t) 1)
 
 #endif /* !__ASSEMBLER__ */
+=======
+>>>>>>> origin/10.5
 
 /*
  *	CPU families (sysctl hw.cpufamily)
@@ -380,6 +405,10 @@ __END_DECLS
  * Use feature flags (eg, hw.optional.altivec) to test for optional
  * functionality.
  */
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
 #define CPUFAMILY_UNKNOWN   		0
 #define CPUFAMILY_POWERPC_G3		0xcee41549
 #define CPUFAMILY_POWERPC_G4		0x77c184ae
@@ -390,11 +419,22 @@ __END_DECLS
 #define CPUFAMILY_INTEL_PENRYN		0x78ea4fbc
 #define CPUFAMILY_INTEL_NEHALEM		0x6b5a4cd2
 #define CPUFAMILY_INTEL_WESTMERE	0x573b5eec
+<<<<<<< HEAD
 #define CPUFAMILY_INTEL_SANDYBRIDGE	0x5490b78c
 #define CPUFAMILY_INTEL_IVYBRIDGE	0x1f65e835
+<<<<<<< HEAD
+<<<<<<< HEAD
 #define CPUFAMILY_INTEL_HASWELL		0x10b282dc
 #define CPUFAMILY_INTEL_BROADWELL	0x582ed09c
+<<<<<<< HEAD
 #define CPUFAMILY_INTEL_SKYLAKE		0x37fc219f
+=======
+>>>>>>> origin/10.7
+=======
+#define CPUFAMILY_INTEL_HASWELL		0x10b282dc
+>>>>>>> origin/10.8
+=======
+>>>>>>> origin/10.10
 #define CPUFAMILY_ARM_9			0xe73283ae
 #define CPUFAMILY_ARM_11		0x8ff620d8
 #define CPUFAMILY_ARM_XSCALE		0x53b005f5
@@ -405,6 +445,12 @@ __END_DECLS
 #define CPUFAMILY_ARM_SWIFT 		0x1e2d6381
 #define CPUFAMILY_ARM_CYCLONE		0x37a09642
 #define CPUFAMILY_ARM_TYPHOON		0x2c91a47e
+=======
+#define CPUFAMILY_ARM_9			0xe73283ae
+#define CPUFAMILY_ARM_11		0x8ff620d8
+#define CPUFAMILY_ARM_XSCALE		0x53b005f5
+#define CPUFAMILY_ARM_13		0x0cc90e64
+>>>>>>> origin/10.6
 
 /* The following synonyms are deprecated: */
 #define CPUFAMILY_INTEL_6_14	CPUFAMILY_INTEL_YONAH
@@ -415,5 +461,31 @@ __END_DECLS
 #define CPUFAMILY_INTEL_CORE	CPUFAMILY_INTEL_YONAH
 #define CPUFAMILY_INTEL_CORE2	CPUFAMILY_INTEL_MEROM
 
+<<<<<<< HEAD
+=======
+#define CPUFAMILY_UNKNOWN    0
+#define CPUFAMILY_POWERPC_G3 0xcee41549
+#define CPUFAMILY_POWERPC_G4 0x77c184ae
+#define CPUFAMILY_POWERPC_G5 0xed76d8aa
+#define CPUFAMILY_INTEL_6_13 0xaa33392b
+#define CPUFAMILY_INTEL_6_14 0x73d67300  /* "Intel Core Solo" and "Intel Core Duo" (32-bit Pentium-M with SSE3) */
+#define CPUFAMILY_INTEL_6_15 0x426f69ef  /* "Intel Core 2 Duo" */
+#define CPUFAMILY_INTEL_6_23 0x78ea4fbc  /* Penryn */
+#define CPUFAMILY_INTEL_6_26 0x6b5a4cd2  /* Nehalem */
+#define CPUFAMILY_ARM_9      0xe73283ae
+#define CPUFAMILY_ARM_11     0x8ff620d8
+#define CPUFAMILY_ARM_XSCALE 0x53b005f5
+#define CPUFAMILY_ARM_13     0x0cc90e64
+
+#define CPUFAMILY_INTEL_YONAH	CPUFAMILY_INTEL_6_14
+#define CPUFAMILY_INTEL_MEROM	CPUFAMILY_INTEL_6_15
+#define CPUFAMILY_INTEL_PENRYN	CPUFAMILY_INTEL_6_23
+#define CPUFAMILY_INTEL_NEHALEM	CPUFAMILY_INTEL_6_26
+
+#define CPUFAMILY_INTEL_CORE	CPUFAMILY_INTEL_6_14
+#define CPUFAMILY_INTEL_CORE2	CPUFAMILY_INTEL_6_15
+>>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.6
 
 #endif	/* _MACH_MACHINE_H_ */

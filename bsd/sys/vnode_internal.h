@@ -244,7 +244,11 @@ struct vnode {
 #define	VRAOFF		0x002000	/* read ahead disabled */
 #define	VNCACHEABLE	0x004000	/* vnode is allowed to be put back in name cache */
 #if NAMEDSTREAMS
+<<<<<<< HEAD
 #define	VISSHADOW	0x008000	/* vnode is a shadow file */
+=======
+#define VISSHADOW       0x008000        /* vnode is a shadow file */
+>>>>>>> origin/10.5
 #endif
 #define	VSWAP		0x010000	/* vnode is being used as swapfile */
 #define	VTHROTTLED	0x020000	/* writes or pageouts have been throttled */
@@ -304,8 +308,12 @@ struct fd_vn_data {
 extern	struct vnode *rootvnode;	/* root (i.e. "/") vnode */
 
 #ifdef CONFIG_IMGSRC_ACCESS
+<<<<<<< HEAD
 #define MAX_IMAGEBOOT_NESTING	2
 extern	struct vnode *imgsrc_rootvnodes[];
+=======
+extern	struct vnode *imgsrc_rootvnode;
+>>>>>>> origin/10.6
 #endif /* CONFIG_IMGSRC_ACCESS */
 
 
@@ -473,8 +481,13 @@ errno_t  vnode_getnamedstream(vnode_t, vnode_t *, const char *, enum nsoperation
 errno_t  vnode_makenamedstream(vnode_t, vnode_t *, const char *, int, vfs_context_t);
 errno_t  vnode_removenamedstream(vnode_t, vnode_t, const char *, int, vfs_context_t);
 errno_t  vnode_flushnamedstream(vnode_t vp, vnode_t svp, vfs_context_t context);
+<<<<<<< HEAD
 errno_t  vnode_relenamedstream(vnode_t vp, vnode_t svp);
 errno_t  vnode_verifynamedstream (vnode_t vp);
+=======
+errno_t  vnode_relenamedstream(vnode_t vp, vnode_t svp, vfs_context_t context);
+errno_t  vnode_verifynamedstream (vnode_t vp, vfs_context_t ctx);
+>>>>>>> origin/10.8
 #endif
 
 
@@ -502,10 +515,16 @@ int	vnode_ref_ext(vnode_t, int, int);
 
 void	vnode_rele_ext(vnode_t, int, int);
 void	vnode_rele_internal(vnode_t, int, int, int);
+<<<<<<< HEAD
 #ifdef BSD_KERNEL_PRIVATE
 int	vnode_getalways(vnode_t);
 int 	vget_internal(vnode_t, int, int);
 errno_t vnode_getiocount(vnode_t, unsigned int, int);
+=======
+int	vnode_getwithref(vnode_t);
+#ifdef BSD_KERNEL_PRIVATE
+int	vnode_getalways(vnode_t);
+>>>>>>> origin/10.5
 #endif /* BSD_KERNEL_PRIVATE */
 int	vnode_get_locked(vnode_t);
 int	vnode_put_locked(vnode_t);
@@ -521,7 +540,10 @@ errno_t	vnode_suspend(vnode_t);
 
 
 errno_t	vnode_mtime(vnode_t, struct timespec *, vfs_context_t);
+<<<<<<< HEAD
 errno_t vnode_flags(vnode_t, uint32_t *, vfs_context_t);
+=======
+>>>>>>> origin/10.9
 
 errno_t	vnode_size(vnode_t, off_t *, vfs_context_t);
 errno_t	vnode_setsize(vnode_t, off_t, int ioflag, vfs_context_t);

@@ -1,8 +1,18 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+>>>>>>> origin/10.8
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +24,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -587,6 +617,11 @@ cat_insertfilethread(struct hfsmount *hfsmp, struct cat_desc *descp)
 	if (result)
 		goto exit;
 
+	// XXXdbg - preflight all btree operations to make sure there's enough space
+	result = BTCheckFreeSpace(fcb);
+	if (result)
+		goto exit;
+
 	BDINIT(file_data, &file_rec);
 	result = BTSearchRecord(fcb, &iterator[0], &file_data, &datasize, &iterator[0]);
 	if (result) 
@@ -826,7 +861,11 @@ cat_lookupmangled(struct hfsmount *hfsmp, struct cat_desc *descp, int wantrsrc,
 		return (ENOENT);
 	}
 
+<<<<<<< HEAD
 	result = cat_idlookup(hfsmp, fileID, 0, 0, outdescp, attrp, forkp);
+=======
+	result = cat_idlookup(hfsmp, fileID, 0,0,  outdescp, attrp, forkp);
+>>>>>>> origin/10.8
 	if (result)
 		return (ENOENT);
 	/* It must be in the correct directory */
@@ -911,6 +950,7 @@ cat_lookupbykey(struct hfsmount *hfsmp, CatalogKey *keyp, int flags, u_int32_t h
 	hint = iterator->hint.nodeNum;
 
 	/* Hide the journal files (if any) */
+<<<<<<< HEAD
 	if ((hfsmp->jnl || ((HFSTOVCB(hfsmp)->vcbAtrb & kHFSVolumeJournaledMask) && (hfsmp->hfs_flags & HFS_READ_ONLY))) &&
 		((cnid == hfsmp->hfs_jnlfileid) || (cnid == hfsmp->hfs_jnlinfoblkid)) &&
 		 !(flags & HFS_LOOKUP_SYSFILE)) {
@@ -928,6 +968,16 @@ cat_lookupbykey(struct hfsmount *hfsmp, CatalogKey *keyp, int flags, u_int32_t h
 		}
 	}
 	
+=======
+	if (hfsmp->jnl &&
+		((cnid == hfsmp->hfs_jnlfileid) ||
+		 (cnid == hfsmp->hfs_jnlinfoblkid))) {
+
+		result = ENOENT;
+		goto exit;
+	}
+
+>>>>>>> origin/10.2
 	/*
 	 * When a hardlink link is encountered, auto resolve it.
 	 *
@@ -1180,6 +1230,11 @@ cat_create(struct hfsmount *hfsmp, cnid_t new_fileid, struct cat_desc *descp, st
 		hfs_setencodingbits(hfsmp, encoding);
 	}
 
+	// XXXdbg - preflight all btree operations to make sure there's enough space
+	result = BTCheckFreeSpace(fcb);
+	if (result)
+		goto exit;
+
 	/*
 	 * Insert the thread record first
 	 */
@@ -1190,6 +1245,7 @@ cat_create(struct hfsmount *hfsmp, cnid_t new_fileid, struct cat_desc *descp, st
 		btdata.itemSize = datalen;
 		btdata.itemCount = 1;
 		
+<<<<<<< HEAD
 		/* Caller asserts the following:
 		 *	1) this CNID is not in use by any orphaned EAs 
 		 *  2) There are no lingering cnodes (removed on-disk but still in-core) with this CNID
@@ -1199,6 +1255,60 @@ cat_create(struct hfsmount *hfsmp, cnid_t new_fileid, struct cat_desc *descp, st
 		result = BTInsertRecord(fcb, &bto->iterator, &btdata, datalen);
 		if (result) {
 			goto exit;
+=======
+		for (;;) {
+			// this call requires the attribute file lock to be held
+			result = file_attribute_exist(hfsmp, nextCNID);
+			if (result == EEXIST) {
+				// that cnid has orphaned attributes so just skip it.
+				if (++nextCNID < kHFSFirstUserCatalogNodeID) {
+					nextCNID = kHFSFirstUserCatalogNodeID;
+				}
+				continue;
+			}
+			if (result) goto exit;
+			
+			buildthreadkey(nextCNID, std_hfs, (CatalogKey *) &bto->iterator.key);
+
+			/*
+			 * If the CNID wraparound bit is set, then we need to validate if there
+			 * is a cnode in the hash already with this ID (even if it no longer exists
+			 * on disk).  If so, then just skip this ID and move on to the next one. 
+			 */
+			if (!std_hfs && (hfsmp->vcbAtrb & kHFSCatalogNodeIDsReusedMask)) {
+				if (hfs_chash_snoop (hfsmp, nextCNID, 1, NULL, NULL) == 0) {
+					/* It was found in the cnode hash!*/
+					result = btExists;
+				}	
+			}
+
+			if (result == 0) {
+				result = BTInsertRecord(fcb, &bto->iterator, &btdata, datalen);
+			}
+
+			if ((result == btExists) && !std_hfs && (hfsmp->vcbAtrb & kHFSCatalogNodeIDsReusedMask)) {
+				/*
+				 * Allow CNIDs on HFS Plus volumes to wrap around
+				 */
+				if (++nextCNID < kHFSFirstUserCatalogNodeID) {
+					nextCNID = kHFSFirstUserCatalogNodeID;
+				}
+				continue;
+			}
+			break;
+		}
+		if (result) goto exit;
+	}
+	
+	/*
+	 * CNID is now established. If we have wrapped then
+	 * update the vcbNxtCNID.
+	 */
+	if ((hfsmp->vcbAtrb & kHFSCatalogNodeIDsReusedMask)) {
+		hfsmp->vcbNxtCNID = nextCNID + 1;
+		if (hfsmp->vcbNxtCNID < kHFSFirstUserCatalogNodeID) {
+			hfsmp->vcbNxtCNID = kHFSFirstUserCatalogNodeID;
+>>>>>>> origin/10.7
 		}
 	}
 
@@ -1256,7 +1366,12 @@ cat_create(struct hfsmount *hfsmp, cnid_t new_fileid, struct cat_desc *descp, st
 #endif
 
 	}
+<<<<<<< HEAD
 	attrp->ca_fileid = new_fileid;
+=======
+	vcb->vcbNxtCNID = nextCNID;
+	vcb->vcbFlags |= 0xFF00;
+>>>>>>> origin/10.2
 
 exit:
 	(void) BTFlushPath(fcb);
@@ -1321,6 +1436,11 @@ cat_rename (
 	bzero(to_iterator, sizeof(*to_iterator));
 	if ((result = buildkey(hfsmp, to_cdp, (HFSPlusCatalogKey *)&to_iterator->key, 0)))
 		goto exit;	
+
+	// XXXdbg - preflight all btree operations to make sure there's enough space
+	result = BTCheckFreeSpace(fcb);
+	if (result)
+		goto exit;
 
 	to_key = (HFSPlusCatalogKey *)&to_iterator->key;
 	MALLOC(recp, CatalogRecord *, sizeof(CatalogRecord), M_TEMP, M_WAITOK);
@@ -1490,12 +1610,17 @@ cat_rename (
 		       {
 		       	int err;
 			err = BTInsertRecord(fcb, from_iterator, &btdata, datasize);
+<<<<<<< HEAD
 			if (err) {
 				printf("hfs: cat_create: could not undo (BTInsert = %d)\n", err);
 				hfs_mark_inconsistent(hfsmp, HFS_ROLLBACK_FAILED);
 				result = err;
 				goto exit;
 			}
+=======
+			if (err)
+				panic("cat_create: could not undo (BTInsert = %d)", err);
+>>>>>>> origin/10.2
 		       }
 		    #else
 			(void) BTInsertRecord(fcb, from_iterator, &btdata, datasize);
@@ -1517,12 +1642,17 @@ cat_rename (
 		     {
 		     	int err;
 			err = BTDeleteRecord(fcb, to_iterator);
+<<<<<<< HEAD
 			if (err) {
 				printf("hfs: cat_create: could not undo (BTDelete = %d)\n", err);
 				hfs_mark_inconsistent(hfsmp, HFS_ROLLBACK_FAILED);
 				result = err;
 				goto exit;
 			}
+=======
+			if (err)
+				panic("cat_create: could not undo (BTDelete = %d)", err);
+>>>>>>> origin/10.2
 		     }			
 		  #else
 			(void) BTDeleteRecord(fcb, to_iterator);
@@ -1649,6 +1779,11 @@ cat_delete(struct hfsmount *hfsmp, struct cat_desc *descp, struct cat_attr *attr
 	if (result)
 		goto exit;
 
+	// XXXdbg - preflight all btree operations to make sure there's enough space
+	result = BTCheckFreeSpace(fcb);
+	if (result)
+		goto exit;
+
 	/* Delete record */
 	result = BTDeleteRecord(fcb, iterator);
 	if (result) {
@@ -1691,6 +1826,10 @@ cat_delete(struct hfsmount *hfsmp, struct cat_desc *descp, struct cat_attr *attr
 
 exit:
 	(void) BTFlushPath(fcb);
+<<<<<<< HEAD
+=======
+	FREE(iterator, M_TEMP);
+>>>>>>> origin/10.2
 
 	return MacToVFSError(result);
 }
@@ -1754,6 +1893,10 @@ cat_update_internal(struct hfsmount *hfsmp, int update_hardlink, struct cat_desc
 
 exit:
 	(void) BTFlushPath(fcb);
+<<<<<<< HEAD
+=======
+	FREE(iterator, M_TEMP);
+>>>>>>> origin/10.2
 
 	return MacToVFSError(result);
 }
@@ -2488,10 +2631,49 @@ cat_createlink(struct hfsmount *hfsmp, struct cat_desc *descp, struct cat_attr *
 	btdata.bufferAddress = &bto->data;
 	btdata.itemSize = datalen;
 	btdata.itemCount = 1;
+<<<<<<< HEAD
 
 	buildthreadkey(nextCNID, 0, (CatalogKey *) &bto->iterator.key);
 	result = BTInsertRecord(fcb, &bto->iterator, &btdata, datalen);
 	if (result) {
+=======
+	
+	for (;;) {
+		buildthreadkey(nextCNID, 0, (CatalogKey *) &bto->iterator.key);
+	
+		/*
+		 * If the CNID wraparound bit is set, then we need to validate if there
+		 * is a cnode in the hash already with this ID (even if it no longer exists
+		 * on disk).  If so, then just skip this ID and move on to the next one. 
+		 */
+		if (!std_hfs && (hfsmp->vcbAtrb & kHFSCatalogNodeIDsReusedMask)) {
+			/* Verify that the CNID does not already exist in the cnode hash... */
+			if (hfs_chash_snoop (hfsmp, nextCNID, 1, NULL, NULL) == 0) {
+				/* It was found in the cnode hash!*/
+				result = btExists;
+			}	
+		}
+
+		if (result == 0) {
+			result = BTInsertRecord(fcb, &bto->iterator, &btdata, datalen);
+		}
+
+		if ((result == btExists) && (hfsmp->vcbAtrb & kHFSCatalogNodeIDsReusedMask)) {
+			/*
+			 * Allow CNIDs on HFS Plus volumes to wrap around
+			 */
+			if (++nextCNID < kHFSFirstUserCatalogNodeID) {
+				nextCNID = kHFSFirstUserCatalogNodeID;
+			}
+			continue;
+		}
+		if (result == 0) {
+			thread_inserted = 1;
+		}
+		break;
+	}
+	if (result)
+>>>>>>> origin/10.7
 		goto exit;
 	}
 	thread_inserted = 1;
@@ -2641,12 +2823,15 @@ cat_makealias(struct hfsmount *hfsmp, u_int32_t inode_num, struct HFSPlusCatalog
 	/* Allocate some disk space for the alias content. */
 	result = BlockAllocate(hfsmp, 0, blkcount, blkcount, 
 			       HFS_ALLOC_FORCECONTIG | HFS_ALLOC_METAZONE, 
+<<<<<<< HEAD
 	                       &rsrcforkp->extents[0].startBlock,
 	                       &rsrcforkp->extents[0].blockCount);
 	/* Did it fail with an out of space error? If so, re-try and allow journal flushing. */
 	if (result == dskFulErr ) {	
 		result = BlockAllocate(hfsmp, 0, blkcount, blkcount, 
 			       HFS_ALLOC_FORCECONTIG | HFS_ALLOC_METAZONE | HFS_ALLOC_FLUSHTXN, 
+=======
+>>>>>>> origin/10.6
 	                       &rsrcforkp->extents[0].startBlock,
 	                       &rsrcforkp->extents[0].blockCount);
 	}
@@ -3148,8 +3333,13 @@ getdirentries_callback(const CatalogKey *ckp, const CatalogRecord *crp,
 		 * regardless, so it's slightly safer to let that logic mark the boolean,
 		 * especially since it's closer to the return of this function.
 		 */		 
+<<<<<<< HEAD
 			
 		if (state->cbs_flags & VNODE_READDIR_EXTENDED) {
+=======
+
+		if (state->cbs_extended) {
+>>>>>>> origin/10.6
 			/* The last record has not been returned yet, so we 
 			 * want to stop after packing the last item 
 			 */
@@ -3415,6 +3605,7 @@ encodestr:
 		state->cbs_previlinkref = ilinkref;
 	}
 
+<<<<<<< HEAD
 	/* Continue iteration if there's room */
 	return (state->cbs_result == 0  &&
 		uio_resid(state->cbs_uio) >= SMALL_DIRENTRY_SIZE);
@@ -3442,6 +3633,25 @@ getdirentries_std_callback(const CatalogKey *ckp, const CatalogRecord *crp,
 	caddr_t uioaddr;
 	
 	hfsmp = state->cbs_hfsmp;
+=======
+	/* Hide the private meta data directory and journal files */
+	if (parentcnid == kRootDirID) {
+		if ((rec->recordType == kHFSPlusFolderRecord) &&
+		    (rec->hfsPlusFolder.folderID == hfsmp->hfs_private_metadata_dir)) {
+			return (1);	/* continue */
+		}
+		if (hfsmp->jnl &&
+		    (rec->recordType == kHFSPlusFileRecord) &&
+		    ((rec->hfsPlusFile.fileID == hfsmp->hfs_jnlfileid) ||
+		     (rec->hfsPlusFile.fileID == hfsmp->hfs_jnlinfoblkid))) {
+
+			return (1);	/* continue */
+		}
+	}
+
+
+	cep = &list->entry[list->realentries++];
+>>>>>>> origin/10.2
 
 	curID = ckp->hfs.parentID;
 
@@ -3559,7 +3769,11 @@ cat_getdirentries(struct hfsmount *hfsmp, u_int32_t entrycnt, directoryhint_t *d
 	 * field to track whether or not we've returned EOF from the iterator function.
 	 */
 	state.cbs_eof = false;
+<<<<<<< HEAD
 	
+=======
+
+>>>>>>> origin/10.6
 	iterator = (BTreeIterator *) ((char *)state.cbs_linkinfo + (maxlinks * sizeof(linkinfo_t)));
 	key = (CatalogKey *)&iterator->key;
 	have_key = 0;
@@ -3701,13 +3915,20 @@ cat_getdirentries(struct hfsmount *hfsmp, u_int32_t entrycnt, directoryhint_t *d
 	/* Note that state.cbs_index is still valid on errors */
 	*items = state.cbs_index - index;
 	index = state.cbs_index;
+<<<<<<< HEAD
 
+=======
+	
+>>>>>>> origin/10.6
 	/*
 	 * Also note that cbs_eof is set in all cases if we ever hit EOF
 	 * during the enumeration by the catalog callback.  Mark the directory's hint
 	 * descriptor as having hit EOF.
 	 */
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.6
 	if (state.cbs_eof) {
 		dirhint->dh_desc.cd_flags |= CD_EOF;
 		*eofflag = 1;
@@ -3765,6 +3986,7 @@ cat_getdirentries(struct hfsmount *hfsmp, u_int32_t entrycnt, directoryhint_t *d
 	else
 		result = MacToVFSError(result);
 
+<<<<<<< HEAD
 	if (result == ENOENT) {
 		result = 0;
 	}
@@ -3774,6 +3996,19 @@ cleanup:
 	
 	return (result);
 }
+=======
+struct read_state {
+	u_int32_t	cbs_parentID;
+	u_int32_t	cbs_hiddenDirID;
+	u_int32_t	cbs_hiddenJournalID;
+	u_int32_t	cbs_hiddenInfoBlkID;
+	off_t		cbs_lastoffset;
+	struct uio *	cbs_uio;
+	ExtendedVCB *	cbs_vcb;
+	int16_t		cbs_hfsPlus;
+	int16_t		cbs_result;
+};
+>>>>>>> origin/10.2
 
 
 /*
@@ -3842,6 +4077,7 @@ cat_binarykeycompare(HFSPlusCatalogKey *searchKey, HFSPlusCatalogKey *trialKey)
 	trialParentID = trialKey->parentID;
 	result = 0;
 	
+<<<<<<< HEAD
 	if (searchParentID > trialParentID) {
 		++result;
 	} else if (searchParentID < trialParentID) {
@@ -3851,6 +4087,28 @@ cat_binarykeycompare(HFSPlusCatalogKey *searchKey, HFSPlusCatalogKey *trialKey)
 		u_int16_t * str2 = &trialKey->nodeName.unicode[0];
 		int length1 = searchKey->nodeName.length;
 		int length2 = trialKey->nodeName.length;
+=======
+	/* hide our private meta data directory */
+	if (curID == kRootDirID				&&
+	    catent.d_fileno == state->cbs_hiddenDirID	&&
+	    catent.d_type == DT_DIR)
+		goto lastitem;
+
+	/* Hide the journal files */
+	if ((curID == kRootDirID) &&
+	    (catent.d_type == DT_REG) &&
+	    ((catent.d_fileno == state->cbs_hiddenJournalID) ||
+	     (catent.d_fileno == state->cbs_hiddenInfoBlkID))) {
+
+		return (1);	/* skip and continue */
+	}
+
+	state->cbs_lastoffset = state->cbs_uio->uio_offset;
+
+	/* if this entry won't fit then we're done */
+	if (catent.d_reclen > state->cbs_uio->uio_resid)
+		return (0);	/* stop */
+>>>>>>> origin/10.2
 
 		result = UnicodeBinaryCompare (str1, length1, str2, length2);
 	}
@@ -3873,8 +4131,40 @@ CompareCatalogKeys(HFSCatalogKey *searchKey, HFSCatalogKey *trialKey)
 	cnid_t searchParentID, trialParentID;
 	int result;
 
+<<<<<<< HEAD
 	searchParentID = searchKey->parentID;
 	trialParentID = trialKey->parentID;
+=======
+	diroffset = uio->uio_offset;
+	*eofflag = 0;
+
+	MALLOC(iterator, BTreeIterator *, sizeof(*iterator), M_TEMP, M_WAITOK);
+	bzero(iterator, sizeof(*iterator));
+
+	/* get an iterator and position it */
+	cip = GetCatalogIterator(vcb, dirID, diroffset);
+
+	result = PositionIterator(cip, diroffset, iterator, &op);
+	if (result == cmNotFound) {
+		*eofflag = 1;
+		result = 0;
+		AgeCatalogIterator(cip);
+		goto cleanup;
+	} else if ((result = MacToVFSError(result)))
+		goto cleanup;
+
+	state.cbs_hiddenDirID = hfsmp->hfs_private_metadata_dir;
+	if (hfsmp->jnl) {
+		state.cbs_hiddenJournalID = hfsmp->hfs_jnlfileid;
+		state.cbs_hiddenInfoBlkID = hfsmp->hfs_jnlinfoblkid;
+	}
+
+	state.cbs_lastoffset = cip->currentOffset;
+	state.cbs_vcb = vcb;
+	state.cbs_uio = uio;
+	state.cbs_result = 0;
+	state.cbs_parentID = dirID;
+>>>>>>> origin/10.2
 
 	if (searchParentID > trialParentID)
 		result = 1;
@@ -4662,7 +4952,11 @@ getcnid(const CatalogRecord *crp)
 		cnid = crp->hfsPlusFile.fileID;
 		break;
 	default:
+<<<<<<< HEAD
 		printf("hfs: getcnid: unknown recordType=%d\n", crp->recordType);
+=======
+		panic("hfs: getcnid: unknown recordType (crp @ 0x%x)\n", crp);
+>>>>>>> origin/10.2
 		break;
 	}
 
@@ -4691,7 +4985,11 @@ getparentcnid(const CatalogRecord *recp)
 		cnid = recp->hfsPlusThread.parentID;
 		break;
 	default:
+<<<<<<< HEAD
 		panic("hfs: getparentcnid: unknown recordType (crp @ %p)\n", recp);
+=======
+		panic("hfs: getparentcnid: unknown recordType (crp @ 0x%x)\n", recp);
+>>>>>>> origin/10.2
 		break;
 	}
 

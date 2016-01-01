@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2004-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2004-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -93,7 +97,11 @@ errno_t mbuf_align_32(mbuf_t mbuf, size_t len)
  */
 addr64_t mbuf_data_to_physical(void* ptr)
 {
+<<<<<<< HEAD
 	return ((addr64_t)mcl_to_paddr(ptr));
+=======
+	return (addr64_t)(uintptr_t)mcl_to_paddr(ptr);
+>>>>>>> origin/10.6
 }
 
 errno_t mbuf_get(mbuf_how_t how, mbuf_type_t type, mbuf_t *mbuf)
@@ -1249,6 +1257,7 @@ mbuf_get_mhlen(void)
 	return (_MHLEN);
 }
 
+<<<<<<< HEAD
 u_int32_t
 mbuf_get_minclsize(void)
 {
@@ -1381,4 +1390,71 @@ mbuf_get_unsent_data_bytes(const mbuf_t m, u_int32_t *unsent_data)
 
 	*unsent_data = m->m_pkthdr.pkt_unsent_databytes;
 	return (0);
+=======
+mbuf_priority_t
+mbuf_get_priority(struct mbuf *m)
+{
+#if !PKT_PRIORITY
+#pragma unused(m)
+	return (MBUF_PRIORITY_NORMAL);
+#else /* PKT_PRIORITY */
+	mbuf_priority_t prio = MBUF_PRIORITY_NORMAL;
+
+	if (m == NULL || !(m->m_flags & M_PKTHDR))
+		return (prio);
+
+	/* Defaults to normal; ignore anything else but background */
+	if (m->m_pkthdr.prio == MBUF_PRIORITY_BACKGROUND)
+		prio = MBUF_PRIORITY_BACKGROUND;
+
+	return (prio);
+#endif /* PKT_PRIORITY */
+}
+
+mbuf_traffic_class_t 
+mbuf_get_traffic_class(mbuf_t m)
+{
+#if !PKT_PRIORITY
+#pragma unused(m)
+	return (MBUF_TC_BE);
+#else /* PKT_PRIORITY */
+	mbuf_priority_t prio = MBUF_TC_BE;
+
+	if (m == NULL || !(m->m_flags & M_PKTHDR))
+		return (prio);
+
+	if (m->m_pkthdr.prio <= MBUF_TC_VO)
+		prio = m->m_pkthdr.prio;
+
+	return (prio);
+#endif /* PKT_PRIORITY */
+}
+
+errno_t 
+mbuf_set_traffic_class(mbuf_t m, mbuf_traffic_class_t tc)
+{
+#if !PKT_PRIORITY
+#pragma unused(m)
+#pragma unused(tc)
+	return 0;
+#else /* PKT_PRIORITY */
+	errno_t error = 0;
+	
+	if (m == NULL || !(m->m_flags & M_PKTHDR))
+		return EINVAL;
+
+	switch (tc) {
+		case MBUF_TC_BE:
+		case MBUF_TC_BK:
+		case MBUF_TC_VI:
+		case MBUF_TC_VO:
+			m->m_pkthdr.prio = tc;
+			break;
+		default:
+			error = EINVAL;
+			break;
+	}
+	return error;
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 }

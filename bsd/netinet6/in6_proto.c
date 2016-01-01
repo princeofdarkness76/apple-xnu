@@ -1,5 +1,13 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2008-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2008-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
+=======
+ * Copyright (c) 2008-2015 Apple Inc. All rights reserved.
+>>>>>>> origin/10.10
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -306,6 +314,7 @@ struct ip6protosw inet6sw[] = {
 	.pr_unlock =		rip_unlock,
 },
 #endif /*INET*/
+<<<<<<< HEAD
 {
 	.pr_type =		SOCK_RAW,
 	.pr_protocol =		IPPROTO_IPV6,
@@ -316,7 +325,28 @@ struct ip6protosw inet6sw[] = {
 	.pr_init =		encap6_init,
 	.pr_usrreqs =		&rip6_usrreqs,
 	.pr_unlock =		rip_unlock,
+=======
+{ SOCK_RAW,	&inet6domain,	IPPROTO_IPV6,	PR_ATOMIC|PR_ADDR|PR_LASTHDR,
+  encap6_input, rip6_pr_output,	0,		rip6_ctloutput,
+  0,
+  encap_init,	0,		0,		0,
+  0,
+  &rip6_usrreqs,
+  0,		rip_unlock,	0,
+  { 0, 0 }, NULL, { 0 }
 },
+#if MROUTING
+{ SOCK_RAW,     &inet6domain,	IPPROTO_PIM,	PR_ATOMIC|PR_ADDR|PR_LASTHDR,
+  pim6_input,	rip6_pr_output,	0,              rip6_ctloutput,
+  0,
+  0,		0,		0,		0,
+  0,	
+  &rip6_usrreqs,
+  0,		rip_unlock,	0,
+  { 0, 0 }, NULL, { 0 }
+>>>>>>> origin/10.6
+},
+#endif
 /* raw wildcard */
 {
 	.pr_type =		SOCK_RAW,
@@ -453,9 +483,20 @@ int	ip6_maxifdefrouters = 16;	/* Max acceptable def routers via RA */
 int	ip6_maxdynroutes = 1024;	/* Max # of routes created via redirect */
 int	ip6_only_allow_rfc4193_prefix = 0;	/* Only allow RFC4193 style Unique Local IPv6 Unicast prefixes */
 
+<<<<<<< HEAD
 static int ip6_keepfaith = 0;
 uint64_t ip6_log_time = 0;
 int	nd6_onlink_ns_rfc4861 = 0; /* allow 'on-link' nd6 NS (as in RFC 4861) */
+=======
+int	ip6_neighborgcthresh = 2048;	/* Threshold # of NDP entries for GC */
+int	ip6_maxifprefixes = 16;		/* Max acceptable prefixes via RA per IF */
+int	ip6_maxifdefrouters = 16;	/* Max acceptable def routers via RA */
+int	ip6_maxdynroutes = 4096;	/* Max # of routes created via redirect */
+
+u_int32_t ip6_id = 0UL;
+int	ip6_keepfaith = 0;
+time_t	ip6_log_time = (time_t)0L;
+>>>>>>> origin/10.5
 
 /* icmp6 */
 /*
@@ -606,6 +647,8 @@ SYSCTL_INT(_net_inet6_ip6, IPV6CTL_AUTO_LINKLOCAL,
 	auto_linklocal, CTLFLAG_RW | CTLFLAG_LOCKED, &ip6_auto_linklocal,	0, "");
 SYSCTL_STRUCT(_net_inet6_ip6, IPV6CTL_RIP6STATS, rip6stats, CTLFLAG_RD | CTLFLAG_LOCKED,
 	&rip6stat, rip6stat, "");
+<<<<<<< HEAD
+<<<<<<< HEAD
 SYSCTL_INT(_net_inet6_ip6, IPV6CTL_PREFER_TEMPADDR,
 	prefer_tempaddr, CTLFLAG_RW | CTLFLAG_LOCKED, &ip6_prefer_tempaddr,	0, "");
 SYSCTL_INT(_net_inet6_ip6, IPV6CTL_USE_DEFAULTZONE,
@@ -623,6 +666,23 @@ SYSCTL_INT(_net_inet6_ip6, IPV6CTL_MAXDYNROUTES,
 SYSCTL_INT(_net_inet6_ip6, OID_AUTO,
 	only_allow_rfc4193_prefixes, CTLFLAG_RW | CTLFLAG_LOCKED,
 	&ip6_only_allow_rfc4193_prefix,	0, "");
+=======
+=======
+#if MROUTING
+>>>>>>> origin/10.6
+SYSCTL_STRUCT(_net_inet6_ip6, OID_AUTO, mrt6stat, CTLFLAG_RD,
+        &mrt6stat, mrt6stat, "");
+#endif
+SYSCTL_INT(_net_inet6_ip6, IPV6CTL_NEIGHBORGCTHRESH,
+	neighborgcthresh, CTLFLAG_RW,	&ip6_neighborgcthresh,	0, "");
+SYSCTL_INT(_net_inet6_ip6, IPV6CTL_MAXIFPREFIXES,
+	maxifprefixes, CTLFLAG_RW,	&ip6_maxifprefixes,	0, "");
+SYSCTL_INT(_net_inet6_ip6, IPV6CTL_MAXIFDEFROUTERS,
+	maxifdefrouters, CTLFLAG_RW,	&ip6_maxifdefrouters,	0, "");
+SYSCTL_INT(_net_inet6_ip6, IPV6CTL_MAXDYNROUTES,
+	maxdynroutes, CTLFLAG_RW,	&ip6_maxdynroutes,	0, "");
+
+>>>>>>> origin/10.5
 
 /* net.inet6.icmp6 */
 SYSCTL_INT(_net_inet6_icmp6, ICMPV6CTL_REDIRACCEPT,

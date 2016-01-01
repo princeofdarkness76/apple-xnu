@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -113,6 +139,8 @@
 
 SLIST_HEAD(igmp_inm_relhead, in_multi);
 
+SLIST_HEAD(igmp_inm_relhead, in_multi);
+
 static void	igi_initvar(struct igmp_ifinfo *, struct ifnet *, int);
 static struct igmp_ifinfo *igi_alloc(int);
 static void	igi_free(struct igmp_ifinfo *);
@@ -143,7 +171,11 @@ static struct mbuf *igmp_ra_alloc(void);
 #ifdef IGMP_DEBUG
 static const char *igmp_rec_type_to_str(const int);
 #endif
+<<<<<<< HEAD
 static uint32_t	igmp_set_version(struct igmp_ifinfo *, const int);
+=======
+static void	igmp_set_version(struct igmp_ifinfo *, const int);
+>>>>>>> origin/10.7
 static void	igmp_flush_relq(struct igmp_ifinfo *,
     struct igmp_inm_relhead *);
 static int	igmp_v1v2_queue_report(struct in_multi *, const int);
@@ -204,6 +236,7 @@ static struct igmpstat_v3 igmpstat_v3 = {
 static struct igmpstat igmpstat; /* old IGMPv2 stats structure */
 static struct timeval igmp_gsrdelay = {10, 0};
 
+<<<<<<< HEAD
 static int igmp_recvifkludge = 1;
 static int igmp_sendra = 1;
 static int igmp_sendlocal = 1;
@@ -211,6 +244,10 @@ static int igmp_v1enable = 1;
 static int igmp_v2enable = 1;
 static int igmp_legacysupp = 0;
 static int igmp_default_version = IGMP_VERSION_3;
+=======
+static struct router_info *
+		find_rti(struct ifnet *ifp, int wait);
+>>>>>>> origin/10.5
 
 SYSCTL_STRUCT(_net_inet_igmp, IGMPCTL_STATS, stats, CTLFLAG_RD | CTLFLAG_LOCKED,
     &igmpstat, igmpstat, "");
@@ -317,6 +354,7 @@ igmp_save_context(struct mbuf *m, struct ifnet *ifp)
         m->m_pkthdr.rcvif = ifp;
 }
 
+<<<<<<< HEAD
 static __inline void
 igmp_scrub_context(struct mbuf *m)
 {
@@ -332,6 +370,39 @@ inet_ntop_haddr(in_addr_t haddr, char *buf, socklen_t size)
 	ia.s_addr = htonl(haddr);
 	return (inet_ntop(AF_INET, &ia, buf, size));
 }
+=======
+static struct router_info *
+find_rti(
+	struct ifnet *ifp, int wait)
+{
+	struct router_info *rti = Head;
+	
+	
+#if IGMP_DEBUG
+	printf("[igmp.c, _find_rti] --> entering \n");
+#endif
+	while (rti) {
+		if (rti->rti_ifp == ifp) {
+#if IGMP_DEBUG
+			printf("[igmp.c, _find_rti] --> found old entry \n");
+#endif
+			return rti;
+		}
+		rti = rti->rti_next;
+	}
+	
+	MALLOC(rti, struct router_info *, sizeof *rti, M_IGMP, wait);
+	if (rti != NULL)
+	{
+		rti->rti_ifp = ifp;
+		rti->rti_type = IGMP_V2_ROUTER;
+		rti->rti_time = 0;
+		rti->rti_next = Head;
+		Head = rti;
+	}
+#if IGMP_DEBUG
+	if (rti) printf("[igmp.c, _find_rti] --> created an entry \n");
+>>>>>>> origin/10.5
 #endif
 
 /*
@@ -366,9 +437,20 @@ sysctl_igmp_default_version SYSCTL_HANDLER_ARGS
 	if (error)
 		goto out_locked;
 
+<<<<<<< HEAD
 	if (new < IGMP_VERSION_1 || new > IGMP_VERSION_3) {
 		error = EINVAL;
 		goto out_locked;
+=======
+	ip = mtod(m, struct ip *);
+	timer = igmp->igmp_code * PR_FASTHZ / IGMP_TIMER_SCALE;
+	if (timer == 0)
+		timer = 1;
+	rti = find_rti(ifp, M_NOWAIT);
+	if (rti == NULL) {
+		m_freem(m);
+		return;
+>>>>>>> origin/10.5
 	}
 
 	IGMP_PRINTF(("%s: change igmp_default_version from %d to %d\n",
@@ -493,6 +575,7 @@ igmp_dispatch_queue(struct igmp_ifinfo *igi, struct ifqueue *ifq, int limit,
 	struct mbuf *m;
 	struct ip *ip;
 
+<<<<<<< HEAD
 	if (igi != NULL)
 		IGI_LOCK_ASSERT_HELD(igi);
 
@@ -513,6 +596,20 @@ igmp_dispatch_queue(struct igmp_ifinfo *igi, struct ifqueue *ifq, int limit,
 			IGI_LOCK(igi);
 		if (--limit == 0)
 			break;
+=======
+	if (inm->inm_addr.s_addr == igmp_all_hosts_group
+	    || inm->inm_ifp->if_flags & IFF_LOOPBACK) {
+		inm->inm_timer = 0;
+		inm->inm_state = IGMP_OTHERMEMBER;
+	} else {
+		inm->inm_rti = find_rti(inm->inm_ifp, M_WAITOK);
+		if (inm->inm_rti == NULL) return ENOMEM;
+		igmp_sendpkt(inm, inm->inm_rti->rti_type, 0);
+		inm->inm_timer = IGMP_RANDOM_DELAY(
+					IGMP_MAX_HOST_REPORT_DELAY*PR_FASTHZ);
+		inm->inm_state = IGMP_IREPORTEDLAST;
+		igmp_timers_are_running = 1;
+>>>>>>> origin/10.5
 	}
 
 	if (igi != NULL)
@@ -624,12 +721,28 @@ igmp_domifreattach(struct igmp_ifinfo *igi)
 	igmp_initsilent(ifp, igi);
 	ifnet_lock_done(ifp);
 
+<<<<<<< HEAD
 	LIST_INSERT_HEAD(&igi_head, igi, igi_link);
 
 	IGMP_UNLOCK();
 
 	IGMP_PRINTF(("%s: reattached igmp_ifinfo for ifp 0x%llx(%s)\n",
 	    __func__, (uint64_t)VM_KERNEL_ADDRPERM(ifp), ifp->if_name));
+=======
+	igmp_timers_are_running = 0;
+	IN_FIRST_MULTI(step, inm);
+	while (inm != NULL) {
+		if (inm->inm_timer == 0) {
+			/* do nothing */
+		} else if ((--inm->inm_timer == 0) && (inm->inm_rti != NULL)) {
+			igmp_sendpkt(inm, inm->inm_rti->rti_type, 0);
+			inm->inm_state = IGMP_IREPORTEDLAST;
+		} else {
+			igmp_timers_are_running = 1;
+		}
+		IN_NEXT_MULTI(step, inm);
+	}
+>>>>>>> origin/10.5
 }
 
 /*
@@ -642,6 +755,7 @@ igmp_domifdetach(struct ifnet *ifp)
 
 	SLIST_INIT(&inm_dthead);
 
+<<<<<<< HEAD
 	IGMP_PRINTF(("%s: called for ifp 0x%llx(%s%d)\n", __func__,
 	    (uint64_t)VM_KERNEL_ADDRPERM(ifp), ifp->if_name, ifp->if_unit));
 
@@ -649,6 +763,15 @@ igmp_domifdetach(struct ifnet *ifp)
 	igi_delete(ifp, (struct igmp_inm_relhead *)&inm_dthead);
 	IGMP_UNLOCK();
 
+=======
+	IGMP_PRINTF(("%s: called for ifp %p(%s%d)\n",
+	    __func__, ifp, ifp->if_name, ifp->if_unit));
+
+	lck_mtx_lock(&igmp_mtx);
+	igi_delete(ifp, (struct igmp_inm_relhead *)&inm_dthead);
+	lck_mtx_unlock(&igmp_mtx);
+
+>>>>>>> origin/10.7
 	/* Now that we're dropped all locks, release detached records */
 	IGMP_REMOVE_DETACHED_INM(&inm_dthead);
 }
@@ -689,6 +812,7 @@ igi_delete(const struct ifnet *ifp, struct igmp_inm_relhead *inm_dthead)
 	    ifp, ifp->if_xname);
 }
 
+<<<<<<< HEAD
 __private_extern__ void
 igmp_initsilent(struct ifnet *ifp, struct igmp_ifinfo *igi)
 {
@@ -703,10 +827,20 @@ igmp_initsilent(struct ifnet *ifp, struct igmp_ifinfo *igi)
 	IGI_UNLOCK(igi);
 }
 
+=======
+>>>>>>> origin/10.6
 static void
 igi_initvar(struct igmp_ifinfo *igi, struct ifnet *ifp, int reattach)
 {
+<<<<<<< HEAD
 	IGI_LOCK_ASSERT_HELD(igi);
+=======
+        struct mbuf *m;
+        struct igmp *igmp;
+        struct ip *ip;
+        struct ip_moptions imo;
+	struct route ro;
+>>>>>>> origin/10.6
 
 	igi->igi_ifp = ifp;
 	igi->igi_version = igmp_default_version;
@@ -722,6 +856,7 @@ igi_initvar(struct igmp_ifinfo *igi, struct ifnet *ifp, int reattach)
 	/*
 	 * Responses to general queries are subject to bounds.
 	 */
+<<<<<<< HEAD
 	igi->igi_gq.ifq_maxlen =  IGMP_MAX_RESPONSE_PACKETS;
 	igi->igi_v2q.ifq_maxlen = IGMP_MAX_RESPONSE_PACKETS;
 }
@@ -771,6 +906,14 @@ igi_addref(struct igmp_ifinfo *igi, int locked)
 		IGI_LOCK_SPIN(igi);
 	else
 		IGI_LOCK_ASSERT_HELD(igi);
+=======
+	bzero(&ro, sizeof (ro));
+        (void) ip_output(m, router_alert, &ro, 0, &imo, NULL);
+	if (ro.ro_rt != NULL) {
+		rtfree(ro.ro_rt);
+		ro.ro_rt = NULL;
+	}
+>>>>>>> origin/10.6
 
 	if (++igi->igi_refcnt == 0) {
 		panic("%s: igi=%p wraparound refcnt", __func__, igi);
@@ -811,8 +954,13 @@ igi_remref(struct igmp_ifinfo *igi)
 	/* Now that we're dropped all locks, release detached records */
 	IGMP_REMOVE_DETACHED_INM(&inm_dthead);
 
+<<<<<<< HEAD
 	IGMP_PRINTF(("%s: freeing igmp_ifinfo for ifp 0x%llx(%s)\n",
 	    __func__, (uint64_t)VM_KERNEL_ADDRPERM(ifp), if_name(ifp)));
+=======
+	IGMP_PRINTF(("%s: freeing igmp_ifinfo for ifp %p(%s%d)\n",
+	    __func__, ifp, ifp->if_name, ifp->if_unit));
+>>>>>>> origin/10.7
 
 	igi_free(igi);
 }
@@ -1847,8 +1995,15 @@ igmp_timeout(void *arg)
 	struct ifnet		*ifp;
 	struct igmp_ifinfo	*igi;
 	struct in_multi		*inm;
+<<<<<<< HEAD
 	int			 loop = 0, uri_sec = 0;
 	SLIST_HEAD(, in_multi)	inm_dthead;
+=======
+	int			 loop = 0, uri_fasthz = 0;
+	SLIST_HEAD(, in_multi)	inm_dthead;
+
+	SLIST_INIT(&inm_dthead);
+>>>>>>> origin/10.7
 
 	SLIST_INIT(&inm_dthead);
 
@@ -1989,6 +2144,7 @@ next:
 	}
 
 out_locked:
+<<<<<<< HEAD
 	/* re-arm the timer if there's work to do */
 	igmp_timeout_run = 0;
 	igmp_sched_timeout();
@@ -2009,6 +2165,12 @@ igmp_sched_timeout(void)
 		igmp_timeout_run = 1;
 		timeout(igmp_timeout, NULL, hz);
 	}
+=======
+	lck_mtx_unlock(&igmp_mtx);
+
+	/* Now that we're dropped all locks, release detached records */
+	IGMP_REMOVE_DETACHED_INM(&inm_dthead);
+>>>>>>> origin/10.7
 }
 
 /*

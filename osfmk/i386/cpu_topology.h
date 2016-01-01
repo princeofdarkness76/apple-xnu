@@ -1,5 +1,13 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2003-2010 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2003-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
+=======
+ * Copyright (c) 2003-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -141,9 +149,21 @@ typedef struct x86_lcpu
     boolean_t		primary;	/* logical cpu is primary CPU in package */
     volatile lcpu_state_t	state;	/* state of the logical CPU */
     volatile boolean_t	stopped;	/* used to indicate that the CPU has "stopped" */
+<<<<<<< HEAD
+<<<<<<< HEAD
     uint64_t		rtcPop;		/* next timer pop programmed */
     uint64_t		rtcDeadline;	/* next etimer-requested deadline */
     x86_cpu_cache_t	*caches[MAX_CACHE_DEPTH];
+=======
+    uint64_t		rtcPop;		/* when etimer wants a timer pop */
+    uint64_t		rtcDeadline;
+=======
+    uint64_t		rtcPop;		/* next timer pop programmed */
+    uint64_t		rtcDeadline;	/* next etimer-requested deadline */
+>>>>>>> origin/10.6
+    x86_cpu_cache_t	*caches[MAX_CACHE_DEPTH];
+    struct pmc		*pmc;		/* Pointer to perfmon data */
+>>>>>>> origin/10.5
     void		*pmStats;	/* Power management stats for lcpu */
     void		*pmState;	/* Power management state for lcpu */
 } x86_lcpu_t;
@@ -153,6 +173,7 @@ typedef struct x86_lcpu
 #define X86CORE_FL_HAS_HPET	0x10000000	/* core has HPET assigned */
 #define X86CORE_FL_HALTED	0x00008000	/* core is halted */
 #define X86CORE_FL_IDLE		0x00004000	/* core is idle */
+#define X86CORE_FL_WAKEUP	0x00002000	/* wakeup is pending */
 
 typedef struct x86_core
 {
@@ -207,11 +228,40 @@ typedef struct x86_pkg
     void		*pmStats;	/* Power Management stats for package*/
     void		*pmState;	/* Power Management state for package*/
     struct mca_state	*mca_state;	/* MCA state for memory errors */
+<<<<<<< HEAD
+<<<<<<< HEAD
     uint64_t		package_idle_exits;
     uint32_t		num_idle;
+=======
+>>>>>>> origin/10.5
+=======
+    uint64_t		package_idle_exits;
+    uint32_t		num_idle;
+>>>>>>> origin/10.8
 } x86_pkg_t;
 
 extern x86_pkg_t	*x86_pkgs;	/* root of all CPU packages */
+ 
+typedef struct x86_topology_parameters
+{
+    uint32_t		LLCDepth;
+    uint32_t		nCoresSharingLLC;
+    uint32_t		nLCPUsSharingLLC;
+    uint32_t		maxSharingLLC;
+    uint32_t		nLThreadsPerCore;
+    uint32_t		nPThreadsPerCore;
+    uint32_t		nLCoresPerDie;
+    uint32_t		nPCoresPerDie;
+    uint32_t		nLDiesPerPackage;
+    uint32_t		nPDiesPerPackage;
+    uint32_t		nLThreadsPerDie;
+    uint32_t		nPThreadsPerDie;
+    uint32_t		nLThreadsPerPackage;
+    uint32_t		nPThreadsPerPackage;
+    uint32_t		nLCoresPerPackage;
+    uint32_t		nPCoresPerPackage;
+    uint32_t		nPackages;
+} x86_topology_parameters_t;
 
 typedef struct x86_topology_parameters
 {
@@ -239,6 +289,9 @@ typedef struct x86_topology_parameters
 extern void		cpu_topology_sort(int ncpus);
 extern kern_return_t	cpu_topology_start_cpu(int cpunum);
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.5
 #endif /* _I386_CPU_TOPOLOGY_H_ */
 #endif /* KERNEL_PRIVATE */

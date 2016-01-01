@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -102,6 +124,8 @@
 #include <kern/task.h>
 
 #include <security/audit/audit.h>
+
+#include <bsm/audit_kernel.h>
 
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -760,6 +784,7 @@ nfssvc(proc_t p, struct nfssvc_args *uap, __unused int *retval)
 	 */
 	if ((uap->flag != NFSSVC_EXPORT) && ((error = proc_suser(p))))
 		return (error);
+<<<<<<< HEAD
 #if CONFIG_MACF
 	error = mac_system_check_nfsd(kauth_cred_get());
 	if (error)
@@ -768,6 +793,33 @@ nfssvc(proc_t p, struct nfssvc_args *uap, __unused int *retval)
 
 	/* make sure NFS server data structures have been initialized */
 	nfsrv_init();
+=======
+	while (nfssvc_sockhead_flag & SLP_INIT) {
+		 nfssvc_sockhead_flag |= SLP_WANTINIT;
+		(void) tsleep((caddr_t)&nfssvc_sockhead, PSOCK, "nfsd init", 0);
+	}
+	if (uap->flag & NFSSVC_BIOD)
+		error = nfssvc_iod(p);
+#ifdef NFS_NOSERVER
+	else
+		error = ENXIO;
+#else /* !NFS_NOSERVER */
+	else if (uap->flag & NFSSVC_MNTD) {
+		error = copyin(uap->argp, (caddr_t)&ncd, sizeof (ncd));
+		if (error)
+			return (error);
+		NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF | AUDITVNPATH1,
+		       UIO_USERSPACE, ncd.ncd_dirp, p);
+		error = namei(&nd);
+		if (error)
+			return (error);
+		if ((nd.ni_vp->v_flag & VROOT) == 0)
+			error = EINVAL;
+		nmp = VFSTONFS(nd.ni_vp->v_mount);
+		vput(nd.ni_vp);
+		if (error)
+			return (error);
+>>>>>>> origin/10.3
 
 	if (uap->flag & NFSSVC_ADDSOCK) {
 		if (IS_64BIT_PROCESS(p)) {
@@ -975,8 +1027,19 @@ nfssvc_addsock(socket_t so, mbuf_t mynam)
 	slp->ns_sotype = sotype;
 	slp->ns_nam = mynam;
 
+<<<<<<< HEAD
 	/* set up the socket up-call */
 	nfsrv_uc_addsock(slp, first);
+=======
+	/* set up the socket upcall */
+	socket_lock(so, 1);
+	so->so_upcallarg = (caddr_t)slp;
+	so->so_upcall = nfsrv_rcv;
+	so->so_rcv.sb_flags |= SB_UPCALL;
+	socket_unlock(so, 1);
+	/* just playin' it safe */
+	sock_setsockopt(so, SOL_SOCKET, SO_UPCALLCLOSEWAIT, &on, sizeof(on));
+>>>>>>> origin/10.5
 
 	/* mark that the socket is not in the nfsrv_sockwg list */
 	slp->ns_wgq.tqe_next = SLPNOLIST;

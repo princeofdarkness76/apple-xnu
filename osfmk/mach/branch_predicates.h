@@ -30,6 +30,11 @@
 #ifndef	_MACH_BRANCH_PREDICATES_H
 #define	_MACH_BRANCH_PREDICATES_H
 
+<<<<<<< HEAD
 #define	__probable(x)	__builtin_expect(!!((long)(x)), 1L)
 #define	__improbable(x)	__builtin_expect(!!((long)(x)), 0L)
+=======
+#define	__probable(x)	__builtin_expect((long)(x), 1L)
+#define	__improbable(x)	__builtin_expect((long)(x), 0L)
+>>>>>>> origin/10.8
 #endif /* _MACH_BRANCH_PREDICATES_H */

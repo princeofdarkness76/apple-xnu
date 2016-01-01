@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -226,11 +248,17 @@ extern kern_return_t	pmap_enter_options(
 					   vm_map_offset_t v,
 					   ppnum_t pn,
 					   vm_prot_t prot,
+<<<<<<< HEAD
 					   vm_prot_t fault_type,
 					   unsigned int flags,
 					   boolean_t wired,
 					   unsigned int options,
 					   void *arg);
+=======
+					   unsigned int flags,
+					   boolean_t wired,
+					   unsigned int options);
+>>>>>>> origin/10.6
 
 extern void		pmap_remove_some_phys(
 				pmap_t		pmap,
@@ -415,6 +443,7 @@ extern kern_return_t	(pmap_attribute)(	/* Get/Set special memory
 	int		__options = 0;					\
 									\
 	PMAP_ENTER_CHECK(__pmap, __page)				\
+<<<<<<< HEAD
 	if (__page->object->internal) {					\
 		__options |= PMAP_OPTIONS_INTERNAL;			\
 	}								\
@@ -432,6 +461,45 @@ extern kern_return_t	(pmap_attribute)(	/* Get/Set special memory
 				  NULL);				\
 	MACRO_END
 #endif	/* !PMAP_ENTER */
+=======
+	pmap_enter(__pmap,					\
+		(virtual_address),					\
+		__page->phys_page,					\
+			(protection),					\
+		(flags),						\
+		(wired));						\
+	MACRO_END
+#endif	/* !PMAP_ENTER */
+
+#ifndef	PMAP_ENTER_OPTIONS
+#define PMAP_ENTER_OPTIONS(pmap, virtual_address, page, protection,	\
+				flags, wired, options, result) \
+	MACRO_BEGIN							\
+	pmap_t		__pmap = (pmap);				\
+	vm_page_t	__page = (page);				\
+									\
+	PMAP_ENTER_CHECK(__pmap, __page)				\
+	result = pmap_enter_options(__pmap,				\
+		(virtual_address),					\
+		__page->phys_page,					\
+			(protection),					\
+		(flags),						\
+		(wired),						\
+		options);					\
+	MACRO_END
+#endif	/* !PMAP_ENTER_OPTIONS */
+
+#define PMAP_ENTER_CHECK(pmap, page)					\
+{									\
+	if ((pmap) != kernel_pmap) {					\
+		ASSERT_PAGE_DECRYPTED(page);				\
+	}								\
+	if ((page)->error) {						\
+		panic("VM page %p should not have an error\n",		\
+			(page));					\
+	}								\
+}
+>>>>>>> origin/10.6
 
 #ifndef	PMAP_ENTER_OPTIONS
 #define PMAP_ENTER_OPTIONS(pmap, virtual_address, page, protection,	\
@@ -601,6 +669,7 @@ extern pmap_t	kernel_pmap;			/* The kernel's map */
 #define VM_WIMG_MASK		0xFF
 
 #define VM_MEM_SUPERPAGE	0x100		/* map a superpage instead of a base page */
+<<<<<<< HEAD
 #define VM_MEM_STACK		0x200
 
 #if __x86_64__
@@ -608,10 +677,13 @@ extern pmap_t	kernel_pmap;			/* The kernel's map */
 #define PMAP_CREATE_EPT		0x2
 #define PMAP_CREATE_KNOWN_FLAGS (PMAP_CREATE_64BIT | PMAP_CREATE_EPT)
 #endif
+=======
+>>>>>>> origin/10.6
 
 #define PMAP_OPTIONS_NOWAIT	0x1		/* don't block, return 
 						 * KERN_RESOURCE_SHORTAGE 
 						 * instead */
+<<<<<<< HEAD
 #define PMAP_OPTIONS_NOENTER	0x2		/* expand pmap if needed
 						 * but don't enter mapping
 						 */
@@ -627,6 +699,8 @@ extern pmap_t	kernel_pmap;			/* The kernel's map */
 #define PMAP_OPTIONS_CLEAR_REUSABLE 0x400	/* page no longer "reusable" */
 #define PMAP_OPTIONS_COMPRESSOR_IFF_MODIFIED 0x800 /* credit the compressor
 						    * iff page was modified */
+=======
+>>>>>>> origin/10.6
 
 #if	!defined(__LP64__)
 extern vm_offset_t	pmap_extract(pmap_t pmap,

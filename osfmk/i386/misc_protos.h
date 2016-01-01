@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -41,7 +67,11 @@ extern	boolean_t virtualized;
 
 extern void		vstart(vm_offset_t);
 extern void		i386_init(void);
+<<<<<<< HEAD
 extern void		x86_init_wrapper(uintptr_t, uintptr_t) __attribute__((noreturn));
+=======
+
+>>>>>>> origin/10.7
 extern void		i386_vm_init(
 				uint64_t,
 				boolean_t,
@@ -127,7 +157,14 @@ extern void	rtc_clock_stepped(
 			uint32_t new_frequency,
 			uint32_t old_frequency);
 extern void	rtc_clock_napped(uint64_t, uint64_t);
+<<<<<<< HEAD
+<<<<<<< HEAD
 extern void	rtc_clock_adjust(uint64_t);
+=======
+>>>>>>> origin/10.5
+=======
+extern void	rtc_clock_adjust(uint64_t);
+>>>>>>> origin/10.6
 
 extern void     pmap_lowmem_finalize(void);
 
@@ -157,8 +194,13 @@ extern void act_machine_switch_pcb(thread_t old, thread_t new);
 #define FULL_SLAVE_INIT	(NULL)
 #define FAST_SLAVE_INIT	((void *)(uintptr_t)1)
 
+<<<<<<< HEAD
 void cpu_pmc_control(void *);
 
 extern void pstate_trace(void);
 
+=======
+uint64_t ml_early_random(void);
+void cpu_pmc_control(void *);
+>>>>>>> origin/10.8
 #endif /* _I386_MISC_PROTOS_H_ */

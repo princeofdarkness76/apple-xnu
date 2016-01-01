@@ -1,8 +1,14 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2011, 2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +20,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -98,6 +124,7 @@
 #include <sys/_types/_timeval64.h>
 #include <sys/user.h>
 #include <sys/aio_kern.h>
+<<<<<<< HEAD
 #include <sys/sysproto.h>
 #include <sys/signalvar.h>
 #include <sys/kdebug.h>
@@ -108,6 +135,10 @@
 #include <sys/acct.h>		/* acct_process */
 
 #include <security/audit/audit.h>
+=======
+
+#include <bsm/audit_kernel.h>
+>>>>>>> origin/10.3
 #include <bsm/audit_kevents.h>
 
 #include <mach/mach_types.h>
@@ -120,6 +151,8 @@
 #include <kern/thread_call.h>
 #include <kern/sched_prim.h>
 #include <kern/assert.h>
+<<<<<<< HEAD
+<<<<<<< HEAD
 #include <sys/codesign.h>
 
 #if VM_PRESSURE_EVENTS
@@ -130,6 +163,10 @@
 #include <sys/kern_memorystatus.h>
 #endif
 
+=======
+#include <sys/codesign.h>
+
+>>>>>>> origin/10.6
 #if CONFIG_DTRACE
 /* Do not include dtrace.h, it redefines kmem_[alloc/free] */
 extern void (*dtrace_fasttrap_exit_ptr)(proc_t);
@@ -153,18 +190,25 @@ extern void dtrace_lazy_dofs_destroy(proc_t);
 #include <sys/sdt.h>
 
 extern boolean_t init_task_died;
+<<<<<<< HEAD
+=======
+extern char init_task_failure_data[];
+>>>>>>> origin/10.10
 void proc_prepareexit(proc_t p, int rv, boolean_t perf_notify);
 void vfork_exit(proc_t p, int rv);
 void vproc_exit(proc_t p);
 __private_extern__ void munge_user64_rusage(struct rusage *a_rusage_p, struct user64_rusage *a_user_rusage_p);
 __private_extern__ void munge_user32_rusage(struct rusage *a_rusage_p, struct user32_rusage *a_user_rusage_p);
 static int reap_child_locked(proc_t parent, proc_t child, int deadparent, int reparentedtoinit, int locked, int droplock);
+<<<<<<< HEAD
 static void populate_corpse_crashinfo(proc_t p, void *crash_info_ptr, struct rusage_superset *rup, mach_exception_data_type_t code, mach_exception_data_type_t subcode);
 extern int proc_pidpathinfo(proc_t p, uint64_t arg, user_addr_t buffer, uint32_t buffersize, int32_t *retval);
 
 static __attribute__((noinline)) void launchd_crashed_panic(proc_t p, int rv);
 extern void proc_piduniqidentifierinfo(proc_t p, struct proc_uniqidentifierinfo *p_uniqidinfo);
 
+=======
+>>>>>>> origin/10.8
 
 /*
  * Things which should have prototypes in headers, but don't
@@ -393,6 +437,18 @@ launchd_crashed_panic(proc_t p, int rv)
 	panic_plain("%s exited (signal %d, exit status %d %s)", (p->p_name[0] != '\0' ? p->p_name : "initproc"), WTERMSIG(rv),
 	            WEXITSTATUS(rv), ((p->p_csflags & CS_KILLED) ? "CS_KILLED" : ""));
 }
+=======
+#if KTRACE   
+#include <sys/ktrace.h>
+#include <sys/ubc.h>
+#endif
+
+extern char init_task_failure_data[];
+int exit1 __P((struct proc *, int, int *));
+void proc_prepareexit(struct proc *p);
+int vfork_exit(struct proc *p, int rv);
+void vproc_exit(struct proc *p);
+>>>>>>> origin/10.3
 
 /*
  * exit --
@@ -437,6 +493,7 @@ exit1_internal(proc_t p, int rv, int *retval, boolean_t thread_can_terminate, bo
 	 */
 
 	 ut = get_bsdthread_info(self);
+<<<<<<< HEAD
 	 if (ut->uu_flag & UT_VFORK) {
 		if (!thread_can_terminate) {
 			return EINVAL;
@@ -490,6 +547,18 @@ exit1_internal(proc_t p, int rv, int *retval, boolean_t thread_can_terminate, bo
 		}
 	}
 
+=======
+	 if (ut->uu_flag & P_VFORK) {
+		if (!vfork_exit(p, rv)) {
+			vfork_return(self, p->p_pptr, p , retval);
+			unix_syscall_return(0);
+			/* NOT REACHED */
+		}  
+		return(EINVAL);
+	 }
+	AUDIT_SYSCALL_EXIT(0, p, ut); /* Exit is always successfull */
+        signal_lock(p);
+>>>>>>> origin/10.3
 	while (p->exit_thread != self) {
 		if (sig_try_locked(p) <= 0) {
 			proc_transend(p, 1);
@@ -509,6 +578,37 @@ exit1_internal(proc_t p, int rv, int *retval, boolean_t thread_can_terminate, bo
 		}
 		sig_lock_to_exit(p);
 	}
+<<<<<<< HEAD
+=======
+	if (p == initproc) {
+		proc_unlock(p);
+		printf("pid 1 exited (signal %d, exit %d)",
+		    WTERMSIG(rv), WEXITSTATUS(rv));
+<<<<<<< HEAD
+=======
+#if (DEVELOPMENT || DEBUG)
+		int err;
+		/*
+		 * For debugging purposes, generate a core file of initproc before
+		 * panicking. Leave at least 300 MB free on the root volume, and ignore
+		 * the process's corefile ulimit.
+		 */
+		if ((err = coredump(p, 300, 1)) != 0) {
+			printf("Failed to generate initproc core file: error %d", err);
+		} else {
+			printf("Generated initproc core file");
+			sync(p, (void *)NULL, (int *)NULL);
+		}
+#endif
+		init_task_died = TRUE;
+>>>>>>> origin/10.10
+		panic("%s died\nState at Last Exception:\n\n%s", 
+							(p->p_comm[0] != '\0' ?
+								p->p_comm :
+								"launchd"),
+							init_task_failure_data);
+	}
+>>>>>>> origin/10.5
 
 	if (p == initproc && current_proc() == p) {
 		init_task_died = TRUE;
@@ -774,9 +874,12 @@ proc_exit(proc_t p)
 	
 	proc_refdrain(p);
 
+<<<<<<< HEAD
 	/* if any pending cpu limits action, clear it */
 	task_clear_cpuusage(p->task, TRUE);
 
+=======
+>>>>>>> origin/10.7
 	workqueue_mark_exiting(p);
 	workqueue_exit(p);
 	kqueue_dealloc(p->p_wqkqueue);
@@ -793,12 +896,20 @@ proc_exit(proc_t p)
 	if (uth->uu_lowpri_window) {
 	        /*
 		 * task is marked as a low priority I/O type
+<<<<<<< HEAD
 		 * and the I/O we issued while in flushing files on close
+=======
+		 * and the I/O we issued while flushing files on close
+>>>>>>> origin/10.5
 		 * collided with normal I/O operations...
 		 * no need to throttle this thread since its going away
 		 * but we do need to update our bookeeping w/r to throttled threads
 		 */
+<<<<<<< HEAD
 		throttle_lowpri_io(0);
+=======
+		throttle_lowpri_io(FALSE);
+>>>>>>> origin/10.5
 	}
 
 #if SYSV_SHM
@@ -937,6 +1048,9 @@ proc_exit(proc_t p)
 	if (p->p_tracep) {
 		struct vnode *tvp = p->p_tracep;
 		p->p_tracep = NULL;
+
+		if (UBCINFOEXISTS(tvp))
+		        ubc_rele(tvp);
 		vrele(tvp);
 	}
 #endif
@@ -955,6 +1069,10 @@ proc_exit(proc_t p)
 	proc_childdrainstart(p);
 	while ((q = p->p_children.lh_first) != NULL) {
 		int reparentedtoinit = (q->p_listflag & P_LIST_DEADPARENT) ? 1 : 0;
+<<<<<<< HEAD
+=======
+		q->p_listflag |= P_LIST_DEADPARENT;
+>>>>>>> origin/10.8
 		if (q->p_stat == SZOMB) {
 			if (p != q->p_pptr)
 				panic("parent child linkage broken");
@@ -1207,9 +1325,14 @@ proc_exit(proc_t p)
 		 *  keyed off of list lock for reaping
 		 */
 		proc_list_lock();
+<<<<<<< HEAD
 		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_COMMON,
 			BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_EXIT) | DBG_FUNC_END,
 			pid, exitval, 0, 0, 0);
+=======
+		KERNEL_DEBUG_CONSTANT(BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_EXIT) | DBG_FUNC_END,
+					      pid, exitval, 0, 0, 0);
+>>>>>>> origin/10.6
 		/* check for sysctl zomb lookup */
 		while ((p->p_listflag & P_LIST_WAITING) == P_LIST_WAITING) {
 			msleep(&p->p_stat, proc_list_mlock, PWAIT, "waitcoll", 0);
@@ -1237,7 +1360,11 @@ proc_exit(proc_t p)
 		 * no need to throttle this thread since its going away
 		 * but we do need to update our bookeeping w/r to throttled threads
 		 */
+<<<<<<< HEAD
 		throttle_lowpri_io(0);
+=======
+		throttle_lowpri_io(FALSE);
+>>>>>>> origin/10.5
 	}
 
 	proc_rele(pp);
@@ -1648,11 +1775,15 @@ wait4(p, uap, retval)
 		return (0);
 	}
 
+<<<<<<< HEAD
 	/* Save arguments for continuation. Backing storage is in uthread->uu_arg, and will not be deallocated */
 	uth = current_uthread();
 	wait4_data = &uth->uu_kevent.uu_wait4_data;
 	wait4_data->args = uap;
 	wait4_data->retval = retval;
+=======
+	a = (struct wait4_args *)get_bsduthreadarg(current_act());
+>>>>>>> origin/10.3
 
 	if ((error = msleep0((caddr_t)q, proc_list_mlock, PWAIT | PCATCH | PDROP, "wait", 0, wait1continue)))
 		return (error);
@@ -1831,6 +1962,7 @@ loop1:
 			/* Prevent other process for waiting for this event? */
 			if (!(uap->options & WNOWAIT)) {
 				(void) reap_child_locked(q, p, 0, 0, 0, 0);
+<<<<<<< HEAD
 =======
 		if (p->p_flag & P_WAITING) {
 			(void)tsleep(&p->p_stat, PWAIT, "waitcoll", 0);
@@ -1875,6 +2007,8 @@ loop1:
 				p->p_flag &= ~P_WAITING;
 				wakeup(&p->p_stat);
 >>>>>>> origin/10.1
+=======
+>>>>>>> origin/10.8
 				return (0);
 			}
 			goto out;
@@ -2105,16 +2239,27 @@ init_process(void)
 {
 	register struct proc *p = current_proc();
 
-	if (suser(p->p_ucred, &p->p_acflag))
+	AUDIT_MACH_SYSCALL_ENTER(AUE_INITPROCESS);
+	if (suser(p->p_ucred, &p->p_acflag)) {
+		AUDIT_MACH_SYSCALL_EXIT(KERN_NO_ACCESS);
 		return(KERN_NO_ACCESS);
+<<<<<<< HEAD
 >>>>>>> origin/10.1
+=======
+	}
+>>>>>>> origin/10.3
 
 	proc_list_unlock();
 
+<<<<<<< HEAD
 	if ((cansignal != 0) && (initproc == parent) && (child->p_stat == SZOMB))
 		psignal(initproc, SIGCHLD);
 	if (locked == 1)
 		proc_list_lock();
+=======
+	AUDIT_MACH_SYSCALL_EXIT(KERN_SUCCESS);
+	return(KERN_SUCCESS);
+>>>>>>> origin/10.3
 }
 
 <<<<<<< HEAD
@@ -2137,6 +2282,7 @@ process_terminate_self(void)
  * status and rusage for wait().  Check for child processes and orphan them.
  */
 
+<<<<<<< HEAD
 void
 vfork_exit(proc_t p, int rv)
 {
@@ -2145,6 +2291,12 @@ vfork_exit(proc_t p, int rv)
 
 void
 vfork_exit_internal(proc_t p, int rv, int forceexit)
+=======
+int
+vfork_exit(p, rv)
+	struct proc *p;
+	int rv;
+>>>>>>> origin/10.3
 {
 	thread_t self = current_thread();
 #ifdef FIXME
@@ -2152,6 +2304,7 @@ vfork_exit_internal(proc_t p, int rv, int forceexit)
 #endif
 	struct uthread *ut;
 
+<<<<<<< HEAD
 	/*
 	 * If a thread in this task has already
 	 * called exit(), then halt any others
@@ -2160,6 +2313,17 @@ vfork_exit_internal(proc_t p, int rv, int forceexit)
 
 	 ut = get_bsdthread_info(self);
 
+=======
+	ut = get_bsdthread_info(self);
+	if (p->exit_thread) {
+		return(1);
+	} 
+	p->exit_thread = self;
+	
+	s = splsched();
+	p->p_flag |= P_WEXIT;
+	splx(s);
+>>>>>>> origin/10.3
 
 	proc_lock(p);
 	 if ((p->p_lflag & P_LPEXIT) == P_LPEXIT) {
@@ -2230,6 +2394,7 @@ vfork_exit_internal(proc_t p, int rv, int forceexit)
 	ut->uu_siglist = 0;
 
 	vproc_exit(p);
+	return(0);
 }
 
 void 
@@ -2458,6 +2623,9 @@ vproc_exit(proc_t p)
 	if (p->p_tracep) {
 		struct vnode *tvp = p->p_tracep;
 		p->p_tracep = NULL;
+
+		if (UBCINFOEXISTS(tvp))
+		        ubc_rele(tvp);
 		vrele(tvp);
 	}
 #endif
@@ -2638,6 +2806,9 @@ vproc_exit(proc_t p)
 		p->p_listflag |= P_LIST_WAITING;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
 		/*
 		 * This is a named reference and it is not granted
 		 * if the reap is already in progress. So we get

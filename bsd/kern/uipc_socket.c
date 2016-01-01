@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 1998-2015 Apple Inc. All rights reserved.
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +16,24 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +41,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */
 /*
@@ -94,8 +127,11 @@
 #include <sys/kdebug.h>
 #include <sys/un.h>
 #include <sys/user.h>
+<<<<<<< HEAD
 #include <sys/priv.h>
 #include <sys/kern_event.h>
+=======
+>>>>>>> origin/10.6
 #include <net/route.h>
 #include <net/init.h>
 #include <net/ntstat.h>
@@ -209,7 +245,11 @@ MALLOC_DEFINE(M_PCB, "pcb", "protocol control block");
 #define	DBG_FNC_SORECEIVE_LIST	NETDBG_CODE(DBG_NETSOCK, (8 << 8) | 3)
 #define	DBG_FNC_SOSHUTDOWN	NETDBG_CODE(DBG_NETSOCK, (9 << 8))
 
+<<<<<<< HEAD
 #define	MAX_SOOPTGETM_SIZE	(128 * MCLBYTES)
+=======
+#define MAX_SOOPTGETM_SIZE	(128 * MCLBYTES)
+>>>>>>> origin/10.3
 
 int somaxconn = SOMAXCONN;
 SYSCTL_INT(_kern_ipc, KIPC_SOMAXCONN, somaxconn,
@@ -286,11 +326,17 @@ extern struct inpcbinfo tcbinfo;
 extern int get_inpcb_str_size(void);
 extern int get_tcp_str_size(void);
 
+<<<<<<< HEAD
 static unsigned int sl_zone_size;		/* size of sockaddr_list */
 static struct zone *sl_zone;			/* zone for sockaddr_list */
 
 static unsigned int se_zone_size;		/* size of sockaddr_entry */
 static struct zone *se_zone;			/* zone for sockaddr_entry */
+=======
+extern int uthread_get_background_state(uthread_t);
+
+#ifdef __APPLE__
+>>>>>>> origin/10.6
 
 vm_size_t	so_cache_zone_element_size;
 
@@ -364,8 +410,12 @@ socketinit(void)
 	}
 	socketinit_done = 1;
 
+<<<<<<< HEAD
 	PE_parse_boot_argn("socket_debug", &socket_debug,
 	    sizeof (socket_debug));
+=======
+	PE_parse_boot_argn("socket_debug", &socket_debug, sizeof (socket_debug));
+>>>>>>> origin/10.5
 
 	/*
 	 * allocate lock group attribute and group for socket cache mutex
@@ -395,6 +445,7 @@ socketinit(void)
 	zone_change(so_cache_zone, Z_CALLERACCT, FALSE);
 	zone_change(so_cache_zone, Z_NOENCRYPT, TRUE);
 
+<<<<<<< HEAD
 	sl_zone_size = sizeof (struct sockaddr_list);
 	if ((sl_zone = zinit(sl_zone_size, 1024 * sl_zone_size, 1024,
 	    "sockaddr_list")) == NULL) {
@@ -412,6 +463,14 @@ socketinit(void)
 	}
 	zone_change(se_zone, Z_CALLERACCT, FALSE);
 	zone_change(se_zone, Z_EXPAND, TRUE);
+=======
+	so_cache_zone = zinit(str_size, 120000*str_size, 8192, "socache zone");
+	zone_change(so_cache_zone, Z_NOENCRYPT, TRUE);
+#if TEMPDEBUG
+	printf("cached_sock_alloc -- so_cache_zone size is %x\n", str_size);
+#endif
+	timeout(so_cache_timer, NULL, (SO_CACHE_FLUSH_INTERVAL * hz));
+>>>>>>> origin/10.6
 
 	bzero(&soextbkidlestat, sizeof(struct soextbkidlestat));
 	soextbkidlestat.so_xbkidle_maxperproc = SO_IDLE_BK_IDLE_MAX_PER_PROC;
@@ -623,9 +682,18 @@ int
 socreate_internal(int dom, struct socket **aso, int type, int proto,
     struct proc *p, uint32_t flags, struct proc *ep)
 {
+<<<<<<< HEAD
 	struct protosw *prp;
 	struct socket *so;
 	int error = 0;
+=======
+	struct proc *p = current_proc();
+	register struct protosw *prp;
+	register struct socket *so;
+	register int error = 0;
+	thread_t thread;
+	struct uthread *ut;
+>>>>>>> origin/10.6
 
 #if TCPDEBUG
 	extern int tcpconsdebug;
@@ -726,6 +794,7 @@ socreate_internal(int dom, struct socket **aso, int type, int proto,
 	if (tcpconsdebug == 2)
 		so->so_options |= SO_DEBUG;
 #endif
+<<<<<<< HEAD
 	so_set_default_traffic_class(so);
 
 	/*
@@ -763,6 +832,27 @@ socreate_internal(int dom, struct socket **aso, int type, int proto,
 	 * APIs.
 	 */
 
+=======
+#endif
+	/*
+	 * If this is a background thread/task, mark the socket as such.
+	 */
+	thread = current_thread();
+	ut = get_bsdthread_info(thread);
+	if (uthread_get_background_state(ut)) {
+		socket_set_traffic_mgt_flags(so, TRAFFIC_MGT_SO_BACKGROUND);
+		so->so_background_thread = thread;
+		/*
+		 * In case setpriority(PRIO_DARWIN_THREAD) was called
+		 * on this thread, regulate network (TCP) traffics.
+		 */
+		if (ut->uu_flag & UT_BACKGROUND_TRAFFIC_MGT) {
+			socket_set_traffic_mgt_flags(so,
+			    TRAFFIC_MGT_SO_BG_REGULATE);
+		}
+	}
+
+>>>>>>> origin/10.6
 	*aso = so;
 
 	return (0);
@@ -1135,7 +1225,12 @@ soclose_wait_locked(struct socket *so)
 	 * Double check here and return if there's no outstanding upcall;
 	 * otherwise proceed further only if SOF_UPCALLCLOSEWAIT is set.
 	 */
+<<<<<<< HEAD
 	if (!so->so_upcallusecount || !(so->so_flags & SOF_UPCALLCLOSEWAIT))
+=======
+	if (!(so->so_flags & SOF_UPCALLINUSE) ||
+	    !(so->so_flags & SOF_UPCALLCLOSEWAIT))
+>>>>>>> origin/10.5
 		return;
 	so->so_rcv.sb_flags &= ~SB_UPCALL;
 	so->so_snd.sb_flags &= ~SB_UPCALL;
@@ -2974,6 +3069,7 @@ soreceive_addr(struct proc *p, struct socket *so, struct sockaddr **psa,
 		SBLASTRECORDCHK(&so->so_rcv, "soreceive 1b");
 		SBLASTMBUFCHK(&so->so_rcv, "soreceive 1b");
 	}
+<<<<<<< HEAD
 #endif /* CONFIG_MACF_SOCKET_SUBSET */
 	if (psa != NULL) {
 		*psa = dup_sockaddr(mtod(m, struct sockaddr *), canwait);
@@ -2995,6 +3091,36 @@ soreceive_addr(struct proc *p, struct socket *so, struct sockaddr **psa,
 		m = so->so_rcv.sb_mb;
 		if (m != NULL) {
 			m->m_nextpkt = nextrecord;
+=======
+dontblock:
+#ifndef __APPLE__
+	if (uio->uio_procp)
+		uio->uio_procp->p_stats->p_ru.ru_msgrcv++;
+#else	/* __APPLE__ */
+	/*
+	 * 2207985
+	 * This should be uio->uio-procp; however, some callers of this
+	 * function use auto variables with stack garbage, and fail to
+	 * fill out the uio structure properly.
+	 */
+	if (p)
+		p->p_stats->p_ru.ru_msgrcv++;
+#endif	/* __APPLE__ */
+	nextrecord = m->m_nextpkt;
+	if ((pr->pr_flags & PR_ADDR) && m->m_type == MT_SONAME) {
+		KASSERT(m->m_type == MT_SONAME, ("receive 1a"));
+		orig_resid = 0;
+		if (psa) {
+			*psa = dup_sockaddr(mtod(m, struct sockaddr *),
+					    mp0 == 0);
+			if ((*psa == 0) && (flags & MSG_NEEDSA)) {
+				error = EWOULDBLOCK;
+				goto release;
+			}
+		}
+		if (flags & MSG_PEEK) {
+			m = m->m_next;
+>>>>>>> origin/10.3
 		} else {
 			so->so_rcv.sb_mb = nextrecord;
 			SB_EMPTY_FIXUP(&so->so_rcv);
@@ -6049,7 +6175,11 @@ soo_kqfilter(struct fileproc *fp, struct knote *kn, vfs_context_t ctx)
 		/*
 		 * If the caller explicitly asked for OOB results (e.g. poll()),
 		 * save that off in the hookid field and reserve the kn_flags
+<<<<<<< HEAD
 		 * EV_OOBAND bit for output only.
+=======
+		 * EV_OOBAND bit for output only).
+>>>>>>> origin/10.10
 		 */
 		if (kn->kn_flags & EV_OOBAND) {
 			kn->kn_flags &= ~EV_OOBAND;
@@ -6135,19 +6265,31 @@ filt_soread(struct knote *kn, long hint)
 	}
 
 	/* socket isn't a listener */
+<<<<<<< HEAD
 	/*
 	 * NOTE_LOWAT specifies new low water mark in data, i.e.
 	 * the bytes of protocol data. We therefore exclude any
 	 * control bytes.
 	 */
+=======
+>>>>>>> origin/10.10
 	kn->kn_data = so->so_rcv.sb_cc - so->so_rcv.sb_ctl;
+	/*
+	 * Clear out EV_OOBAND that filt_soread may have set in the
+	 * past.
+	 */
+	kn->kn_flags &= ~EV_OOBAND;
 
+<<<<<<< HEAD
 	/*
 	 * Clear out EV_OOBAND that filt_soread may have set in the
 	 * past.
 	 */
 	kn->kn_flags &= ~EV_OOBAND;
 	if ((so->so_oobmark) || (so->so_state & SS_RCVATMARK)) {
+=======
+	if ((so->so_oobmark) || (so->so_state & SS_RCVATMARK)){
+>>>>>>> origin/10.10
 		kn->kn_flags |= EV_OOBAND;
 		/*
 		 * If caller registered explicit interest in OOB data,
@@ -6163,6 +6305,7 @@ filt_soread(struct knote *kn, long hint)
 			if ((hint & SO_FILT_HINT_LOCKED) == 0)
 				socket_unlock(so, 1);
 			return (1);
+<<<<<<< HEAD
 =======
 		while (flags & MSG_WAITALL && m == 0 && uio->uio_resid > 0 &&
 		    !sosendallatonce(so) && !nextrecord) {
@@ -6192,6 +6335,11 @@ filt_soread(struct knote *kn, long hint)
 	        m_freem_list(free_list);
 	}
 
+=======
+		}
+	}
+	
+>>>>>>> origin/10.10
 	if ((so->so_state & SS_CANTRCVMORE)
 #if CONTENT_FILTER
 	    && cfil_sock_data_pending(&so->so_rcv) == 0
@@ -6226,6 +6374,7 @@ filt_soread(struct knote *kn, long hint)
 	if ((hint & SO_FILT_HINT_LOCKED) == 0)
 		socket_unlock(so, 1);
 
+<<<<<<< HEAD
 	/*
 	 * The order below is important. Since NOTE_LOWAT
 	 * overrides sb_lowat, check for NOTE_LOWAT case
@@ -6235,6 +6384,9 @@ filt_soread(struct knote *kn, long hint)
 		return (kn->kn_data >= lowwat);
 
 	return (so->so_rcv.sb_cc >= lowwat);
+=======
+	return (kn->kn_data >= lowwat);
+>>>>>>> origin/10.10
 }
 
 static void
@@ -6460,6 +6612,7 @@ filt_socktouch(struct knote *kn, struct kevent_internal_s *kev, long type)
 		uint32_t changed_flags;
 		changed_flags = (kn->kn_sfflags ^ kn->kn_hookid);
 
+<<<<<<< HEAD
 		/*
 		 * Since we keep track of events that are already
 		 * delivered, if any of those events are not requested
@@ -6492,6 +6645,28 @@ filt_socktouch(struct knote *kn, struct kevent_internal_s *kev, long type)
 		break;
 	default:
 		break;
+=======
+#ifdef __APPLE_API_PRIVATE
+		case SO_UPCALLCLOSEWAIT:
+			error = sooptcopyin(sopt, &optval, sizeof (optval),
+			    sizeof (optval));
+			if (error)
+				goto bad;
+			if (optval)
+				so->so_flags |= SOF_UPCALLCLOSEWAIT;
+			else
+				so->so_flags &= ~SOF_UPCALLCLOSEWAIT;
+			break;
+#endif
+
+		default:
+			error = ENOPROTOOPT;
+			break;
+		}
+		if (error == 0 && so->so_proto && so->so_proto->pr_ctloutput) {
+			(void) ((*so->so_proto->pr_ctloutput)(so, sopt));
+		}
+>>>>>>> origin/10.5
 	}
 }
 
@@ -6586,9 +6761,32 @@ socket_unlock(struct socket *so, int refcount)
 				/* NOTREACHED */
 			}
 
+<<<<<<< HEAD
 			so->so_usecount--;
 			if (so->so_usecount == 0)
 				sofreelastref(so, 1);
+=======
+#if PKT_PRIORITY
+		case SO_TRAFFIC_CLASS: {
+			error = sooptcopyin(sopt, &optval, sizeof (optval),
+				sizeof (optval));
+			if (error)
+				goto bad;
+			if (optval < SO_TC_BE || optval > SO_TC_VO) {
+				error = EINVAL;
+				goto bad;
+			}
+			so->so_traffic_class = optval;
+		}
+#endif /* PKT_PRIORITY */
+
+		default:
+			error = ENOPROTOOPT;
+			break;
+		}
+		if (error == 0 && so->so_proto && so->so_proto->pr_ctloutput) {
+			(void) ((*so->so_proto->pr_ctloutput)(so, sopt));
+>>>>>>> origin/10.6
 		}
 		lck_mtx_unlock(mutex_held);
 	}
@@ -6863,9 +7061,39 @@ soresume(struct proc *p, struct socket *so, int locked)
 		so->so_extended_bk_start = 0;
 		OSBitAndAtomic(~P_LXBKIDLEINPROG, &p->p_ladvflag);
 
+<<<<<<< HEAD
 		OSIncrementAtomic(&soextbkidlestat.so_xbkidle_resumed);
 		OSDecrementAtomic(&soextbkidlestat.so_xbkidle_active);
 		VERIFY(soextbkidlestat.so_xbkidle_active >= 0);
+=======
+#ifdef __APPLE_API_PRIVATE
+		case SO_UPCALLCLOSEWAIT:
+			optval = (so->so_flags & SOF_UPCALLCLOSEWAIT);
+			goto integer;
+#endif
+
+<<<<<<< HEAD
+=======
+			sonpx.npx_flags = (so->so_flags & SOF_NPX_SETOPTSHUT) ? SONPX_SETOPTSHUT : 0;
+			sonpx.npx_mask = SONPX_MASK_VALID;
+
+			error = sooptcopyout(sopt, &sonpx, sizeof(struct so_np_extensions));
+			break;	
+		}
+#if PKT_PRIORITY
+		case SO_TRAFFIC_CLASS:
+			optval = so->so_traffic_class;
+			goto integer;
+#endif /* PKT_PRIORITY */
+
+>>>>>>> origin/10.6
+		default:
+			error = ENOPROTOOPT;
+			break;
+		}
+		socket_unlock(so, 1);
+		return (error);
+>>>>>>> origin/10.5
 	}
 	if (locked == 0)
 		socket_unlock(so, 1);
@@ -7056,12 +7284,30 @@ so_get_recv_anyif(struct socket *so)
 {
 	int ret = 0;
 
+<<<<<<< HEAD
 #if INET6
 	if (SOCK_DOM(so) == PF_INET || SOCK_DOM(so) == PF_INET6) {
 #else
 	if (SOCK_DOM(so) == PF_INET) {
 #endif /* !INET6 */
 		ret = (sotoinpcb(so)->inp_flags & INP_RECV_ANYIF) ? 1 : 0;
+=======
+	if (sopt_size > MAX_SOOPTGETM_SIZE)
+		return EMSGSIZE;
+
+	MGET(m, sopt->sopt_p ? M_WAIT : M_DONTWAIT, MT_DATA);
+	if (m == 0)
+		return ENOBUFS;
+	if (sopt_size > MLEN) {
+		MCLGET(m, sopt->sopt_p ? M_WAIT : M_DONTWAIT);
+		if ((m->m_flags & M_EXT) == 0) {
+			m_free(m);
+			return ENOBUFS;
+		}
+		m->m_len = min(MCLBYTES, sopt_size);
+	} else {
+		m->m_len = min(MLEN, sopt_size);
+>>>>>>> origin/10.3
 	}
 
 	return (ret);

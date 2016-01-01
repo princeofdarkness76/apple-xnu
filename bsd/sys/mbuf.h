@@ -1,6 +1,11 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 1999-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 1999-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +20,24 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +45,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /* Copyright (c) 1998, 1999 Apple Computer, Inc. All Rights Reserved */
 /* Copyright (c) 1995 NeXT Computer, Inc. All Rights Reserved */
@@ -293,6 +330,7 @@ struct necp_mtag {
 struct	pkthdr {
 	struct	ifnet *rcvif;		/* rcv interface */
 	/* variables for ip and tcp reassembly */
+<<<<<<< HEAD
 	void	*pkt_hdr;		/* pointer to packet header */
 	int32_t	len;			/* total packet length */
 	/* variables for hardware checksum */
@@ -395,6 +433,39 @@ struct	pkthdr {
 		} __mpriv_u;
 	} pkt_mpriv __attribute__((aligned(4)));
 	u_int32_t redzone;		/* red zone */
+=======
+	void	*header;		/* pointer to packet header */
+        /* variables for hardware checksum */
+#ifdef KERNEL_PRIVATE
+    	/* Note: csum_flags is used for hardware checksum and VLAN */
+#endif KERNEL_PRIVATE
+        int     csum_flags;             /* flags regarding checksum */       
+        int     csum_data;              /* data field used by csum routines */
+	struct mbuf *aux;		/* extra data buffer; ipsec/others */
+#ifdef KERNEL_PRIVATE
+	u_short	vlan_tag;		/* VLAN tag, host byte order */
+<<<<<<< HEAD
+	u_short reserved_1;		/* for future use */
+#else KERNEL_PRIVATE
+	void	*reserved1;		/* for future use */
+#endif KERNEL_PRIVATE
+	void	*reserved2;		/* for future use */
+>>>>>>> origin/10.3
+=======
+	u_short socket_id;		/* socket id */
+        SLIST_HEAD(packet_tags, m_tag) tags; /* list of packet tags */
+#if PF_PKTHDR
+	/*
+	 * Be careful; {en,dis}abling PF_PKTHDR will require xnu recompile;
+	 * private code outside of xnu must use mbuf_get_mhlen() instead
+	 * of MHLEN.
+	 */
+	struct pf_mtag pf_mtag;
+#endif /* PF_PKTHDR */
+#if PKT_PRIORITY
+	u_int32_t prio;			/* packet priority */
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 };
 
 /*
@@ -535,6 +606,7 @@ struct mbuf {
 	(M_PROTO1|M_PROTO2|M_PROTO3|M_PROTO5)
 
 /* flags copied when copying m_pkthdr */
+<<<<<<< HEAD
 #define	M_COPYFLAGS							\
 	(M_PKTHDR|M_EOR|M_PROTO1|M_PROTO2|M_PROTO3 |			\
 	M_LOOP|M_PROTO5|M_BCAST|M_MCAST|M_FRAG |			\
@@ -555,6 +627,36 @@ struct mbuf {
 #define	CSUM_DATA_VALID		0x0400		/* csum_data field is valid */
 #define	CSUM_PSEUDO_HDR		0x0800		/* csum_data has pseudo hdr */
 #define	CSUM_PARTIAL		0x1000		/* simple Sum16 computation */
+=======
+#define	M_COPYFLAGS	(M_PKTHDR|M_EOR|M_PROTO1|M_PROTO1|M_PROTO2|M_PROTO3 | \
+			    M_PROTO4|M_PROTO5|M_BCAST|M_MCAST|M_FRAG)
+
+/* flags indicating hw checksum support and sw checksum requirements [freebsd4.1]*/
+#define CSUM_IP                 0x0001          /* will csum IP */
+#define CSUM_TCP                0x0002          /* will csum TCP */
+#define CSUM_UDP                0x0004          /* will csum UDP */
+#define CSUM_IP_FRAGS           0x0008          /* will csum IP fragments */
+#define CSUM_FRAGMENT           0x0010          /* will do IP fragmentation */
+        
+#define CSUM_IP_CHECKED         0x0100          /* did csum IP */
+#define CSUM_IP_VALID           0x0200          /*   ... the csum is valid */
+#define CSUM_DATA_VALID         0x0400          /* csum_data field is valid */
+#define CSUM_PSEUDO_HDR         0x0800          /* csum_data has pseudo hdr */
+#define CSUM_TCP_SUM16          0x1000          /* simple TCP Sum16 computation */
+ 
+#define CSUM_DELAY_DATA         (CSUM_TCP | CSUM_UDP)
+#define CSUM_DELAY_IP           (CSUM_IP)       /* XXX add ipv6 here too? */
+#ifdef KERNEL_PRIVATE
+/*
+ * Note: see also IF_HWASSIST_CSUM defined in <net/if_var.h>
+ */
+/* bottom 16 bits reserved for hardware checksum */
+#define CSUM_CHECKSUM_MASK	0xffff
+
+/* VLAN tag present */
+#define CSUM_VLAN_TAG_VALID	0x10000		/* vlan_tag field is valid */
+#endif KERNEL_PRIVATE
+>>>>>>> origin/10.3
 
 #define	CSUM_DELAY_DATA		(CSUM_TCP | CSUM_UDP)
 #define	CSUM_DELAY_IP		(CSUM_IP)	/* IPv4 only: no IPv6 IP cksum */
@@ -798,6 +900,7 @@ do {									\
 /* compatiblity with 4.3 */
 #define	m_copy(m, o, l)		m_copym((m), (o), (l), M_DONTWAIT)
 
+<<<<<<< HEAD
 #define	MBSHIFT		20				/* 1MB */
 #define	MBSIZE		(1 << MBSHIFT)
 #define	GBSHIFT		30				/* 1GB */
@@ -954,6 +1057,11 @@ struct name {							\
 #define	max_linkhdr	P2ROUNDUP(_max_linkhdr, sizeof (u_int32_t))
 #define	max_protohdr	P2ROUNDUP(_max_protohdr, sizeof (u_int32_t))
 #endif /* XNU_KERNEL_PRIVATE */
+=======
+#define MBSHIFT         20                              /* 1MB */
+
+#endif /* KERNEL_PRIVATE */
+>>>>>>> origin/10.5
 
 /*
  * Mbuf statistics (legacy).
@@ -1441,7 +1549,14 @@ __BEGIN_DECLS
 __private_extern__ void m_scratch_init(struct mbuf *);
 __private_extern__ u_int32_t m_scratch_get(struct mbuf *, u_int8_t **);
 
+<<<<<<< HEAD
 __private_extern__ void m_classifier_init(struct mbuf *, uint32_t);
+=======
+extern void m_prio_init(struct mbuf *);
+extern void m_prio_background(struct mbuf *);
+
+__END_DECLS
+>>>>>>> origin/10.6
 
 __private_extern__ int m_set_service_class(struct mbuf *, mbuf_svc_class_t);
 __private_extern__ mbuf_svc_class_t m_get_service_class(struct mbuf *);

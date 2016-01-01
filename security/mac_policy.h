@@ -580,9 +580,12 @@ typedef int mpo_cred_label_update_execve_t(
 	struct label *vnodelabel,
 	struct label *scriptvnodelabel,
 	struct label *execlabel,
+<<<<<<< HEAD
 	u_int *csflags,
 	void *macpolicyattr,
 	size_t macpolicyattrlen,
+=======
+>>>>>>> origin/10.5
 	int *disjointp
 );
 /**
@@ -2600,6 +2603,7 @@ typedef int mpo_proc_check_fork_t(
 	struct proc *proc
 );
 /**
+<<<<<<< HEAD
   @brief Access control check for setting host special ports.
   @param cred Subject credential
   @param id The host special port to set
@@ -2626,6 +2630,8 @@ typedef int mpo_proc_check_set_host_exception_port_t(
 	unsigned int exception
 );
 /**
+=======
+>>>>>>> origin/10.6
   @brief Access control over pid_suspend and pid_resume
   @param cred Subject credential
   @param proc Subject process trying to run pid_suspend or pid_resume 
@@ -4223,6 +4229,34 @@ typedef int mpo_proc_check_get_task_t(
 	kauth_cred_t cred,
 	struct proc *p
 );
+<<<<<<< HEAD
+=======
+
+
+/**
+ @brief Access control check for manipulating a proc's vm_map
+ @param cred Subject credential
+ @param proc Object process
+ 
+ Determine whether the vm_map map belonging to process proc with 
+ credential cred allows the VM_PROT_COPY operation.
+ 
+ @return Return 0 if access is granted, otherwise an appropriate value for
+ errno should be returned.
+ */
+typedef int mpo_proc_check_map_prot_copy_allow_t(
+	kauth_cred_t cred,
+	struct proc *p
+);
+
+
+/**
+  @brief Assign a label to a new kernelspace Mach task
+  @param kproc New task
+  @param tasklabel Label for new task
+  @param portlabel Label for new task port
+  @see mpo_cred_label_associate_kernel_t
+>>>>>>> origin/10.5
 
 /**
   @brief Access control check for exposing a process's task port
@@ -4475,9 +4509,17 @@ typedef int mpo_vnode_check_fsgetpath_t(
   @brief Access control check after determining the code directory hash
  */
 typedef int mpo_vnode_check_signature_t(struct vnode *vp,  struct label *label, 
+<<<<<<< HEAD
 					off_t macho_offset, unsigned char *sha1, 
 					const void *signature, int size,
 					int flags, int *is_platform_binary);
+<<<<<<< HEAD
+=======
+					unsigned char *sha1, void *signature, 
+					int size);
+>>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.10
 
 /**
   @brief Access control check for retrieving file attributes
@@ -5758,13 +5800,24 @@ typedef int mpo_iokit_check_nvram_delete_t(
  */
 typedef void mpo_reserved_hook_t(void);
 
+<<<<<<< HEAD
 /*
  * Policy module operations.
  *
  * Please note that this should be kept in sync with the check assumptions
  * policy in bsd/kern/policy_check.c (policy_ops struct).
  */
+<<<<<<< HEAD
 #define MAC_POLICY_OPS_VERSION 37 /* inc when new reserved slots are taken */
+=======
+/*!
+  \struct mac_policy_ops
+*/
+#define MAC_POLICY_OPS_VERSION 2 /* inc when new reserved slots are taken */
+>>>>>>> origin/10.6
+=======
+#define MAC_POLICY_OPS_VERSION 32 /* inc when new reserved slots are taken */
+>>>>>>> origin/10.10
 struct mac_policy_ops {
 	mpo_audit_check_postselect_t		*mpo_audit_check_postselect;
 	mpo_audit_check_preselect_t		*mpo_audit_check_preselect;
@@ -6095,8 +6148,10 @@ struct mac_policy_ops {
 	mpo_vnode_label_update_t		*mpo_vnode_label_update;
 	mpo_vnode_notify_create_t		*mpo_vnode_notify_create;
 	mpo_vnode_check_signature_t		*mpo_vnode_check_signature;
+<<<<<<< HEAD
 	mpo_vnode_check_uipc_bind_t		*mpo_vnode_check_uipc_bind;
 	mpo_vnode_check_uipc_connect_t		*mpo_vnode_check_uipc_connect;
+<<<<<<< HEAD
 
 	mpo_proc_check_run_cs_invalid_t		*mpo_proc_check_run_cs_invalid;
 	mpo_proc_check_suspend_resume_t		*mpo_proc_check_suspend_resume;
@@ -6121,6 +6176,7 @@ struct mac_policy_ops {
  	mpo_proc_check_ledger_t			*mpo_proc_check_ledger;
 
 	mpo_vnode_notify_rename_t		*mpo_vnode_notify_rename;
+<<<<<<< HEAD
 
 	mpo_reserved_hook_t			*mpo_reserved32;
 	mpo_reserved_hook_t			*mpo_reserved33;
@@ -6145,6 +6201,38 @@ struct mac_policy_ops {
 	mpo_vnode_notify_link_t			*mpo_vnode_notify_link;
 	mpo_iokit_check_filter_properties_t	*mpo_iokit_check_filter_properties;
 	mpo_iokit_check_get_property_t		*mpo_iokit_check_get_property;
+=======
+	mpo_proc_check_map_prot_copy_allow_t	*mpo_proc_check_map_prot_copy_allow;
+	mpo_reserved_hook_t			*mpo_reserved2;
+	mpo_reserved_hook_t			*mpo_reserved3;
+	mpo_reserved_hook_t			*mpo_reserved4;
+=======
+	mac_proc_check_run_cs_invalid_t		*mpo_proc_check_run_cs_invalid;
+	mpo_proc_check_suspend_resume_t		*mpo_proc_check_suspend_resume;
+>>>>>>> origin/10.6
+	mpo_reserved_hook_t			*mpo_reserved5;
+	mpo_reserved_hook_t			*mpo_reserved6;
+	mpo_reserved_hook_t			*mpo_reserved7;
+	mpo_reserved_hook_t			*mpo_reserved8;
+	mpo_reserved_hook_t			*mpo_reserved9;
+>>>>>>> origin/10.5
+=======
+	mpo_thread_label_init_t			*mpo_thread_label_init;
+	mpo_thread_label_destroy_t		*mpo_thread_label_destroy;
+	mpo_system_check_kas_info_t	*mpo_system_check_kas_info;
+	mpo_reserved_hook_t			*mpo_reserved18;
+ 	mpo_vnode_notify_open_t			*mpo_vnode_notify_open;
+	mpo_reserved_hook_t			*mpo_reserved20;
+	mpo_reserved_hook_t			*mpo_reserved21;
+	mpo_reserved_hook_t			*mpo_reserved22;
+	mpo_reserved_hook_t			*mpo_reserved23;
+	mpo_reserved_hook_t			*mpo_reserved24;
+	mpo_reserved_hook_t			*mpo_reserved25;
+	mpo_reserved_hook_t			*mpo_reserved26;
+	mpo_reserved_hook_t			*mpo_reserved27;
+	mpo_reserved_hook_t			*mpo_reserved28;
+	mpo_reserved_hook_t			*mpo_reserved29;
+>>>>>>> origin/10.8
 };
 
 /**

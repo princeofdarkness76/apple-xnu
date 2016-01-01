@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -110,10 +132,23 @@
 #define x86_DEBUG_STATE64		11
 #define x86_DEBUG_STATE			12
 #define THREAD_STATE_NONE		13
+<<<<<<< HEAD
+<<<<<<< HEAD
 /* 14 and 15 are used for the internal x86_SAVED_STATE flavours */
 #define x86_AVX_STATE32			16
 #define x86_AVX_STATE64			17
 #define x86_AVX_STATE			18
+=======
+/* 15 and 16 are used for the internal x86_SAVED_STATE flavours */
+#define x86_AVX_STATE32			16
+#define x86_AVX_STATE64			17
+>>>>>>> origin/10.6
+=======
+/* 14 and 15 are used for the internal x86_SAVED_STATE flavours */
+#define x86_AVX_STATE32			16
+#define x86_AVX_STATE64			17
+#define x86_AVX_STATE			18
+>>>>>>> origin/10.8
 
 
 /*
@@ -143,7 +178,14 @@
 	  (x == x86_DEBUG_STATE)	|| \
 	  (x == x86_AVX_STATE32)	|| \
 	  (x == x86_AVX_STATE64)	|| \
+<<<<<<< HEAD
+<<<<<<< HEAD
 	  (x == x86_AVX_STATE)		|| \
+=======
+>>>>>>> origin/10.6
+=======
+	  (x == x86_AVX_STATE)		|| \
+>>>>>>> origin/10.8
 	  (x == THREAD_STATE_NONE))
 
 struct x86_state_hdr {
@@ -337,7 +379,30 @@ typedef struct x86_saved_state32 x86_saved_state32_t;
 #define x86_SAVED_STATE32_COUNT	((mach_msg_type_number_t) \
 	(sizeof (x86_saved_state32_t)/sizeof(unsigned int)))
 
+<<<<<<< HEAD
 #pragma pack(4)
+=======
+struct x86_saved_state32_tagged {
+	uint32_t			tag;
+	struct x86_saved_state32	state;
+};
+typedef struct x86_saved_state32_tagged x86_saved_state32_tagged_t;
+
+struct x86_sframe32 {
+	/*
+	 * in case we throw a fault reloading
+	 * segment registers on a return out of
+	 * the kernel... the 'slf' state is only kept
+	 * long enough to rejigger (i.e. restore
+	 * the save area to its original state)
+	 * the save area and throw the appropriate
+	 * kernel trap pointing to the 'ssf' state
+	 */
+        struct x86_seg_load_fault32	slf;
+        struct x86_saved_state32_tagged ssf;
+};
+typedef struct x86_sframe32 x86_sframe32_t;
+>>>>>>> origin/10.5
 
 /*
  * This is the state pushed onto the 64-bit interrupt stack

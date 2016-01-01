@@ -3,6 +3,8 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,14 +16,34 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -141,6 +163,27 @@ hfs_vnop_readdirattr(ap)
 	return (error);
 }
 
+<<<<<<< HEAD
+=======
+		// XXXdbg
+		hfs_global_shared_lock_acquire(hfsmp);
+		if (hfsmp->jnl) {
+		    if ((error = journal_start_transaction(hfsmp->jnl)) != 0) {
+				hfs_global_shared_lock_release(hfsmp);
+				return error;
+		    }
+		}
+
+		/* Lock catalog b-tree */
+		error = hfs_metafilelocking(hfsmp, kHFSCatalogFileID, LK_SHARED, ap->a_p);
+		if (error) {
+		    if (hfsmp->jnl) {
+				journal_end_transaction(hfsmp->jnl);
+			}
+			hfs_global_shared_lock_release(hfsmp);
+		    return (error);
+		}
+>>>>>>> origin/10.2
 
 /*
  * getattrlistbulk, like readdirattr, will return attributes for the items in
@@ -169,9 +212,23 @@ hfs_vnop_getattrlistbulk(ap)
 {
 	int error = 0;
 
+<<<<<<< HEAD
 	error = hfs_readdirattr_internal(ap->a_vp, ap->a_alist, ap->a_vap,
 	    ap->a_uio, (uint64_t)ap->a_options, 0, NULL, ap->a_eofflag,
 	    (int *)ap->a_actualcount, ap->a_context);
+=======
+		/* Unlock catalog b-tree */
+		(void) hfs_metafilelocking(hfsmp, kHFSCatalogFileID, LK_RELEASE, ap->a_p);
+
+		if (hfsmp->jnl) {
+		    journal_end_transaction(hfsmp->jnl);
+		}
+		hfs_global_shared_lock_release(hfsmp);
+
+		if (error)
+			return (error);
+	}
+>>>>>>> origin/10.2
 
 	return (error);
 }
@@ -227,6 +284,21 @@ hfs_readdirattr_internal(struct vnode *dvp, struct attrlist *alist,
 			}
 		}
 	}
+<<<<<<< HEAD
+=======
+	if (cp->c_flag & (C_NOEXISTS | C_DELETED))
+		return (ENOENT);
+
+	// XXXdbg - don't allow modifying the journal or journal_info_block
+	if (hfsmp->jnl && cp->c_datafork) {
+		struct HFSPlusExtentDescriptor *extd;
+		
+		extd = &cp->c_datafork->ff_data.cf_extents[0];
+		if (extd->startBlock == HFSTOVCB(hfsmp)->vcbJinfoBlock || extd->startBlock == hfsmp->jnl_start) {
+			return EPERM;
+		}
+	}
+>>>>>>> origin/10.2
 
 	/*
 	 * Take an exclusive directory lock since we manipulate the directory hints
@@ -250,10 +322,75 @@ hfs_readdirattr_internal(struct vnode *dvp, struct attrlist *alist,
 	 * contents.  Instead, use the catalog to tell us when we've hit EOF
 	 * for this directory
 	 */
+<<<<<<< HEAD
+=======
+	if (alist->volattr == 0) {
+		struct timeval tv;
+
+		cp->c_flag |= C_MODIFIED;
+		tv = time;
+		CTIMES(cp, &tv, &tv);
+		if ((error = VOP_UPDATE(vp, &tv, &tv, 1)))
+			goto ErrorExit;
+	}
+	/* Volume Rename */
+	if (alist->volattr & ATTR_VOL_NAME) {
+		ExtendedVCB *vcb = VTOVCB(vp);
+	
+		if (vcb->vcbVN[0] == 0) {
+			/*
+			 * Ignore attempts to rename a volume to a zero-length name:
+			 * restore the original name from the cnode.
+			 */
+			copystr(cp->c_desc.cd_nameptr, vcb->vcbVN, sizeof(vcb->vcbVN), NULL);
+		} else {
+			struct cat_desc to_desc = {0};
+			struct cat_desc todir_desc = {0};
+			struct cat_desc new_desc = {0};
+
+			todir_desc.cd_parentcnid = kRootParID;
+			todir_desc.cd_cnid = kRootParID;
+			todir_desc.cd_flags = CD_ISDIR;
+
+			to_desc.cd_nameptr = vcb->vcbVN;
+			to_desc.cd_namelen = strlen(vcb->vcbVN);
+			to_desc.cd_parentcnid = kRootParID;
+			to_desc.cd_cnid = cp->c_cnid;
+			to_desc.cd_flags = CD_ISDIR;
+
+			// XXXdbg
+			hfs_global_shared_lock_acquire(hfsmp);
+			if (hfsmp->jnl) {
+			    if (journal_start_transaction(hfsmp->jnl) != 0) {
+					hfs_global_shared_lock_release(hfsmp);
+					error = EINVAL;
+					/* Restore the old name in the VCB */
+					copystr(cp->c_desc.cd_nameptr, vcb->vcbVN, sizeof(vcb->vcbVN), NULL);
+					vcb->vcbFlags |= 0xFF00;
+					goto ErrorExit;
+			    }
+			}
+
+
+			/* Lock catalog b-tree */
+			error = hfs_metafilelocking(hfsmp, kHFSCatalogFileID, LK_EXCLUSIVE, p);
+			if (error) {
+				if (hfsmp->jnl) {
+				    journal_end_transaction(hfsmp->jnl);
+				}
+				hfs_global_shared_lock_release(hfsmp);
+
+				/* Restore the old name in the VCB */
+				copystr(cp->c_desc.cd_nameptr, vcb->vcbVN, sizeof(vcb->vcbVN), NULL);
+				vcb->vcbFlags |= 0xFF00;
+				goto ErrorExit;
+			}
+>>>>>>> origin/10.2
 
 	/* Get a buffer to hold packed attributes. */
 	fixedblocksize = (sizeof(u_int32_t) + hfs_attrblksize(alist)); /* 4 bytes for length */
 
+<<<<<<< HEAD
 	if (!vap) {
 		maxattrblocksize = fixedblocksize;
 		if (alist->commonattr & ATTR_CMN_NAME)
@@ -272,6 +409,21 @@ hfs_readdirattr_internal(struct vnode *dvp, struct attrlist *alist,
 			if (!namebuf) {
 				error = ENOMEM;
 				goto exit2;
+=======
+			/* Unlock the Catalog */
+			(void) hfs_metafilelocking(hfsmp, kHFSCatalogFileID, LK_RELEASE, p);
+			
+			if (hfsmp->jnl) {
+			    journal_end_transaction(hfsmp->jnl);
+			}
+			hfs_global_shared_lock_release(hfsmp);
+			
+			if (error) {
+				/* Restore the old name in the VCB */
+				copystr(cp->c_desc.cd_nameptr, vcb->vcbVN, sizeof(vcb->vcbVN), NULL);
+				vcb->vcbFlags |= 0xFF00;
+				goto ErrorExit;
+>>>>>>> origin/10.2
 			}
 			vap->va_name = namebuf;
 		}
@@ -285,6 +437,7 @@ hfs_readdirattr_internal(struct vnode *dvp, struct attrlist *alist,
 		dirhint->dh_index = -1;
 	}
 
+<<<<<<< HEAD
 	/*
 	 * Obtain a list of catalog entries and pack their attributes until
 	 * the output buffer is full or maxcount entries have been packed.
@@ -301,6 +454,75 @@ hfs_readdirattr_internal(struct vnode *dvp, struct attrlist *alist,
 	if (maxentries < 1) {
 		error = EINVAL;
 		goto exit2;
+=======
+/* 			
+#
+#% readdirattr	vp	L L L
+#
+vop_readdirattr {
+	IN struct vnode *vp;
+	IN struct attrlist *alist;
+	INOUT struct uio *uio;
+	IN u_long maxcount:
+	IN u_long options;
+	OUT u_long *newstate;
+	OUT int *eofflag;
+	OUT u_long *actualCount;
+	OUT u_long **cookies;
+	IN struct ucred *cred;
+};
+*/
+__private_extern__
+int
+hfs_readdirattr(ap)
+	struct vop_readdirattr_args /* {
+		struct vnode *a_vp;
+		struct attrlist *a_alist;
+		struct uio *a_uio;
+		u_long a_maxcount;
+		u_long a_options;
+		u_long *a_newstate;
+		int *a_eofflag;
+		u_long *a_actualcount;
+		u_long **a_cookies;
+		struct ucred *a_cred;
+	} */ *ap;
+{
+	struct vnode *dvp = ap->a_vp;
+	struct cnode *dcp = VTOC(dvp);
+	struct hfsmount * hfsmp = VTOHFS(dvp);
+	struct attrlist *alist = ap->a_alist;
+	struct uio *uio = ap->a_uio;
+	int maxcount = ap->a_maxcount;
+	struct proc *p = current_proc();
+	u_long fixedblocksize;
+	u_long maxattrblocksize;
+	u_long currattrbufsize;
+	void *attrbufptr = NULL;
+	void *attrptr;
+	void *varptr;
+	struct attrblock attrblk;
+	int error = 0;
+	int depleted = 0;
+	int index, startindex;
+	int i, dir_entries;
+	struct cat_desc *lastdescp = NULL;
+	struct cat_desc prevdesc;
+	char * prevnamebuf = NULL;
+	struct cat_entrylist *ce_list = NULL;
+
+	dir_entries = dcp->c_entries;
+	if (dcp->c_attr.ca_fileid == kHFSRootFolderID && hfsmp->jnl) {
+		dir_entries -= 3;
+	}
+
+	*(ap->a_actualcount) = 0;
+	*(ap->a_eofflag) = 0;
+	
+	if (ap->a_cookies != NULL) {
+		printf("readdirattr: no cookies!\n");
+		return (EINVAL);
+>>>>>>> origin/10.2
 	}
 
 	/* Initialize a catalog entry list. */
@@ -322,8 +544,15 @@ hfs_readdirattr_internal(struct vnode *dvp, struct attrlist *alist,
 
 	hfs_systemfile_unlock(hfsmp, lockflags);
 
+<<<<<<< HEAD
 	if ((error == ENOENT) || (reachedeof != 0)) { 
 		*(eofflag) = TRUE;
+=======
+	/* Convert uio_offset into a directory index. */
+	startindex = index = uio->uio_offset / sizeof(struct dirent);
+	if ((index + 1) > dir_entries) {
+		*(ap->a_eofflag) = 1;
+>>>>>>> origin/10.2
 		error = 0;
 	}
 	if (error) {
@@ -448,6 +677,7 @@ hfs_readdirattr_internal(struct vnode *dvp, struct attrlist *alist,
 
 				/* Termination checks */
 				if ((--maxcount <= 0) ||
+<<<<<<< HEAD
 				    // LP64todo - fix this!
 				    uio_resid(uio) < 0 ||
 				    ((u_int32_t)uio_resid(uio) < (fixedblocksize + HFS_AVERAGE_NAME_SIZE))){
@@ -479,6 +709,27 @@ hfs_readdirattr_internal(struct vnode *dvp, struct attrlist *alist,
 			if (vp) {
 				vnode_put(vp);
 				vp = NULL;
+=======
+				    (uio->uio_resid < (fixedblocksize + HFS_AVERAGE_NAME_SIZE)) ||
+				    (index >= dir_entries)) {
+					depleted = 1;
+					break;
+				}
+			}
+		} /* for each catalog entry */
+
+		/* If there are more entries then save the last name. */
+		if (index < dir_entries
+		&&  !(*(ap->a_eofflag))
+		&&  lastdescp != NULL) {
+			if (prevnamebuf == NULL)
+				MALLOC(prevnamebuf, char *, kHFSPlusMaxFileNameBytes + 1, M_TEMP, M_WAITOK);
+			bcopy(lastdescp->cd_nameptr, prevnamebuf, lastdescp->cd_namelen + 1);
+			if (!depleted) {
+				prevdesc.cd_hint = lastdescp->cd_hint;
+				prevdesc.cd_nameptr = prevnamebuf;
+				prevdesc.cd_namelen = lastdescp->cd_namelen + 1;
+>>>>>>> origin/10.2
 			}
 
 			resid = uio_resid(uio);
@@ -911,6 +1162,7 @@ packcommonattr(
 		*((u_int32_t *)attrbufptr) = cap->ca_flags;
 		attrbufptr = ((u_int32_t *)attrbufptr) + 1;
 	}
+
 	if (ATTR_CMN_USERACCESS & attr) {
 		u_int32_t user_access;
 
@@ -959,6 +1211,7 @@ packdirattr(
 	void *attrbufptr = *abp->ab_attrbufpp;
 	u_int32_t entries;
 
+<<<<<<< HEAD
 	/*
 	 * The DIR_LINKCOUNT is the count of real directory hard links.
 	 * (i.e. its not the sum of the implied "." and ".." references
@@ -979,6 +1232,12 @@ packdirattr(
 			if (hfsmp->jnl ||
 			    ((hfsmp->vcbAtrb & kHFSVolumeJournaledMask) &&
 			     (hfsmp->hfs_flags & HFS_READ_ONLY)))
+=======
+		if (descp->cd_parentcnid == kRootParID) {
+			if (hfsmp->hfs_private_metadata_dir != 0)
+				--entries;	    /* hide private dir */
+			if (hfsmp->jnl)
+>>>>>>> origin/10.2
 				entries -= 2;	/* hide the journal files */
 		}
 

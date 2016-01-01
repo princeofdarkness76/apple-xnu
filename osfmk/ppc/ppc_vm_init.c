@@ -57,12 +57,12 @@
 extern unsigned int intstack[];	/* declared in start.s */
 extern unsigned int intstack_top_ss;	/* declared in start.s */
 
-vm_offset_t mem_size;	/* Size of actual physical memory present
+vm_offset_t	mem_size;	/* Size of actual physical memory present
 						   minus any performance buffer and possibly limited
 						   by mem_limit in bytes */
-vm_offset_t mem_actual;	/* The "One True" physical memory size 
+vm_offset_t	mem_actual;	/* The "One True" physical memory size 
 						   actually, it's the highest physical address + 1 */
-						  
+uint64_t	max_mem;	/* Size of physical memory (bytes), adjusted by maxmem */
 
 mem_region_t pmap_mem_regions[PMAP_MEM_REGION_MAX];
 int	 pmap_mem_regions_count = 0;	/* No non-contiguous memory regions */
@@ -208,6 +208,8 @@ void ppc_vm_init(unsigned int mem_limit, boot_args *args)
 		pmap_mem_regions_count++;
 	}
 
+	max_mem = mem_size;
+
 	kprintf("mem_size: %d M\n",mem_size / (1024 * 1024));
 
 	/* 
@@ -270,6 +272,29 @@ void ppc_vm_init(unsigned int mem_limit, boot_args *args)
             pmap_enter(kernel_pmap, addr, addr, VM_PROT_READ|VM_PROT_WRITE, TRUE);
 	}
 
+<<<<<<< HEAD
+=======
+	for (addr = trunc_page_32(sectHIBB);
+             addr < round_page_32(sectHIBB+sectSizeHIB);
+             addr += PAGE_SIZE) {
+
+            pmap_enter(kernel_pmap, (vm_map_offset_t)addr, (ppnum_t)(addr>>12), 
+			VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE, 
+			VM_WIMG_USE_DEFAULT, TRUE);
+
+	}
+
+	pmap_enter(kernel_pmap, (vm_map_offset_t)(uintptr_t)&sharedPage,
+		(ppnum_t)&sharedPage >> 12, /* Make sure the sharedPage is mapped */
+		VM_PROT_READ|VM_PROT_WRITE, 
+		VM_WIMG_USE_DEFAULT, TRUE);
+
+	pmap_enter(kernel_pmap, (vm_map_offset_t)(uintptr_t)&lowGlo.lgVerCode,
+		(ppnum_t)&lowGlo.lgVerCode >> 12,	/* Make sure the low memory globals are mapped */
+		VM_PROT_READ|VM_PROT_WRITE, 
+		VM_WIMG_USE_DEFAULT, TRUE);
+		
+>>>>>>> origin/10.5
 /*
  *	We need to map the remainder page-by-page because some of this will
  *	be released later, but not all.  Ergo, no block mapping here 
@@ -290,6 +315,56 @@ void ppc_vm_init(unsigned int mem_limit, boot_args *args)
  *	Note: the shadow BAT registers were already loaded in ppc_init.c
  */
 
+<<<<<<< HEAD
+=======
+	hw_start_trans();					/* Start translating */
+	PE_init_platform(TRUE, args);		/* Initialize this right off the bat */
+
+
+#if 0
+	GratefulDebInit((bootBumbleC *)&(args->Video));	/* Initialize the GratefulDeb debugger */
+#endif
+
+
+	printf_init();						/* Init this in case we need debugger */
+	panic_init();						/* Init this in case we need debugger */
+	PE_init_kprintf(TRUE);				/* Note on PPC we only call this after VM is set up */
+
+	kprintf("kprintf initialized\n");
+
+	serialmode = 0;						/* Assume normal keyboard and console */
+	if(PE_parse_boot_argn("serial", &serialmode, sizeof (serialmode))) {		/* Do we want a serial keyboard and/or console? */
+		kprintf("Serial mode specified: %08X\n", serialmode);
+	}
+	if(serialmode & 1) {				/* Start serial if requested */
+		(void)switch_to_serial_console();	/* Switch into serial mode */
+		disableConsoleOutput = FALSE;	/* Allow printfs to happen */
+	}
+	
+	kprintf("max_mem: %ld M\n", (unsigned long)(max_mem >> 20));
+	kprintf("version_variant = %s\n", version_variant);
+	kprintf("version         = %s\n\n", version);
+	__asm__ ("mfpvr %0" : "=r" (pvr));
+	kprintf("proc version    = %08x\n", pvr);
+	if(getPerProc()->pf.Available & pf64Bit) {	/* 64-bit processor? */
+		xhid0 = hid0get64();			/* Get the hid0 */
+		if(xhid0 & (1ULL << (63 - 19))) kprintf("Time base is externally clocked\n");
+		else kprintf("Time base is internally clocked\n");
+	}
+
+
+	taproot_size = PE_init_taproot(&taproot_addr);	/* (BRINGUP) See if there is a taproot */
+	if(taproot_size) {					/* (BRINGUP) */
+		kprintf("TapRoot card configured to use vaddr = %08X, size = %08X\n", taproot_addr, taproot_size);
+		bcopy_nc(version, (void *)(taproot_addr + 16), strlen(version));	/* (BRINGUP) Pass it our kernel version */
+		__asm__ volatile("eieio");		/* (BRINGUP) */
+		xtaproot = (unsigned int *)taproot_addr;	/* (BRINGUP) */
+		xtaproot[0] = 1;				/* (BRINGUP) */
+		__asm__ volatile("eieio");		/* (BRINGUP) */
+	}
+
+	PE_create_console();				/* create the console for verbose or pretty mode */
+>>>>>>> origin/10.5
 
 	LoadIBATs((unsigned int *)&shadow_BAT.IBATs[0]);		/* Load up real IBATs from shadows */
 	LoadDBATs((unsigned int *)&shadow_BAT.DBATs[0]);		/* Load up real DBATs from shadows */

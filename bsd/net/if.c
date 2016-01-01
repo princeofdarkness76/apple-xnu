@@ -1,6 +1,15 @@
 /*
+<<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +24,24 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+<<<<<<< HEAD
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +49,22 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /*
  * Copyright (c) 1980, 1986, 1993
@@ -110,12 +151,15 @@
 #include <netinet/in.h>
 #include <netinet/in_var.h>
 #include <netinet/ip_var.h>
+<<<<<<< HEAD
 #include <netinet/ip6.h>
 #include <netinet/ip_var.h>
 #include <netinet/tcp.h>
 #include <netinet/tcp_var.h>
 #include <netinet/udp.h>
 #include <netinet/udp_var.h>
+=======
+>>>>>>> origin/10.5
 #if INET6
 #include <netinet6/in6_var.h>
 #include <netinet6/in6_ifattach.h>
@@ -164,10 +208,20 @@ static int if_delmulti_common(struct ifmultiaddr *, struct ifnet *,
 static int if_rtmtu(struct radix_node *, void *);
 static void if_rtmtu_update(struct ifnet *);
 
+<<<<<<< HEAD
 static int if_clone_list(int, int *, user_addr_t);
+
+static struct	if_clone *if_clone_lookup(const char *, int *);
+static int	if_clone_list(struct if_clonereq *);
+=======
+#if IF_CLONE_LIST
+static int	if_clone_list(int count, int * total, user_addr_t dst);
+#endif /* IF_CLONE_LIST */
+>>>>>>> origin/10.6
 
 MALLOC_DEFINE(M_IFADDR, "ifaddr", "interface address");
 
+<<<<<<< HEAD
 struct	ifnethead ifnet_head = TAILQ_HEAD_INITIALIZER(ifnet_head);
 
 static int	if_cloners_count;
@@ -175,6 +229,7 @@ LIST_HEAD(, if_clone) if_cloners = LIST_HEAD_INITIALIZER(if_cloners);
 
 static struct ifaddr *ifa_ifwithnet_common(const struct sockaddr *,
     unsigned int);
+<<<<<<< HEAD
 static void if_attach_ifa_common(struct ifnet *, struct ifaddr *, int);
 static void if_detach_ifa_common(struct ifnet *, struct ifaddr *, int);
 
@@ -219,6 +274,16 @@ static decl_lck_mtx_data(, ifma_trash_lock);
 
 #define	IFMA_ZONE_MAX		64		/* maximum elements in zone */
 #define	IFMA_ZONE_NAME		"ifmultiaddr"	/* zone name */
+=======
+int	ifqmaxlen = IFQ_MAXLEN;
+struct	ifnethead ifnet = TAILQ_HEAD_INITIALIZER(ifnet);
+struct ifmultihead ifma_lostlist = LIST_HEAD_INITIALIZER(ifma_lostlist);
+>>>>>>> origin/10.3
+
+static int	if_cloners_count;
+LIST_HEAD(, if_clone) if_cloners = LIST_HEAD_INITIALIZER(if_cloners);
+=======
+>>>>>>> origin/10.5
 
 #if INET6
 /*
@@ -229,6 +294,8 @@ extern void	nd6_setmtu(struct ifnet *);
 extern lck_mtx_t *nd6_mutex;
 #endif
 
+<<<<<<< HEAD
+<<<<<<< HEAD
 SYSCTL_NODE(_net, PF_LINK, link, CTLFLAG_RW|CTLFLAG_LOCKED, 0, "Link layers");
 SYSCTL_NODE(_net_link, 0, generic, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
 	"Generic link-management");
@@ -264,6 +331,11 @@ ifa_init(void)
 	lck_mtx_init(&ifma_trash_lock, ifa_mtx_grp, ifa_mtx_attr);
 	TAILQ_INIT(&ifma_trash_head);
 }
+=======
+#define M_CLONE		M_IFADDR
+>>>>>>> origin/10.3
+=======
+>>>>>>> origin/10.6
 
 /*
  * Network interface utility routines.
@@ -275,12 +347,100 @@ ifa_init(void)
 int if_index;
 struct ifaddr **ifnet_addrs;
 struct ifnet **ifindex2ifnet;
+<<<<<<< HEAD
+=======
+
+#define INITIAL_IF_INDEXLIM	8
+
+/*
+ * Function: if_next_index
+ * Purpose:
+ *   Return the next available interface index.  
+ *   Grow the ifnet_addrs[] and ifindex2ifnet[] arrays to accomodate the 
+ *   added entry when necessary.
+ *
+ * Note:
+ *   ifnet_addrs[] is indexed by (if_index - 1), whereas
+ *   ifindex2ifnet[] is indexed by ifp->if_index.  That requires us to
+ *   always allocate one extra element to hold ifindex2ifnet[0], which
+ *   is unused.
+ */
+static int
+if_next_index(void)
+{
+	static int 	if_indexlim = 0;
+	static int 	if_list_growing = 0;
+	int		new_index;
+
+	while (if_list_growing) {
+		/* wait until list is done growing */
+		(void)tsleep((caddr_t)&ifnet_addrs, PZERO, "if_next_index", 0);
+	}
+	new_index = ++if_index;
+	if (if_index > if_indexlim) {
+		unsigned 	n;
+		int		new_if_indexlim;
+		caddr_t		new_ifnet_addrs;
+		caddr_t		new_ifindex2ifnet;
+		caddr_t		old_ifnet_addrs;
+
+		/* mark list as growing */
+		if_list_growing = 1;
+
+		old_ifnet_addrs = (caddr_t)ifnet_addrs;
+		if (ifnet_addrs == NULL) {
+			new_if_indexlim = INITIAL_IF_INDEXLIM;
+		} else {
+			new_if_indexlim = if_indexlim << 1;
+		}
+
+		/* allocate space for the larger arrays */
+		n = (2 * new_if_indexlim + 1) * sizeof(caddr_t);
+		new_ifnet_addrs = _MALLOC(n, M_IFADDR, M_WAITOK);
+		new_ifindex2ifnet = new_ifnet_addrs 
+			+ new_if_indexlim * sizeof(caddr_t);
+		bzero(new_ifnet_addrs, n);
+		if (ifnet_addrs != NULL) {
+			/* copy the existing data */
+			bcopy((caddr_t)ifnet_addrs, new_ifnet_addrs,
+			      if_indexlim * sizeof(caddr_t));
+			bcopy((caddr_t)ifindex2ifnet,
+			      new_ifindex2ifnet,
+			      (if_indexlim + 1) * sizeof(caddr_t));
+		}
+
+		/* switch to the new tables and size */
+		ifnet_addrs = (struct ifaddr **)new_ifnet_addrs;
+		ifindex2ifnet = (struct ifnet **)new_ifindex2ifnet;
+		if_indexlim = new_if_indexlim;
+
+		/* release the old data */
+		if (old_ifnet_addrs != NULL) {
+			_FREE((caddr_t)old_ifnet_addrs, M_IFADDR);
+		}
+
+		/* wake up others that might be blocked */
+		if_list_growing = 0;
+		wakeup((caddr_t)&ifnet_addrs);
+	}
+	return (new_index);
+
+}
+>>>>>>> origin/10.3
 
 __private_extern__ void
 if_attach_ifa(struct ifnet *ifp, struct ifaddr *ifa)
 {
+<<<<<<< HEAD
 	if_attach_ifa_common(ifp, ifa, 0);
 }
+=======
+	unsigned socksize, ifasize;
+	int namelen, masklen;
+	char workbuf[64];
+	register struct sockaddr_dl *sdl;
+	register struct ifaddr *ifa;
+>>>>>>> origin/10.3
 
 __private_extern__ void
 if_attach_link_ifa(struct ifnet *ifp, struct ifaddr *ifa)
@@ -288,6 +448,7 @@ if_attach_link_ifa(struct ifnet *ifp, struct ifaddr *ifa)
 	if_attach_ifa_common(ifp, ifa, 1);
 }
 
+<<<<<<< HEAD
 static void
 if_attach_ifa_common(struct ifnet *ifp, struct ifaddr *ifa, int link)
 {
@@ -322,6 +483,310 @@ if_attach_ifa_common(struct ifnet *ifp, struct ifaddr *ifa, int link)
 
 __private_extern__ void
 if_detach_ifa(struct ifnet *ifp, struct ifaddr *ifa)
+=======
+	/*
+	 * XXX -
+	 * The old code would work if the interface passed a pre-existing
+	 * chain of ifaddrs to this code.  We don't trust our callers to
+	 * properly initialize the tailq, however, so we no longer allow
+	 * this unlikely case.
+	 */
+	TAILQ_INIT(&ifp->if_addrhead);
+	TAILQ_INIT(&ifp->if_prefixhead);
+	LIST_INIT(&ifp->if_multiaddrs);
+	getmicrotime(&ifp->if_lastchange);
+
+	if ((ifp->if_eflags & IFEF_REUSE) == 0 || ifp->if_index == 0) {
+		/* allocate a new entry */
+		ifp->if_index = if_next_index();
+		ifindex2ifnet[ifp->if_index] = ifp;
+
+		/*
+		 * create a Link Level name for this device
+		 */
+		namelen = snprintf(workbuf, sizeof(workbuf),
+				   "%s%d", ifp->if_name, ifp->if_unit);
+#define _offsetof(t, m) ((int)((caddr_t)&((t *)0)->m))
+		masklen = _offsetof(struct sockaddr_dl, sdl_data[0]) + namelen;
+		socksize = masklen + ifp->if_addrlen;
+#define ROUNDUP(a) (1 + (((a) - 1) | (sizeof(long) - 1)))
+		if (socksize < sizeof(*sdl))
+			socksize = sizeof(*sdl);
+		socksize = ROUNDUP(socksize);
+		ifasize = sizeof(*ifa) + 2 * socksize;
+		ifa = (struct ifaddr *) _MALLOC(ifasize, M_IFADDR, M_WAITOK);
+		if (ifa) {
+			bzero((caddr_t)ifa, ifasize);
+			sdl = (struct sockaddr_dl *)(ifa + 1);
+			sdl->sdl_len = socksize;
+			sdl->sdl_family = AF_LINK;
+			bcopy(workbuf, sdl->sdl_data, namelen);
+			sdl->sdl_nlen = namelen;
+			sdl->sdl_index = ifp->if_index;
+			sdl->sdl_type = ifp->if_type;
+			ifnet_addrs[ifp->if_index - 1] = ifa;
+			ifa->ifa_ifp = ifp;
+			ifa->ifa_rtrequest = link_rtrequest;
+			ifa->ifa_addr = (struct sockaddr *)sdl;
+			sdl = (struct sockaddr_dl *)(socksize + (caddr_t)sdl);
+			ifa->ifa_netmask = (struct sockaddr *)sdl;
+			sdl->sdl_len = masklen;
+			while (namelen != 0)
+				sdl->sdl_data[--namelen] = 0xff;
+		}
+	} else {
+		ifa = ifnet_addrs[ifp->if_index - 1];
+	}
+	if (ifa != NULL) {
+		TAILQ_INSERT_HEAD(&ifp->if_addrhead, ifa, ifa_link);
+	}
+	TAILQ_INSERT_TAIL(&ifnet, ifp, if_link);
+}
+
+/*
+ * Create a clone network interface.
+ */
+static int
+if_clone_create(char *name, int len, void *params)
+{
+	struct if_clone *ifc;
+	char *dp;
+	int wildcard;
+	u_int32_t bytoff, bitoff;
+	u_int32_t unit;
+	int err;
+
+	ifc = if_clone_lookup(name, &unit);
+	if (ifc == NULL)
+		return (EINVAL);
+
+	if (ifunit(name) != NULL)
+		return (EEXIST);
+
+	bytoff = bitoff = 0;
+	wildcard = (unit == UINT32_MAX);
+	/*
+	 * Find a free unit if none was given.
+	 */
+	if (wildcard) {
+		while ((bytoff < ifc->ifc_bmlen)
+		    && (ifc->ifc_units[bytoff] == 0xff))
+			bytoff++;
+		if (bytoff >= ifc->ifc_bmlen)
+			return (ENOSPC);
+		while ((ifc->ifc_units[bytoff] & (1 << bitoff)) != 0)
+			bitoff++;
+		unit = (bytoff << 3) + bitoff;
+	}
+
+	if (unit > ifc->ifc_maxunit)
+		return (ENXIO);
+
+	err = (*ifc->ifc_create)(ifc, unit, params);
+	if (err != 0)
+		return (err);
+
+	if (!wildcard) {
+		bytoff = unit >> 3;
+		bitoff = unit - (bytoff << 3);
+	}
+
+	/*
+	 * Allocate the unit in the bitmap.
+	 */
+	KASSERT((ifc->ifc_units[bytoff] & (1 << bitoff)) == 0,
+	    ("%s: bit is already set", __func__));
+	ifc->ifc_units[bytoff] |= (1 << bitoff);
+
+	/* In the wildcard case, we need to update the name. */
+	if (wildcard) {
+		for (dp = name; *dp != '\0'; dp++);
+		if (snprintf(dp, len - (dp-name), "%d", unit) >
+		    len - (dp-name) - 1) {
+			/*
+			 * This can only be a programmer error and
+			 * there's no straightforward way to recover if
+			 * it happens.
+			 */
+			panic("if_clone_create(): interface name too long");
+		}
+
+	}
+
+	return (0);
+}
+
+/*
+ * Destroy a clone network interface.
+ */
+int
+if_clone_destroy(const char *name)
+{
+	struct if_clone *ifc;
+	struct ifnet *ifp;
+	int bytoff, bitoff;
+	u_int32_t unit;
+
+	ifc = if_clone_lookup(name, &unit);
+	if (ifc == NULL)
+		return (EINVAL);
+
+	if (unit < ifc->ifc_minifs)
+		return (EINVAL);
+
+	ifp = ifunit(name);
+	if (ifp == NULL)
+		return (ENXIO);
+
+	if (ifc->ifc_destroy == NULL)
+		return (EOPNOTSUPP);
+
+	(*ifc->ifc_destroy)(ifp);
+
+	/*
+	 * Compute offset in the bitmap and deallocate the unit.
+	 */
+	bytoff = unit >> 3;
+	bitoff = unit - (bytoff << 3);
+	KASSERT((ifc->ifc_units[bytoff] & (1 << bitoff)) != 0,
+	    ("%s: bit is already cleared", __func__));
+	ifc->ifc_units[bytoff] &= ~(1 << bitoff);
+	return (0);
+}
+
+/*
+ * Look up a network interface cloner.
+ */
+
+__private_extern__ struct if_clone *
+if_clone_lookup(const char *name, u_int32_t *unitp)
+{
+	struct if_clone *ifc;
+	const char *cp;
+	int i;
+
+	for (ifc = LIST_FIRST(&if_cloners); ifc != NULL;) {
+		for (cp = name, i = 0; i < ifc->ifc_namelen; i++, cp++) {
+			if (ifc->ifc_name[i] != *cp)
+				goto next_ifc;
+		}
+		goto found_name;
+ next_ifc:
+		ifc = LIST_NEXT(ifc, ifc_list);
+	}
+
+	/* No match. */
+	return ((struct if_clone *)NULL);
+
+ found_name:
+	if (*cp == '\0') {
+		i = 0xffff;
+	} else {
+		for (i = 0; *cp != '\0'; cp++) {
+			if (*cp < '0' || *cp > '9') {
+				/* Bogus unit number. */
+				return (NULL);
+			}
+			i = (i * 10) + (*cp - '0');
+		}
+	}
+
+	if (unitp != NULL)
+		*unitp = i;
+	return (ifc);
+}
+
+/*
+ * Register a network interface cloner.
+ */
+void
+if_clone_attach(struct if_clone *ifc)
+{
+	int bytoff, bitoff;
+	int err;
+	int len, maxclone;
+	u_int32_t unit;
+
+	KASSERT(ifc->ifc_minifs - 1 <= ifc->ifc_maxunit,
+	    ("%s: %s requested more units then allowed (%d > %d)",
+	    __func__, ifc->ifc_name, ifc->ifc_minifs,
+	    ifc->ifc_maxunit + 1));
+	/*
+	 * Compute bitmap size and allocate it.
+	 */
+	maxclone = ifc->ifc_maxunit + 1;
+	len = maxclone >> 3;
+	if ((len << 3) < maxclone)
+		len++;
+	ifc->ifc_units = _MALLOC(len, M_CLONE, M_WAITOK | M_ZERO);
+	bzero(ifc->ifc_units, len);
+	ifc->ifc_bmlen = len;
+
+	LIST_INSERT_HEAD(&if_cloners, ifc, ifc_list);
+	if_cloners_count++;
+
+	for (unit = 0; unit < ifc->ifc_minifs; unit++) {
+		err = (*ifc->ifc_create)(ifc, unit, NULL);
+		KASSERT(err == 0,
+		    ("%s: failed to create required interface %s%d",
+		    __func__, ifc->ifc_name, unit));
+
+		/* Allocate the unit in the bitmap. */
+		bytoff = unit >> 3;
+		bitoff = unit - (bytoff << 3);
+		ifc->ifc_units[bytoff] |= (1 << bitoff);
+	}
+}
+
+/*
+ * Unregister a network interface cloner.
+ */
+void
+if_clone_detach(struct if_clone *ifc)
+{
+
+	LIST_REMOVE(ifc, ifc_list);
+	FREE(ifc->ifc_units, M_CLONE);
+	if_cloners_count--;
+}
+
+/*
+ * Provide list of interface cloners to userspace.
+ */
+static int
+if_clone_list(struct if_clonereq *ifcr)
+{
+	char outbuf[IFNAMSIZ], *dst;
+	struct if_clone *ifc;
+	int count, error = 0;
+
+	ifcr->ifcr_total = if_cloners_count;
+	if ((dst = ifcr->ifcr_buffer) == NULL) {
+		/* Just asking how many there are. */
+		return (0);
+	}
+
+	if (ifcr->ifcr_count < 0)
+		return (EINVAL);
+
+	count = (if_cloners_count < ifcr->ifcr_count) ?
+	    if_cloners_count : ifcr->ifcr_count;
+
+	for (ifc = LIST_FIRST(&if_cloners); ifc != NULL && count != 0;
+	     ifc = LIST_NEXT(ifc, ifc_list), count--, dst += IFNAMSIZ) {
+		strncpy(outbuf, ifc->ifc_name, IFNAMSIZ - 1);
+		error = copyout(outbuf, dst, IFNAMSIZ);
+		if (error)
+			break;
+	}
+
+	return (error);
+}
+
+__private_extern__ int
+ifa_foraddr(addr)
+	unsigned int addr;
+>>>>>>> origin/10.3
 {
 	if_detach_ifa_common(ifp, ifa, 0);
 }
@@ -450,6 +915,7 @@ if_next_index(void)
 }
 
 /*
+<<<<<<< HEAD
  * Create a clone network interface.
  */
 static int
@@ -1380,13 +1846,95 @@ if_qflush_sc(struct ifnet *ifp, mbuf_svc_class_t sc, u_int32_t flow,
  */
 struct ifnet *
 ifunit(const char *name)
+=======
+ * Locate the source address of an interface based on a complete address.
+ */
+struct ifaddr *
+ifa_ifwithaddr_scoped(const struct sockaddr *addr, unsigned int ifscope)
+{
+	struct ifaddr *result = NULL;
+	struct ifnet *ifp;
+
+	if (ifscope == IFSCOPE_NONE)
+		return (ifa_ifwithaddr(addr));
+
+	ifnet_head_lock_shared();
+	if (ifscope > (unsigned int)if_index) {
+		ifnet_head_done();
+		return (NULL);
+	}
+
+	ifp = ifindex2ifnet[ifscope];
+	if (ifp != NULL) {
+		struct ifaddr *ifa = NULL;
+
+		/*
+		 * This is suboptimal; there should be a better way
+		 * to search for a given address of an interface.
+		 */
+		ifnet_lock_shared(ifp);
+		for (ifa = ifp->if_addrhead.tqh_first; ifa != NULL;
+		    ifa = ifa->ifa_link.tqe_next) {
+			if (ifa->ifa_addr->sa_family != addr->sa_family)
+				continue;
+			if (equal(addr, ifa->ifa_addr)) {
+				result = ifa;
+				break;
+			}
+			if ((ifp->if_flags & IFF_BROADCAST) &&
+			    ifa->ifa_broadaddr != NULL &&
+			    /* IP6 doesn't have broadcast */
+			    ifa->ifa_broadaddr->sa_len != 0 &&
+			    equal(ifa->ifa_broadaddr, addr)) {
+				result = ifa;
+				break;
+			}
+		}
+		if (result != NULL)
+			ifaref(result);
+		ifnet_lock_done(ifp);
+	}
+	ifnet_head_done();
+
+	return (result);
+}
+
+struct ifaddr *
+ifa_ifwithnet(const struct sockaddr *addr)
+{
+	return (ifa_ifwithnet_common(addr, IFSCOPE_NONE));
+}
+
+struct ifaddr *
+ifa_ifwithnet_scoped(const struct sockaddr *addr, unsigned int ifscope)
+{
+	return (ifa_ifwithnet_common(addr, ifscope));
+}
+
+/*
+ * Find an interface on a specific network.  If many, choice
+ * is most specific found.
+ */
+static struct ifaddr *
+ifa_ifwithnet_common(const struct sockaddr *addr, unsigned int ifscope)
+>>>>>>> origin/10.5
 {
 	char namebuf[IFNAMSIZ + 1];
 	const char *cp;
 	struct ifnet *ifp;
+<<<<<<< HEAD
 	int unit;
 	unsigned len, m;
 	char c;
+=======
+	struct ifaddr *ifa = NULL;
+	struct ifaddr *ifa_maybe = (struct ifaddr *) 0;
+	u_int af = addr->sa_family;
+	const char *addr_data = addr->sa_data, *cplim;
+
+	if (!ip_doscopedroute || addr->sa_family != AF_INET)
+		ifscope = IFSCOPE_NONE;
+>>>>>>> origin/10.5
 
 	len = strlen(name);
 	if (len < 2 || len > IFNAMSIZ)
@@ -1444,6 +1992,62 @@ if_withname(struct sockaddr *sa)
 	 * and there might not be room to put the trailing null anyway, so we
 	 * make a local copy that we know we can null terminate safely.
 	 */
+<<<<<<< HEAD
+=======
+	for (ifp = ifnet_head.tqh_first; ifp; ifp = ifp->if_link.tqe_next) {
+		ifnet_lock_shared(ifp);
+		for (ifa = ifp->if_addrhead.tqh_first; ifa;
+		     ifa = ifa->ifa_link.tqe_next) {
+			const char *cp, *cp2, *cp3;
+
+			if (ifa->ifa_addr->sa_family != af)
+next:				continue;
+#ifndef __APPLE__
+/* This breaks tunneling application trying to install a route with
+ * a specific subnet and the local address as the destination
+ * It's breaks binary compatibility with previous version of MacOS X
+ */
+			if (
+ 
+#if INET6 /* XXX: for maching gif tunnel dst as routing entry gateway */
+			    addr->sa_family != AF_INET6 &&
+#endif
+			    ifp->if_flags & IFF_POINTOPOINT) {
+				/*
+				 * This is a bit broken as it doesn't
+				 * take into account that the remote end may
+				 * be a single node in the network we are
+				 * looking for.
+				 * The trouble is that we don't know the
+				 * netmask for the remote end.
+				 */
+				if (ifa->ifa_dstaddr != 0
+				    && equal(addr, ifa->ifa_dstaddr)) {
+				    break;
+ 				}
+			} else
+#endif /* __APPLE__*/
+			{
+				/*
+				 * If we're looking up with a scope,
+				 * find using a matching interface.
+				 */
+				if (ifscope != IFSCOPE_NONE &&
+				    ifp->if_index != ifscope)
+					continue;
+
+				/*
+				 * if we have a special address handler,
+				 * then use it instead of the generic one.
+				 */
+	          		if (ifa->ifa_claim_addr) {
+					if (ifa->ifa_claim_addr(ifa, addr)) {
+						break;
+					} else {
+						continue;
+					}
+				}
+>>>>>>> origin/10.5
 
 	bcopy(sdl->sdl_data, ifname, sdl->sdl_nlen);
 	ifname[sdl->sdl_nlen] = '\0';
@@ -2253,7 +2857,62 @@ ifioctl_ifreq(struct socket *so, u_long cmd, struct ifreq *ifr, struct proc *p)
 			return (error);
 		return (if_clone_destroy(ifr->ifr_name));
 	}
+<<<<<<< HEAD
 
+	/*
+	 * ioctls which require ifp.  Note that we acquire dlil_ifnet_lock
+	 * here to ensure that the ifnet, if found, has been fully attached.
+	 */
+	dlil_if_lock();
+=======
+	ifr = (struct ifreq *)data;
+
+	switch (cmd) {
+	case SIOCIFCREATE:
+	case SIOCIFCREATE2:
+                error = proc_suser(p);
+                if (error)
+                        return (error);
+                return if_clone_create(ifr->ifr_name, sizeof(ifr->ifr_name),
+			 cmd == SIOCIFCREATE2 ? ifr->ifr_data : NULL);
+	case SIOCIFDESTROY:
+		error = suser(p->p_ucred, &p->p_acflag);
+		if (error)
+			return (error);
+<<<<<<< HEAD
+		return ((cmd == SIOCIFCREATE) ?
+			if_clone_create(ifr->ifr_name, sizeof(ifr->ifr_name)) :
+			if_clone_destroy(ifr->ifr_name));
+#if 0
+	case SIOCIFGCLONERS:
+		return (if_clone_list((struct if_clonereq *)data));
+#endif 0
+=======
+		return if_clone_destroy(ifr->ifr_name);
+#if IF_CLONE_LIST
+	case SIOCIFGCLONERS32: {
+		struct if_clonereq32 *ifcr = (struct if_clonereq32 *)data;
+		return (if_clone_list(ifcr->ifcr_count, &ifcr->ifcr_total,
+		    CAST_USER_ADDR_T(ifcr->ifcru_buffer)));
+		/* NOTREACHED */
+
+	}
+	case SIOCIFGCLONERS64: {
+		struct if_clonereq64 *ifcr = (struct if_clonereq64 *)data;
+		return (if_clone_list(ifcr->ifcr_count, &ifcr->ifcr_total,
+		    ifcr->ifcru_buffer));
+		/* NOTREACHED */
+	    }
+#endif /* IF_CLONE_LIST */
+>>>>>>> origin/10.6
+	}
+
+<<<<<<< HEAD
+>>>>>>> origin/10.3
+	ifp = ifunit(ifr->ifr_name);
+	dlil_if_unlock();
+
+=======
 	/*
 	 * ioctls which require ifp.  Note that we acquire dlil_ifnet_lock
 	 * here to ensure that the ifnet, if found, has been fully attached.
@@ -2261,7 +2920,7 @@ ifioctl_ifreq(struct socket *so, u_long cmd, struct ifreq *ifr, struct proc *p)
 	dlil_if_lock();
 	ifp = ifunit(ifr->ifr_name);
 	dlil_if_unlock();
-
+>>>>>>> origin/10.7
 	if (ifp == NULL)
 		return (ENXIO);
 
@@ -2519,6 +3178,14 @@ ifioctl_ifreq(struct socket *so, u_long cmd, struct ifreq *ifr, struct proc *p)
 		ifnet_touch_lastchange(ifp);
 		break;
 
+<<<<<<< HEAD
+=======
+	case SIOCSETVLAN:
+		if (ifp->if_type != IFT_L2VLAN) {
+			return (EOPNOTSUPP);
+		}
+	case SIOCSIFPHYADDR:
+>>>>>>> origin/10.3
 	case SIOCDIFPHYADDR:
 	case SIOCSIFMEDIA:
 	case SIOCSIFGENERIC:
@@ -2577,11 +3244,22 @@ ifioctl_ifreq(struct socket *so, u_long cmd, struct ifreq *ifr, struct proc *p)
 		error = ifnet_ioctl(ifp, SOCK_DOM(so), cmd, (caddr_t)ifr);
 		break;
 
+<<<<<<< HEAD
 	case SIOCGIFWAKEFLAGS:
 		ifnet_lock_shared(ifp);
 		ifr->ifr_wake_flags = ifnet_get_wake_flags(ifp);
 		ifnet_lock_done(ifp);
 		break;
+=======
+		return dlil_ioctl(so->so_proto->pr_domain->dom_family, 
+				   ifp, cmd, (caddr_t) data);
+	case SIOCGETVLAN:
+		if (ifp->if_type != IFT_L2VLAN) {
+			return (EOPNOTSUPP);
+		}
+		return dlil_ioctl(so->so_proto->pr_domain->dom_family, 
+				   ifp, cmd, (caddr_t) data);
+>>>>>>> origin/10.3
 
 	case SIOCGIFGETRTREFCNT:
 		ifnet_lock_shared(ifp);
@@ -2670,6 +3348,28 @@ ifioctl_ifreq(struct socket *so, u_long cmd, struct ifreq *ifr, struct proc *p)
 			ifr->ifr_2kcl = 0;
 		ifnet_lock_done(ifp);
 		break;
+<<<<<<< HEAD
+=======
+
+	case SIOCGIFGETRTREFCNT:
+#if IFNET_ROUTE_REFCNT
+		ifnet_lock_shared(ifp);
+		ifr->ifr_route_refcnt = ifp->if_route_refcnt;
+		ifnet_lock_done(ifp);
+		break;
+#else
+		return (EOPNOTSUPP);
+#endif /* IFNET_ROUTE_REFCNT */
+
+	default:
+		oif_flags = ifp->if_flags;
+		if (so->so_proto == 0)
+			return (EOPNOTSUPP);
+	    {
+		int ocmd = cmd;
+
+		switch (cmd) {
+>>>>>>> origin/10.6
 
 	case SIOCSIF2KCL:
 		if ((error = priv_check_cred(kauth_cred_get(),
@@ -3804,9 +4504,13 @@ if_rtproto_del(struct ifnet *ifp, int protocol)
 {
 	struct radix_node_head  *rnh;
 
+<<<<<<< HEAD
 	if ((protocol <= AF_MAX) && (protocol >= 0) &&
 		((rnh = rt_tables[protocol]) != NULL) && (ifp != NULL)) {
 		lck_mtx_lock(rnh_lock);
+=======
+	if ((protocol <= AF_MAX) && ((rnh = rt_tables[protocol]) != NULL) && (ifp != NULL))
+>>>>>>> origin/10.2
 		(void) rnh->rnh_walktree(rnh, if_rtdel, ifp);
 		lck_mtx_unlock(rnh_lock);
 	}
