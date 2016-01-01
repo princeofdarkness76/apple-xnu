@@ -3,22 +3,19 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -126,6 +123,7 @@ void db_low_trace(db_expr_t addr, int have_addr, db_expr_t count, char * modif) 
 		ReadReal(xxltr, (unsigned int *)&xltr);					/* Get the first half */
 		ReadReal(xxltr+32, &(((unsigned int *)&xltr)[8]));		/* Get the second half */
 		
+<<<<<<< HEAD
 		db_printf("\n%s%08X  %1X  %08X %08X - %04X\n", (xxltr!=cxltr ? " " : "*"), 
 			xxltr,
 			xltr.LTR_cpu, xltr.LTR_timeHi, xltr.LTR_timeLo, 
@@ -134,6 +132,24 @@ void db_low_trace(db_expr_t addr, int have_addr, db_expr_t count, char * modif) 
 			xltr.LTR_cr, xltr.LTR_srr0, xltr.LTR_srr1, xltr.LTR_dar, xltr.LTR_save, xltr.LTR_lr, xltr.LTR_ctr);
 		db_printf("              %08X %08X %08X %08X %08X %08X\n",
 			xltr.LTR_r0, xltr.LTR_r1, xltr.LTR_r2, xltr.LTR_r3, xltr.LTR_r4, xltr.LTR_r5);
+=======
+		db_printf("\n%s%08llX  %1X  %08X %08X - %04X", (xxltr != cxltr ? " " : "*"), 
+			xxltr,
+			(xltr.LTR_cpu & 0xFF), xltr.LTR_timeHi, xltr.LTR_timeLo, 
+			(xltr.LTR_excpt & 0x8000 ? 0xFFFF : xltr.LTR_excpt * 64));	/* Print the first line */
+
+		if(xltr.LTR_cpu & 0xFF00) db_printf(", sflgs = %02X\n", ((xltr.LTR_cpu >> 8) & 0xFF));
+		else db_printf("\n");
+			
+		db_printf("              DAR/DSR/CR: %016llX %08X %08X\n", xltr.LTR_dar, xltr.LTR_dsisr, xltr.LTR_cr);
+		
+		db_printf("                SRR0/SRR1 %016llX %016llX\n",  xltr.LTR_srr0, xltr.LTR_srr1);
+		db_printf("                LR/CTR    %016llX %016llX\n",  xltr.LTR_lr, xltr.LTR_ctr);
+
+		db_printf("                R0/R1/R2  %016llX %016llX %016llX\n", xltr.LTR_r0, xltr.LTR_r1, xltr.LTR_r2);
+		db_printf("                R3/R4/R5  %016llX %016llX %016llX\n", xltr.LTR_r3, xltr.LTR_r4, xltr.LTR_r5);
+		db_printf("              R6/sv/rsv   %016llX %016llX %08X\n", xltr.LTR_r6, xltr.LTR_save, xltr.LTR_rsvd0);
+>>>>>>> origin/10.3
 	
 		if((cnt != 16) && (xxltr == xTraceCurr)) break;			/* If whole table dump, exit when we hit start again... */
 
@@ -358,12 +374,31 @@ void db_dumpphys(struct phys_entry *pp) { 						/* Dump from physent */
 	PCA				*pca;
 	unsigned int	*pteg;
 
+<<<<<<< HEAD
 	db_printf("Dump from physical entry %08X: %08X %08X\n", pp, pp->phys_link, pp->pte1);
 	mp = hw_cpv(pp->phys_link);
 	while(mp) {
 		db_dumpmapping(mp);
 		db_dumppca(mp);
 		mp = hw_cpv(mp->next);
+=======
+		for(i = 0; i < 32; i += 4) {						/* Step through pteg */
+			db_printf("%08X%08X %08X%08X - ", xpteg[i], xpteg[i + 1], xpteg[i + 2], xpteg[i + 3]);	/* Dump the pteg slot */
+			
+			if(xpteg[i + 1] & 1) db_printf("  valid - ");	/* Is it valid? */
+			else db_printf("invalid - ");					/* Nope, invalid */
+
+			llslot = ((long long)xpteg[i] << 32) | (long long)xpteg[i + 1];	/* Make a long long version of this */ 
+			space = (llslot >> 12) & (maxAdrSp - 1);		/* Extract the space */
+			llhash = (unsigned long long)space | ((unsigned long long)space << maxAdrSpb) | ((unsigned long long)space << (2 * maxAdrSpb));	/* Get the hash */
+			llhash = llhash & 0x0000001FFFFFFFFFULL;		/* Make sure we stay within supported ranges */
+			pva =  (unsigned long long)ptegindex ^ llhash;	/* Get part of the vaddr */
+			llseg = (llslot >> 12) ^ llhash;				/* Get the segment number */
+			api = (llslot >> 7) & 0x1F;						/* Get the API */
+			llva = ((llseg << (28 - maxAdrSpb)) & 0xFFFFFFFFF0000000ULL) | (api << 23) | ((pva << 12) & 0x007FF000);	/* Get the vaddr */
+			db_printf("va = %016llX\n", llva);
+		}
+>>>>>>> origin/10.3
 	}
 	
 	return;
@@ -592,6 +627,7 @@ void db_display_xregs(db_expr_t addr, int have_addr, db_expr_t count, char * mod
 	int				i, j, pents;
 
 	stSpecrs(dbspecrs);										/* Save special registers */
+<<<<<<< HEAD
 	db_printf("PIR:    %08X\n", dbspecrs[0]);
 	db_printf("PVR:    %08X\n", dbspecrs[1]);
 	db_printf("SDR1:   %08X\n", dbspecrs[22]);
@@ -616,6 +652,50 @@ void db_display_xregs(db_expr_t addr, int have_addr, db_expr_t count, char * mod
 		db_printf("SR%02d: %08X %08X %08X %08X %08X %08X %08X %08X\n", i,
 			dbspecrs[23+i], dbspecrs[24+i], dbspecrs[25+i], dbspecrs[26+i], 
 			dbspecrs[27+i], dbspecrs[28+i], dbspecrs[29+i], dbspecrs[30+i]); 
+=======
+	if(per_proc_info[0].pf.Available & pf64Bit) {
+		db_printf("PIR:    %08X\n", dbspecrs[0]);
+		db_printf("PVR:    %08X\n", dbspecrs[1]);
+		db_printf("SDR1:   %08X.%08X\n", dbspecrs[26], dbspecrs[27]);
+		db_printf("HID0:   %08X.%08X\n", dbspecrs[28], dbspecrs[29]);
+		db_printf("HID1:   %08X.%08X\n", dbspecrs[30], dbspecrs[31]);
+		db_printf("HID4:   %08X.%08X\n", dbspecrs[32], dbspecrs[33]);
+		db_printf("HID5:   %08X.%08X\n", dbspecrs[34], dbspecrs[35]);
+		db_printf("SPRG0:  %08X.%08X %08X.%08X\n", dbspecrs[18], dbspecrs[19], dbspecrs[20], dbspecrs[21]);
+		db_printf("SPRG2:  %08X.%08X %08X.%08X\n", dbspecrs[22], dbspecrs[23], dbspecrs[24], dbspecrs[25]);
+		db_printf("\n");
+		for(i = 0; i < (64 * 4); i += 4) {
+			db_printf("SLB %02d: %08X.%08X %08X.%08X\n", i / 4, dbspecrs[80 + i], dbspecrs[81 + i], dbspecrs[82 + i], dbspecrs[83 + i]);
+		}
+	}
+	else {	
+		db_printf("PIR:    %08X\n", dbspecrs[0]);
+		db_printf("PVR:    %08X\n", dbspecrs[1]);
+		db_printf("SDR1:   %08X\n", dbspecrs[22]);
+		db_printf("HID0:   %08X\n", dbspecrs[39]);
+		db_printf("HID1:   %08X\n", dbspecrs[40]);
+		db_printf("L2CR:   %08X\n", dbspecrs[41]);
+		db_printf("MSSCR0: %08X\n", dbspecrs[42]);
+		db_printf("MSSCR1: %08X\n", dbspecrs[43]);
+		db_printf("THRM1:  %08X\n", dbspecrs[44]);
+		db_printf("THRM2:  %08X\n", dbspecrs[45]);
+		db_printf("THRM3:  %08X\n", dbspecrs[46]);
+		db_printf("ICTC:   %08X\n", dbspecrs[47]);
+		db_printf("L2CR2:  %08X\n", dbspecrs[48]);
+		db_printf("DABR:   %08X\n", dbspecrs[49]);
+	
+		db_printf("DBAT: %08X %08X %08X %08X\n", dbspecrs[2], dbspecrs[3], dbspecrs[4], dbspecrs[5]);
+		db_printf("      %08X %08X %08X %08X\n", dbspecrs[6], dbspecrs[7], dbspecrs[8], dbspecrs[9]);
+		db_printf("IBAT: %08X %08X %08X %08X\n", dbspecrs[10], dbspecrs[11], dbspecrs[12], dbspecrs[13]);
+		db_printf("      %08X %08X %08X %08X\n", dbspecrs[14], dbspecrs[15], dbspecrs[16], dbspecrs[17]);
+		db_printf("SPRG: %08X %08X %08X %08X\n", dbspecrs[18], dbspecrs[19], dbspecrs[20], dbspecrs[21]);
+		db_printf("\n");
+		for(i = 0; i < 16; i += 8) {						/* Print 8 at a time */
+			db_printf("SR%02d: %08X %08X %08X %08X %08X %08X %08X %08X\n", i,
+				dbspecrs[23+i], dbspecrs[24+i], dbspecrs[25+i], dbspecrs[26+i], 
+				dbspecrs[27+i], dbspecrs[28+i], dbspecrs[29+i], dbspecrs[30+i]); 
+		}
+>>>>>>> origin/10.3
 	}
 	
 	db_printf("\n");
@@ -645,6 +725,195 @@ void db_display_xregs(db_expr_t addr, int have_addr, db_expr_t count, char * mod
 }
 
 /*
+<<<<<<< HEAD
+=======
+ *		Check check mappings and hash table for consistency
+ *
+  *		cm
+ */
+void db_check_mappings(db_expr_t addr, int have_addr, db_expr_t count, char * modif) {
+
+	addr64_t  pteg, pca, llva, lnextva;	
+	unsigned int xpteg[32], xpca[8], space, hash, pva, seg, api, va, free, free2, xauto, PTEGcnt, wimgkk, wimgxx, slotoff;
+	int i, j, fnderr, slot, slot2, k, s4bit;
+	pmap_t pmap;
+	mapping	 *mp;
+	ppnum_t ppn, pa, aoff;
+	unsigned long long llslot, llseg, llhash;
+	
+	s4bit = 0;												/* Assume dinky? */
+	if(per_proc_info[0].pf.Available & pf64Bit) s4bit = 1;	/* Are we a big guy? */
+	
+	PTEGcnt = hash_table_size / 64;							/* Get the number of PTEGS */
+	if(s4bit) PTEGcnt = PTEGcnt / 2;						/* PTEGs are twice as big */	
+
+	pteg = hash_table_base;									/* Start of hash table */
+	pca = hash_table_base - 4;								/* Start of PCA */
+	
+	for(i = 0; i < PTEGcnt; i++) {							/* Step through them all */
+
+		fnderr = 0;
+	
+		ReadReal(pteg, &xpteg[0]);							/* Get first half of the pteg */
+		ReadReal(pteg + 0x20, &xpteg[8]);					/* Get second half of the pteg */
+		if(s4bit) {											/* See if we need the other half */
+			ReadReal(pteg + 0x40, &xpteg[16]);				/* Get third half of the pteg */
+			ReadReal(pteg + 0x60, &xpteg[24]);				/* Get fourth half of the pteg */
+		}
+		ReadReal(pca, &xpca[0]);							/* Get pca */
+	
+		if(xpca[0] & 0x00000001) {							/* Is PCA locked? */
+			db_printf("Unexpected locked PCA\n");			/* Yeah, this may be bad */
+			fnderr = 1;										/* Remember to print the pca/pteg pair later */
+		}
+
+		free = 0x80000000;
+		
+		for(j = 0; j < 7; j++) {							/* Search for duplicates */
+			slot = j * 2;									/* Point to the slot */
+			if(s4bit) slot = slot * 2;						/* Adjust for bigger slots */
+			if(!(xpca[0] & free)) {							/* Check more if slot is allocated */
+				for(k = j + 1; k < 8; k++) {				/* Search remaining slots */
+					slot2 = k * 2;							/* Point to the slot */
+					if(s4bit) slot2 = slot2 * 2;			/* Adjust for bigger slots */
+					if((xpteg[slot] == xpteg[slot2]) 
+					   && (!s4bit || (xpteg[slot + 1] == xpteg[slot2 + 1]))) {		/* Do we have duplicates? */
+						db_printf("Duplicate tags in pteg, slot %d and slot %d\n", j, k);
+						fnderr = 1;
+					}
+				}
+			}
+			free = free >> 1;								/* Move slot over */
+		}
+		
+		free = 0x80000000;
+		xauto = 0x00008000;
+
+		for(j = 0; j < 8; j++) {							/* Step through the slots */
+		
+			slot = j * 2;									/* Point to the slot */
+			if(s4bit) slot = slot * 2;						/* Hagfish? */
+			if(xpca[0] & free) {							/* Check if marked free */
+				if((!s4bit && (xpteg[slot] & 0x80000000))	/* Is a supposedly free slot valid? */
+				   || (s4bit && (xpteg[slot + 1] & 1))) {	
+					db_printf("Free slot still valid - %d\n", j);	
+					fnderr = 1;
+				}	
+			}
+			else {											/* We have an in use slot here */
+								
+				if(!(!s4bit && (xpteg[slot] & 0x80000000))	/* Is a supposedly in use slot valid? */
+				   && !(s4bit && (xpteg[slot + 1] & 1))) {	
+					db_printf("Inuse slot not valid - %d\n", j);	
+					fnderr = 1;
+				}	
+				else {										/* Slot is valid, check mapping */
+					if(!s4bit) {							/* Not Hagfish? */
+						space = (xpteg[slot] >> 7) & (maxAdrSp - 1);	/* Extract the space */
+						hash = space | (space << maxAdrSpb) | (space << (2 * maxAdrSpb));	/* Get the hash */
+						pva =  i ^ hash;					/* Get part of the vaddr */
+						seg = (xpteg[slot] >> 7) ^ hash;	/* Get the segment number */
+						api = (xpteg[slot] & 0x3F);			/* Get the API */
+						va = ((seg << (28 - maxAdrSpb)) & 0xF0000000) | (api << 22) | ((pva << 12) & 0x003FF000);	/* Get the vaddr */
+						llva = (addr64_t)va;				/* Make this a long long */
+						wimgxx = xpteg[slot + 1] & 0x7F;	/* Get the wimg and pp */
+						ppn = xpteg[slot + 1] >> 12;		/* Get physical page number */
+						slotoff = (i * 64) + (j * 8) | 1;	/* Get offset to slot and valid bit */
+					}
+					else {									/* Yes, Hagfish */
+						llslot = ((long long)xpteg[slot] << 32) | (long long)xpteg[slot + 1];	/* Make a long long version of this */ 
+						space = (llslot >> 12) & (maxAdrSp - 1);	/* Extract the space */
+						llhash = (unsigned long long)space | ((unsigned long long)space << maxAdrSpb) | ((unsigned long long)space << (2 * maxAdrSpb));	/* Get the hash */
+						llhash = llhash & 0x0000001FFFFFFFFFULL;	/* Make sure we stay within supported ranges */
+						pva =  i ^ llhash;					/* Get part of the vaddr */
+						llseg = ((llslot >> 12) ^ llhash);	/* Get the segment number */
+						api = (llslot >> 7) & 0x1F;			/* Get the API */
+						llva = ((llseg << (28 - maxAdrSpb)) & 0xFFFFFFFFF0000000ULL) | (api << 23) | ((pva << 12) & 0x007FF000);	/* Get the vaddr */
+						wimgxx = xpteg[slot + 3] & 0x7F;	/* Get the wimg and pp */
+						ppn =  (xpteg[slot + 2] << 20) | (xpteg[slot + 3] >> 12);	/* Get physical page number */
+						slotoff = (i * 128) + (j * 16) | 1;		/* Get offset to slot and valid bit */
+					}
+					
+					pmap = pmapTrans[space].pmapVAddr;	/* Find the pmap address */
+					if(!pmap) {								/* The pmap is not in use */
+						db_printf("The space %08X is not assigned to a pmap, slot = %d\n", space, slot);	/* Say we are wrong */
+						fnderr = 1;
+						goto dcmout;
+					}
+				
+					mp = hw_find_map(pmap, llva, &lnextva);		/* Try to find the mapping for this address */
+//					db_printf("%08X - %017llX\n", mp, llva);
+					if((unsigned int)mp == mapRtBadLk) {	/* Did we lock up ok? */
+						db_printf("Timeout locking mapping for for virtual address %016ll8X, slot = %d\n", llva, j);	
+						return;
+					}
+					
+					if(!mp) {								/* Did we find one? */
+						db_printf("Not mapped, slot = %d, va = %08X\n", j, (unsigned int)llva);	
+						fnderr = 1;
+						goto dcmout;
+					}
+					
+					if((mp->mpFlags & 0xFF000000) > 0x01000000) {	/* Is busy count too high? */
+						db_printf("Busy count too high, slot = %d\n", j);
+						fnderr = 1;
+					}
+					
+					if(mp->mpFlags & mpBlock) {				/* Is this a block map? */
+						if(!(xpca[0] & xauto)) {				/* Is it marked as such? */
+							db_printf("mapping marked as block, PCA is not, slot = %d\n", j);
+							fnderr = 1;
+						}
+					}
+					else {									/* Is a block */
+						if(xpca[0] & xauto) {				/* Is it marked as such? */
+							db_printf("mapping not marked as block, PCA is, slot = %d\n", j);
+							fnderr = 1;
+						}
+						if(mp->mpPte != slotoff) {			/* See if mapping PTEG offset is us */
+							db_printf("mapping does not point to PTE, slot = %d\n", j);
+							fnderr = 1;
+						}
+					}
+				
+					wimgkk = (unsigned int)mp->mpVAddr;		/* Get last half of vaddr where keys, etc are */
+					wimgkk = (wimgkk ^ wimgxx) & 0x7F;		/* XOR to find differences from PTE */
+					if(wimgkk) {							/* See if key in PTE is what we want */
+						db_printf("key or WIMG does not match, slot = %d\n", j);
+						fnderr = 1;
+					}
+					
+					aoff = (ppnum_t)((llva >> 12) - (mp->mpVAddr >> 12));	/* Get the offset from vaddr */
+					pa = aoff + mp->mpPAddr;				/* Get the physical page number we expect */
+					if(pa != ppn) {							/* Is physical address expected? */
+						db_printf("Physical address does not match, slot = %d\n", j);
+						fnderr = 1;
+					}
+	
+					mapping_drop_busy(mp);					/* We're done with the mapping */
+				}
+				
+			}
+dcmout:
+			free = free >> 1;
+			xauto = xauto >> 1;
+		}
+
+
+		if(fnderr)db_dumppca(i);							/* Print if error */
+
+		pteg = pteg + 64;									/* Go to the next one */
+		if(s4bit) pteg = pteg + 64;							/* Hagfish? */
+		pca = pca - 4;										/* Go to the next one */
+
+
+	}
+
+	return;
+}
+
+/*
+>>>>>>> origin/10.3
  *		Displays all of the kmods in the system.
  *
   *		dp

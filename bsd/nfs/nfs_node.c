@@ -4,6 +4,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
 <<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -28,11 +29,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -115,6 +126,7 @@ lck_mtx_t *nfs_node_hash_mutex;
  */
 void
 nfs_nhinit(void)
+<<<<<<< HEAD
 {
 	nfs_node_hash_lck_grp = lck_grp_alloc_init("nfs_node_hash", LCK_GRP_ATTR_NULL);
 	nfs_node_hash_mutex = lck_mtx_alloc_init(nfs_node_hash_lck_grp, LCK_ATTR_NULL);
@@ -124,6 +136,8 @@ nfs_nhinit(void)
 
 void
 nfs_nhinit_finish(void)
+=======
+>>>>>>> origin/10.3
 {
 	lck_mtx_lock(nfs_node_hash_mutex);
 	if (!nfsnodehashtbl)
@@ -905,6 +919,7 @@ nfs_vnop_reclaim(ap)
 		vfs_context_t a_context;
 	} */ *ap;
 {
+<<<<<<< HEAD
 	vnode_t vp = ap->a_vp;
 	nfsnode_t np = VTONFS(vp);
 	vfs_context_t ctx = ap->a_context;
@@ -914,6 +929,13 @@ nfs_vnop_reclaim(ap)
 	struct nfsmount *nmp = np->n_mount ? VFSTONFS(np->n_mount) : NFSTONMP(np);
 	mount_t mp = vnode_mount(vp);
 	int force;
+=======
+	register struct vnode *vp = ap->a_vp;
+	register struct nfsnode *np = VTONFS(vp);
+	register struct nfsmount *nmp;
+	register struct nfsdmap *dp, *dp2;
+	extern int prtactive;
+>>>>>>> origin/10.3
 
 	FSDBG_TOP(265, vp, np, np->n_flag, 0);
 	force = (!mp || vfs_isforce(mp) || nfs_mount_gone(nmp));
@@ -1019,6 +1041,7 @@ nfs_vnop_reclaim(ap)
 	}
 	lck_mtx_unlock(&np->n_openlock);
 
+<<<<<<< HEAD
 	if (np->n_monlink.le_next != NFSNOLIST) {
 		/* Wait for any in-progress getattr to complete, */
 		/* then remove this node from the monitored node list. */
@@ -1033,6 +1056,14 @@ nfs_vnop_reclaim(ap)
 			np->n_monlink.le_next = NFSNOLIST;
 		}
 		lck_mtx_unlock(&nmp->nm_lock);
+=======
+	/*
+	 * For nqnfs, take it off the timer queue as required.
+	 */
+	nmp = VFSTONFS(vp->v_mount);
+	if (nmp && (nmp->nm_flag & NFSMNT_NQNFS) && np->n_timer.cqe_next != 0) {
+		CIRCLEQ_REMOVE(&nmp->nm_timerhead, np, n_timer);
+>>>>>>> origin/10.3
 	}
 
 	lck_mtx_lock(nfs_buf_mutex);

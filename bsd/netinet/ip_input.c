@@ -19,8 +19,13 @@
 =======
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -40,6 +45,15 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
 =======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
  * 
  * @APPLE_LICENSE_HEADER_END@
 >>>>>>> origin/10.2
@@ -194,6 +208,7 @@ static lck_grp_attr_t	*ipqlock_grp_attr;
 #define	IPREASS_HASH(x, y) \
 	(((((x) & 0xF) | ((((x) >> 8) & 0xF) << 4)) ^ (y)) & IPREASS_HMASK)
 
+<<<<<<< HEAD
 /* IP fragment reassembly queues (protected by ipqlock) */
 static TAILQ_HEAD(ipqhead, ipq) ipq[IPREASS_NHASH]; /* ip reassembly queues */
 static int maxnipq;			/* max packets in reass queues */
@@ -258,6 +273,18 @@ static uint32_t ip_adj_clear_hwcksum = 0;
 SYSCTL_UINT(_net_inet_ip, OID_AUTO, adj_clear_hwcksum,
 	CTLFLAG_RW | CTLFLAG_LOCKED, &ip_adj_clear_hwcksum, 0,
 	"Invalidate hwcksum info when adjusting length");
+=======
+static int	nipq = 0;	/* total # of reass queues */
+static int	maxnipq = 0;
+SYSCTL_INT(_net_inet_ip, OID_AUTO, maxfragpackets, CTLFLAG_RW,
+	&maxnipq, 0,
+	"Maximum number of IPv4 fragment reassembly queue entries");
+>>>>>>> origin/10.3
+
+static int    maxfragsperpacket;
+SYSCTL_INT(_net_inet_ip, OID_AUTO, maxfragsperpacket, CTLFLAG_RW,
+	&maxfragsperpacket, 0,
+	"Maximum number of IPv4 fragments allowed per packet");
 
 /*
  * XXX - Setting ip_checkinterface mostly implements the receive side of
@@ -321,12 +348,17 @@ struct in_ifaddrhashhead *in_ifaddrhashtbl;	/* inet addr hash table  */
 static u_int32_t inaddr_nhash;			/* hash table size */
 static u_int32_t inaddr_hashp;			/* next largest prime */
 
+<<<<<<< HEAD
 static int ip_getstat SYSCTL_HANDLER_ARGS;
 struct ipstat ipstat;
 SYSCTL_PROC(_net_inet_ip, IPCTL_STATS, stats,
 	CTLTYPE_STRUCT | CTLFLAG_RD | CTLFLAG_LOCKED,
 	0, 0, ip_getstat, "S,ipstat",
 	"IP statistics (struct ipstat, netinet/ip_var.h)");
+=======
+static struct ipq ipq[IPREASS_NHASH];
+const  int    ipintrq_present = 1;
+>>>>>>> origin/10.3
 
 #if IPCTL_DEFMTU
 SYSCTL_INT(_net_inet_ip, IPCTL_DEFMTU, mtu, CTLFLAG_RW | CTLFLAG_LOCKED,
@@ -517,6 +549,7 @@ ip_init(struct protosw *pp, struct domain *dp)
 	ipqlock_attr = lck_attr_alloc_init();
 	lck_mtx_init(&ipqlock, ipqlock_grp, ipqlock_attr);
 
+<<<<<<< HEAD
 	lck_mtx_lock(&ipqlock);
 	/* Initialize IP reassembly queue. */
 	for (i = 0; i < IPREASS_NHASH; i++)
@@ -540,6 +573,10 @@ ip_init(struct protosw *pp, struct domain *dp)
 	sadb_stat_mutex_attr = lck_attr_alloc_init();
 	lck_mtx_init(sadb_stat_mutex, sadb_stat_mutex_grp,
 	    sadb_stat_mutex_attr);
+=======
+	maxnipq = nmbclusters / 32;
+	maxfragsperpacket = 16;
+>>>>>>> origin/10.3
 
 #endif
 	arp_init();
@@ -701,6 +738,7 @@ typedef struct pktchain_elm pktchain_elm_t;
 /* Store upto PKTTBL_SZ unique flows on the stack */
 #define PKTTBL_SZ	7
 
+<<<<<<< HEAD
 static struct mbuf *
 ip_chain_insert(struct mbuf *packet, pktchain_elm_t *tbl)
 {
@@ -722,6 +760,14 @@ ip_chain_insert(struct mbuf *packet, pktchain_elm_t *tbl)
 		    (ip->ip_p == tbl[pkttbl_idx].pkte_proto)) {
 		} else {
 			return (packet);
+=======
+	/* 127/8 must not appear on wire - RFC1122 */
+	if ((ntohl(ip->ip_dst.s_addr) >> IN_CLASSA_NSHIFT) == IN_LOOPBACKNET ||
+	    (ntohl(ip->ip_src.s_addr) >> IN_CLASSA_NSHIFT) == IN_LOOPBACKNET) {
+		if ((m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK) == 0) {
+			ipstat.ips_badaddr++;
+			goto bad;
+>>>>>>> origin/10.3
 		}
 	}
 	if (tbl[pkttbl_idx].pkte_tail != NULL)
@@ -759,7 +805,14 @@ ip_input_second_pass_loop_tbl(pktchain_elm_t *tbl, struct ip_fw_in_args *args)
 			/* no need to initialize address and protocol in tbl */
 		}
 	}
+<<<<<<< HEAD
 }
+=======
+	if ((IF_HWASSIST_CSUM_FLAGS(m->m_pkthdr.rcvif->if_hwassist) == 0) 
+	    || (apple_hwcksum_rx == 0) ||
+	   ((m->m_pkthdr.csum_flags & CSUM_TCP_SUM16) && ip->ip_p != IPPROTO_TCP))
+		m->m_pkthdr.csum_flags = 0; /* invalidate HW generated checksum flags */
+>>>>>>> origin/10.3
 
 static void
 ip_input_cpout_args(struct ip_fw_in_args *args, struct ip_fw_args *args1,
@@ -2303,12 +2356,94 @@ pass:
 ours:
 	/*
 	 * If offset or IP_MF are set, must reassemble.
+<<<<<<< HEAD
 	 */
 	if (ip->ip_off & ~(IP_DF | IP_RF)) {
 		/*
 		 * ip_reass() will return a different mbuf, and update
 		 * the divert info in div_info and args.fwa_divert_rule.
 		 */
+=======
+	 * Otherwise, nothing need be done.
+	 * (We could look in the reassembly queue to see
+	 * if the packet was previously fragmented,
+	 * but it's not worth the time; just let them time out.)
+	 */
+	if (ip->ip_off & (IP_MF | IP_OFFMASK | IP_RF)) {
+
+		/* If maxnipq is 0, never accept fragments. */
+		if (maxnipq == 0) {
+                	ipstat.ips_fragments++;
+			ipstat.ips_fragdropped++;
+			goto bad;
+			}
+
+		sum = IPREASS_HASH(ip->ip_src.s_addr, ip->ip_id);
+		/*
+		 * Look for queue of fragments
+		 * of this datagram.
+		 */
+		for (fp = ipq[sum].next; fp != &ipq[sum]; fp = fp->next)
+			if (ip->ip_id == fp->ipq_id &&
+			    ip->ip_src.s_addr == fp->ipq_src.s_addr &&
+			    ip->ip_dst.s_addr == fp->ipq_dst.s_addr &&
+			    ip->ip_p == fp->ipq_p)
+				goto found;
+
+		fp = 0;
+
+		/*
+		 * Enforce upper bound on number of fragmented packets
+		 * for which we attempt reassembly;
+		 * If maxnipq is -1, accept all fragments without limitation.
+		 */
+		if ((nipq > maxnipq) && (maxnipq > 0)) {
+		    /*
+		     * drop something from the tail of the current queue
+		     * before proceeding further
+		     */
+		    if (ipq[sum].prev == &ipq[sum]) {   /* gak */
+			for (i = 0; i < IPREASS_NHASH; i++) {
+			    if (ipq[i].prev != &ipq[i]) {
+					ipstat.ips_fragtimeout +=
+						ipq[i].prev->ipq_nfrags;
+				ip_freef(ipq[i].prev);
+				break;
+			    }
+			}
+		    } else {
+				ipstat.ips_fragtimeout += ipq[sum].prev->ipq_nfrags;
+			ip_freef(ipq[sum].prev);
+		}
+		}
+found:
+		/*
+		 * Adjust ip_len to not reflect header,
+		 * convert offset of this to bytes.
+		 */
+		ip->ip_len -= hlen;
+		if (ip->ip_off & IP_MF) {
+		        /*
+		         * Make sure that fragments have a data length
+			 * that's a non-zero multiple of 8 bytes.
+		         */
+			if (ip->ip_len == 0 || (ip->ip_len & 0x7) != 0) {
+				ipstat.ips_toosmall++; /* XXX */
+				goto bad;
+			}
+			m->m_flags |= M_FRAG;
+		} else
+			m->m_flags &= ~M_FRAG;
+		ip->ip_off <<= 3;
+
+		/*
+		 * Attempt reassembly; if it succeeds, proceed.
+		 * ip_reass() will return a different mbuf, and update
+		 * the divert info in divert_info and args.divert_rule.
+		 */
+			ipstat.ips_fragments++;
+			m->m_pkthdr.header = ip;
+>>>>>>> origin/10.3
 #if IPDIVERT
 		m = ip_reass(m, (u_int16_t *)&div_info, &args.fwa_divert_rule);
 #else
@@ -2326,6 +2461,7 @@ ours:
 			HTONS(ip->ip_len);
 			HTONS(ip->ip_off);
 #endif
+<<<<<<< HEAD
 			ip->ip_sum = 0;
 			ip->ip_sum = ip_cksum_hdr_in(m, hlen);
 #if BYTE_ORDER != BIG_ENDIAN
@@ -2341,6 +2477,10 @@ ours:
 	 * IP header.
 	 */
 	ip->ip_len -= hlen;
+=======
+		} else
+		ip->ip_len -= hlen;
+>>>>>>> origin/10.3
 
 #if IPDIVERT
 	/*
@@ -2699,6 +2839,7 @@ found:
 	/*
 	 * If first fragment to arrive, create a reassembly queue.
 	 */
+<<<<<<< HEAD
 	if (fp == NULL) {
 		fp = ipq_alloc(M_DONTWAIT);
 		if (fp == NULL)
@@ -2707,6 +2848,10 @@ found:
 		if (mac_ipq_label_init(fp, M_NOWAIT) != 0) {
 			ipq_free(fp);
 			fp = NULL;
+=======
+	if (fp == 0) {
+		if ((t = m_get(M_DONTWAIT, MT_FTABLE)) == NULL)
+>>>>>>> origin/10.3
 			goto dropfrag;
 		}
 		mac_ipq_label_associate(m, fp);
@@ -2752,6 +2897,12 @@ found:
 #if CONFIG_MACF_NET
 		mac_ipq_label_update(m, fp);
 #endif
+<<<<<<< HEAD
+=======
+		goto inserted;
+	} else {
+		fp->ipq_nfrags++;
+>>>>>>> origin/10.3
 	}
 
 #define	GETIP(m)	((struct ip *)((m)->m_pkthdr.pkt_hdr))
@@ -2823,8 +2974,12 @@ found:
 		m->m_nextpkt = nq;
 		ipstat.ips_fragdropped++;
 		fp->ipq_nfrags--;
+<<<<<<< HEAD
 		/* defer freeing until after lock is dropped */
 		MBUFQ_ENQUEUE(&dfq, q);
+=======
+		m_freem(q);
+>>>>>>> origin/10.3
 	}
 
 	/*
@@ -2848,7 +3003,11 @@ found:
 #else
 		fp->ipq_divert = *divinfo;
 #endif
+<<<<<<< HEAD
 		fp->ipq_div_cookie = *divcookie;
+=======
+	fp->ipq_div_cookie = *divcookie;
+>>>>>>> origin/10.3
 	}
 	*divinfo = 0;
 	*divcookie = 0;
@@ -2869,10 +3028,16 @@ found:
 		if (GETIP(q)->ip_off != next) {
 			if (fp->ipq_nfrags > maxfragsperpacket) {
 				ipstat.ips_fragdropped += fp->ipq_nfrags;
+<<<<<<< HEAD
 				frag_freef(head, fp);
 			}
 			m = NULL;	/* nothing to return */
 			goto done;
+=======
+				ip_freef(fp);
+			}
+			return (0);
+>>>>>>> origin/10.3
 		}
 		next += GETIP(q)->ip_len;
 	}
@@ -2880,10 +3045,16 @@ found:
 	if (p->m_flags & M_FRAG) {
 		if (fp->ipq_nfrags > maxfragsperpacket) {
 			ipstat.ips_fragdropped += fp->ipq_nfrags;
+<<<<<<< HEAD
 			frag_freef(head, fp);
 		}
 		m = NULL;		/* nothing to return */
 		goto done;
+=======
+			ip_freef(fp);
+		}
+		return (0);
+>>>>>>> origin/10.3
 	}
 
 	/*
@@ -2894,9 +3065,14 @@ found:
 	if (next + (IP_VHL_HL(ip->ip_vhl) << 2) > IP_MAXPACKET) {
 		ipstat.ips_toolong++;
 		ipstat.ips_fragdropped += fp->ipq_nfrags;
+<<<<<<< HEAD
 		frag_freef(head, fp);
 		m = NULL;		/* nothing to return */
 		goto done;
+=======
+		ip_freef(fp);
+		return (0);
+>>>>>>> origin/10.3
 	}
 
 	/*
@@ -2911,6 +3087,11 @@ found:
 	for (q = nq; q != NULL; q = nq) {
 		nq = q->m_nextpkt;
 		q->m_nextpkt = NULL;
+<<<<<<< HEAD
+=======
+			m->m_pkthdr.csum_flags &= q->m_pkthdr.csum_flags;
+			m->m_pkthdr.csum_data += q->m_pkthdr.csum_data;
+>>>>>>> origin/10.3
 		m_cat(m, q);
 	}
 
@@ -2961,11 +3142,17 @@ found:
 	ip->ip_len = (IP_VHL_HL(ip->ip_vhl) << 2) + next;
 	ip->ip_src = fp->ipq_src;
 	ip->ip_dst = fp->ipq_dst;
+<<<<<<< HEAD
 
 	fp->ipq_frags = NULL;	/* return to caller as 'm' */
 	frag_freef(head, fp);
 	fp = NULL;
 
+=======
+	remque((void*)fp);
+	nipq--;
+	(void) m_free(dtom(fp));
+>>>>>>> origin/10.3
 	m->m_len += (IP_VHL_HL(ip->ip_vhl) << 2);
 	m->m_data -= (IP_VHL_HL(ip->ip_vhl) << 2);
 	/* some debugging cruft by sklower, below, will go away soon */
@@ -2999,11 +3186,16 @@ dropfrag:
 	*divcookie = 0;
 #endif /* IPDIVERT */
 	ipstat.ips_fragdropped++;
+<<<<<<< HEAD
 	if (fp != NULL)
 		fp->ipq_nfrags--;
 	/* arm the purge timer if not already and if there's work to do */
 	frag_sched_timeout();
 	lck_mtx_unlock(&ipqlock);
+=======
+	if (fp != 0)
+		fp->ipq_nfrags--;
+>>>>>>> origin/10.3
 	m_freem(m);
 	/* perform deferred free (if needed) */
 	if (!MBUFQ_EMPTY(&dfq))
@@ -3027,7 +3219,12 @@ frag_freef(struct ipqhead *fhp, struct ipq *fp)
 		m_freem_list(fp->ipq_frags);
 		fp->ipq_frags = NULL;
 	}
+<<<<<<< HEAD
 	TAILQ_REMOVE(fhp, fp, ipq_list);
+=======
+	remque((void*)fp);
+	(void) m_free(dtom(fp));
+>>>>>>> origin/10.3
 	nipq--;
 	ipq_free(fp);
 }
@@ -3051,6 +3248,7 @@ frag_timeout(void *arg)
 
 	lck_mtx_lock(&ipqlock);
 	for (i = 0; i < IPREASS_NHASH; i++) {
+<<<<<<< HEAD
 		for (fp = TAILQ_FIRST(&ipq[i]); fp; ) {
 			struct ipq *fpp;
 
@@ -3059,6 +3257,17 @@ frag_timeout(void *arg)
 			if (--fpp->ipq_ttl == 0) {
 				ipstat.ips_fragtimeout += fpp->ipq_nfrags;
 				frag_freef(&ipq[i], fpp);
+=======
+		fp = ipq[i].next;
+		if (fp == 0)
+			continue;
+		while (fp != &ipq[i]) {
+			--fp->ipq_ttl;
+			fp = fp->next;
+			if (fp->prev->ipq_ttl == 0) {
+				ipstat.ips_fragtimeout += fp->prev->ipq_nfrags;
+				ip_freef(fp->prev);
+>>>>>>> origin/10.3
 			}
 		}
 	}
@@ -3067,6 +3276,7 @@ frag_timeout(void *arg)
 	 * (due to the limit being lowered), drain off
 	 * enough to get down to the new limit.
 	 */
+<<<<<<< HEAD
 	if (maxnipq >= 0 && nipq > (unsigned)maxnipq) {
 		for (i = 0; i < IPREASS_NHASH; i++) {
 			while (nipq > (unsigned)maxnipq &&
@@ -3074,6 +3284,15 @@ frag_timeout(void *arg)
 				ipstat.ips_fragdropped +=
 				    TAILQ_FIRST(&ipq[i])->ipq_nfrags;
 				frag_freef(&ipq[i], TAILQ_FIRST(&ipq[i]));
+=======
+	if (maxnipq >= 0 && nipq > maxnipq) {
+	for (i = 0; i < IPREASS_NHASH; i++) {
+			while (nipq > maxnipq &&
+				(ipq[i].next != &ipq[i])) {
+				ipstat.ips_fragdropped +=
+				    ipq[i].next->ipq_nfrags;
+				ip_freef(ipq[i].next);
+>>>>>>> origin/10.3
 			}
 		}
 	}
@@ -3104,10 +3323,16 @@ frag_drain(void)
 
 	lck_mtx_lock(&ipqlock);
 	for (i = 0; i < IPREASS_NHASH; i++) {
+<<<<<<< HEAD
 		while (!TAILQ_EMPTY(&ipq[i])) {
 			ipstat.ips_fragdropped +=
 			    TAILQ_FIRST(&ipq[i])->ipq_nfrags;
 			frag_freef(&ipq[i], TAILQ_FIRST(&ipq[i]));
+=======
+		while (ipq[i].next != &ipq[i]) {
+			ipstat.ips_fragdropped += ipq[i].next->ipq_nfrags;
+			ip_freef(ipq[i].next);
+>>>>>>> origin/10.3
 		}
 	}
 	lck_mtx_unlock(&ipqlock);

@@ -1,24 +1,21 @@
 /*
- * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -119,8 +116,50 @@ EXT(ResetHandler):
 			mtlr	r4
 			blr
 
+<<<<<<< HEAD
 resetexc:
 			mtcr	r11
+=======
+resetexc:	cmplwi	r13,RESET_HANDLER_BUPOR			; Special bring up POR sequence?
+			bne		resetexc2						; No...
+			lis		r4,hi16(EXT(resetPOR))			; Get POR code
+			ori		r4,r4,lo16(EXT(resetPOR))		; The rest
+			mtlr	r4								; Set it
+			blr										; Jump to it....
+
+resetexc2:	cmplwi	cr1,r13,RESET_HANDLER_IGNORE	; Are we ignoring these? (Software debounce)
+
+			mfsprg	r13,0							; Get per_proc
+			lwz		r13,pfAvailable(r13)			; Get the features
+			rlwinm.	r13,r13,0,pf64Bitb,pf64Bitb		; Is this a 64-bit machine?
+			cror	cr1_eq,cr0_eq,cr1_eq			; See if we want to take this
+			bne--	cr1,rxCont						; Yes, continue...
+			bne--	rxIg64							; 64-bit path...
+
+			mtcr	r11								; Restore the CR
+			mfsprg	r13,2							; Restore R13
+			mfsprg	r11,0							; Get per_proc
+			lwz		r11,pfAvailable(r11)			; Get the features
+			mtsprg	2,r11							; Restore sprg2
+			mfsprg	r11,3							; Restore R11
+			rfi										; Return and ignore the reset
+
+rxIg64:		mtcr	r11								; Restore the CR
+			mfsprg	r11,0							; Get per_proc
+			mtspr	hsprg0,r14						; Save a register
+			lwz		r14,UAW(r11)					; Get the User Assist Word
+			mfsprg	r13,2							; Restore R13
+			lwz		r11,pfAvailable(r11)			; Get the features
+			mtsprg	2,r11							; Restore sprg2
+			mfsprg	r11,3							; Restore R11
+			mtsprg	3,r14							; Set the UAW in sprg3
+			mfspr	r14,hsprg0						; Restore R14
+			rfid									; Return and ignore the reset
+
+rxCont:		mtcr	r11
+			li		r11,RESET_HANDLER_IGNORE		; Get set to ignore
+			stw		r11,lo16(EXT(ResetHandler)-EXT(ExceptionVectorsStart)+RESETHANDLER_TYPE)(br0)	; Start ignoring these
+>>>>>>> origin/10.3
 			mfsprg	r13,1							/* Get the exception save area */
 			li		r11,T_RESET						/* Set 'rupt code */
 			b		.L_exception_entry				/* Join common... */
@@ -131,11 +170,89 @@ resetexc:
 
 			. = 0x200
 .L_handler200:
+<<<<<<< HEAD
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
 			mfsprg	r13,1							/* Get the exception save area */
 			li		r11,T_MACHINE_CHECK				/* Set 'rupt code */
 			b		.L_exception_entry				/* Join common... */
+=======
+			mtsprg	2,r13							; Save R13 
+			mtsprg	3,r11							; Save R11
+
+			.globl	EXT(extPatchMCK)
+LEXT(extPatchMCK)									; This is patched to a nop for 64-bit 
+			b		h200aaa							; Skip 64-bit code... 
+
+;
+;			Fall through here for 970 MCKs.
+;
+
+			li		r11,1							; 
+			sldi	r11,r11,32+3					; 
+			mfspr	r13,hid4						; 
+			or		r11,r11,r13						; 
+			sync
+			mtspr	hid4,r11						; 
+			isync
+			li		r11,1							; 
+			sldi	r11,r11,32+8					; 
+			andc	r13,r13,r11						; 
+			lis		r11,0xE000						; Get the unlikeliest ESID possible
+			sync
+			mtspr	hid4,r13						; 
+			isync									; 
+			
+			srdi	r11,r11,1						; 
+			slbie	r11								; 
+			sync
+			isync
+		
+			li		r11,T_MACHINE_CHECK				; Set rupt code
+			b		.L_exception_entry				; Join common...
+
+;
+;			Preliminary checking of other MCKs
+;
+
+h200aaa:	mfsrr1	r11								; Get the SRR1
+			mfcr	r13								; Save the CR
+			
+			rlwinm.	r11,r11,0,dcmck,dcmck			; 
+			beq+	notDCache						; 
+			
+			sync
+			mfspr	r11,msscr0						; 
+			dssall									; 
+			sync
+			isync
+
+			oris	r11,r11,hi16(dl1hwfm)			; 
+			mtspr	msscr0,r11						; 
+			
+rstbsy:		mfspr	r11,msscr0						; 
+			
+			rlwinm.	r11,r11,0,dl1hwf,dl1hwf			; 
+			bne		rstbsy							; 
+			
+			sync									; 
+
+			mfsprg	r11,0							; Get the per_proc
+			mtcrf	255,r13							; Restore CRs
+			lwz		r13,hwMachineChecks(r11)		; Get old count
+			addi	r13,r13,1						; Count this one
+			stw		r13,hwMachineChecks(r11)		; Set new count
+			lwz		r11,pfAvailable(r11)			; Get the feature flags
+			mfsprg	r13,2							; Restore R13
+			mtsprg	2,r11							; Set the feature flags
+			mfsprg	r11,3							; Restore R11
+			rfi										; Return
+
+notDCache:	mtcrf	255,r13							; Restore CRs
+			li		r11,T_MACHINE_CHECK				; Set rupt code
+			b		.L_exception_entry				; Join common...
+
+>>>>>>> origin/10.3
 
 /*
  * 			Data access - page fault, invalid memory rights for operation
@@ -1125,6 +1242,7 @@ skipz5:
 		
 			stw		r27,saver27(r13)				/* Save this one */
 			li		r10,emfp0						; Point to floating point save
+<<<<<<< HEAD
 			stw		r28,saver28(r13)				/* Save this one */
 			stw		r29,saver29(r13)				/* Save this one */
 			mfsr	r14,sr14						; Get the copyin/out segment register
@@ -1144,6 +1262,176 @@ skipz5a:	stw		r7,savedsisr(r13)				/* Save the 'rupt code DSISR */
 			li		r9,0							; Get set to clear VRSAVE
 			mfspr	r19,vrsave						; Get the VRSAVE register
 			mtspr	vrsave,r9						; Clear VRSAVE for each interrupt level
+=======
+			std		r28,saver28(r13)				; Save this one
+            la		r27,savevscr(r13)				; point to 32-byte line with VSCR and FPSCR
+			std		r29,saver29(r13)				; Save R29
+			std		r30,saver30(r13)				; Save this one 
+			std		r31,saver31(r13)				; Save this one 
+			std		r6,savedar(r13)					; Save the rupt DAR 
+			stw		r7,savedsisr(r13)				; Save the rupt code DSISR
+			stw		r11,saveexception(r13)			; Save the exception code 
+
+			beq++	noPerfMonSave64					; Performance monitor not on...
+
+			li		r22,0							; r22:	zero
+		
+			mfspr	r23,mmcr0_gp
+			mfspr	r24,mmcr1_gp
+			mfspr	r25,mmcra_gp
+			std		r23,savemmcr0(r13)				; Save MMCR0
+			std		r24,savemmcr1(r13)				; Save MMCR1 
+			std		r25,savemmcr2(r13)				; Save MMCRA
+			mtspr	mmcr0_gp,r22					; Leave MMCR0 clear
+			mtspr	mmcr1_gp,r22					; Leave MMCR1 clear
+			mtspr	mmcra_gp,r22					; Leave MMCRA clear 
+			mfspr	r23,pmc1_gp
+			mfspr	r24,pmc2_gp
+			mfspr	r25,pmc3_gp
+			mfspr	r26,pmc4_gp
+			stw		r23,savepmc+0(r13)				; Save PMC1
+			stw		r24,savepmc+4(r13)				; Save PMC2
+			stw		r25,savepmc+8(r13)				; Save PMC3
+			stw		r26,savepmc+12(r13)				; Save PMC4
+			mfspr	r23,pmc5_gp
+			mfspr	r24,pmc6_gp
+			mfspr	r25,pmc7_gp
+			mfspr	r26,pmc8_gp
+			stw		r23,savepmc+16(r13)				; Save PMC5
+			stw		r24,savepmc+20(r13)				; Save PMC6
+			stw		r25,savepmc+24(r13)				; Save PMC7
+			stw		r26,savepmc+28(r13)				; Save PMC8
+			mtspr	pmc1_gp,r22						; Leave PMC1 clear 
+			mtspr	pmc2_gp,r22						; Leave PMC2 clear
+			mtspr	pmc3_gp,r22						; Leave PMC3 clear 		
+			mtspr	pmc4_gp,r22						; Leave PMC4 clear 
+			mtspr	pmc5_gp,r22						; Leave PMC5 clear 
+			mtspr	pmc6_gp,r22						; Leave PMC6 clear
+			mtspr	pmc7_gp,r22						; Leave PMC7 clear 		
+			mtspr	pmc8_gp,r22						; Leave PMC8 clear 
+
+noPerfMonSave64:		
+
+;
+;			Everything is saved at this point, except for FPRs, and VMX registers.
+;			Time for us to get a new savearea and then trace interrupt if it is enabled.
+;
+
+			lwz		r25,traceMask(0)				; Get the trace mask
+			li		r0,SAVgeneral					; Get the savearea type value
+			lhz		r19,PP_CPU_NUMBER(r2)			; Get the logical processor number											
+			stb		r0,SAVflags+2(r13)				; Mark valid context
+			rlwinm	r22,r11,30,0,31					; Divide interrupt code by 2
+			li		r23,trcWork						; Get the trace work area address
+			addi	r22,r22,10						; Adjust code so we shift into CR5
+			li		r26,0x8							; Get start of cpu mask
+			rlwnm	r7,r25,r22,22,22				; Set CR5_EQ bit position to 0 if tracing allowed 
+			srw		r26,r26,r19						; Get bit position of cpu number
+			mtcrf	0x04,r7							; Set CR5 to show trace or not
+			and.	r26,r26,r25						; See if we trace this cpu
+			crandc	cr5_eq,cr5_eq,cr0_eq			; Turn off tracing if cpu is disabled
+
+			bne++	cr5,xcp64xit					; Skip all of this if no tracing here...
+
+;
+;			We select a trace entry using a compare and swap on the next entry field.
+;			Since we do not lock the actual trace buffer, there is a potential that
+;			another processor could wrap an trash our entry.  Who cares?
+;
+
+			lwz		r25,traceStart(0)				; Get the start of trace table
+			lwz		r26,traceEnd(0)					; Get end of trace table
+
+trcselSF:	lwarx	r20,0,r23						; Get and reserve the next slot to allocate
+			
+			addi	r22,r20,LTR_size				; Point to the next trace entry
+			cmplw	r22,r26							; Do we need to wrap the trace table?
+			bne+	gotTrcEntSF						; No wrap, we got us a trace entry...
+			
+			mr		r22,r25							; Wrap back to start
+
+gotTrcEntSF:	
+			stwcx.	r22,0,r23						; Try to update the current pointer
+			bne-	trcselSF						; Collision, try again...
+			
+#if ESPDEBUG
+			dcbf	0,r23							; Force to memory
+			sync
+#endif
+
+;
+;			Let us cut that trace entry now.
+;
+
+			dcbz128	0,r20							; Zap the trace entry
+
+			lwz		r9,SAVflags(r13)				; Get savearea flags
+
+			ld		r16,ruptStamp(r2)				; Get top of time base
+			ld		r0,saver0(r13)					; Get back interrupt time R0 (we need this whether we trace or not)
+			std		r16,LTR_timeHi(r20)				; Set the upper part of TB 
+			ld		r1,saver1(r13)					; Get back interrupt time R1
+			rlwinm	r9,r9,20,16,23					; Isolate the special flags
+			ld		r18,saver2(r13)					; Get back interrupt time R2
+			std		r0,LTR_r0(r20)					; Save off register 0 	
+			rlwimi	r9,r19,0,24,31					; Slide in the cpu number
+			ld		r3,saver3(r13)					; Restore this one
+			sth		r9,LTR_cpu(r20)					; Stash the cpu number and special flags
+			std		r1,LTR_r1(r20)					; Save off register 1			
+			ld		r4,saver4(r13)					; Restore this one
+			std		r18,LTR_r2(r20)					; Save off register 2 			
+			ld		r5,saver5(r13)					; Restore this one
+			ld		r6,saver6(r13)					; Get R6
+			std		r3,LTR_r3(r20)					; Save off register 3
+			lwz		r16,savecr(r13)					; Get the CR value
+			std		r4,LTR_r4(r20)					; Save off register 4 
+			mfsrr0	r17								; Get SRR0 back, it is still good
+			std		r5,LTR_r5(r20)					; Save off register 5	
+			std		r6,LTR_r6(r20)					; Save off register 6	
+			mfsrr1	r18								; SRR1 is still good in here
+			stw		r16,LTR_cr(r20)					; Save the CR
+			std		r17,LTR_srr0(r20)				; Save the SSR0 
+			std		r18,LTR_srr1(r20)				; Save the SRR1 
+						
+			mfdar	r17								; Get this back
+			ld		r16,savelr(r13)					; Get the LR
+			std		r17,LTR_dar(r20)				; Save the DAR
+			mfctr	r17								; Get the CTR (still good in register)
+			std		r16,LTR_lr(r20)					; Save the LR
+			std		r17,LTR_ctr(r20)				; Save off the CTR
+			mfdsisr	r17								; Get the DSISR
+			std		r13,LTR_save(r20)				; Save the savearea 
+			stw		r17,LTR_dsisr(r20)				; Save the DSISR
+			sth		r11,LTR_excpt(r20)				; Save the exception type 
+
+#if ESPDEBUG
+			dcbf	0,r20							; Force to memory			
+			sync									; Make sure it all goes
+#endif
+xcp64xit:	mr		r14,r11							; Save the interrupt code across the call
+			bl		EXT(save_get_phys_64)			; Grab a savearea
+			mfsprg	r2,0							; Get the per_proc info
+			li		r10,emfp0						; Point to floating point save
+			mr		r11,r14							; Get the exception code back
+			dcbz128	r10,r2							; Clear for speed
+			std		r3,next_savearea(r2)			; Store the savearea for the next rupt
+			b		xcpCommon						; Go join the common interrupt processing...
+
+;
+;			All of the context is saved. Now we will get a
+;			fresh savearea.  After this we can take an interrupt.
+;
+
+			.align	5
+
+xcpCommon:
+
+;
+;			Here we will save some floating point and vector status
+;			and we also set a clean default status for a new interrupt level.
+;			Note that we assume that emfp0 is on an altivec boundary
+;			and that R10 points to it (as a displacemnt from R2).
+>>>>>>> origin/10.3
 ;
 ;			We need to save the FPSCR as if it is normal context.
 ;			This is because pending exceptions will cause an exception even if
@@ -1186,6 +1474,7 @@ lllck:		lwarx	r9,0,r8							/* Grab the lock value */
 			beq+	lllckd							/* Got it... */
 			b		lllck							/* Collision, try again... */
 			
+<<<<<<< HEAD
 lllcks:		lwz		r9,SVlock(r8)					/* Get that lock in here */
 			mr.		r9,r9							/* Is it free yet? */
 			beq+	lllck							/* Yeah, try for it again... */
@@ -1244,6 +1533,140 @@ gotTrcEnt:	bne-	cr5,skipTrace1					/* Don't want to trace this kind... */
 			dcbst	br0,r23							; (TEST/DEBUG)
 			sync									; (TEST/DEBUG)
 #endif
+=======
+;
+;			We are now done saving all of the context.  Start filtering the interrupts.
+;			Note that a Redrive will count as an actual interrupt.
+;			Note also that we take a lot of system calls so we will start decode here.
+;
+
+Redrive:	
+
+
+#if INSTRUMENT
+			mfspr	r20,pmc1						; INSTRUMENT - saveinstr[4] - Take stamp before exception filter
+			stw		r20,0x6100+(0x04*16)+0x0(0)		; INSTRUMENT - Save it
+			mfspr	r20,pmc2						; INSTRUMENT - Get stamp
+			stw		r20,0x6100+(0x04*16)+0x4(0)		; INSTRUMENT - Save it
+			mfspr	r20,pmc3						; INSTRUMENT - Get stamp
+			stw		r20,0x6100+(0x04*16)+0x8(0)		; INSTRUMENT - Save it
+			mfspr	r20,pmc4						; INSTRUMENT - Get stamp
+			stw		r20,0x6100+(0x04*16)+0xC(0)		; INSTRUMENT - Save it
+#endif			
+			lwz		r22,SAVflags(r13)				; Pick up the flags
+			lwz		r0,saver0+4(r13)				; Get back interrupt time syscall number
+			mfsprg	r2,0							; Restore per_proc
+		
+			li		r20,lo16(xcpTable)				; Point to the vector table (note: this must be in 1st 64k of physical memory)
+			la		r12,hwCounts(r2)				; Point to the exception count area
+			andis.	r24,r22,hi16(SAVeat)			; Should we eat this one?		
+			rlwinm	r22,r22,SAVredriveb+1,31,31		; Get a 1 if we are redriving
+			add		r12,r12,r11						; Point to the count
+			lwzx	r20,r20,r11						; Get the interrupt handler
+			lwz		r25,0(r12)						; Get the old value
+			lwz		r23,hwRedrives(r2)				; Get the redrive count
+			crmove	cr3_eq,cr0_eq					; Remember if we are ignoring
+			xori	r24,r22,1						; Get the NOT of the redrive
+			mtctr	r20								; Point to the interrupt handler
+			mtcrf	0x80,r0							; Set our CR0 to the high nybble of possible syscall code
+			add		r25,r25,r24						; Count this one if not a redrive
+			add		r23,r23,r24						; Count this one if if is a redrive
+			crandc	cr0_lt,cr0_lt,cr0_gt			; See if we have R0 equal to 0b10xx...x 
+			stw		r25,0(r12)						; Store it back
+			stw		r23,hwRedrives(r2)				; Save the redrive count
+			bne--	cr3,IgnoreRupt					; Interruption is being ignored...
+			bctr									; Go process the exception...
+	
+
+;
+;			Exception vector filter table
+;
+
+			.align	7
+			
+xcpTable:
+			.long	EatRupt							; T_IN_VAIN			
+			.long	PassUpTrap						; T_RESET				
+			.long	MachineCheck					; T_MACHINE_CHECK		
+			.long	EXT(handlePF)					; T_DATA_ACCESS		
+			.long	EXT(handlePF)					; T_INSTRUCTION_ACCESS
+			.long	PassUpRupt						; T_INTERRUPT		
+			.long	EXT(AlignAssist)				; T_ALIGNMENT			
+			.long	EXT(Emulate)					; T_PROGRAM			
+			.long	PassUpFPU						; T_FP_UNAVAILABLE		
+			.long	PassUpRupt						; T_DECREMENTER		
+			.long	PassUpTrap						; T_IO_ERROR			
+			.long	PassUpTrap						; T_RESERVED			
+			.long	xcpSyscall						; T_SYSTEM_CALL			
+			.long	PassUpTrap						; T_TRACE				
+			.long	PassUpTrap						; T_FP_ASSIST			
+			.long	PassUpTrap						; T_PERF_MON				
+			.long	PassUpVMX						; T_VMX					
+			.long	PassUpTrap						; T_INVALID_EXCP0		
+			.long	PassUpTrap						; T_INVALID_EXCP1			
+			.long	PassUpTrap						; T_INVALID_EXCP2		
+			.long	PassUpTrap						; T_INSTRUCTION_BKPT		
+			.long	PassUpRupt						; T_SYSTEM_MANAGEMENT		
+			.long	EXT(AltivecAssist)				; T_ALTIVEC_ASSIST		
+			.long	PassUpRupt						; T_THERMAL				
+			.long	PassUpTrap						; T_INVALID_EXCP5		
+			.long	PassUpTrap						; T_INVALID_EXCP6			
+			.long	PassUpTrap						; T_INVALID_EXCP7			
+			.long	PassUpTrap						; T_INVALID_EXCP8			
+			.long	PassUpTrap						; T_INVALID_EXCP9			
+			.long	PassUpTrap						; T_INVALID_EXCP10		
+			.long	PassUpTrap						; T_INVALID_EXCP11		
+			.long	PassUpTrap						; T_INVALID_EXCP12	
+			.long	PassUpTrap						; T_INVALID_EXCP13		
+
+			.long	PassUpTrap						; T_RUNMODE_TRACE			
+
+			.long	PassUpRupt						; T_SIGP					
+			.long	PassUpTrap						; T_PREEMPT				
+			.long	conswtch						; T_CSWITCH				
+			.long	PassUpRupt						; T_SHUTDOWN				
+			.long	PassUpAbend						; T_CHOKE					
+
+			.long	EXT(handleDSeg)					; T_DATA_SEGMENT			
+			.long	EXT(handleISeg)					; T_INSTRUCTION_SEGMENT	
+
+			.long	WhoaBaby						; T_SOFT_PATCH			
+			.long	WhoaBaby						; T_MAINTENANCE			
+			.long	WhoaBaby						; T_INSTRUMENTATION		
+			.long	WhoaBaby						; T_ARCHDEP0
+			.long	EatRupt							; T_HDEC
+;
+;			Just what the heck happened here????
+;
+
+			.align	5
+			
+WhoaBaby:	b		.								; Open the hood and wait for help
+
+			.align	5
+			
+IgnoreRupt:
+			lwz		r20,hwIgnored(r2)				; Grab the ignored interruption count
+			addi	r20,r20,1						; Count this one
+			stw		r20,hwIgnored(r2)				; Save the ignored count
+			b		EatRupt							; Ignore it...
+
+
+													
+;
+;			System call
+;
+		
+			.align	5
+
+xcpSyscall:	lis		r20,hi16(EXT(shandler))			; Assume this is a normal one, get handler address
+			rlwinm	r6,r0,1,0,31					; Move sign bit to the end 
+			ori		r20,r20,lo16(EXT(shandler))		; Assume this is a normal one, get handler address
+			bnl++	cr0,PassUp						; R0 not 0b10xxx...x, can not be any kind of magical system call, just pass it up...
+			lwz		r7,savesrr1+4(r13)				; Get the entering MSR (low half)
+			lwz		r1,dgFlags(0)					; Get the flags
+			cmplwi	cr2,r6,1						; See if original R0 had the CutTrace request code in it 
+>>>>>>> origin/10.3
 			
 			bf-		featL1ena,skipz6				; L1 cache is disabled...
 			dcbz	0,r20							/* Allocate cache for the entry */
@@ -1349,9 +1772,25 @@ skipTrace2:
 			mr		r0,r8							; Restore R0
 #endif
 
+<<<<<<< HEAD
 			mfsprg	r2,0							/* Get the per processor block */
 
 #if CHECKSAVE
+=======
+;
+;			Handle machine check here.
+;
+; 
+;
+
+			.align	5
+
+MachineCheck:
+
+			bt++	pf64Bitb,mck64					; 
+			
+			lwz		r27,savesrr1+4(r13)				; Pick up srr1
+>>>>>>> origin/10.3
 
 			lis		r4,0x7FFF						/* (TEST/DEBUG) */
 			mfdec	r12								/* (TEST/DEBUG) */
@@ -1433,6 +1872,7 @@ cksave0:	lwz		r28,SVfree(r8)					/* (TEST/DEBUG) */
 			li		r24,0							/* (TEST/DEBUG) */
 			li		r29,1							/* (TEST/SAVE) */
 			
+<<<<<<< HEAD
 cksave0a:	mr.		r28,r28							/* (TEST/DEBUG) */
 			beq-	cksave3							/* (TEST/DEBUG) */
 			
@@ -1440,6 +1880,74 @@ cksave0a:	mr.		r28,r28							/* (TEST/DEBUG) */
 			bne+	cksave1							/* (TEST/DEBUG) */
 			
 			bl		currbad							; (TEST/DEBUG)
+=======
+			sync
+
+			mtspr	scomd,r9						; Set the AND mask to 0
+			mtspr	scomc,r8						; Write the AND mask and clear conditions
+			mfspr	r8,scomc						; Get back the status (we just ignore it)
+			sync
+			isync							
+
+			lis		r8,l2FIR						; Get the L2 FIR register address
+			ori		r8,r8,0x8000					; Set to read data
+			
+			sync
+
+			mtspr	scomc,r8						; Request the L2 FIR
+			mfspr	r26,scomd						; Get the source
+			mfspr	r8,scomc						; Get back the status (we just ignore it)
+			sync
+			isync							
+			
+			lis		r8,l2FIRrst						; Get the L2 FIR AND mask address
+			
+			sync
+
+			mtspr	scomd,r9						; Set the AND mask to 0
+			mtspr	scomc,r8						; Write the AND mask and clear conditions
+			mfspr	r8,scomc						; Get back the status (we just ignore it)
+			sync
+			isync							
+
+			lis		r8,busFIR						; Get the Bus FIR register address
+			ori		r8,r8,0x8000					; Set to read data
+			
+			sync
+
+			mtspr	scomc,r8						; Request the Bus FIR
+			mfspr	r27,scomd						; Get the source
+			mfspr	r8,scomc						; Get back the status (we just ignore it)
+			sync
+			isync							
+			
+			lis		r8,busFIRrst					; Get the Bus FIR AND mask address
+			
+			sync
+
+			mtspr	scomd,r9						; Set the AND mask to 0
+			mtspr	scomc,r8						; Write the AND mask and clear conditions
+			mfspr	r8,scomc						; Get back the status (we just ignore it)
+			sync
+			isync							
+			
+;			Note: bug in early chips where scom reads are shifted right by 1. We fix that here.
+;			Also note that we will lose bit 63
+
+			beq++	mckNoFix						; No fix up is needed
+			sldi	r24,r24,1						; Shift left 1
+			sldi	r25,r25,1						; Shift left 1
+			sldi	r26,r26,1						; Shift left 1
+			sldi	r27,r27,1						; Shift left 1
+			
+mckNoFix:	std		r24,savexdat0(r13)				; Save the MCK source in case we pass the error
+			std		r25,savexdat1(r13)				; Save the Core FIR in case we pass the error
+			std		r26,savexdat2(r13)				; Save the L2 FIR in case we pass the error
+			std		r27,savexdat3(r13)				; Save the BUS FIR in case we pass the error
+
+			rlwinm.	r0,r20,0,mckIFUE-32,mckIFUE-32	; Is this some kind of uncorrectable?
+			bne		mckUE							; Yeah...
+>>>>>>> origin/10.3
 			
 cksave1:	rlwinm.	r21,r28,0,21,3					/* (TEST/DEBUG) */
 			beq+	cksave2							/* (TEST/DEBUG) */
@@ -1455,8 +1963,15 @@ cksave2:	lwz		r25,SACalloc(r28)				/* (TEST/DEBUG) */
 			
 			bl		currbad							; (TEST/DEBUG)
 
+<<<<<<< HEAD
 cksave2z:	mr.		r21,r21							/* (TEST/DEBUG) */
 			beq+	cksave2a						/* (TEST/DEBUG) */
+=======
+			isync
+			tlbiel	r23								; Locally invalidate TLB entry for iaddr
+			sync									; Wait for it
+			b		ceMck							; All recovered...
+>>>>>>> origin/10.3
 			
 			bl		currbad							; (TEST/DEBUG)
 
@@ -1472,8 +1987,21 @@ cksave3:	cmplw	r24,r22							/* (TEST/DEBUG) */
 			
 			bl		currbad							; (TEST/DEBUG)
 			
+<<<<<<< HEAD
 cksave4:	lwz		r28,SVfree(r8)					/* (TEST/DEBUG) */
 			li		r24,0							/* (TEST/DEBUG) */
+=======
+			li		r3,0							; Set the first SLBE
+			
+mckSLBclr:	slbmte	r0,r3							; Clear the whole entry to 0s
+			addi	r3,r3,1							; Bump index
+			cmplwi	cr1,r3,64						; Have we done them all?
+			bne++	cr1,mckSLBclr					; Yup....
+			
+			sth		r3,ppInvSeg(r2)					; Store non-zero to trigger SLB reload 
+			bne++	ceMck							; This was not a programming error, all recovered...
+			b		ueMck							; Pass the software error up...
+>>>>>>> origin/10.3
 
 cksave5:	mr.		r28,r28							/* (TEST/DEBUG) */
 			beq-	cksave6							/* (TEST/DEBUG) */
@@ -1511,7 +2039,11 @@ doncheksv:
 			beq-	cr1,notracex					/* We don't have a filter yet... */			
 			beq-	notracex						/* This processor hasn't started filtering yet... */
 			
+<<<<<<< HEAD
 			blrl									/* Filter the interrupt */
+=======
+			b		ceMck							; All recovered...
+>>>>>>> origin/10.3
 		
 			mfsprg	r2,0							/* Make sure we have the per processor block */			
 			cmplwi	cr0,r3,kMPIOInterruptPending	/* See what the filter says */
@@ -1629,6 +2161,7 @@ noisidisp:	mr		r3,r11							/* (TEST/DEBUG) */
 nopgmdisp:	mr		r3,r11							/* (TEST/DEBUG) */		
 #endif
 
+<<<<<<< HEAD
 			li		r21,0							; Assume no processor register for now
 			lis		r12,hi16(EXT(hw_counts))		; Get the high part of the interrupt counters
 			bf		featSMP,nopirhere				; Jump if this processor does not have a PIR...
@@ -1661,6 +2194,26 @@ nopirhere:	ori		r12,r12,lo16(EXT(hw_counts))	; Get the low part of the interrupt
 			lwz		r1,dgFlags(r1)					; Get the flags
 			rlwinm.	r1,r1,0,enaUsrFCallb,enaUsrFCallb	; Are they valid?
 			beq-	noCutT							; No...
+=======
+;
+;			We really do not know what this one is or what to do with it...
+;
+			
+mckUnk:		lwz		r21,hwMckUnk(r2)				; Get unknown error count
+			addi	r21,r21,1						; Count it
+			stw		r21,hwMckUnk(r2)				; Stuff it
+			b		ueMck							; Go south, young man...
+
+;
+;			Hang recovery.  This is just a notification so we only count.
+;
+			
+mckHangRcrvr:
+			lwz		r21,hwMckHang(r2)				; Get hang recovery count
+			addi	r21,r21,1						; Count this one
+			stw		r21,hwMckHang(r2)				; Stick it back
+			b		ceMck							; All recovered...
+>>>>>>> origin/10.3
 
 FCisok:		beq-	cr2,isCutTrace					/* This is a CutTrace system call */
 			
@@ -1701,8 +2254,20 @@ noCutT:		beq-	cr3,MachineCheck				; Whoa... Machine check...
 													/* 'cause FW can't handle that */
 			mfsprg	r2,0							/* Restore the per_processor area */
 ;
+<<<<<<< HEAD
 ;			The following interrupts are the only ones that can be redriven
 ;			by the higher level code or emulation routines.
+=======
+;			Externally signaled MCK.  No recovery for the moment, but we this may be
+;			where we handle ml_probe_read problems eventually.
+;			
+mckExtMck:
+			lwz		r21,hwMckHang(r2)				; Get hang recovery count
+			addi	r21,r21,1						; Count this one
+			stw		r21,hwMckHang(r2)				; Stick it back
+			b		ceMck							; All recovered...
+
+>>>>>>> origin/10.3
 ;
 
 Redrive:	cmplwi	cr0,r3,T_IN_VAIN				/* Did the signal handler eat the signal? */
@@ -1819,15 +2384,38 @@ hiccup:		cmplw	r27,r27							; ?
 			bne-	hiccup							; ?
 			isync									; ?
 			
+<<<<<<< HEAD
 			oris	r11,r11,hi16(dl1hwfm)			; ?
 			mtspr	msscr0,r11						; ?
 			
 rstbsy:		mfspr	r11,msscr0						; ?
+=======
+			lwz		r5,0(r19)						; Get the counter
+			addi	r5,r5,1							; Count it
+			stw		r5,0(r19)						; Stuff it back
+			b		ceMck							; All recovered...
+			
+		
+;			General recovery for ERAT problems - handled in exception vector already
+
+mckInvERAT:	lwz		r21,0(r19)						; Get the exception count spot
+			addi	r21,r21,1						; Count this one
+			stw		r21,0(r19)						; Save count
+			b		ceMck							; All recovered...
+>>>>>>> origin/10.3
 			
 			rlwinm.	r11,r11,0,dl1hwf,dl1hwf			; ?
 			bne		rstbsy							; ?
 			
+<<<<<<< HEAD
 			sync									; ?
+=======
+mckHangRcvr:			
+			lwz		r21,hwMckHang(r2)				; Get hang recovery count
+			addi	r21,r21,1						; Count this one
+			stw		r21,hwMckHang(r2)				; Stick it back
+			b		ceMck							; All recovered...
+>>>>>>> origin/10.3
 
 			li		r11,T_IN_VAIN					; ?
 			b		EatRupt							; ?
@@ -1839,6 +2427,7 @@ notDCache:
 ;			ml_probe_read.  If so, this is expected, so modify the PC to
 ;			ml_proble_read_mck and then eat the exception.
 ;
+<<<<<<< HEAD
 			lwz		r30,savesrr0(r13)				; Get the failing PC
 			lis		r28,hi16(EXT(ml_probe_read_mck))	; High order part
 			lis		r27,hi16(EXT(ml_probe_read))	; High order part
@@ -1862,6 +2451,67 @@ notDCache:
 			lwz		r27,8(r11)						; Pick up DBAT 1 high
 			lwz		r18,16(r11)						; Pick up DBAT 2 high
 			lwz		r11,24(r11)						; Pick up DBAT 3 high
+=======
+	
+mckUE:		lwz		r21,hwMckUE(r2)					; Get general uncorrectable error count
+			addi	r21,r21,1						; Count it
+			stw		r21,hwMckUE(r2)					; Stuff it
+			b		ueMck							; Go south, young man...
+	
+mckhIFUE:	lwz		r21,hwMckIUEr(r2)				; Get I-Fetch TLB reload uncorrectable error count
+			addi	r21,r21,1						; Count it
+			stw		r21,hwMckIUEr(r2)				; Stuff it
+			b		ueMck							; Go south, young man...
+
+mckDUE:		lwz		r21,hwMckDUE(r2)				; Get deferred uncorrectable error count
+			addi	r21,r21,1						; Count it
+			stw		r21,hwMckDUE(r2)				; Stuff it
+			
+;
+;			Right here is where we end up after a failure on a ml_probe_read_64.
+;			We will check if that is the case, and if so, fix everything up and
+;			return from it.
+			
+			lis		r8,hi16(EXT(ml_probe_read_64))	; High of start
+			lis		r9,hi16(EXT(ml_probe_read_mck_64))	; High of end
+			ori		r8,r8,lo16(EXT(ml_probe_read_64))	; Low of start
+			ori		r9,r9,lo16(EXT(ml_probe_read_mck_64))	; Low of end
+			cmpld	r23,r8							; Too soon?
+			cmpld	cr1,r23,r9						; Too late?
+			
+			cror	cr0_lt,cr0_lt,cr1_gt			; Too soon or too late?
+			ld		r3,saver12(r13)					; Get the original MSR
+			ld		r5,savelr(r13)					; Get the return address
+			li		r4,0							; Get fail code
+			blt--	ueMck							; This is a normal machine check, just pass up...
+			std		r5,savesrr0(r13)				; Set the return MSR
+			
+			std		r3,savesrr1(r13)				; Set the return address
+			std		r4,saver3(r13)					; Set failure return code
+			b		ceMck							; All recovered...
+
+mckDTW:		lwz		r21,hwMckDTW(r2)				; Get deferred tablewalk uncorrectable error count
+			addi	r21,r21,1						; Count it
+			stw		r21,hwMckDTW(r2)				; Stuff it
+			b		ueMck							; Go south, young man...
+
+mckL1D:		lwz		r21,hwMckL1DPE(r2)				; Get data cache parity error count
+			addi	r21,r21,1						; Count it
+			stw		r21,hwMckL1DPE(r2)				; Stuff it
+			b		ceMck							; All recovered...
+
+mckL1T:		lwz		r21,hwMckL1TPE(r2)				; Get TLB parity error count
+			addi	r21,r21,1						; Count it
+			stw		r21,hwMckL1TPE(r2)				; Stuff it
+
+ceMck:		li		r0,1							; Set the recovered flag before passing up
+			stw		r0,savemisc3(r13)				; Set it
+			b		PassUpTrap						; Go up and log error...
+
+ueMck:		li		r0,0							; Set the unrecovered flag before passing up
+			stw		r0,savemisc3(r13)				; Set it
+			b		PassUpTrap						; Go up and log error and probably panic
+>>>>>>> origin/10.3
 			
 			sync
 			mtdbatu	0,r30							; Restore DBAT 0 high
@@ -2598,6 +3248,286 @@ EXT(ExceptionVectorsEnd):							/* Used if relocating the exception vectors */
  */
 	.long	0						/* (HACK/HACK/HACK) */
 #endif
+<<<<<<< HEAD
+=======
+			.long	0								; 5088 Start of the trace table
+			.long	0								; 508C End (wrap point) of the trace
+			.long	0								; 5090 Saved mask while in debugger
+			.long	0								; 5094 Size of trace table (1 - 256 pages)
+			.long	0								; 5098 traceGas[0]
+			.long	0								; 509C traceGas[1]
+
+			.long	0								; 50A0 reserved			
+			.long	0								; 50A4 reserved			
+			.long	0								; 50A8 reserved			
+			.long	0								; 50AC reserved			
+			.long	0								; 50B0 reserved			
+			.long	0								; 50B4 reserved			
+			.long	0								; 50B8 reserved			
+			.long	0								; 50BC reserved			
+			.long	0								; 50C0 reserved			
+			.long	0								; 50C4 reserved			
+			.long	0								; 50C8 reserved			
+			.long	0								; 50CC reserved			
+			.long	0								; 50D0 reserved			
+			.long	0								; 50D4 reserved			
+			.long	0								; 50D8 reserved			
+			.long	0								; 50DC reserved			
+			.long	0								; 50E0 reserved			
+			.long	0								; 50E4 reserved			
+			.long	0								; 50E8 reserved			
+			.long	0								; 50EC reserved			
+			.long	0								; 50F0 reserved			
+			.long	0								; 50F4 reserved			
+			.long	0								; 50F8 reserved			
+			.long	0								; 50FC reserved			
+
+			.globl	EXT(saveanchor)
+
+EXT(saveanchor):									; 5100 saveanchor
+			.set	.,.+SVsize
+			
+			.long	0								; 5140 reserved
+			.long	0								; 5144 reserved
+			.long	0								; 5148 reserved
+			.long	0								; 514C reserved
+			.long	0								; 5150 reserved
+			.long	0								; 5154 reserved
+			.long	0								; 5158 reserved
+			.long	0								; 515C reserved
+			.long	0								; 5160 reserved
+			.long	0								; 5164 reserved
+			.long	0								; 5168 reserved
+			.long	0								; 516C reserved
+			.long	0								; 5170 reserved
+			.long	0								; 5174 reserved
+			.long	0								; 5178 reserved
+			.long	0								; 517C reserved
+			
+			.long	0								; 5180 tlbieLock
+
+			.long	0								; 5184 reserved
+			.long	0								; 5188 reserved
+			.long	0								; 518C reserved
+			.long	0								; 5190 reserved
+			.long	0								; 5194 reserved
+			.long	0								; 5198 reserved
+			.long	0								; 519C reserved
+			.long	0								; 51A0 reserved			
+			.long	0								; 51A4 reserved			
+			.long	0								; 51A8 reserved			
+			.long	0								; 51AC reserved			
+			.long	0								; 51B0 reserved			
+			.long	0								; 51B4 reserved			
+			.long	0								; 51B8 reserved			
+			.long	0								; 51BC reserved			
+			.long	0								; 51C0 reserved			
+			.long	0								; 51C4 reserved			
+			.long	0								; 51C8 reserved			
+			.long	0								; 51CC reserved			
+			.long	0								; 51D0 reserved			
+			.long	0								; 51D4 reserved			
+			.long	0								; 51D8 reserved			
+			.long	0								; 51DC reserved			
+			.long	0								; 51E0 reserved			
+			.long	0								; 51E4 reserved			
+			.long	0								; 51E8 reserved			
+			.long	0								; 51EC reserved			
+			.long	0								; 51F0 reserved			
+			.long	0								; 51F4 reserved			
+			.long	0								; 51F8 reserved			
+			.long	0								; 51FC reserved	
+			
+			.globl	EXT(dgWork)
+			
+EXT(dgWork):
+			
+			.long	0								; 5200 dgLock
+			.long	0								; 5204 dgFlags		
+			.long	0								; 5208 dgMisc0		
+			.long	0								; 520C dgMisc1		
+			.long	0								; 5210 dgMisc2		
+			.long	0								; 5214 dgMisc3		
+			.long	0								; 5218 dgMisc4		
+			.long	0								; 521C dgMisc5	
+				
+			.long	0								; 5220 reserved
+			.long	0								; 5224 reserved
+			.long	0								; 5228 reserved
+			.long	0								; 522C reserved
+			.long	0								; 5230 reserved
+			.long	0								; 5234 reserved
+			.long	0								; 5238 reserved
+			.long	0								; 523C reserved
+			.long	0								; 5240 reserved
+			.long	0								; 5244 reserved
+			.long	0								; 5248 reserved
+			.long	0								; 524C reserved
+			.long	0								; 5250 reserved
+			.long	0								; 5254 reserved
+			.long	0								; 5258 reserved
+			.long	0								; 525C reserved
+			.long	0								; 5260 reserved
+			.long	0								; 5264 reserved
+			.long	0								; 5268 reserved
+			.long	0								; 526C reserved
+			.long	0								; 5270 reserved
+			.long	0								; 5274 reserved
+			.long	0								; 5278 reserved
+			.long	0								; 527C reserved
+			
+			.long	0								; 5280 reserved
+			.long	0								; 5284 reserved
+			.long	0								; 5288 reserved
+			.long	0								; 528C reserved
+			.long	0								; 5290 reserved
+			.long	0								; 5294 reserved
+			.long	0								; 5298 reserved
+			.long	0								; 529C reserved
+			.long	0								; 52A0 reserved			
+			.long	0								; 52A4 reserved			
+			.long	0								; 52A8 reserved			
+			.long	0								; 52AC reserved			
+			.long	0								; 52B0 reserved			
+			.long	0								; 52B4 reserved			
+			.long	0								; 52B8 reserved			
+			.long	0								; 52BC reserved			
+			.long	0								; 52C0 reserved			
+			.long	0								; 52C4 reserved			
+			.long	0								; 52C8 reserved			
+			.long	0								; 52CC reserved			
+			.long	0								; 52D0 reserved			
+			.long	0								; 52D4 reserved			
+			.long	0								; 52D8 reserved			
+			.long	0								; 52DC reserved			
+			.long	0								; 52E0 reserved			
+			.long	0								; 52E4 reserved			
+			.long	0								; 52E8 reserved			
+			.long	0								; 52EC reserved			
+			.long	0								; 52F0 reserved			
+			.long	0								; 52F4 reserved			
+			.long	0								; 52F8 reserved			
+			.long	0								; 52FC reserved	
+
+			.globl	EXT(killresv)
+EXT(killresv):
+
+			.long	0								; 5300 Used to kill reservations
+			.long	0								; 5304 Used to kill reservations
+			.long	0								; 5308 Used to kill reservations
+			.long	0								; 530C Used to kill reservations
+			.long	0								; 5310 Used to kill reservations
+			.long	0								; 5314 Used to kill reservations
+			.long	0								; 5318 Used to kill reservations
+			.long	0								; 531C Used to kill reservations
+			.long	0								; 5320 Used to kill reservations
+			.long	0								; 5324 Used to kill reservations
+			.long	0								; 5328 Used to kill reservations
+			.long	0								; 532C Used to kill reservations
+			.long	0								; 5330 Used to kill reservations
+			.long	0								; 5334 Used to kill reservations
+			.long	0								; 5338 Used to kill reservations
+			.long	0								; 533C Used to kill reservations
+			.long	0								; 5340 Used to kill reservations
+			.long	0								; 5344 Used to kill reservations
+			.long	0								; 5348 Used to kill reservations
+			.long	0								; 534C Used to kill reservations
+			.long	0								; 5350 Used to kill reservations
+			.long	0								; 5354 Used to kill reservations
+			.long	0								; 5358 Used to kill reservations
+			.long	0								; 535C Used to kill reservations
+			.long	0								; 5360 Used to kill reservations
+			.long	0								; 5364 Used to kill reservations
+			.long	0								; 5368 Used to kill reservations
+			.long	0								; 536C Used to kill reservations
+			.long	0								; 5370 Used to kill reservations
+			.long	0								; 5374 Used to kill reservations
+			.long	0								; 5378 Used to kill reservations
+			.long	0								; 537C Used to kill reservations
+			
+			.long	0								; 5380 reserved
+			.long	0								; 5384 reserved
+			.long	0								; 5388 reserved
+			.long	0								; 538C reserved
+			.long	0								; 5390 reserved
+			.long	0								; 5394 reserved
+			.long	0								; 5398 reserved
+			.long	0								; 539C reserved
+			.long	0								; 53A0 reserved			
+			.long	0								; 53A4 reserved			
+			.long	0								; 53A8 reserved			
+			.long	0								; 53AC reserved			
+			.long	0								; 53B0 reserved			
+			.long	0								; 53B4 reserved			
+			.long	0								; 53B8 reserved			
+			.long	0								; 53BC reserved			
+			.long	0								; 53C0 reserved			
+			.long	0								; 53C4 reserved			
+			.long	0								; 53C8 reserved			
+			.long	0								; 53CC reserved			
+			.long	0								; 53D0 reserved			
+			.long	0								; 53D4 reserved			
+			.long	0								; 53D8 reserved			
+			.long	0								; 53DC reserved			
+			.long	0								; 53E0 reserved			
+			.long	0								; 53E4 reserved			
+			.long	0								; 53E8 reserved			
+			.long	0								; 53EC reserved			
+			.long	0								; 53F0 reserved			
+			.long	0								; 53F4 reserved			
+			.long	0								; 53F8 reserved			
+			.long	0								; 53FC reserved	
+			.long	0								; 5400 reserved
+			.long	0								; 5404 reserved
+			.long	0								; 5408 reserved
+			.long	0								; 540C reserved
+			.long	0								; 5410 reserved
+			.long	0								; 5414 reserved
+			.long	0								; 5418 reserved
+			.long	0								; 541C reserved
+			.long	0								; 5420 reserved			
+			.long	0								; 5424 reserved			
+			.long	0								; 5428 reserved			
+			.long	0								; 542C reserved			
+			.long	0								; 5430 reserved			
+			.long	0								; 5434 reserved			
+			.long	0								; 5438 reserved			
+			.long	0								; 543C reserved			
+			.long	0								; 5440 reserved			
+			.long	0								; 5444 reserved			
+			.long	0								; 5448 reserved			
+			.long	0								; 544C reserved			
+			.long	0								; 5450 reserved			
+			.long	0								; 5454 reserved			
+			.long	0								; 5458 reserved			
+			.long	0								; 545C reserved			
+			.long	0								; 5460 reserved			
+			.long	0								; 5464 reserved			
+			.long	0								; 5468 reserved			
+			.long	0								; 546C reserved			
+			.long	0								; 5470 reserved			
+			.long	0								; 5474 reserved			
+			.long	0								; 5478 reserved			
+			.long	0								; 547C reserved	
+;
+;	The "shared page" is used for low-level debugging
+;
+
+			. = 0x6000
+			.globl	EXT(sharedPage)
+
+EXT(sharedPage):									; Per processor data area
+		.long	0xC24BC195							; Comm Area validity value 
+		.long	0x87859393							; Comm Area validity value 
+		.long	0xE681A2C8							; Comm Area validity value 
+		.long	0x8599855A							; Comm Area validity value 
+		.long	0xD74BD296							; Comm Area validity value 
+		.long	0x8388E681							; Comm Area validity value 
+		.long	0xA2C88599							; Comm Area validity value 
+		.short	0x855A								; Comm Area validity value 
+		.short	1									; Comm Area version number
+		.fill	1016*4,1,0							; (filled with 0s)
+>>>>>>> origin/10.3
 
 	.data
 	.align	ALIGN

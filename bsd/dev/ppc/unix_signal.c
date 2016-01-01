@@ -3,22 +3,19 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -97,12 +94,33 @@ sendsig(p, catcher, sig, mask, code)
 	vec_save(th_act);
 	if (find_user_vec(th_act)) {
 		vec_used = 1;
+<<<<<<< HEAD
 		state_count = PPC_VECTOR_STATE_COUNT;
 		if (act_machine_get_state(th_act, PPC_VECTOR_STATE, &mctx.vs, &state_count)  != KERN_SUCCESS) {
 			goto bad;
 		}	
 		
 	}
+=======
+
+                if ((ctx32 == 1) || dualcontext) {
+                    flavor = PPC_VECTOR_STATE;
+                    tstate = (void *)&mctx.vs;
+                    state_count = PPC_VECTOR_STATE_COUNT;
+                    if (thread_getstatus(th_act, flavor, (thread_state_t)tstate, &state_count)  != KERN_SUCCESS)
+                    goto bad;
+            } 
+       
+            if ((ctx32 == 0) || dualcontext) {
+                    flavor = PPC_VECTOR_STATE;
+                    tstate = (void *)&mctx64.vs;
+                    state_count = PPC_VECTOR_STATE_COUNT;
+                    if (thread_getstatus(th_act, flavor, (thread_state_t)tstate, &state_count)  != KERN_SUCCESS)
+                        goto bad;
+           }
+        infostyle += 5;
+	}  
+>>>>>>> origin/10.3
 
 	trampact = ps->ps_trampact[sig];
 	oonstack = ps->ps_sigstk.ss_flags & SA_ONSTACK;
@@ -238,8 +256,22 @@ sendsig(p, catcher, sig, mask, code)
 		goto bad;
 	if (copyout((caddr_t)&sinfo, (caddr_t)p_sinfo, sizeof(siginfo_t)))
 		goto bad;
+<<<<<<< HEAD
 	if (copyout((caddr_t)&mctx, (caddr_t)p_mctx, uctx.uc_mcsize))
 		goto bad;
+=======
+	if ((ctx32 == 0) || dualcontext) {
+		tstate = &mctx64;
+		if (copyout((caddr_t)tstate, (caddr_t)p_mctx64, (vec_used? UC_FLAVOR64_VEC_SIZE: UC_FLAVOR64_SIZE)))
+			goto bad;
+	}
+	if ((ctx32 == 1) || dualcontext) {
+		tstate = &mctx;
+		if (copyout((caddr_t)tstate, (caddr_t)p_mctx, uctx.uc_mcsize))
+			goto bad;
+	}    
+
+>>>>>>> origin/10.3
 
 	/* Place our arguments in arg registers: rtm dependent */
 
@@ -280,6 +312,134 @@ bad:
  * psl to gain improper priviledges or to cause
  * a machine fault.
  */
+<<<<<<< HEAD
+=======
+
+#define FOR64_TRANSITION 1
+
+
+#ifdef FOR64_TRANSITION
+
+struct osigreturn_args {
+	struct ucontext *uctx;
+};
+
+/* ARGSUSED */
+int
+osigreturn(p, uap, retval)
+	struct proc *p;
+	struct osigreturn_args *uap;
+	int *retval;
+{
+	struct ucontext uctx;
+	struct ucontext *p_uctx;
+	struct mcontext64 mctx64;
+	struct mcontext64 *p_64mctx;
+	struct mcontext  *p_mctx;
+	int error;
+	thread_act_t th_act;
+	struct sigacts *ps = p->p_sigacts;
+	sigset_t mask;	
+	register sig_t action;
+	unsigned long state_count;
+	unsigned int state_flavor;
+	struct uthread * ut;
+	int vec_used = 0;
+	void *tsptr, *fptr, *vptr, *mactx;
+	void ppc_checkthreadstate(void *, int);
+
+	th_act = current_act();
+	/* lets use the larger one */
+	mactx = (void *)&mctx64;
+
+	ut = (struct uthread *)get_bsdthread_info(th_act);
+	if (error = copyin(uap->uctx, &uctx, sizeof(struct ucontext))) {
+		return(error);
+	}
+	
+	/* validate the machine context size */
+	switch (uctx.uc_mcsize)  {
+		case UC_FLAVOR64_VEC_SIZE :
+		case UC_FLAVOR64_SIZE : 
+		case UC_FLAVOR_VEC_SIZE :
+		case UC_FLAVOR_SIZE:
+			break;
+		default: 
+			return(EINVAL);
+	}
+
+	if (error = copyin(uctx.uc_mcontext, mactx, uctx.uc_mcsize)) {
+		return(error);
+	}
+	
+	if (uctx.uc_onstack & 01)
+			p->p_sigacts->ps_sigstk.ss_flags |= SA_ONSTACK;
+	else
+		p->p_sigacts->ps_sigstk.ss_flags &= ~SA_ONSTACK;
+
+	ut->uu_sigmask = uctx.uc_sigmask & ~sigcantmask;
+	if (ut->uu_siglist & ~ut->uu_sigmask)
+		signal_setast(current_act());	
+
+	vec_used = 0;
+	switch (uctx.uc_mcsize)  {
+		case UC_FLAVOR64_VEC_SIZE :
+			vec_used = 1;
+		case UC_FLAVOR64_SIZE : {
+			p_64mctx = (struct mcontext64 *)mactx;	
+			tsptr = (void *)&p_64mctx->ss;
+			fptr = (void *)&p_64mctx->fs;
+			vptr = (void *)&p_64mctx->vs;
+			state_flavor = PPC_THREAD_STATE64;
+			state_count = PPC_THREAD_STATE64_COUNT;
+			}
+			break;
+		case UC_FLAVOR_VEC_SIZE :
+			vec_used = 1;
+		case UC_FLAVOR_SIZE:
+		default: {
+			p_mctx = (struct mcontext *)mactx;	
+			tsptr = (void *)&p_mctx->ss;
+			fptr = (void *)&p_mctx->fs;
+			vptr = (void *)&p_mctx->vs;
+			state_flavor = PPC_THREAD_STATE;
+			state_count = PPC_THREAD_STATE_COUNT;
+		}
+		break;
+	} /* switch () */
+
+	/* validate the thread state, set/reset appropriate mode bits in srr1 */
+	(void)ppc_checkthreadstate(tsptr, state_flavor);
+
+	if (thread_setstatus(th_act, state_flavor, tsptr, &state_count)  != KERN_SUCCESS) {
+		return(EINVAL);
+	}	
+
+	state_count = PPC_FLOAT_STATE_COUNT;
+	if (thread_setstatus(th_act, PPC_FLOAT_STATE, fptr, &state_count)  != KERN_SUCCESS) {
+		return(EINVAL);
+	}	
+
+	mask = sigmask(SIGFPE);
+	if (((ut->uu_sigmask & mask) == 0) && (p->p_sigcatch & mask) && ((p->p_sigignore & mask) == 0)) {
+		action = ps->ps_sigact[SIGFPE];
+		if((action != SIG_DFL) && (action != SIG_IGN)) {
+			thread_enable_fpe(th_act, 1);
+		}
+	}
+
+	if (vec_used) {
+		state_count = PPC_VECTOR_STATE_COUNT;
+		if (thread_setstatus(th_act, PPC_VECTOR_STATE, vptr, &state_count)  != KERN_SUCCESS) {
+			return(EINVAL);
+		}	
+	}
+	return (EJUSTRETURN);
+}
+
+#endif /* FOR64_TRANSITION */
+
+>>>>>>> origin/10.3
 struct sigreturn_args {
 	struct ucontext *uctx;
 };
@@ -311,7 +471,22 @@ sigreturn(p, uap, retval)
 	if (error = copyin(uap->uctx, &uctx, sizeof(struct ucontext))) {
 		return(error);
 	}
+<<<<<<< HEAD
 	if (error = copyin(uctx.uc_mcontext, &mctx, sizeof(struct mcontext))) {
+=======
+        
+	/* validate the machine context size */
+	switch (uctx.uc_mcsize) {
+		case UC_FLAVOR64_VEC_SIZE:
+		case UC_FLAVOR64_SIZE:
+		case UC_FLAVOR_VEC_SIZE:
+		case UC_FLAVOR_SIZE:
+			break;
+		default:
+			return(EINVAL);
+	}
+	if (error = copyin(uctx.uc_mcontext, mactx, uctx.uc_mcsize)) {
+>>>>>>> origin/10.3
 		return(error);
 	}
 	

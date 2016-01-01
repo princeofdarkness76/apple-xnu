@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 1998-2008 Apple Inc. All rights reserved.
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
  * This file contains Original Code and/or Modifications of Original Code
@@ -17,11 +18,23 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -299,6 +312,13 @@ enum {
     kDarkWakeFlagGraphicsPowerState1 = 0x0200,
     kDarkWakeFlagAudioNotSuppressed  = 0x0400
 };
+
+// RESERVED IOPMrootDomain class variables
+#define diskSyncCalloutEntry                _reserved->diskSyncCalloutEntry
+#define _settingController                  _reserved->_settingController
+#define _batteryLocationNotifier            _reserved->_batteryLocationNotifier
+#define _displayWranglerNotifier            _reserved->_displayWranglerNotifier
+
 
 static IOPMrootDomain * gRootDomain;
 static IONotifier *     gSysPowerDownNotifier = 0;
@@ -645,7 +665,11 @@ transmitted by the loginwindow at the end of boot, a flag is cleared,
 and this allows subsequent Demand Sleep.
 */
 
+<<<<<<< HEAD
 //******************************************************************************
+=======
+// **********************************************************************************
+>>>>>>> origin/10.3
 
 IOPMrootDomain * IOPMrootDomain::construct( void )
 {
@@ -671,6 +695,7 @@ static void updateConsoleUsersCallout(thread_call_param_t p0, thread_call_param_
 
 void IOPMrootDomain::updateConsoleUsers(void)
 {
+<<<<<<< HEAD
     IOService::updateConsoleUsers(NULL, kIOMessageSystemHasPoweredOn);
     if (tasksSuspended)
     {
@@ -678,17 +703,48 @@ void IOPMrootDomain::updateConsoleUsers(void)
         tasks_system_suspend(tasksSuspended);
     }
 }
+=======
+    OSDictionary                            *tmpDict;
+
+    pmPowerStateQueue = 0;
+
+    _reserved = (ExpansionData *)IOMalloc(sizeof(ExpansionData));
+    if(!_reserved) return false;
+
+    super::start(nub);
+>>>>>>> origin/10.3
 
 //******************************************************************************
 
+<<<<<<< HEAD
 static void disk_sync_callout( thread_call_param_t p0, thread_call_param_t p1 )
 {
     IOService * rootDomain = (IOService *) p0;
     uint32_t    notifyRef  = (uint32_t)(uintptr_t) p1;
     uint32_t    powerState = rootDomain->getPowerState();
+=======
+    PMinit();
+    setProperty("IOSleepSupported","");
+    allowSleep = true;
+    sleepIsSupported = true;
+    systemBooting = true;
+    ignoringClamshell = true;
+    sleepSlider = 0;
+    idleSleepPending = false;
+    canSleep = true;
+    wrangler = NULL;
+    sleepASAP = false;
+    _settingController = NULL;
+    ignoringClamshellDuringWakeup = false;
+    
+    tmpDict = OSDictionary::withCapacity(1);
+    setProperty(kRootDomainSupportedFeatures, tmpDict);
+    tmpDict->release();
+>>>>>>> origin/10.3
 
     DLOG("disk_sync_callout ps=%u\n", powerState);
 
+<<<<<<< HEAD
     if (ON_STATE == powerState)
     {
         sync_internal();
@@ -697,6 +753,18 @@ static void disk_sync_callout( thread_call_param_t p0, thread_call_param_t p1 )
     else
     {
         IOHibernateSystemPostWake();
+=======
+    // create our parent
+    patriarch = new IORootParent;
+    patriarch->init();
+    patriarch->attach(this);
+    patriarch->start(this);
+    patriarch->youAreRoot();
+    patriarch->wakeSystem();
+    patriarch->addPowerChild(this);
+        
+    registerPowerDriver(this,ourPowerStates,number_of_power_states);
+>>>>>>> origin/10.3
 
         if (gRootDomain)
             gRootDomain->sleepWakeDebugSaveSpinDumpFile();
@@ -707,7 +775,18 @@ static void disk_sync_callout( thread_call_param_t p0, thread_call_param_t p1 )
     DLOG("disk_sync_callout finish\n");
 }
 
+<<<<<<< HEAD
 //******************************************************************************
+=======
+    // Register for a notification when IODisplayWrangler is published
+    _displayWranglerNotifier = addNotification( gIOPublishNotification, 
+                                                serviceMatching("IODisplayWrangler"), 
+                                                &displayWranglerPublished, this, 0);
+
+    _batteryLocationNotifier = addNotification( gIOPublishNotification, 
+                                                resourceMatching("battery"), 
+                                                &batteryLocationPublished, this, this);
+>>>>>>> origin/10.3
 
 static void hib_debugSetup_callout( thread_call_param_t p0, thread_call_param_t p1 )
 {
@@ -723,6 +802,7 @@ static void hib_debugSetup_callout( thread_call_param_t p0, thread_call_param_t 
 }
 //******************************************************************************
 
+<<<<<<< HEAD
 static UInt32 computeDeltaTimeMS( const AbsoluteTime * startTime )
 {
     AbsoluteTime    endTime;
@@ -736,6 +816,127 @@ static UInt32 computeDeltaTimeMS( const AbsoluteTime * startTime )
     }
 
     return (UInt32)(nano / 1000000ULL);
+=======
+IOReturn     IOPMrootDomain::setPMSetting(int type, OSNumber *n)
+{
+    if(_settingController && _settingController->func) {
+        int         seconds;
+        seconds = n->unsigned32BitValue();
+        return (*(_settingController->func))(type, seconds, _settingController->refcon);
+    } else {
+        return kIOReturnNoDevice;
+    }   
+}
+
+// **********************************************************************************
+// setProperties
+//
+// Receive a setProperty call
+// The "System Boot" property means the system is completely booted.
+// **********************************************************************************
+IOReturn IOPMrootDomain::setProperties ( OSObject *props_obj)
+{
+    IOReturn                            return_value = kIOReturnSuccess;
+    OSDictionary                        *dict = OSDynamicCast(OSDictionary, props_obj);
+    OSBoolean                           *b;
+    OSNumber                            *n;
+    OSString                            *boot_complete_string = OSString::withCString("System Boot Complete");
+    OSString                            *power_button_string = OSString::withCString("DisablePowerButtonSleep");
+    OSString                            *stall_halt_string = OSString::withCString("StallSystemAtHalt");
+    OSString                            *auto_wake_string = OSString::withCString("wake");
+    OSString                            *auto_power_string = OSString::withCString("poweron");
+    OSString                            *wakeonring_string = OSString::withCString("WakeOnRing");
+    OSString                            *fileserver_string = OSString::withCString("AutoRestartOnPowerLoss");
+    OSString                            *wakeonlid_string = OSString::withCString("WakeOnLid");
+    OSString                            *wakeonac_string = OSString::withCString("WakeOnACChange");
+    
+    if(!dict) 
+    {
+        return_value = kIOReturnBadArgument;
+        goto exit;
+    }
+
+    if( systemBooting 
+        && boot_complete_string 
+        && dict->getObject(boot_complete_string)) 
+    {
+        systemBooting = false;
+        adjustPowerState();
+    }
+    
+    if( power_button_string
+        && (b = OSDynamicCast(OSBoolean, dict->getObject(power_button_string))) ) 
+    {
+        setProperty(power_button_string, b);
+    }
+
+    if( stall_halt_string
+        && (b = OSDynamicCast(OSBoolean, dict->getObject(stall_halt_string))) ) 
+    {
+        setProperty(stall_halt_string, b);
+    }
+    
+    // Relay AutoWake setting to its controller
+    if( auto_wake_string
+        && (n = OSDynamicCast(OSNumber, dict->getObject(auto_wake_string))) )
+    {
+        return_value = setPMSetting(kIOPMAutoWakeSetting, n);
+        if(kIOReturnSuccess != return_value) goto exit;
+    }
+
+    // Relay AutoPower setting to its controller
+    if( auto_power_string
+        && (n = OSDynamicCast(OSNumber, dict->getObject(auto_power_string))) )
+    {
+        return_value = setPMSetting(kIOPMAutoPowerOnSetting, n);
+        if(kIOReturnSuccess != return_value) goto exit;
+    }
+
+    // Relay WakeOnRing setting to its controller
+    if( wakeonring_string
+        && (n = OSDynamicCast(OSNumber, dict->getObject(wakeonring_string))) )
+    {
+        return_value = setPMSetting(kIOPMWakeOnRingSetting, n);
+        if(kIOReturnSuccess != return_value) goto exit;
+    }
+
+    // Relay FileServer setting to its controller
+    if( fileserver_string
+        && (n = OSDynamicCast(OSNumber, dict->getObject(fileserver_string))) )
+    {
+        return_value = setPMSetting(kIOPMAutoRestartOnPowerLossSetting, n);
+        if(kIOReturnSuccess != return_value) goto exit;
+    }
+
+    // Relay WakeOnLid setting to its controller
+    if( wakeonlid_string 
+        && (n = OSDynamicCast(OSNumber, dict->getObject(wakeonlid_string))) )
+    {
+        return_value = setPMSetting(kIOPMWakeOnLidSetting, n);
+        if(kIOReturnSuccess != return_value) goto exit;
+    }
+    
+    // Relay WakeOnACChange setting to its controller
+    if( wakeonac_string
+        && (n = OSDynamicCast(OSNumber, dict->getObject(wakeonac_string))) )
+    {
+        return_value = setPMSetting(kIOPMWakeOnACChangeSetting, n);
+        if(kIOReturnSuccess != return_value) goto exit;
+    }
+
+
+    exit:
+    if(boot_complete_string) boot_complete_string->release();
+    if(power_button_string) power_button_string->release();
+    if(stall_halt_string) stall_halt_string->release();
+    if(auto_wake_string) auto_wake_string->release();
+    if(auto_power_string) auto_power_string->release();
+    if(wakeonring_string) wakeonring_string->release();
+    if(fileserver_string) fileserver_string->release();
+    if(wakeonlid_string) wakeonlid_string->release();
+    if(wakeonac_string) wakeonac_string->release();
+    return return_value;
+>>>>>>> origin/10.3
 }
 
 //******************************************************************************
@@ -911,6 +1112,7 @@ static const OSSymbol * gIOPMUserIsActiveKey;
 
 bool IOPMrootDomain::start( IOService * nub )
 {
+<<<<<<< HEAD
     OSIterator      *psIterator;
     OSDictionary    *tmpDict;
     IORootParent *   patriarch;
@@ -919,6 +1121,51 @@ bool IOPMrootDomain::start( IOService * nub )
 #endif
 
     super::start(nub);
+=======
+    IORegistryEntry                 *_batteryRegEntry = getProperty("BatteryEntry");
+
+    // (if possible) re-publish power source state under IOPMrootDomain
+    // (only done if the battery controller publishes an IOResource defining battery location)
+    if(_batteryRegEntry)
+    {
+        OSArray             *batt_info;
+        batt_info = _batteryRegEntry->getProperty(kIOBatteryInfoKey);
+        if(batt_info)
+            setProperty(kIOBatteryInfoKey, batt_info);
+    }
+
+    messageClients(kIOPMMessageBatteryStatusHasChanged);
+}
+
+IOReturn IOPMrootDomain::registerPMSettingController
+        (IOPMSettingControllerCallback func, void *info)
+{
+    if(_settingController) return kIOReturnExclusiveAccess;
+    
+    _settingController = (PMSettingCtrl *)IOMalloc(sizeof(PMSettingCtrl));
+    if(!_settingController) return kIOReturnNoMemory;
+    
+    _settingController->func = func;
+    _settingController->refcon = info;
+    return kIOReturnSuccess;
+}
+
+IOReturn IOPMrootDomain::registerPlatformPowerProfiles
+        (OSArray        *system_profiles)
+{
+    if(!system_profiles) return kIOReturnBadArgument;
+    if(getProperty("SystemPowerProfiles")) return kIOReturnExclusiveAccess;
+    setProperty("SystemPowerProfiles", system_profiles);
+}
+
+//*********************************************************************************
+// receivePowerNotification
+//
+// The power controller is notifying us of a hardware-related power management
+// event that we must handle. This is a result of an 'environment' interrupt from
+// the power mgt micro.
+//*********************************************************************************
+>>>>>>> origin/10.3
 
     gRootDomain = this;
     gIOPMSettingAutoWakeCalendarKey = OSSymbol::withCString(kIOPMSettingAutoWakeCalendarKey);
@@ -9404,6 +9651,7 @@ void IOPMrootDomain::sleepWakeDebugSaveSpinDumpFile()
     }
 }
 
+<<<<<<< HEAD
 errno_t IOPMrootDomain::sleepWakeDebugSaveFile(const char *name, char *buf, int len)
 {
    struct vnode         *vp = NULL;
@@ -9429,6 +9677,33 @@ errno_t IOPMrootDomain::sleepWakeDebugSaveFile(const char *name, char *buf, int 
     VATTR_INIT(&va);
     VATTR_SET(&va, va_data_size, 0);
     vnode_setattr(vp, &va, ctx);
+=======
+//*********************************************************************************
+// batteryLocationPublished
+//
+// Notification on AppleSMU publishing location of battery data
+//
+//*********************************************************************************
+
+bool IOPMrootDomain::batteryLocationPublished( void * target, void * root_domain,
+        IOService * resourceService )
+{
+    IORegistryEntry                     *battery_location;
+    char                                battery_reg_path[255];
+    int                                 path_len = 255;
+
+    battery_location = resourceService->getProperty("battery");
+    if (!battery_location || !OSDynamicCast(IORegistryEntry, battery_location))
+        return (true);
+        
+    ((IOPMrootDomain *)root_domain)->setProperty("BatteryEntry", battery_location);
+    
+    ((IOPMrootDomain *)root_domain)->announcePowerSourceChange();
+    return (true);
+}
+
+
+>>>>>>> origin/10.3
 
 
     error = vn_rdwr(UIO_WRITE, vp, buf, len, 0,

@@ -1,8 +1,13 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
 <<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,11 +33,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  *
@@ -106,6 +121,11 @@
 #include <sys/timeb.h>
 #include <sys/times.h>
 #include <sys/malloc.h>
+<<<<<<< HEAD
+=======
+
+#include <bsm/audit_kernel.h>
+>>>>>>> origin/10.3
 
 #define chgproccnt_ok(p) 1
 
@@ -164,7 +184,11 @@ extern void task_importance_update_owner_info(task_t);
 int
 setprivexec(proc_t p, struct setprivexec_args *uap, int32_t *retval)
 {
+<<<<<<< HEAD
 	AUDIT_ARG(value32, uap->flag);
+=======
+	AUDIT_ARG(value, uap->flag);
+>>>>>>> origin/10.3
 	*retval = p->p_debugger;
 	p->p_debugger = (uap->flag != 0);
 	return(0);
@@ -1963,6 +1987,7 @@ setlogin(proc_t p, struct setlogin_args *uap, __unused int32_t *retval)
 
 	if ((error = proc_suser(p)))
 		return (error);
+<<<<<<< HEAD
 
 	bzero(&buffer[0], MAXLOGNAME+1);
 
@@ -1984,6 +2009,15 @@ setlogin(proc_t p, struct setlogin_args *uap, __unused int32_t *retval)
 	if (!error) {
 		AUDIT_ARG(text, buffer);
 	 } else if (error == ENAMETOOLONG)
+=======
+	 
+	error = copyinstr((caddr_t) uap->namebuf,
+	    (caddr_t) p->p_pgrp->pg_session->s_login,
+	    sizeof (p->p_pgrp->pg_session->s_login) - 1, (size_t *)&dummy);
+	if(!error)
+		AUDIT_ARG(text, p->p_pgrp->pg_session->s_login);
+	else if (error == ENAMETOOLONG)
+>>>>>>> origin/10.3
 		error = EINVAL;
 	return (error);
 }
@@ -2003,6 +2037,7 @@ set_security_token(proc_t p)
 	posix_cred_t my_pcred;
 	host_priv_t host_priv;
 
+<<<<<<< HEAD
 	/*
 	 * Don't allow a vfork child to override the parent's token settings
 	 * (since they share a task).  Instead, the child will just have to
@@ -2027,6 +2062,10 @@ set_security_token(proc_t p)
 		sec_token.val[0] = 0;
 		sec_token.val[1] = 0;
 	}
+=======
+	sec_token.val[0] = p->p_ucred->cr_uid;
+ 	sec_token.val[1] = p->p_ucred->cr_gid;
+>>>>>>> origin/10.3
 
 	/*
 	 * The current layout of the Mach audit token explicitly
@@ -2037,6 +2076,7 @@ set_security_token(proc_t p)
 	 * the user of the trailer from future representation
 	 * changes.
 	 */
+<<<<<<< HEAD
 	audit_token.val[0] = my_cred->cr_audit.as_aia_p->ai_auid;
 	audit_token.val[1] = my_pcred->cr_uid;
 	audit_token.val[2] = my_pcred->cr_gid;
@@ -2061,6 +2101,18 @@ set_security_token(proc_t p)
 #endif
 
 	return (host_security_set_task_token(host_security_self(),
+=======
+	audit_token.val[0] = p->p_au->ai_auid;
+	audit_token.val[1] = p->p_ucred->cr_uid;
+ 	audit_token.val[2] = p->p_ucred->cr_gid;
+	audit_token.val[3] = p->p_cred->p_ruid;
+        audit_token.val[4] = p->p_cred->p_rgid;
+	audit_token.val[5] = p->p_pid;
+	audit_token.val[6] = p->p_au->ai_asid;
+	audit_token.val[7] = p->p_au->ai_termid.port;
+
+	return host_security_set_task_token(host_security_self(),
+>>>>>>> origin/10.3
 					   p->task,
 					   sec_token,
 					   audit_token,

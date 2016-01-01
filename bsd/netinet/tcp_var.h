@@ -4,6 +4,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
 <<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -28,11 +29,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -174,6 +185,7 @@ struct tseg_qent {
 	struct	mbuf	*tqe_m;		/* mbuf contains packet */
 };
 LIST_HEAD(tsegqe_head, tseg_qent);
+<<<<<<< HEAD
 
 struct sackblk {
 	tcp_seq start;		/* start seq no. of sack block */
@@ -202,6 +214,13 @@ struct tcp_rxt_seg {
 #define	TCP_RXT_DSACK_FOR_TLP	0x2
 	SLIST_ENTRY(tcp_rxt_seg) rx_link;
 };
+=======
+extern int	tcp_reass_maxseg;
+extern int	tcp_reass_qsize;
+#ifdef MALLOC_DECLARE
+MALLOC_DECLARE(M_TSEGQ);
+#endif
+>>>>>>> origin/10.3
 
 struct tcptemp {
 	u_char	tt_ipgen[40]; /* the size must be of max ip header, now IPv6 */
@@ -1416,6 +1435,7 @@ extern	struct inpcbinfo tcbinfo;
 extern	struct tcpstat tcpstat;	/* tcp statistics */
 extern	int tcp_mssdflt;	/* XXX */
 extern	int tcp_minmss;
+<<<<<<< HEAD
 #define	TCP_FASTOPEN_SERVER 0x01
 #define	TCP_FASTOPEN_CLIENT 0x02
 
@@ -1423,6 +1443,10 @@ extern	int tcp_tfo_halfcnt;
 extern	int tcp_tfo_backlog;
 extern	int tcp_fastopen;
 extern	int tcp_tfo_fallback_min;
+=======
+extern	int tcp_delack_enabled;
+extern	int tcp_do_newreno;
+>>>>>>> origin/10.3
 extern	int ss_fltsz;
 extern	int ss_fltsz_local;
 extern 	int tcp_do_rfc3390;		/* Calculate ss_fltsz according to RFC 3390 */

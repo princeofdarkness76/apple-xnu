@@ -3,22 +3,19 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -33,7 +30,17 @@
 #include <kern/processor.h>
 
 unsigned int max_cpus_initialized = 0;
+<<<<<<< HEAD
+=======
+unsigned int LockTimeOut = 12500000;
+unsigned int MutexSpin = 0;
+extern int forcenap;
+>>>>>>> origin/10.3
 
+decl_simple_lock_data(, spsLock);
+unsigned int spsLockInit = 0;
+uint32_t warFlags = 0;
+#define warDisMBpoff	0x80000000
 #define	MAX_CPUS_SET	0x1
 #define	MAX_CPUS_WAIT	0x2
 
@@ -212,24 +219,31 @@ void ml_thread_policy(
 
 void machine_idle(void)
 {
-        if (per_proc_info[cpu_number()].interrupts_enabled == TRUE) {
-	        int cur_decr;
+	struct per_proc_info	*ppinfo;
 
-	        machine_idle_ppc();
+	ppinfo = getPerProc();
 
+	if ((ppinfo->interrupts_enabled == TRUE) &&
+	    (ppinfo->cpu_flags & SignalReady)) {	/* Check to see if we are allowed to nap */
+		int cur_decr;
+
+		machine_idle_ppc();
 		/*
-		 * protect against a lost decrementer trap
-		 * if the current decrementer value is negative
-		 * by more than 10 ticks, re-arm it since it's 
-		 * unlikely to fire at this point... a hardware
-		 * interrupt got us out of machine_idle and may
-		 * also be contributing to this state
-		 */
+ 		 * protect against a lost decrementer trap
+ 		 * if the current decrementer value is negative
+ 		 * by more than 10 ticks, re-arm it since it's 
+ 		 * unlikely to fire at this point... a hardware
+ 		 * interrupt got us out of machine_idle and may
+ 		 * also be contributing to this state
+ 		 */
 		cur_decr = isync_mfdec();
 
 		if (cur_decr < -10) {
 		        mtdec(1);
 		}
+	}
+	else {
+		(void) ml_set_interrupts_enabled(TRUE);		/* Enable for interruptions even if nap is not allowed */
 	}
 }
 
@@ -250,7 +264,11 @@ ml_processor_register(
 	int target_cpu;
 
 	if (processor_info->boot_cpu == FALSE) {
-		 if (cpu_register(&target_cpu) != KERN_SUCCESS)
+		if (spsLockInit == 0) {
+			spsLockInit = 1;
+			simple_lock_init(&spsLock, 0);
+		}
+		if (cpu_register(&target_cpu) != KERN_SUCCESS)
 			return KERN_FAILURE;
 	} else {
 		/* boot_cpu is always 0 */
@@ -260,6 +278,17 @@ ml_processor_register(
 	per_proc_info[target_cpu].cpu_id = processor_info->cpu_id;
 	per_proc_info[target_cpu].start_paddr = processor_info->start_paddr;
 
+<<<<<<< HEAD
+=======
+	if (per_proc_info[target_cpu].pf.pfPowerModes & pmPowerTune) {
+	  per_proc_info[target_cpu].pf.pfPowerTune0 = processor_info->power_mode_0;
+	  per_proc_info[target_cpu].pf.pfPowerTune1 = processor_info->power_mode_1;
+	}
+
+	donap = processor_info->supports_nap;		/* Assume we use requested nap */
+	if(forcenap) donap = forcenap - 1;			/* If there was an override, use that */
+	
+>>>>>>> origin/10.3
 	if(per_proc_info[target_cpu].pf.Available & pfCanNap)
 	  if(processor_info->supports_nap) 
 		per_proc_info[target_cpu].pf.Available |= pfWillNap;
@@ -401,6 +430,111 @@ ml_enable_cache_level(int cache_level, int enable)
   return -1;
 }
 
+/*
+ *      Routine:        ml_set_processor_speed
+ *      Function:
+ */
+void
+ml_set_processor_speed(unsigned long speed)
+{
+	struct per_proc_info	*proc_info;
+	uint32_t				powerModes, cpu;
+	kern_return_t			result;
+	boolean_t				current_state;
+	unsigned int			i;
+  
+	extern void ml_set_processor_speed_slave(unsigned long speed);
+	extern void ml_set_processor_speed_dpll(unsigned long speed);
+	extern void ml_set_processor_speed_dfs(unsigned long speed);
+	extern void ml_set_processor_speed_powertune(unsigned long speed);
+  
+	powerModes = per_proc_info[0].pf.pfPowerModes;
+  
+	if (powerModes & pmDualPLL) {
+
+		ml_set_processor_speed_dpll(speed);
+
+	} else if (powerModes & pmDFS) {
+
+		for (cpu = 0; cpu < real_ncpus; cpu++) {
+			/*
+			 * cpu_signal() returns after .5ms if it fails to signal a running cpu
+			 * retry cpu_signal() for .1s to deal with long interrupt latency at boot
+			 */
+			for (i=200; i>0; i--) {
+				current_state = ml_set_interrupts_enabled(FALSE);
+				if (cpu != cpu_number()) {
+					if(!((machine_slot[cpu].running) &&
+				         (per_proc_info[cpu].cpu_flags & SignalReady)))
+						/*
+						 * Target cpu is off-line, skip
+						 */
+						result = KERN_SUCCESS;
+					else {
+						simple_lock(&spsLock);
+						result = cpu_signal(cpu, SIGPcpureq, CPRQsps, speed);	
+						if (result == KERN_SUCCESS) 
+							thread_sleep_simple_lock(&spsLock, &spsLock, THREAD_UNINT);
+						simple_unlock(&spsLock);
+					}
+				} else {
+					ml_set_processor_speed_dfs(speed);
+					result = KERN_SUCCESS;
+				}
+				(void) ml_set_interrupts_enabled(current_state);
+				if (result == KERN_SUCCESS)
+					break;
+			}
+			if (result != KERN_SUCCESS)
+				panic("ml_set_processor_speed(): Fail to set cpu%d speed\n", cpu);
+		}
+
+	} else if (powerModes & pmPowerTune) {
+
+		ml_set_processor_speed_powertune(speed);
+
+	}
+}
+
+/*
+ *      Routine:        ml_set_processor_speed_slave
+ *      Function:
+ */
+void
+ml_set_processor_speed_slave(unsigned long speed)
+{
+  extern void ml_set_processor_speed_dfs(unsigned long speed);
+  
+  ml_set_processor_speed_dfs(speed);
+  
+  simple_lock(&spsLock);  
+  thread_wakeup(&spsLock);
+  simple_unlock(&spsLock);
+}
+
+/*
+ *	Routine:        ml_init_lock_timeout
+ *	Function:
+ */
+void
+ml_init_lock_timeout(void)
+{
+	uint64_t	abstime;
+	uint32_t	mtxspin; 
+
+	nanoseconds_to_absolutetime(NSEC_PER_SEC>>2, &abstime);
+	LockTimeOut = (unsigned int)abstime;
+
+	if (PE_parse_boot_arg("mtxspin", &mtxspin)) {
+		if (mtxspin > USEC_PER_SEC>>4)
+			mtxspin =  USEC_PER_SEC>>4;
+		nanoseconds_to_absolutetime(mtxspin*NSEC_PER_USEC, &abstime);
+	} else {
+		nanoseconds_to_absolutetime(20*NSEC_PER_USEC, &abstime);
+	}
+	MutexSpin = (unsigned int)abstime;
+}
+
 void
 init_ast_check(processor_t processor)
 {}
@@ -457,5 +591,16 @@ be_tracing()
 {
   int mycpu = cpu_number();
   return(per_proc_info[mycpu].cpu_flags & traceBE);
+}
+
+
+void ml_mem_backoff(void) {
+
+	if(warFlags & warDisMBpoff) return;					/* If backoff disabled, exit */
+
+	__asm__ volatile("sync");
+	__asm__ volatile("isync");
+	
+	return;
 }
 

@@ -1,8 +1,13 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2006 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
 <<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,11 +33,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -98,6 +113,8 @@
 
 #include <security/audit/audit.h>
 
+#include <bsm/audit_kernel.h>
+
 #include <kern/task.h>
 #include <kern/thread.h>
 
@@ -114,9 +131,13 @@ int get_task_userstop(task_t);
 #define	CLR(t, f)	(t) &= ~(f)
 #define	ISSET(t, f)	((t) & (f))
 
+<<<<<<< HEAD
 extern thread_t	port_name_to_thread(mach_port_name_t port_name);
 extern thread_t get_firstthread(task_t);
 
+=======
+void psignal_lock __P((struct proc *, int, int));
+>>>>>>> origin/10.3
 
 /*
  * sys-trace system call.
@@ -130,12 +151,16 @@ ptrace(struct proc *p, struct ptrace_args *uap, int32_t *retval)
 	thread_t	th_act;
 	struct uthread 	*ut;
 	int tr_sigexc = 0;
+<<<<<<< HEAD
 	int error = 0;
 	int stopped = 0;
+=======
+>>>>>>> origin/10.3
 
 	AUDIT_ARG(cmd, uap->req);
 	AUDIT_ARG(pid, uap->pid);
 	AUDIT_ARG(addr, uap->addr);
+<<<<<<< HEAD
 	AUDIT_ARG(value32, uap->data);
 
 	if (uap->req == PT_DENY_ATTACH) {
@@ -151,6 +176,19 @@ ptrace(struct proc *p, struct ptrace_args *uap, int32_t *retval)
 		}
 		SET(p->p_lflag, P_LNOATTACH);
 		proc_unlock(p);
+=======
+	AUDIT_ARG(value, uap->data);
+
+        if (uap->req == PT_DENY_ATTACH) {
+	        if (ISSET(p->p_flag, P_TRACED)) {
+				exit1(p, W_EXITCODE(ENOTSUP, 0), retval);
+				/* drop funnel before we return */
+				thread_funnel_set(kernel_flock, FALSE);
+				thread_exception_return();
+				/* NOTREACHED */
+			}
+		SET(p->p_flag, P_NOATTACH);
+>>>>>>> origin/10.3
 
 		return(0);
 	}
@@ -225,7 +263,18 @@ retry_trace_me:;
 	if ((t = proc_find(uap->pid)) == NULL)
 			return (ESRCH);
 
+<<<<<<< HEAD
 	AUDIT_ARG(process, t);
+=======
+
+	AUDIT_ARG(process, t);
+
+	/* We do not want ptrace to do anything with kernel, init 
+	 * and mach_init
+	 */
+	if (uap->pid <=2 )
+		return (EPERM);
+>>>>>>> origin/10.3
 
 	task = t->task;
 	if (uap->req == PT_ATTACHEXC) {

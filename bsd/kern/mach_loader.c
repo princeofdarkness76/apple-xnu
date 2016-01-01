@@ -4,6 +4,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
 <<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -28,11 +29,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -529,8 +540,14 @@ parse_machfile(
 	load_result_t		*result
 )
 {
+<<<<<<< HEAD
 	uint32_t		ncmds;
 	struct load_command	*lcp;
+=======
+	struct machine_slot	*ms;
+	uint32_t		ncmds;
+	struct load_command	*lcp, *next;
+>>>>>>> origin/10.3
 	struct dylinker_command	*dlp = 0;
 	integer_t		dlarchbits = 0;
 	void *			control;
@@ -650,6 +667,7 @@ parse_machfile(
 	 *  2: segments
 	 *  3: dyld, encryption, check entry point
 	 */
+<<<<<<< HEAD
 	
 	for (pass = 0; pass <= 3; pass++) {
 
@@ -669,13 +687,20 @@ parse_machfile(
 			break;
 		}
 
+=======
+	for (pass = 1; pass <= 2; pass++) {
+>>>>>>> origin/10.3
 		/*
 		 * Loop through each of the load_commands indicated by the
 		 * Mach-O header; if an absurd value is provided, we just
 		 * run off the end of the reserved section by incrementing
 		 * the offset too far, so we are implicitly fail-safe.
 		 */
+<<<<<<< HEAD
 		offset = mach_header_sz;
+=======
+		offset = sizeof(struct mach_header);
+>>>>>>> origin/10.3
 		ncmds = header->ncmds;
 
 		while (ncmds--) {
@@ -696,8 +721,13 @@ parse_machfile(
 			 */
 			if (oldoffset > offset ||
 			    lcp->cmdsize < sizeof(struct load_command) ||
+<<<<<<< HEAD
 			    offset > header->sizeofcmds + mach_header_sz) {
 				ret = LOAD_BADMACHO;
+=======
+			    offset > header->sizeofcmds + sizeof(struct mach_header)) {
+			    	ret = LOAD_BADMACHO;
+>>>>>>> origin/10.3
 				break;
 			}
 
@@ -888,7 +918,10 @@ parse_machfile(
 			default:
 				/* Other commands are ignored by the kernel */
 				ret = LOAD_SUCCESS;
+<<<<<<< HEAD
 				break;
+=======
+>>>>>>> origin/10.3
 			}
 			if (ret != LOAD_SUCCESS)
 				break;

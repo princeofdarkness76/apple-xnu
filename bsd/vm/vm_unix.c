@@ -1,8 +1,13 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
 <<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,11 +33,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -95,6 +110,9 @@
 
 #include <security/audit/audit.h>
 #include <security/mac.h>
+#include <bsm/audit_kevents.h>
+
+#include <bsm/audit_kernel.h>
 #include <bsm/audit_kevents.h>
 
 #include <kern/kalloc.h>
@@ -506,6 +524,10 @@ pid_for_task(
 	AUDIT_MACH_SYSCALL_ENTER(AUE_PIDFORTASK);
 	AUDIT_ARG(mach_port1, t);
 
+<<<<<<< HEAD
+=======
+	funnel_state = thread_funnel_set(kernel_flock, TRUE);
+>>>>>>> origin/10.3
 	t1 = port_name_to_task(t);
 
 	if (t1 == TASK_NULL) {
@@ -523,7 +545,12 @@ pid_for_task(
 	task_deallocate(t1);
 pftout:
 	AUDIT_ARG(pid, pid);
+<<<<<<< HEAD
 	(void) copyout((char *) &pid, pid_addr, sizeof(int));
+=======
+	(void) copyout((char *) &pid, (char *) x, sizeof(*x));
+	thread_funnel_set(kernel_flock, funnel_state);
+>>>>>>> origin/10.3
 	AUDIT_MACH_SYSCALL_EXIT(err);
 	return(err);
 }
@@ -769,9 +796,17 @@ task_name_for_pid(
 	AUDIT_ARG(pid, pid);
 	AUDIT_ARG(mach_port1, target_tport);
 
+	AUDIT_MACH_SYSCALL_ENTER(AUE_TASKFORPID);
+	AUDIT_ARG(pid, pid);
+	AUDIT_ARG(mach_port1, target_tport);
+
 	t1 = port_name_to_task(target_tport);
 	if (t1 == TASK_NULL) {
+<<<<<<< HEAD
 		(void) copyout((char *)&t1, task_addr, sizeof(mach_port_name_t));
+=======
+		(void ) copyout((char *)&t1, (char *)t, sizeof(mach_port_t));
+>>>>>>> origin/10.3
 		AUDIT_MACH_SYSCALL_EXIT(KERN_FAILURE);
 		return(KERN_FAILURE);
 	} 
@@ -794,8 +829,10 @@ task_name_for_pid(
 
  restart:
 	p1 = get_bsdtask_info(t1);
+	p = pfind(pid);
+	AUDIT_ARG(process, p);
 	if (
-		((p = pfind(pid)) != (struct proc *) 0)
+		(p != (struct proc *) 0)
 		&& (p1 != (struct proc *) 0)
 		&& (((p->p_ucred->cr_uid == p1->p_ucred->cr_uid) && 
 			((p->p_cred->p_ruid == p1->p_cred->p_ruid)))
@@ -817,10 +854,16 @@ task_name_for_pid(
 						get_task_ipcspace(current_task()));
 			} else
 				tret  = MACH_PORT_NULL;
+<<<<<<< HEAD
 
 			AUDIT_ARG(mach_port2, tret);
 			(void) copyout((char *)&tret, task_addr, sizeof(mach_port_name_t));
 			task_deallocate(t1);
+=======
+			AUDIT_ARG(mach_port2, tret);
+			(void ) copyout((char *)&tret, (char *) t, sizeof(mach_port_t));
+	        task_deallocate(t1);
+>>>>>>> origin/10.3
 			error = KERN_SUCCESS;
 			goto tnfpout;
 		}
@@ -833,11 +876,16 @@ noperm:
 	tret = MACH_PORT_NULL;
 	(void) copyout((char *) &tret, task_addr, sizeof(mach_port_name_t));
 	error = KERN_FAILURE;
+<<<<<<< HEAD
 tnfpout:
 	if (refheld != 0)
 		kauth_cred_unref(&target_cred);
 	if (p != PROC_NULL)
 		proc_rele(p);
+=======
+tfpout:
+	thread_funnel_set(kernel_flock, funnel_state);
+>>>>>>> origin/10.3
 	AUDIT_MACH_SYSCALL_EXIT(error);
 	return(error);
 }
@@ -858,10 +906,75 @@ pid_suspend(struct proc *p __unused, struct pid_suspend_args *args, int *ret)
 	}
 #endif
 
+<<<<<<< HEAD
 	if (pid == 0) {
 		error = EPERM;
 		goto out;
 	}
+=======
+	shared_region_mapping_t shared_region;
+	struct shared_region_task_mappings	task_mapping_info;
+	shared_region_mapping_t	next;
+
+	ndp = &nd;
+
+	AUDIT_ARG(addr, base_address);
+	/* Retrieve the base address */
+	if (error = copyin(base_address, &local_base, sizeof (caddr_t))) {
+			goto lsf_bailout;
+        }
+	if (error = copyin(flags, &local_flags, sizeof (int))) {
+			goto lsf_bailout;
+        }
+
+	if(local_flags & QUERY_IS_SYSTEM_REGION) {
+			shared_region_mapping_t	default_shared_region;
+			vm_get_shared_region(current_task(), &shared_region);
+			task_mapping_info.self = (vm_offset_t)shared_region;
+
+			shared_region_mapping_info(shared_region, 
+					&(task_mapping_info.text_region), 
+					&(task_mapping_info.text_size),
+					&(task_mapping_info.data_region), 
+					&(task_mapping_info.data_size), 
+					&(task_mapping_info.region_mappings),
+					&(task_mapping_info.client_base), 
+					&(task_mapping_info.alternate_base),
+					&(task_mapping_info.alternate_next), 
+					&(task_mapping_info.fs_base),
+					&(task_mapping_info.system),
+					&(task_mapping_info.flags), &next);
+
+			default_shared_region =
+				lookup_default_shared_region(
+					ENV_DEFAULT_ROOT, 
+					task_mapping_info.system);
+			if (shared_region == default_shared_region) {
+				local_flags = SYSTEM_REGION_BACKED;
+			} else {
+				local_flags = 0;
+			}
+			shared_region_mapping_dealloc(default_shared_region);
+			error = 0;
+			error = copyout(&local_flags, flags, sizeof (int));
+			goto lsf_bailout;
+	}
+	caller_flags = local_flags;
+	kret = kmem_alloc(kernel_map, (vm_offset_t *)&filename_str,
+			(vm_size_t)(MAXPATHLEN));
+		if (kret != KERN_SUCCESS) {
+			error = ENOMEM;
+			goto lsf_bailout;
+		}
+	kret = kmem_alloc(kernel_map, (vm_offset_t *)&map_list,
+			(vm_size_t)(map_cnt*sizeof(sf_mapping_t)));
+		if (kret != KERN_SUCCESS) {
+			kmem_free(kernel_map, (vm_offset_t)filename_str, 
+				(vm_size_t)(MAXPATHLEN));
+			error = ENOMEM;
+			goto lsf_bailout;
+		}
+>>>>>>> origin/10.3
 
 	targetproc = proc_find(pid);
 	if (targetproc == PROC_NULL) {
@@ -874,9 +987,17 @@ pid_suspend(struct proc *p __unused, struct pid_suspend_args *args, int *ret)
 		goto out;
 	}
 
+<<<<<<< HEAD
 	target = targetproc->task;
 	if (target != TASK_NULL) {
 		mach_port_t tfpport;
+=======
+	/*
+	 * Get a vnode for the target file
+	 */
+	NDINIT(ndp, LOOKUP, FOLLOW | LOCKLEAF | AUDITVNPATH1, UIO_SYSSPACE,
+	    filename_str, p);
+>>>>>>> origin/10.3
 
 		/* If we aren't root and target's task access port is set... */
 		if (!kauth_cred_issuser(kauth_cred_get()) &&
@@ -1028,8 +1149,16 @@ sysctl_settfp_policy(__unused struct sysctl_oid *oidp, void *arg1,
     if (error || req->newptr == USER_ADDR_NULL)
         return(error);
 
+<<<<<<< HEAD
 	if (!kauth_cred_issuser(kauth_cred_get()))
 		return(EPERM);
+=======
+	AUDIT_ARG(addr, base_address);
+	/* Retrieve the base address */
+	if (error = copyin(base_address, &local_base, sizeof (caddr_t))) {
+			goto rsf_bailout;
+        }
+>>>>>>> origin/10.3
 
 	if ((error = SYSCTL_IN(req, &new_value, sizeof(int)))) {
 		goto out;

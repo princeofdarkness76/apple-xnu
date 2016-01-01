@@ -8,6 +8,7 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
 >>>>>>> origin/10.2
  * 
@@ -31,11 +32,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
@@ -1699,13 +1710,18 @@ restart_replay:
 			goto bad_txn_handling;
 		}
 	
+<<<<<<< HEAD
 		max_bsize = 0;
 		for (i = 1; i < blhdr->num_blocks; i++) {
+=======
+		for(i=1; i < blhdr->num_blocks; i++) {
+>>>>>>> origin/10.3
 			if (blhdr->binfo[i].bnum < 0 && blhdr->binfo[i].bnum != (off_t)-1) {
 				printf("jnl: %s: replay_journal: bogus block number 0x%llx\n", jnl->jdev_name, blhdr->binfo[i].bnum);
 				bad_blocks = 1;
 				goto bad_txn_handling;
 			}
+<<<<<<< HEAD
 			
 			if ((size_t)blhdr->binfo[i].u.bi.bsize > max_bsize) {
 				max_bsize = blhdr->binfo[i].u.bi.bsize;
@@ -1725,6 +1741,10 @@ restart_replay:
 			txn_start_offset = blhdr_offset;
 		}
 
+=======
+		}
+
+>>>>>>> origin/10.3
 		//printf("jnl: replay_journal: adding %d blocks in journal entry @ 0x%llx to co_buf\n", 
 		//       blhdr->num_blocks-1, jnl->jhdr->start);
 		bad_blocks = 0;
@@ -1845,6 +1865,7 @@ bad_txn_handling:
 
 	//printf("jnl: replay_journal: replaying %d blocks\n", num_full);
     
+<<<<<<< HEAD
 	/*
 	 * make sure it's at least one page in size, so
 	 * start max_bsize at PAGE_SIZE
@@ -1867,6 +1888,30 @@ bad_txn_handling:
 	if (kmem_alloc(kernel_map, (vm_offset_t *)&block_ptr, max_bsize, VM_KERN_MEMORY_FILE)) {
 		goto bad_replay;
 	}
+=======
+    /*
+     * make sure it's at least one page in size, so
+     * start max_bsize at PAGE_SIZE
+     */
+    for (i = 0, max_bsize = PAGE_SIZE; i < num_full; i++) {
+
+            if (co_buf[i].block_num == (off_t)-1)
+	            continue;
+
+	    if (co_buf[i].block_size > max_bsize)
+	            max_bsize = co_buf[i].block_size;
+    }
+    /*
+     * round max_bsize up to the nearest PAGE_SIZE multiple
+     */
+    if (max_bsize & (PAGE_SIZE - 1)) {
+            max_bsize = (max_bsize + PAGE_SIZE) & ~(PAGE_SIZE - 1);
+    }
+
+    if (kmem_alloc(kernel_map, (vm_offset_t *)&block_ptr, max_bsize)) {
+	goto bad_replay;
+    }
+>>>>>>> origin/10.3
     
 	// Replay the coalesced entries in the co-buf
 	for(i = 0; i < num_full; i++) {

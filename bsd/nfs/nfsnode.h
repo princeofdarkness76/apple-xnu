@@ -1,8 +1,13 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2011 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
 <<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,11 +33,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -111,6 +126,7 @@ struct nfsbuf {
 	LIST_ENTRY(nfsbuf)	nb_hash;	/* hash chain */
 	LIST_ENTRY(nfsbuf)	nb_vnbufs;	/* nfsnode's nfsbuf chain */
 	TAILQ_ENTRY(nfsbuf)	nb_free;	/* free list position if not active. */
+<<<<<<< HEAD
 	volatile uint32_t	nb_flags;	/* NB_* flags. */
 	volatile uint32_t	nb_lflags;	/* NBL_* flags. */
 	volatile uint32_t	nb_refs;	/* outstanding references. */
@@ -119,6 +135,12 @@ struct nfsbuf {
 	uint64_t		nb_verf;	/* V3 write verifier */
 	int			nb_commitlevel;	/* lowest write commit level */
 	time_t			nb_timestamp;	/* buffer timestamp */
+=======
+	volatile long		nb_flags;	/* NB_* flags. */
+	time_t			nb_timestamp;	/* buffer timestamp */
+	long			nb_bufsize;	/* buffer size */
+	daddr_t			nb_lblkno;	/* logical block number. */
+>>>>>>> origin/10.3
 	int			nb_error;	/* errno value. */
 	u_int32_t		nb_valid;	/* valid pages in buf */
 	u_int32_t		nb_dirty;	/* dirty pages in buf */
@@ -211,11 +233,18 @@ struct nfsbuf {
 LIST_HEAD(nfsbuflists, nfsbuf);
 TAILQ_HEAD(nfsbuffreehead, nfsbuf);
 
+<<<<<<< HEAD
 extern lck_mtx_t *nfs_buf_mutex;
 extern int nfsbufcnt, nfsbufmin, nfsbufmax, nfsbufmetacnt, nfsbufmetamax;
+=======
+#define NFSNOLIST ((struct nfsbuf *)0xdeadbeef)
+
+extern int nfsbufhashlock, nfsbufcnt, nfsbufmin, nfsbufmax;
+>>>>>>> origin/10.3
 extern int nfsbuffreecnt, nfsbuffreemetacnt, nfsbufdelwricnt, nfsneedbuffer;
 extern int nfs_nbdwrite;
 extern struct nfsbuffreehead nfsbuffree, nfsbufdelwri;
+extern time_t nfsbuffreeuptimestamp;
 
 #ifdef NFSBUFDEBUG
 #define NFSBUFCNTCHK() \
@@ -231,16 +260,24 @@ extern struct nfsbuffreehead nfsbuffree, nfsbufdelwri;
 		(nfsbuffreemetacnt < 0) || \
 		(nfsbuffreemetacnt > nfsbufmax) || \
 		(nfsbuffreemetacnt > nfsbufcnt) || \
+<<<<<<< HEAD
 		(nfsbuffreemetacnt > nfsbufmetamax) || \
 		(nfsbuffreemetacnt > nfsbufmetacnt) || \
+=======
+>>>>>>> origin/10.3
 		(nfsbufdelwricnt < 0) || \
 		(nfsbufdelwricnt > nfsbufmax) || \
 		(nfsbufdelwricnt > nfsbufcnt) || \
 		(nfs_nbdwrite < 0) || \
 		(nfs_nbdwrite > nfsbufcnt) || \
 		0) \
+<<<<<<< HEAD
 		panic("nfsbuf count error: max %d meta %d cnt %d meta %d free %d meta %d delwr %d bdw %d\n", \
 			nfsbufmax, nfsbufmetamax, nfsbufcnt, nfsbufmetacnt, nfsbuffreecnt, nfsbuffreemetacnt, \
+=======
+		panic("nfsbuf count error: max %d cnt %d free %d meta %d delwr %d bdw %d\n", \
+			nfsbufmax, nfsbufcnt, nfsbuffreecnt, nfsbuffreemetacnt, \
+>>>>>>> origin/10.3
 			nfsbufdelwricnt, nfs_nbdwrite); \
 	} while (0)
 #else
@@ -577,12 +614,22 @@ struct nfsnode {
 	u_int64_t		n_xid;		/* last xid to loadattr */
 	struct nfs_vattr	n_vattr;	/* Vnode attribute cache */
 	time_t			n_attrstamp;	/* Attr. cache timestamp */
+<<<<<<< HEAD
 	time_t			n_aclstamp;	/* ACL cache timestamp */
 	time_t			n_evtstamp;	/* last vnode event timestamp */
 	uint32_t		n_events;	/* pending vnode events */
 	u_int8_t		n_access[NFS_ACCESS_CACHE_SIZE+1];	/* ACCESS cache */
 	uid_t                   n_accessuid[NFS_ACCESS_CACHE_SIZE];	/* credentials having access */
 	time_t                  n_accessstamp[NFS_ACCESS_CACHE_SIZE];	/* access cache timestamp */
+=======
+        u_int32_t               n_mode;         /* ACCESS mode cache */
+        uid_t                   n_modeuid;      /* credentials having mode */
+        time_t                  n_modestamp;    /* mode cache timestamp */
+	time_t			n_mtime;	/* Prev modify time. */
+	time_t			n_ncmtime;	/* namecache modify time. */
+	time_t			n_expiry;	/* Lease expiry time */
+	nfsfh_t			*n_fhp;		/* NFS File Handle */
+>>>>>>> origin/10.3
 	union {
 	    struct {
 		struct timespec	n3_mtime;	/* Prev modify time. */
@@ -894,12 +941,16 @@ struct nfsbuf * nfs_buf_incore(nfsnode_t, daddr64_t);
 int nfs_buf_get(nfsnode_t, daddr64_t, uint32_t, thread_t, int, struct nfsbuf **);
 int nfs_buf_upl_setup(struct nfsbuf *bp);
 void nfs_buf_upl_check(struct nfsbuf *bp);
+<<<<<<< HEAD
 void nfs_buf_normalize_valid_range(nfsnode_t, struct nfsbuf *);
 int nfs_buf_map(struct nfsbuf *);
+=======
+>>>>>>> origin/10.3
 void nfs_buf_release(struct nfsbuf *, int);
 int nfs_buf_iowait(struct nfsbuf *);
 void nfs_buf_iodone(struct nfsbuf *);
 void nfs_buf_write_delayed(struct nfsbuf *);
+<<<<<<< HEAD
 void nfs_buf_check_write_verifier(nfsnode_t, struct nfsbuf *);
 void nfs_buf_freeup(int);
 void nfs_buf_refget(struct nfsbuf *bp);
@@ -936,6 +987,9 @@ void nfs_asyncio_finish(struct nfsreq *);
 void nfs_asyncio_resend(struct nfsreq *);
 int nfs_async_write_start(struct nfsmount *);
 void nfs_async_write_done(struct nfsmount *);
+=======
+void nfs_buf_freeup(int);
+>>>>>>> origin/10.3
 
 #endif /* KERNEL */
 

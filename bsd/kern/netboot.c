@@ -4,6 +4,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
 <<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -28,11 +29,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -64,16 +75,27 @@
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 #include <netinet/dhcp_options.h>
+<<<<<<< HEAD
 
 #include <kern/kern_types.h>
 #include <kern/kalloc.h>
 #include <sys/netboot.h>
 #include <sys/imageboot.h>
+=======
+#include <kern/kalloc.h>
+>>>>>>> origin/10.3
 #include <pexpert/pexpert.h>
 
 //#include <libkern/libkern.h>
 extern struct filedesc 	filedesc0;
 
+<<<<<<< HEAD
+=======
+extern int	strncmp(const char *,const char *, size_t);
+extern unsigned long strtoul(const char *, char **, int);
+extern char *	strchr(const char *str, int ch);
+
+>>>>>>> origin/10.3
 extern int 	nfs_mountroot(void); 	/* nfs_vfsops.c */
 extern int (*mountroot)(void);
 
@@ -92,10 +114,39 @@ const void *
 IOBSDRegistryEntryGetData(void * entry, const char * property_name, 
 			  int * packet_length);
 
+<<<<<<< HEAD
+=======
+extern int vndevice_root_image(const char * path, char devname[], 
+			       dev_t * dev_p);
+extern int di_root_image(const char *path, char devname[], dev_t *dev_p);
+
+>>>>>>> origin/10.3
 #define BOOTP_RESPONSE	"bootp-response"
 #define BSDP_RESPONSE	"bsdp-response"
 #define DHCP_RESPONSE	"dhcp-response"
 
+<<<<<<< HEAD
+=======
+extern int 
+bootp(struct ifnet * ifp, struct in_addr * iaddr_p, int max_retry,
+      struct in_addr * netmask_p, struct in_addr * router_p,
+      struct proc * procp);
+
+
+/* forward declarations */
+int	inet_aton(char * cp, struct in_addr * pin);
+
+boolean_t	netboot_iaddr(struct in_addr * iaddr_p);
+boolean_t	netboot_rootpath(struct in_addr * server_ip,
+				 char * name, int name_len, 
+				 char * path, int path_len);
+int	netboot_setup(struct proc * p);
+int	netboot_mountroot(void);
+int	netboot_root(void);
+
+
+
+>>>>>>> origin/10.3
 #define IP_FORMAT	"%d.%d.%d.%d"
 #define IP_CH(ip)	((u_char *)ip)
 #define IP_LIST(ip)	IP_CH(ip)[0],IP_CH(ip)[1],IP_CH(ip)[2],IP_CH(ip)[3]
@@ -381,7 +432,11 @@ netboot_info_init(struct in_addr iaddr)
 		   server_name, info->mount_point);
 	    if (image_path != NULL) {
 		boolean_t 	needs_slash = FALSE;
+<<<<<<< HEAD
 		
+=======
+
+>>>>>>> origin/10.3
 		info->image_path_length = strlen(image_path) + 1;
 		if (image_path[0] != '/') {
 		    needs_slash = TRUE;
@@ -435,18 +490,22 @@ netboot_info_free(struct netboot_info * * info_p)
 
     if (info) {
 	if (info->mount_point) {
-	    kfree(info->mount_point, info->mount_point_length);
+	    kfree((vm_offset_t)info->mount_point, info->mount_point_length);
 	}
 	if (info->server_name) {
-	    kfree(info->server_name, info->server_name_length);
+	    kfree((vm_offset_t)info->server_name, info->server_name_length);
 	}
 	if (info->image_path) {
-	    kfree(info->image_path, info->image_path_length);
+	    kfree((vm_offset_t)info->image_path, info->image_path_length);
 	}
+<<<<<<< HEAD
 	if (info->second_image_path) {
 	    kfree(info->second_image_path, info->second_image_path_length);
 	}
 	kfree(info, sizeof(*info));
+=======
+	kfree((vm_offset_t)info, sizeof(*info));
+>>>>>>> origin/10.3
     }
     *info_p = NULL;
     return;
@@ -537,8 +596,42 @@ get_ip_parameters(struct in_addr * iaddr_p, struct in_addr * netmask_p,
 }
 
 static int
+<<<<<<< HEAD
 route_cmd(int cmd, struct in_addr d, struct in_addr g, 
 	  struct in_addr m, uint32_t more_flags, unsigned int ifscope)
+=======
+inet_aifaddr(struct socket * so, char * name, const struct in_addr * addr, 
+	     const struct in_addr * mask,
+	     const struct in_addr * broadcast)
+{
+    struct sockaddr	blank_sin;
+    struct ifaliasreq	ifra;
+
+    bzero(&blank_sin, sizeof(blank_sin));
+    blank_sin.sa_len = sizeof(blank_sin);
+    blank_sin.sa_family = AF_INET;
+
+    bzero(&ifra, sizeof(ifra));
+    strncpy(ifra.ifra_name, name, sizeof(ifra.ifra_name));
+    if (addr) {
+	ifra.ifra_addr = blank_sin;
+	((struct sockaddr_in *)&ifra.ifra_addr)->sin_addr = *addr;
+    }
+    if (mask) {
+	ifra.ifra_mask = blank_sin;
+	((struct sockaddr_in *)&ifra.ifra_mask)->sin_addr = *mask;
+    }
+    if (broadcast) {
+	ifra.ifra_broadaddr = blank_sin;
+	((struct sockaddr_in *)&ifra.ifra_broadaddr)->sin_addr = *broadcast;
+    }
+    return (ifioctl(so, SIOCAIFADDR, (caddr_t)&ifra, current_proc()));
+}
+
+static int
+route_cmd(int cmd, struct in_addr d, struct in_addr g, 
+	  struct in_addr m, u_long more_flags)
+>>>>>>> origin/10.3
 {
     struct sockaddr_in 		dst;
     int				error;
@@ -566,6 +659,7 @@ route_cmd(int cmd, struct in_addr d, struct in_addr g,
     mask.sin_family = AF_INET;
     mask.sin_addr = m;
 
+<<<<<<< HEAD
     error = rtrequest_scoped(cmd, (struct sockaddr *)&dst,
         (struct sockaddr *)&gw, (struct sockaddr *)&mask, flags, NULL, ifscope);
 
@@ -591,6 +685,30 @@ host_route_delete(struct in_addr host, unsigned int ifscope)
     struct in_addr		zeroes = { 0 };
     
     return (route_cmd(RTM_DELETE, host, zeroes, zeroes, RTF_HOST, ifscope));
+=======
+    return (rtrequest(cmd, (struct sockaddr *)&dst, (struct sockaddr *)&gw,
+		      (struct sockaddr *)&mask, flags, NULL));
+>>>>>>> origin/10.3
+}
+
+static int
+default_route_add(struct in_addr router, boolean_t proxy_arp)
+{
+    u_long			flags = 0;
+    struct in_addr		zeroes = { 0 };
+    
+    if (proxy_arp == FALSE) {
+	flags |= RTF_GATEWAY;
+    }
+    return (route_cmd(RTM_ADD, zeroes, router, zeroes, flags));
+}
+
+static int
+host_route_delete(struct in_addr host)
+{
+    struct in_addr		zeroes = { 0 };
+    
+    return (route_cmd(RTM_DELETE, host, zeroes, zeroes, RTF_HOST));
 }
 
 static struct ifnet *
@@ -740,8 +858,12 @@ netboot_mountroot(void)
 		/* NOT REACHED */
 	    case EHOSTDOWN:
 		/* remove the server's arp entry */
+<<<<<<< HEAD
 		error = host_route_delete(S_netboot_info_p->server_ip,
 					  ifp->if_index);
+=======
+		error = host_route_delete(S_netboot_info_p->server_ip);
+>>>>>>> origin/10.3
 		if (error) {
 		    printf("netboot: host_route_delete(" IP_FORMAT
 			   ") failed %d\n", 
@@ -749,7 +871,11 @@ netboot_mountroot(void)
 		}
 		break;
 	    case EHOSTUNREACH:
+<<<<<<< HEAD
 		error = host_route_delete(router, ifp->if_index);
+=======
+		error = host_route_delete(router);
+>>>>>>> origin/10.3
 		if (error) {
 		    printf("netboot: host_route_delete(" IP_FORMAT
 			   ") failed %d\n", IP_LIST(&router), error);

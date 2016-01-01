@@ -4,6 +4,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
 <<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -28,11 +29,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -620,9 +631,29 @@ tcp_gc(struct inpcbinfo *ipi)
 
 	lck_rw_done(ipi->ipi_lock);
 
+<<<<<<< HEAD
 	/* Clean up the socache while we are here */
 	if (so_cache_timer())
 		atomic_add_32(&ipi->ipi_gc_req.intimer_lazy, 1);
+=======
+	for (ip = time_wait_slots[cur_tw_slot].lh_first; ip; ip = ipnxt)
+	{
+#if KDEBUG
+	        tws_checked++;
+#endif
+		ipnxt = ip->inp_list.le_next;
+		tp = intotcpcb(ip);
+		if (tp == NULL) { /* tp already closed, remove from list */
+			LIST_REMOVE(ip, inp_list);
+			continue; 
+		}
+		if (tp->t_timer[TCPT_2MSL] >= N_TIME_WAIT_SLOTS) {
+		    tp->t_timer[TCPT_2MSL] -= N_TIME_WAIT_SLOTS;
+		    tp->t_rcvtime += N_TIME_WAIT_SLOTS;
+		}
+		else
+		    tp->t_timer[TCPT_2MSL] = 0;
+>>>>>>> origin/10.3
 
 	KERNEL_DEBUG(DBG_FNC_TCP_SLOW | DBG_FUNC_END, tws_checked,
 	    cur_tw_slot, 0, 0, 0);

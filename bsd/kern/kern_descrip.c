@@ -1,12 +1,17 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2001 Apple Computer, Inc. All rights reserved.
 >>>>>>> origin/10.1
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
 <<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -32,11 +37,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -110,6 +125,7 @@
 #include <sys/unistd.h>
 #include <sys/resourcevar.h>
 #include <sys/aio_kern.h>
+<<<<<<< HEAD
 #include <sys/ev.h>
 #include <kern/locks.h>
 #include <sys/uio_internal.h>
@@ -153,6 +169,10 @@ void fg_drop(struct fileproc * fp);
 void fg_free(struct fileglob *fg);
 void fg_ref(struct fileproc * fp);
 void fileport_releasefg(struct fileglob *fg);
+=======
+
+#include <bsm/audit_kernel.h>
+>>>>>>> origin/10.3
 
 /* flags for close_internal_locked */
 #define FD_DUP2RESV 1
@@ -1041,6 +1061,7 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 			goto out;
 		}
 		vp = (struct vnode *)fp->f_data;
+<<<<<<< HEAD
 
 		fflag = fp->f_flag;
 		offset = fp->f_offset;
@@ -1068,6 +1089,36 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 		if (error) {
 			goto outdrop;
 		}
+=======
+
+		/* Copy in the lock structure */
+		error = copyin((caddr_t)uap->arg, (caddr_t)&fl, sizeof (fl));
+		if (error)
+			break;
+		if (fl.l_whence == SEEK_CUR)
+			fl.l_start += fp->f_offset;
+		switch (fl.l_type) {
+
+		case F_RDLCK:
+			if ((fp->f_flag & FREAD) != 0) {
+				p->p_flag |= P_ADVLOCK;
+				error = VOP_ADVLOCK(vp, (caddr_t)p, F_SETLK, &fl, flg);
+			} else
+				error = EBADF;
+			break;
+
+		case F_WRLCK:
+			if ((fp->f_flag & FWRITE) != 0) {
+				p->p_flag |= P_ADVLOCK;
+				error = VOP_ADVLOCK(vp, (caddr_t)p, F_SETLK, &fl, flg);
+			} else
+				error = EBADF;
+			break;
+
+		case F_UNLCK:
+			error = VOP_ADVLOCK(vp, (caddr_t)p, F_UNLCK, &fl, F_POSIX);
+			break;
+>>>>>>> origin/10.3
 
 		if ( (error = vnode_getwithref(vp)) ) {
 			goto outdrop;
@@ -1130,6 +1181,7 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 			}
 			break;
 		default:
+<<<<<<< HEAD
 			flg |= F_POSIX;
 			switch (fl.l_type) {
 			case F_RDLCK:
@@ -1164,6 +1216,12 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 		}
 		(void) vnode_put(vp);
 		goto outdrop;
+=======
+			error = EINVAL;
+			break;
+		}
+		break;
+>>>>>>> origin/10.3
 
 	case F_GETLK:
 	case F_OFD_GETLK:
@@ -1173,6 +1231,7 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 		}
 		vp = (struct vnode *)fp->f_data;
 
+<<<<<<< HEAD
 		offset = fp->f_offset;
 		proc_fdunlock(p);
 
@@ -1255,16 +1314,42 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 
 		vp = (struct vnode *)fp->f_data;
 		proc_fdunlock(p);
+=======
+		/* Copy in the lock structure */
+		error = copyin((caddr_t)uap->arg, (caddr_t)&fl, sizeof (fl));
+		if (error)
+			break;
+		if (fl.l_whence == SEEK_CUR)
+			fl.l_start += fp->f_offset;
+		error = VOP_ADVLOCK(vp, (caddr_t)p, F_GETLK, &fl, F_POSIX);
+		if (error)
+			break;
+		error = copyout((caddr_t)&fl, (caddr_t)uap->arg, sizeof (fl));
+		break;
+
+	case F_PREALLOCATE:
+		if (fp->f_type != DTYPE_VNODE)
+			return (EBADF);
+		vp = (struct vnode *)fp->f_data;
+>>>>>>> origin/10.3
 
 		/* make sure that we have write permission */
 		if ((fp->f_flag & FWRITE) == 0) {
 			error = EBADF;
+<<<<<<< HEAD
 			goto outdrop;
+=======
+			break;
+>>>>>>> origin/10.3
 		}
 
 		error = copyin(argp, (caddr_t)&alloc_struct, sizeof(alloc_struct));
 		if (error)
+<<<<<<< HEAD
 			goto outdrop;
+=======
+			break;
+>>>>>>> origin/10.3
 
 		/* now set the space allocated to 0 */
 		alloc_struct.fst_bytesalloc = 0;
@@ -1291,6 +1376,7 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 		switch (alloc_struct.fst_posmode) {
 	
 		case F_PEOFPOSMODE:
+<<<<<<< HEAD
 			if (alloc_struct.fst_offset != 0) {
 				error = EINVAL;
 				goto outdrop;
@@ -1312,6 +1398,24 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 			error = EINVAL;
 			goto outdrop;
 			}
+=======
+			if (alloc_struct.fst_offset == 0)
+				alloc_flags |= ALLOCATEFROMPEOF;
+			else
+				error = EINVAL;
+			break;
+
+		case F_VOLPOSMODE:
+			if (alloc_struct.fst_offset > 0)
+				alloc_flags |= ALLOCATEFROMVOL;
+			else
+				error = EINVAL;
+			break;
+
+		default:
+			error = EINVAL;
+			break;
+>>>>>>> origin/10.3
 		}
 		if ( (error = vnode_getwithref(vp)) == 0 ) {
 		        /*
@@ -1322,15 +1426,38 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 					      &context);
 			(void)vnode_put(vp);
 
+<<<<<<< HEAD
 			error2 = copyout((caddr_t)&alloc_struct, argp, sizeof(alloc_struct));
 
 			if (error == 0)
 				error = error2;
 		}
 		goto outdrop;
+=======
+		if (error)
+			break;
+
+		/* lock the vnode and call allocate to get the space */
+		error = vn_lock(vp, LK_EXCLUSIVE|LK_RETRY, p);
+		if (error)
+			break;
+		error = VOP_ALLOCATE(vp,alloc_struct.fst_length,alloc_flags,
+				     &alloc_struct.fst_bytesalloc, alloc_struct.fst_offset,
+				     fp->f_cred, p);
+		VOP_UNLOCK(vp, 0, p);
+
+		if (error2 = copyout((caddr_t)&alloc_struct,
+						(caddr_t)uap->arg,
+						sizeof (alloc_struct))) {
+			if (!error)
+				error = error2;
+		}
+		break;
+>>>>>>> origin/10.3
 		
 		}
 	case F_SETSIZE:
+<<<<<<< HEAD
 		if (fp->f_type != DTYPE_VNODE) {
 			error = EBADF;
 			goto out;
@@ -1342,6 +1469,16 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 		if (error)
 			goto outdrop;
 		AUDIT_ARG(value64, offset);
+=======
+		if (fp->f_type != DTYPE_VNODE)
+			return (EBADF);
+		vp = (struct vnode *)fp->f_data;
+
+		error = copyin((caddr_t)uap->arg, (caddr_t)&offset,
+					sizeof (off_t));
+		if (error)
+			break;
+>>>>>>> origin/10.3
 
 		error = vnode_getwithref(vp);
 		if (error)
@@ -1370,6 +1507,7 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 			    &context);
 		}
 
+<<<<<<< HEAD
 		(void)vnode_put(vp);
 		goto outdrop;
 
@@ -1384,6 +1522,20 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 		        fp->f_fglob->fg_flag |= FNORDAHEAD;
 
 		goto out;
+=======
+		if (!is_suser()) {
+			error = EACCES;
+			break;
+		}
+
+		/* lock the vnode and call allocate to get the space */
+		error = vn_lock(vp, LK_EXCLUSIVE|LK_RETRY, p);
+		if (error)
+			break;
+		error = VOP_TRUNCATE(vp,offset,IO_NOZEROFILL,fp->f_cred,p);
+		VOP_UNLOCK(vp,0,p);
+		break;
+>>>>>>> origin/10.3
 
 	case F_NOCACHE:
 		if (fp->f_type != DTYPE_VNODE) {
@@ -1405,7 +1557,14 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 		if (uap->arg)
 		        fp->f_fglob->fg_flag |= FNODIRECT;
 		else
+<<<<<<< HEAD
 		        fp->f_fglob->fg_flag &= ~FNODIRECT;
+=======
+			vp->v_flag |= VRAOFF;
+		simple_unlock(&vp->v_interlock);
+		error = 0;
+		break;
+>>>>>>> origin/10.3
 
 		goto out;
 
@@ -1417,7 +1576,14 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 		if (uap->arg)
 		        fp->f_fglob->fg_flag |= FSINGLE_WRITER;
 		else
+<<<<<<< HEAD
 		        fp->f_fglob->fg_flag &= ~FSINGLE_WRITER;
+=======
+			vp->v_flag &= ~VNOCACHE_DATA;
+		simple_unlock(&vp->v_interlock);
+		error = 0;
+		break;
+>>>>>>> origin/10.3
 
 		goto out;
 
@@ -1434,6 +1600,7 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 =======
 		if (error = copyin((caddr_t)uap->arg,
 					(caddr_t)&ra_struct, sizeof (ra_struct)))
+<<<<<<< HEAD
 			return(error);
 		return (VOP_IOCTL(vp, 1, (caddr_t)&ra_struct, 0, fp->f_cred, p));
 >>>>>>> origin/10.2
@@ -1446,9 +1613,49 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 			        vnode_clearnocache(vp);
 
 			(void)vnode_put(vp);
+=======
+			break;
+		error = VOP_IOCTL(vp, 1, (caddr_t)&ra_struct, 0, fp->f_cred, p);
+		break;
+
+	case F_CHKCLEAN:
+	        /*
+		 * used by regression test to determine if 
+		 * all the dirty pages (via write) have been cleaned
+		 * after a call to 'fsysnc'.
+		 */
+		if (fp->f_type != DTYPE_VNODE)
+			return (EBADF);
+		vp = (struct vnode *)fp->f_data;
+
+		error = VOP_IOCTL(vp, 5, 0, 0, fp->f_cred, p);
+		break;
+
+	case F_READBOOTSTRAP:
+	case F_WRITEBOOTSTRAP:
+		if (fp->f_type != DTYPE_VNODE)
+			return (EBADF);
+		vp = (struct vnode *)fp->f_data;
+
+		error = copyin((caddr_t)uap->arg, (caddr_t)&fbt_struct,
+				sizeof (fbt_struct));
+		if (error)
+			break;
+
+		if (uap->cmd == F_WRITEBOOTSTRAP) {
+		  /*
+		   * Make sure that we are root.  Updating the
+		   * bootstrap on a disk could be a security hole
+		   */
+			if (!is_suser()) {
+				error = EACCES;
+				break;
+			}
+>>>>>>> origin/10.3
 		}
 		goto outdrop;
 
+<<<<<<< HEAD
 	case F_CHECK_OPENEVT:
 	        if (fp->f_type != DTYPE_VNODE) {
 		        error = EBADF;
@@ -1469,18 +1676,21 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 
 			(void)vnode_put(vp);
 =======
+=======
+>>>>>>> origin/10.3
 		if (vp->v_tag != VT_HFS)	/* XXX */
 			error = EINVAL;
 		else {
 			/* lock the vnode and call VOP_IOCTL to handle the I/O */
 			error = vn_lock(vp, LK_EXCLUSIVE|LK_RETRY, p);
 			if (error)
-				return (error);
+				break;
 			error = VOP_IOCTL(vp, (uap->cmd == F_WRITEBOOTSTRAP) ? 3 : 2,
 					(caddr_t)&fbt_struct, 0, fp->f_cred, p);
 			VOP_UNLOCK(vp,0,p);
 >>>>>>> origin/10.2
 		}
+<<<<<<< HEAD
 		goto outdrop;
 
 	case F_RDADVISE: {
@@ -1492,6 +1702,37 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 		}
 		vp = (struct vnode *)fp->f_data;
 		proc_fdunlock(p);
+=======
+		break;
+
+	case F_LOG2PHYS:
+		if (fp->f_type != DTYPE_VNODE)
+			return (EBADF);
+		vp = (struct vnode *)fp->f_data;
+
+		error = vn_lock(vp, LK_EXCLUSIVE|LK_RETRY, p);
+		if (error)
+			break;
+		error = VOP_OFFTOBLK(vp, fp->f_offset, &lbn);
+		if (error)
+			break;
+		error = VOP_BLKTOOFF(vp, lbn, &offset);
+		if (error)
+			break;
+		error = VOP_BMAP(vp, lbn, &devvp, &bn, 0);
+		VOP_DEVBLOCKSIZE(devvp, &devBlockSize);
+		VOP_UNLOCK(vp, 0, p);
+		if (!error) {
+			l2p_struct.l2p_flags = 0;	/* for now */
+			l2p_struct.l2p_contigbytes = 0;	/* for now */
+			l2p_struct.l2p_devoffset = bn * devBlockSize;
+			l2p_struct.l2p_devoffset += fp->f_offset - offset;
+			error = copyout((caddr_t)&l2p_struct,
+					(caddr_t)uap->arg,
+					sizeof (l2p_struct));
+		}
+		break;
+>>>>>>> origin/10.3
 
 		if ( (error = copyin(argp, (caddr_t)&ra_struct, sizeof(ra_struct))) )
 			goto outdrop;
@@ -1503,7 +1744,25 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 		goto outdrop;
 		}
 
+<<<<<<< HEAD
         case F_FLUSH_DATA:
+=======
+		len = MAXPATHLEN;
+		MALLOC(pathbuf, char *, len, M_TEMP, M_WAITOK);
+
+		error = vn_lock(vp, LK_EXCLUSIVE|LK_RETRY, p);
+		if (error) {
+		    FREE(pathbuf, M_TEMP);
+		    break;
+		}
+		error = vn_getpath(vp, pathbuf, &len);
+		if (error == 0)
+			error = copyout((caddr_t)pathbuf, (caddr_t)uap->arg, len);
+		VOP_UNLOCK(vp, 0, p);
+		FREE(pathbuf, M_TEMP);
+		break;
+	}
+>>>>>>> origin/10.3
 
                 if (fp->f_type != DTYPE_VNODE) {
                         error = EBADF;
@@ -1512,8 +1771,33 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
                 vp = (struct vnode *)fp->f_data;
                 proc_fdunlock(p);
 
+<<<<<<< HEAD
                 if ( (error = vnode_getwithref(vp)) == 0 ) {
                         error = cluster_push(vp, 0);
+=======
+		error = vn_lock(vp, LK_EXCLUSIVE|LK_RETRY, p);
+		if (error)
+			break;
+
+		error = VOP_IOCTL(vp, 6, (caddr_t)NULL, 0, fp->f_cred, p);
+		VOP_UNLOCK(vp, 0, p);
+		break;
+	}
+	    
+	default:
+		return (EINVAL);
+	}
+
+	/*
+	 * Fall thru to here for all vnode operations.
+	 * We audit the path after the call to avoid
+	 * triggering file table state changes during
+	 * the audit pathname allocation.
+	 */
+	AUDIT_ARG(vnpath, vp, ARG_VNODE1);
+	return error;
+}
+>>>>>>> origin/10.3
 
                         (void)vnode_put(vp);
                 }
@@ -1528,6 +1812,7 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 		size_t a_size = 0;
 		size_t run = 0;
 
+<<<<<<< HEAD
 		if (uap->cmd == F_LOG2PHYS_EXT) {
 			error = copyin(argp, (caddr_t)&l2p_struct, sizeof(l2p_struct));
 			if (error)
@@ -1562,6 +1847,13 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 				error = EINVAL;
 				goto outdrop;
 			}
+=======
+	AUDIT_SYSCLOSE(p, fd);
+	if ((u_int)fd >= fdp->fd_nfiles ||
+			(fp = fdp->fd_ofiles[fd]) == NULL ||
+			(fdp->fd_ofileflags[fd] & UF_RESERVED))
+		return (EBADF);
+>>>>>>> origin/10.3
 
 			a_size = MIN((uint64_t)l2p_struct.l2p_contigbytes, SIZE_MAX);
 		} else {
@@ -5116,7 +5408,41 @@ fdfree(proc_t p)
 		vrele(tvp);
 	}
 	FREE_ZONE(fdp, sizeof *fdp, M_FILEDESC);
+<<<<<<< HEAD
 >>>>>>> origin/10.1
+=======
+
+	// XXXdbg
+	{ 
+	    void clean_up_fmod_watch(struct proc *p);
+	    clean_up_fmod_watch(p);
+	}
+}
+
+static int
+closef_finish(fp, p)
+	register struct file *fp;
+	register struct proc *p;
+{
+	struct vnode *vp;
+	struct flock lf;
+	int error;
+
+	if ((fp->f_flag & FHASLOCK) && fp->f_type == DTYPE_VNODE) {
+		lf.l_whence = SEEK_SET;
+		lf.l_start = 0;
+		lf.l_len = 0;
+		lf.l_type = F_UNLCK;
+		vp = (struct vnode *)fp->f_data;
+		(void) VOP_ADVLOCK(vp, (caddr_t)fp, F_UNLCK, &lf, F_FLOCK);
+	}
+	if (fp->f_ops)
+		error = fo_close(fp, p);
+	else
+		error = 0;
+	ffree(fp);
+	return (error);
+>>>>>>> origin/10.3
 }
 
 /*

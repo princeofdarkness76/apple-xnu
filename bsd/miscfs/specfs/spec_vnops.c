@@ -8,6 +8,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
 <<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -32,11 +33,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -97,6 +108,7 @@
 #include <sys/uio_internal.h>
 #include <sys/resource.h>
 #include <miscfs/specfs/specdev.h>
+#include <miscfs/specfs/lockf.h>
 #include <vfs/vfs_support.h>
 #include <kern/assert.h>
 #include <kern/task.h>
@@ -127,6 +139,7 @@ char	devcls[] = "devcls";
 
 int (**spec_vnodeop_p)(void *);
 struct vnodeopv_entry_desc spec_vnodeop_entries[] = {
+<<<<<<< HEAD
 	{ &vnop_default_desc, (VOPFUNC)vn_default_error },
 	{ &vnop_lookup_desc, (VOPFUNC)spec_lookup },		/* lookup */
 	{ &vnop_create_desc, (VOPFUNC)err_create },		/* create */
@@ -163,6 +176,58 @@ struct vnodeopv_entry_desc spec_vnodeop_entries[] = {
 	{ &vnop_blktooff_desc, (VOPFUNC)spec_blktooff },		/* blktooff */
 	{ &vnop_offtoblk_desc, (VOPFUNC)spec_offtoblk },		/* offtoblk */
 	{ &vnop_blockmap_desc, (VOPFUNC)spec_blockmap },		/* blockmap */
+=======
+	{ &vop_default_desc, (VOPFUNC)vn_default_error },
+	{ &vop_lookup_desc, (VOPFUNC)spec_lookup },		/* lookup */
+	{ &vop_create_desc, (VOPFUNC)err_create },		/* create */
+	{ &vop_mknod_desc, (VOPFUNC)err_mknod },		/* mknod */
+	{ &vop_open_desc, (VOPFUNC)spec_open },			/* open */
+	{ &vop_close_desc, (VOPFUNC)spec_close },		/* close */
+	{ &vop_access_desc, (VOPFUNC)spec_access },		/* access */
+	{ &vop_getattr_desc, (VOPFUNC)spec_getattr },		/* getattr */
+	{ &vop_setattr_desc, (VOPFUNC)spec_setattr },		/* setattr */
+	{ &vop_read_desc, (VOPFUNC)spec_read },			/* read */
+	{ &vop_write_desc, (VOPFUNC)spec_write },		/* write */
+	{ &vop_lease_desc, (VOPFUNC)nop_lease },		/* lease */
+	{ &vop_ioctl_desc, (VOPFUNC)spec_ioctl },		/* ioctl */
+	{ &vop_select_desc, (VOPFUNC)spec_select },		/* select */
+	{ &vop_revoke_desc, (VOPFUNC)nop_revoke },		/* revoke */
+	{ &vop_mmap_desc, (VOPFUNC)err_mmap },			/* mmap */
+	{ &vop_fsync_desc, (VOPFUNC)spec_fsync },		/* fsync */
+	{ &vop_seek_desc, (VOPFUNC)err_seek },			/* seek */
+	{ &vop_remove_desc, (VOPFUNC)err_remove },		/* remove */
+	{ &vop_link_desc, (VOPFUNC)err_link },			/* link */
+	{ &vop_rename_desc, (VOPFUNC)err_rename },		/* rename */
+	{ &vop_mkdir_desc, (VOPFUNC)err_mkdir },		/* mkdir */
+	{ &vop_rmdir_desc, (VOPFUNC)err_rmdir },		/* rmdir */
+	{ &vop_symlink_desc, (VOPFUNC)err_symlink },		/* symlink */
+	{ &vop_readdir_desc, (VOPFUNC)err_readdir },		/* readdir */
+	{ &vop_readlink_desc, (VOPFUNC)err_readlink },		/* readlink */
+	{ &vop_abortop_desc, (VOPFUNC)err_abortop },		/* abortop */
+	{ &vop_inactive_desc, (VOPFUNC)nop_inactive },		/* inactive */
+	{ &vop_reclaim_desc, (VOPFUNC)nop_reclaim },		/* reclaim */
+	{ &vop_lock_desc, (VOPFUNC)nop_lock },			/* lock */
+	{ &vop_unlock_desc, (VOPFUNC)nop_unlock },		/* unlock */
+	{ &vop_bmap_desc, (VOPFUNC)spec_bmap },			/* bmap */
+	{ &vop_strategy_desc, (VOPFUNC)spec_strategy },		/* strategy */
+	{ &vop_print_desc, (VOPFUNC)spec_print },		/* print */
+	{ &vop_islocked_desc, (VOPFUNC)nop_islocked },		/* islocked */
+	{ &vop_pathconf_desc, (VOPFUNC)spec_pathconf },		/* pathconf */
+	{ &vop_advlock_desc, (VOPFUNC)spec_advlock },		/* advlock */
+	{ &vop_blkatoff_desc, (VOPFUNC)err_blkatoff },		/* blkatoff */
+	{ &vop_valloc_desc, (VOPFUNC)err_valloc },		/* valloc */
+	{ &vop_vfree_desc, (VOPFUNC)err_vfree },		/* vfree */
+	{ &vop_truncate_desc, (VOPFUNC)nop_truncate },		/* truncate */
+	{ &vop_update_desc, (VOPFUNC)nop_update },		/* update */
+	{ &vop_bwrite_desc, (VOPFUNC)spec_bwrite },		/* bwrite */
+	{ &vop_devblocksize_desc, (VOPFUNC)spec_devblocksize }, /* devblocksize */
+	{ &vop_pagein_desc, (VOPFUNC)err_pagein },		/* Pagein */
+	{ &vop_pageout_desc, (VOPFUNC)err_pageout },		/* Pageout */
+        { &vop_copyfile_desc, (VOPFUNC)err_copyfile },		/* Copyfile */
+	{ &vop_blktooff_desc, (VOPFUNC)spec_blktooff },		/* blktooff */
+	{ &vop_offtoblk_desc, (VOPFUNC)spec_offtoblk },		/* offtoblk */
+	{ &vop_cmap_desc, (VOPFUNC)spec_cmap },		/* cmap */
+>>>>>>> origin/10.3
 	{ (struct vnodeop_desc*)NULL, (int(*)())NULL }
 };
 struct vnodeopv_desc spec_vnodeop_opv_desc =
@@ -801,7 +866,105 @@ spec_kqfilter(vnode_t vp, struct knote *kn)
 }
 
 /*
+<<<<<<< HEAD
  * Synch buffers associated with a block device
+=======
+ * Advisory record locking support
+ */
+int
+spec_advlock(ap)
+	struct vop_advlock_args /* {
+		struct vnode *a_vp;
+		caddr_t  a_id;
+		int  a_op;
+		struct flock *a_fl;
+		int  a_flags;
+	} */ *ap;
+{
+	register struct flock *fl = ap->a_fl;
+	register struct lockf *lock;
+	off_t start, end;
+	int error;
+
+	/*
+	 * Avoid the common case of unlocking when inode has no locks.
+	 */
+	if (ap->a_vp->v_specinfo->si_lockf == (struct lockf *)0) {
+		if (ap->a_op != F_SETLK) {
+			fl->l_type = F_UNLCK;
+			return (0);
+		}
+	}
+	/*
+	 * Convert the flock structure into a start and end.
+	 */
+	switch (fl->l_whence) {
+
+	case SEEK_SET:
+	case SEEK_CUR:
+		/*
+		 * Caller is responsible for adding any necessary offset
+		 * when SEEK_CUR is used.
+		 */
+		start = fl->l_start;
+		break;
+
+	case SEEK_END:
+		start = ap->a_vp->v_specinfo->si_devsize + fl->l_start;
+		break;
+
+	default:
+		return (EINVAL);
+	}
+	if (fl->l_len == 0)
+		end = -1;
+	else if (fl->l_len > 0)
+		end = start + fl->l_len - 1;
+	else { /* l_len is negative */
+		end = start - 1;
+		start += fl->l_len;
+	}
+	if (start < 0)
+		return (EINVAL);
+	/*
+	 * Create the lockf structure
+	 */
+	MALLOC(lock, struct lockf *, sizeof *lock, M_LOCKF, M_WAITOK);
+	lock->lf_start = start;
+	lock->lf_end = end;
+	lock->lf_id = ap->a_id;
+	lock->lf_specinfo = ap->a_vp->v_specinfo;
+	lock->lf_type = fl->l_type;
+	lock->lf_next = (struct lockf *)0;
+	TAILQ_INIT(&lock->lf_blkhd);
+	lock->lf_flags = ap->a_flags;
+	/*
+	 * Do the requested operation.
+	 */
+	switch(ap->a_op) {
+	case F_SETLK:
+		return (spec_lf_setlock(lock));
+
+	case F_UNLCK:
+		error = spec_lf_clearlock(lock);
+		FREE(lock, M_LOCKF);
+		return (error);
+
+	case F_GETLK:
+		error = spec_lf_getlock(lock, fl);
+		FREE(lock, M_LOCKF);
+		return (error);
+	
+	default:
+		_FREE(lock, M_LOCKF);
+		return (EINVAL);
+	}
+	/* NOTREACHED */
+}
+
+/*
+ * This is a noop, simply returning what one has been given.
+>>>>>>> origin/10.3
  */
 int
 spec_fsync_internal(vnode_t vp, int waitfor, __unused vfs_context_t context)

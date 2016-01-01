@@ -19,8 +19,13 @@
 =======
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -40,6 +45,15 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
 =======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
  * 
  * @APPLE_LICENSE_HEADER_END@
 >>>>>>> origin/10.2
@@ -185,8 +199,12 @@ static void if_rtmtu_update(struct ifnet *);
 
 static int if_clone_list(int, int *, user_addr_t);
 
+static struct	if_clone *if_clone_lookup(const char *, int *);
+static int	if_clone_list(struct if_clonereq *);
+
 MALLOC_DEFINE(M_IFADDR, "ifaddr", "interface address");
 
+<<<<<<< HEAD
 struct	ifnethead ifnet_head = TAILQ_HEAD_INITIALIZER(ifnet_head);
 
 static int	if_cloners_count;
@@ -238,6 +256,14 @@ static decl_lck_mtx_data(, ifma_trash_lock);
 
 #define	IFMA_ZONE_MAX		64		/* maximum elements in zone */
 #define	IFMA_ZONE_NAME		"ifmultiaddr"	/* zone name */
+=======
+int	ifqmaxlen = IFQ_MAXLEN;
+struct	ifnethead ifnet = TAILQ_HEAD_INITIALIZER(ifnet);
+struct ifmultihead ifma_lostlist = LIST_HEAD_INITIALIZER(ifma_lostlist);
+>>>>>>> origin/10.3
+
+static int	if_cloners_count;
+LIST_HEAD(, if_clone) if_cloners = LIST_HEAD_INITIALIZER(if_cloners);
 
 #if INET6
 /*
@@ -248,6 +274,7 @@ extern void	nd6_setmtu(struct ifnet *);
 extern lck_mtx_t *nd6_mutex;
 #endif
 
+<<<<<<< HEAD
 SYSCTL_NODE(_net, PF_LINK, link, CTLFLAG_RW|CTLFLAG_LOCKED, 0, "Link layers");
 SYSCTL_NODE(_net_link, 0, generic, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
 	"Generic link-management");
@@ -283,6 +310,9 @@ ifa_init(void)
 	lck_mtx_init(&ifma_trash_lock, ifa_mtx_grp, ifa_mtx_attr);
 	TAILQ_INIT(&ifma_trash_head);
 }
+=======
+#define M_CLONE		M_IFADDR
+>>>>>>> origin/10.3
 
 /*
  * Network interface utility routines.
@@ -294,12 +324,100 @@ ifa_init(void)
 int if_index;
 struct ifaddr **ifnet_addrs;
 struct ifnet **ifindex2ifnet;
+<<<<<<< HEAD
+=======
+
+#define INITIAL_IF_INDEXLIM	8
+
+/*
+ * Function: if_next_index
+ * Purpose:
+ *   Return the next available interface index.  
+ *   Grow the ifnet_addrs[] and ifindex2ifnet[] arrays to accomodate the 
+ *   added entry when necessary.
+ *
+ * Note:
+ *   ifnet_addrs[] is indexed by (if_index - 1), whereas
+ *   ifindex2ifnet[] is indexed by ifp->if_index.  That requires us to
+ *   always allocate one extra element to hold ifindex2ifnet[0], which
+ *   is unused.
+ */
+static int
+if_next_index(void)
+{
+	static int 	if_indexlim = 0;
+	static int 	if_list_growing = 0;
+	int		new_index;
+
+	while (if_list_growing) {
+		/* wait until list is done growing */
+		(void)tsleep((caddr_t)&ifnet_addrs, PZERO, "if_next_index", 0);
+	}
+	new_index = ++if_index;
+	if (if_index > if_indexlim) {
+		unsigned 	n;
+		int		new_if_indexlim;
+		caddr_t		new_ifnet_addrs;
+		caddr_t		new_ifindex2ifnet;
+		caddr_t		old_ifnet_addrs;
+
+		/* mark list as growing */
+		if_list_growing = 1;
+
+		old_ifnet_addrs = (caddr_t)ifnet_addrs;
+		if (ifnet_addrs == NULL) {
+			new_if_indexlim = INITIAL_IF_INDEXLIM;
+		} else {
+			new_if_indexlim = if_indexlim << 1;
+		}
+
+		/* allocate space for the larger arrays */
+		n = (2 * new_if_indexlim + 1) * sizeof(caddr_t);
+		new_ifnet_addrs = _MALLOC(n, M_IFADDR, M_WAITOK);
+		new_ifindex2ifnet = new_ifnet_addrs 
+			+ new_if_indexlim * sizeof(caddr_t);
+		bzero(new_ifnet_addrs, n);
+		if (ifnet_addrs != NULL) {
+			/* copy the existing data */
+			bcopy((caddr_t)ifnet_addrs, new_ifnet_addrs,
+			      if_indexlim * sizeof(caddr_t));
+			bcopy((caddr_t)ifindex2ifnet,
+			      new_ifindex2ifnet,
+			      (if_indexlim + 1) * sizeof(caddr_t));
+		}
+
+		/* switch to the new tables and size */
+		ifnet_addrs = (struct ifaddr **)new_ifnet_addrs;
+		ifindex2ifnet = (struct ifnet **)new_ifindex2ifnet;
+		if_indexlim = new_if_indexlim;
+
+		/* release the old data */
+		if (old_ifnet_addrs != NULL) {
+			_FREE((caddr_t)old_ifnet_addrs, M_IFADDR);
+		}
+
+		/* wake up others that might be blocked */
+		if_list_growing = 0;
+		wakeup((caddr_t)&ifnet_addrs);
+	}
+	return (new_index);
+
+}
+>>>>>>> origin/10.3
 
 __private_extern__ void
 if_attach_ifa(struct ifnet *ifp, struct ifaddr *ifa)
 {
+<<<<<<< HEAD
 	if_attach_ifa_common(ifp, ifa, 0);
 }
+=======
+	unsigned socksize, ifasize;
+	int namelen, masklen;
+	char workbuf[64];
+	register struct sockaddr_dl *sdl;
+	register struct ifaddr *ifa;
+>>>>>>> origin/10.3
 
 __private_extern__ void
 if_attach_link_ifa(struct ifnet *ifp, struct ifaddr *ifa)
@@ -307,6 +425,7 @@ if_attach_link_ifa(struct ifnet *ifp, struct ifaddr *ifa)
 	if_attach_ifa_common(ifp, ifa, 1);
 }
 
+<<<<<<< HEAD
 static void
 if_attach_ifa_common(struct ifnet *ifp, struct ifaddr *ifa, int link)
 {
@@ -341,6 +460,309 @@ if_attach_ifa_common(struct ifnet *ifp, struct ifaddr *ifa, int link)
 
 __private_extern__ void
 if_detach_ifa(struct ifnet *ifp, struct ifaddr *ifa)
+=======
+	/*
+	 * XXX -
+	 * The old code would work if the interface passed a pre-existing
+	 * chain of ifaddrs to this code.  We don't trust our callers to
+	 * properly initialize the tailq, however, so we no longer allow
+	 * this unlikely case.
+	 */
+	TAILQ_INIT(&ifp->if_addrhead);
+	TAILQ_INIT(&ifp->if_prefixhead);
+	LIST_INIT(&ifp->if_multiaddrs);
+	getmicrotime(&ifp->if_lastchange);
+
+	if ((ifp->if_eflags & IFEF_REUSE) == 0 || ifp->if_index == 0) {
+		/* allocate a new entry */
+		ifp->if_index = if_next_index();
+		ifindex2ifnet[ifp->if_index] = ifp;
+
+		/*
+		 * create a Link Level name for this device
+		 */
+		namelen = snprintf(workbuf, sizeof(workbuf),
+				   "%s%d", ifp->if_name, ifp->if_unit);
+#define _offsetof(t, m) ((int)((caddr_t)&((t *)0)->m))
+		masklen = _offsetof(struct sockaddr_dl, sdl_data[0]) + namelen;
+		socksize = masklen + ifp->if_addrlen;
+#define ROUNDUP(a) (1 + (((a) - 1) | (sizeof(long) - 1)))
+		if (socksize < sizeof(*sdl))
+			socksize = sizeof(*sdl);
+		socksize = ROUNDUP(socksize);
+		ifasize = sizeof(*ifa) + 2 * socksize;
+		ifa = (struct ifaddr *) _MALLOC(ifasize, M_IFADDR, M_WAITOK);
+		if (ifa) {
+			bzero((caddr_t)ifa, ifasize);
+			sdl = (struct sockaddr_dl *)(ifa + 1);
+			sdl->sdl_len = socksize;
+			sdl->sdl_family = AF_LINK;
+			bcopy(workbuf, sdl->sdl_data, namelen);
+			sdl->sdl_nlen = namelen;
+			sdl->sdl_index = ifp->if_index;
+			sdl->sdl_type = ifp->if_type;
+			ifnet_addrs[ifp->if_index - 1] = ifa;
+			ifa->ifa_ifp = ifp;
+			ifa->ifa_rtrequest = link_rtrequest;
+			ifa->ifa_addr = (struct sockaddr *)sdl;
+			sdl = (struct sockaddr_dl *)(socksize + (caddr_t)sdl);
+			ifa->ifa_netmask = (struct sockaddr *)sdl;
+			sdl->sdl_len = masklen;
+			while (namelen != 0)
+				sdl->sdl_data[--namelen] = 0xff;
+		}
+	} else {
+		ifa = ifnet_addrs[ifp->if_index - 1];
+	}
+	if (ifa != NULL) {
+		TAILQ_INSERT_HEAD(&ifp->if_addrhead, ifa, ifa_link);
+	}
+	TAILQ_INSERT_TAIL(&ifnet, ifp, if_link);
+}
+
+/*
+ * Create a clone network interface.
+ */
+static int
+if_clone_create(char *name, int len)
+{
+	struct if_clone *ifc;
+	char *dp;
+	int wildcard, bytoff, bitoff;
+	int unit;
+	int err;
+
+	ifc = if_clone_lookup(name, &unit);
+	if (ifc == NULL)
+		return (EINVAL);
+
+	if (ifunit(name) != NULL)
+		return (EEXIST);
+
+	bytoff = bitoff = 0;
+	wildcard = (unit < 0);
+	/*
+	 * Find a free unit if none was given.
+	 */
+	if (wildcard) {
+		while ((bytoff < ifc->ifc_bmlen)
+		    && (ifc->ifc_units[bytoff] == 0xff))
+			bytoff++;
+		if (bytoff >= ifc->ifc_bmlen)
+			return (ENOSPC);
+		while ((ifc->ifc_units[bytoff] & (1 << bitoff)) != 0)
+			bitoff++;
+		unit = (bytoff << 3) + bitoff;
+	}
+
+	if (unit > ifc->ifc_maxunit)
+		return (ENXIO);
+
+	err = (*ifc->ifc_create)(ifc, unit);
+	if (err != 0)
+		return (err);
+
+	if (!wildcard) {
+		bytoff = unit >> 3;
+		bitoff = unit - (bytoff << 3);
+	}
+
+	/*
+	 * Allocate the unit in the bitmap.
+	 */
+	KASSERT((ifc->ifc_units[bytoff] & (1 << bitoff)) == 0,
+	    ("%s: bit is already set", __func__));
+	ifc->ifc_units[bytoff] |= (1 << bitoff);
+
+	/* In the wildcard case, we need to update the name. */
+	if (wildcard) {
+		for (dp = name; *dp != '\0'; dp++);
+		if (snprintf(dp, len - (dp-name), "%d", unit) >
+		    len - (dp-name) - 1) {
+			/*
+			 * This can only be a programmer error and
+			 * there's no straightforward way to recover if
+			 * it happens.
+			 */
+			panic("if_clone_create(): interface name too long");
+		}
+
+	}
+
+	return (0);
+}
+
+/*
+ * Destroy a clone network interface.
+ */
+int
+if_clone_destroy(const char *name)
+{
+	struct if_clone *ifc;
+	struct ifnet *ifp;
+	int bytoff, bitoff;
+	int unit;
+
+	ifc = if_clone_lookup(name, &unit);
+	if (ifc == NULL)
+		return (EINVAL);
+
+	if (unit < ifc->ifc_minifs)
+		return (EINVAL);
+
+	ifp = ifunit(name);
+	if (ifp == NULL)
+		return (ENXIO);
+
+	if (ifc->ifc_destroy == NULL)
+		return (EOPNOTSUPP);
+
+	(*ifc->ifc_destroy)(ifp);
+
+	/*
+	 * Compute offset in the bitmap and deallocate the unit.
+	 */
+	bytoff = unit >> 3;
+	bitoff = unit - (bytoff << 3);
+	KASSERT((ifc->ifc_units[bytoff] & (1 << bitoff)) != 0,
+	    ("%s: bit is already cleared", __func__));
+	ifc->ifc_units[bytoff] &= ~(1 << bitoff);
+	return (0);
+}
+
+/*
+ * Look up a network interface cloner.
+ */
+
+static struct if_clone *
+if_clone_lookup(const char *name, int *unitp)
+{
+	struct if_clone *ifc;
+	const char *cp;
+	int i;
+
+	for (ifc = LIST_FIRST(&if_cloners); ifc != NULL;) {
+		for (cp = name, i = 0; i < ifc->ifc_namelen; i++, cp++) {
+			if (ifc->ifc_name[i] != *cp)
+				goto next_ifc;
+		}
+		goto found_name;
+ next_ifc:
+		ifc = LIST_NEXT(ifc, ifc_list);
+	}
+
+	/* No match. */
+	return ((struct if_clone *)NULL);
+
+ found_name:
+	if (*cp == '\0') {
+		i = -1;
+	} else {
+		for (i = 0; *cp != '\0'; cp++) {
+			if (*cp < '0' || *cp > '9') {
+				/* Bogus unit number. */
+				return (NULL);
+			}
+			i = (i * 10) + (*cp - '0');
+		}
+	}
+
+	if (unitp != NULL)
+		*unitp = i;
+	return (ifc);
+}
+
+/*
+ * Register a network interface cloner.
+ */
+void
+if_clone_attach(struct if_clone *ifc)
+{
+	int bytoff, bitoff;
+	int err;
+	int len, maxclone;
+	int unit;
+
+	KASSERT(ifc->ifc_minifs - 1 <= ifc->ifc_maxunit,
+	    ("%s: %s requested more units then allowed (%d > %d)",
+	    __func__, ifc->ifc_name, ifc->ifc_minifs,
+	    ifc->ifc_maxunit + 1));
+	/*
+	 * Compute bitmap size and allocate it.
+	 */
+	maxclone = ifc->ifc_maxunit + 1;
+	len = maxclone >> 3;
+	if ((len << 3) < maxclone)
+		len++;
+	ifc->ifc_units = _MALLOC(len, M_CLONE, M_WAITOK | M_ZERO);
+	bzero(ifc->ifc_units, len);
+	ifc->ifc_bmlen = len;
+
+	LIST_INSERT_HEAD(&if_cloners, ifc, ifc_list);
+	if_cloners_count++;
+
+	for (unit = 0; unit < ifc->ifc_minifs; unit++) {
+		err = (*ifc->ifc_create)(ifc, unit);
+		KASSERT(err == 0,
+		    ("%s: failed to create required interface %s%d",
+		    __func__, ifc->ifc_name, unit));
+
+		/* Allocate the unit in the bitmap. */
+		bytoff = unit >> 3;
+		bitoff = unit - (bytoff << 3);
+		ifc->ifc_units[bytoff] |= (1 << bitoff);
+	}
+}
+
+/*
+ * Unregister a network interface cloner.
+ */
+void
+if_clone_detach(struct if_clone *ifc)
+{
+
+	LIST_REMOVE(ifc, ifc_list);
+	FREE(ifc->ifc_units, M_CLONE);
+	if_cloners_count--;
+}
+
+/*
+ * Provide list of interface cloners to userspace.
+ */
+static int
+if_clone_list(struct if_clonereq *ifcr)
+{
+	char outbuf[IFNAMSIZ], *dst;
+	struct if_clone *ifc;
+	int count, error = 0;
+
+	ifcr->ifcr_total = if_cloners_count;
+	if ((dst = ifcr->ifcr_buffer) == NULL) {
+		/* Just asking how many there are. */
+		return (0);
+	}
+
+	if (ifcr->ifcr_count < 0)
+		return (EINVAL);
+
+	count = (if_cloners_count < ifcr->ifcr_count) ?
+	    if_cloners_count : ifcr->ifcr_count;
+
+	for (ifc = LIST_FIRST(&if_cloners); ifc != NULL && count != 0;
+	     ifc = LIST_NEXT(ifc, ifc_list), count--, dst += IFNAMSIZ) {
+		strncpy(outbuf, ifc->ifc_name, IFNAMSIZ - 1);
+		error = copyout(outbuf, dst, IFNAMSIZ);
+		if (error)
+			break;
+	}
+
+	return (error);
+}
+
+__private_extern__ int
+ifa_foraddr(addr)
+	unsigned int addr;
+>>>>>>> origin/10.3
 {
 	if_detach_ifa_common(ifp, ifa, 0);
 }
@@ -2272,12 +2694,32 @@ ifioctl_ifreq(struct socket *so, u_long cmd, struct ifreq *ifr, struct proc *p)
 			return (error);
 		return (if_clone_destroy(ifr->ifr_name));
 	}
+<<<<<<< HEAD
 
 	/*
 	 * ioctls which require ifp.  Note that we acquire dlil_ifnet_lock
 	 * here to ensure that the ifnet, if found, has been fully attached.
 	 */
 	dlil_if_lock();
+=======
+	ifr = (struct ifreq *)data;
+
+	switch (cmd) {
+	case SIOCIFCREATE:
+	case SIOCIFDESTROY:
+		error = suser(p->p_ucred, &p->p_acflag);
+		if (error)
+			return (error);
+		return ((cmd == SIOCIFCREATE) ?
+			if_clone_create(ifr->ifr_name, sizeof(ifr->ifr_name)) :
+			if_clone_destroy(ifr->ifr_name));
+#if 0
+	case SIOCIFGCLONERS:
+		return (if_clone_list((struct if_clonereq *)data));
+#endif 0
+	}
+
+>>>>>>> origin/10.3
 	ifp = ifunit(ifr->ifr_name);
 	dlil_if_unlock();
 
@@ -2538,6 +2980,14 @@ ifioctl_ifreq(struct socket *so, u_long cmd, struct ifreq *ifr, struct proc *p)
 		ifnet_touch_lastchange(ifp);
 		break;
 
+<<<<<<< HEAD
+=======
+	case SIOCSETVLAN:
+		if (ifp->if_type != IFT_L2VLAN) {
+			return (EOPNOTSUPP);
+		}
+	case SIOCSIFPHYADDR:
+>>>>>>> origin/10.3
 	case SIOCDIFPHYADDR:
 	case SIOCSIFMEDIA:
 	case SIOCSIFGENERIC:
@@ -2596,11 +3046,22 @@ ifioctl_ifreq(struct socket *so, u_long cmd, struct ifreq *ifr, struct proc *p)
 		error = ifnet_ioctl(ifp, SOCK_DOM(so), cmd, (caddr_t)ifr);
 		break;
 
+<<<<<<< HEAD
 	case SIOCGIFWAKEFLAGS:
 		ifnet_lock_shared(ifp);
 		ifr->ifr_wake_flags = ifnet_get_wake_flags(ifp);
 		ifnet_lock_done(ifp);
 		break;
+=======
+		return dlil_ioctl(so->so_proto->pr_domain->dom_family, 
+				   ifp, cmd, (caddr_t) data);
+	case SIOCGETVLAN:
+		if (ifp->if_type != IFT_L2VLAN) {
+			return (EOPNOTSUPP);
+		}
+		return dlil_ioctl(so->so_proto->pr_domain->dom_family, 
+				   ifp, cmd, (caddr_t) data);
+>>>>>>> origin/10.3
 
 	case SIOCGIFGETRTREFCNT:
 		ifnet_lock_shared(ifp);

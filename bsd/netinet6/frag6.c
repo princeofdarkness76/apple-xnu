@@ -171,12 +171,16 @@ frag6_init(void)
 	/* Initialize IPv6 reassembly queue. */
 	ip6q.ip6q_next = ip6q.ip6q_prev = &ip6q;
 
+<<<<<<< HEAD
 	/* same limits as IPv4 */
 	ip6_maxfragpackets = nmbclusters / 32;
 	ip6_maxfrags = ip6_maxfragpackets * 2;
 	ip6q_updateparams();
 	lck_mtx_unlock(&ip6qlock);
 }
+=======
+	ip6_maxfragpackets = nmbclusters / 32;
+>>>>>>> origin/10.3
 
 static void
 frag6_save_context(struct mbuf *m, int val)

@@ -1,8 +1,13 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
 <<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,11 +33,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -463,10 +478,13 @@ union union_vfsidctl { /* the fields vc_vers and vc_fsid are compatible */
 #define VFS_CTL_NEWADDR	0x00010004	/* reconnect to new address */
 #define VFS_CTL_TIMEO	0x00010005	/* set timeout for vfs notification */
 #define VFS_CTL_NOLOCKS	0x00010006	/* disable file locking */
+<<<<<<< HEAD
 #define VFS_CTL_SADDR	0x00010007	/* get server address */
 #define VFS_CTL_DISC    0x00010008	/* server disconnected */
 #define VFS_CTL_SERVERINFO  0x00010009  /* information about fs server */
 #define VFS_CTL_NSTATUS 0x0001000A	/* netfs mount status */
+=======
+>>>>>>> origin/10.3
 
 struct vfsquery {
 	u_int32_t	vq_flags;
@@ -496,12 +514,22 @@ struct netfs_status {
 #define VQ_MOUNT	0x0008	/* new filesystem arrived */
 #define VQ_UNMOUNT	0x0010	/* filesystem has left */
 #define VQ_DEAD		0x0020	/* filesystem is dead, needs force unmount */
+<<<<<<< HEAD
 #define VQ_ASSIST	0x0040	/* filesystem needs assistance from external program */
 #define VQ_NOTRESPLOCK	0x0080	/* server lockd down */
 #define VQ_UPDATE	0x0100	/* filesystem information has changed */
 #define VQ_VERYLOWDISK	0x0200	/* file system has *very* little disk space left */
 #define VQ_SYNCEVENT	0x0400	/* a sync just happened (not set by kernel starting Mac OS X 10.9) */
 #define VQ_SERVEREVENT  0x0800  /* server issued notification/warning */
+=======
+#define VQ_ASSIST	0x0040	/* filesystem needs assistance from external
+				   program */
+#define VQ_NOTRESPLOCK	0x0080	/* server lockd down */
+#define VQ_FLAG0100	0x0100	/* placeholder */
+#define VQ_FLAG0200	0x0200	/* placeholder */
+#define VQ_FLAG0400	0x0400	/* placeholder */
+#define VQ_FLAG0800	0x0800	/* placeholder */
+>>>>>>> origin/10.3
 #define VQ_FLAG1000	0x1000	/* placeholder */
 #define VQ_FLAG2000	0x2000	/* placeholder */
 #define VQ_FLAG4000	0x4000	/* placeholder */

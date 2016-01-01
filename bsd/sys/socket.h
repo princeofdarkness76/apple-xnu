@@ -4,6 +4,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
 <<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -28,11 +29,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -890,6 +901,7 @@ struct user32_sa_endpoints {
 #define MSG_HAVEMORE	0x2000		/* Data ready to be read */
 #define MSG_RCVMORE	0x4000		/* Data remains in current pkt */
 #endif
+<<<<<<< HEAD
 #ifdef KERNEL_PRIVATE
 #define MSG_COMPAT      0x8000		/* deprecated */
 #endif /* KERNEL_PRIVATE */
@@ -902,6 +914,10 @@ struct user32_sa_endpoints {
 #define MSG_USEUPCALL	0x80000000 /* Inherit upcall in sock_accept */
 #endif
 #endif	/* (!_POSIX_C_SOURCE || _DARWIN_C_SOURCE) */
+=======
+#define MSG_COMPAT      0x8000		/* used in sendit() */
+#define MSG_NEEDSA	0x10000		/* Fail receive if socket address cannot be allocated */
+>>>>>>> origin/10.3
 
 /*
  * Header for ancillary data objects in msg_control buffer.

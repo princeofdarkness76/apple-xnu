@@ -4,6 +4,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
 <<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -28,11 +29,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -536,6 +547,51 @@ icmp_input(struct mbuf *m, int hlen)
 			printf("deliver to protocol %d\n", icp->icmp_ip.ip_p);
 #endif
 		icmpsrc.sin_addr = icp->icmp_ip.ip_dst;
+<<<<<<< HEAD
+=======
+#if 1
+		/*
+		 * MTU discovery:
+		 * If we got a needfrag and there is a host route to the
+		 * original destination, and the MTU is not locked, then
+		 * set the MTU in the route to the suggested new value
+		 * (if given) and then notify as usual.  The ULPs will
+		 * notice that the MTU has changed and adapt accordingly.
+		 * If no new MTU was suggested, then we guess a new one
+		 * less than the current value.  If the new MTU is 
+		 * unreasonably small (defined by sysctl tcp_minmss), then
+		 * we reset the MTU to the interface value and enable the
+		 * lock bit, indicating that we are no longer doing MTU
+		 * discovery.
+		 */
+		if (code == PRC_MSGSIZE) {
+			struct rtentry *rt;
+			int mtu;
+
+			rt = rtalloc1((struct sockaddr *)&icmpsrc, 0,
+				      RTF_CLONING | RTF_PRCLONING);
+			if (rt && (rt->rt_flags & RTF_HOST)
+			    && !(rt->rt_rmx.rmx_locks & RTV_MTU)) {
+				mtu = ntohs(icp->icmp_nextmtu);
+				if (!mtu)
+					mtu = ip_next_mtu(rt->rt_rmx.rmx_mtu,
+							  1);
+#if DEBUG_MTUDISC
+				printf("MTU for %s reduced to %d\n",
+					inet_ntoa(icmpsrc.sin_addr), mtu);
+#endif
+				if (mtu < max(296, (tcp_minmss + sizeof(struct tcpiphdr)))) {
+					/* rt->rt_rmx.rmx_mtu =
+						rt->rt_ifp->if_mtu; */
+					rt->rt_rmx.rmx_locks |= RTV_MTU;
+				} else if (rt->rt_rmx.rmx_mtu > mtu) {
+					rt->rt_rmx.rmx_mtu = mtu;
+				}
+			}
+			if (rt)
+				rtfree(rt);
+		}
+>>>>>>> origin/10.3
 
 		/*
 		 * XXX if the packet contains [IPv4 AH TCP], we can't make a

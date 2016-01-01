@@ -19,8 +19,13 @@
 =======
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -40,6 +45,15 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
 =======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
  * 
  * @APPLE_LICENSE_HEADER_END@
 >>>>>>> origin/10.2
@@ -113,8 +127,26 @@
 
 #include <IOKit/IOMapper.h>
 
+<<<<<<< HEAD
 #include <machine/limits.h>
 #include <machine/machine_routines.h>
+=======
+#define _MCLREF(p)       (++mclrefcnt[mtocl(p)])
+#define _MCLUNREF(p)     (--mclrefcnt[mtocl(p)] == 0)
+#define _M_CLEAR_PKTHDR(mbuf_ptr)	(mbuf_ptr)->m_pkthdr.rcvif = NULL; \
+									(mbuf_ptr)->m_pkthdr.len = 0; \
+									(mbuf_ptr)->m_pkthdr.header = NULL; \
+									(mbuf_ptr)->m_pkthdr.csum_flags = 0; \
+									(mbuf_ptr)->m_pkthdr.csum_data = 0; \
+									(mbuf_ptr)->m_pkthdr.aux = (struct mbuf*)NULL; \
+									(mbuf_ptr)->m_pkthdr.reserved_1 = 0; \
+									(mbuf_ptr)->m_pkthdr.vlan_tag = 0; \
+									(mbuf_ptr)->m_pkthdr.reserved2 = NULL;
+
+extern pmap_t kernel_pmap;    /* The kernel's pmap */
+/* kernel translater */
+extern ppnum_t pmap_find_phys(pmap_t pmap, addr64_t va);
+>>>>>>> origin/10.3
 
 #if CONFIG_MACF_NET
 #include <security/mac_framework.h>
@@ -8052,7 +8084,8 @@ m_drain(void)
                                 n->m_pkthdr.csum_flags = 0;
                                 n->m_pkthdr.csum_data = 0;
                                 n->m_pkthdr.aux = NULL;
-                                n->m_pkthdr.reserved1 = 0;
+                                n->m_pkthdr.vlan_tag = 0;
+                                n->m_pkthdr.reserved_1 = 0;
                                 n->m_pkthdr.reserved2 = 0;
                                 bcopy(m->m_data, n->m_data, m->m_pkthdr.len);
 				return(n);

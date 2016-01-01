@@ -19,8 +19,13 @@
 =======
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -40,6 +45,15 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
 =======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
  * 
  * @APPLE_LICENSE_HEADER_END@
 >>>>>>> origin/10.2
@@ -125,6 +139,17 @@
 #define	KEV_DL_AWDL_UNRESTRICTED		27
 #define	KEV_DL_RRC_STATE_CHANGED		28
 
+<<<<<<< HEAD
+=======
+/*
+ * <net/if.h> does not depend on <sys/time.h> on most other systems.  This
+ * helps userland compatability.  (struct timeval ifi_lastchange)
+ */
+#include <sys/time.h>
+
+
+#ifdef __APPLE__
+>>>>>>> origin/10.3
 #include <net/if_var.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -135,11 +160,16 @@
 #endif
 #endif
 
+<<<<<<< HEAD
+=======
+#ifdef KERNEL_PRIVATE
+>>>>>>> origin/10.3
 struct if_clonereq {
 	int	ifcr_total;		/* total cloners (out) */
 	int	ifcr_count;		/* room for this many in user buffer */
 	char	*ifcr_buffer;		/* buffer for cloner names */
 };
+<<<<<<< HEAD
 
 #ifdef KERNEL_PRIVATE
 #define	IF_MAXUNIT	0x7fff	/* historical value */
@@ -156,6 +186,9 @@ struct if_clonereq32 {
 	user32_addr_t ifcru_buffer;
 };
 #endif /* KERNEL_PRIVATE */
+=======
+#endif KERNEL_PRIVATE
+>>>>>>> origin/10.3
 
 #define	IFF_UP		0x1		/* interface is up */
 #define	IFF_BROADCAST	0x2		/* broadcast address valid */
@@ -175,6 +208,7 @@ struct if_clonereq32 {
 #define	IFF_ALTPHYS	IFF_LINK2	/* use alternate physical connection */
 #define	IFF_MULTICAST	0x8000		/* supports multicast */
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 #ifdef PRIVATE
 /* extended flags definitions:  (all bits reserved for internal/future use) */
@@ -221,6 +255,9 @@ struct if_clonereq32 {
 #endif /* PRIVATE */
 =======
 #if KERNEL_PRIVATE
+=======
+#ifdef KERNEL_PRIVATE
+>>>>>>> origin/10.3
 /* extended flags definitions:  (all bits are reserved for internal/future use) */
 #define IFEF_AUTOCONFIGURING	0x1
 #define IFEF_DVR_REENTRY_OK	0x20	/* When set, driver may be reentered from its own thread */

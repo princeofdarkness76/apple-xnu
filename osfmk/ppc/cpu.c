@@ -3,22 +3,19 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -48,6 +45,9 @@ int real_ncpus = 1;
 
 int wncpu = NCPUS;
 resethandler_t	resethandler_target;
+
+decl_simple_lock_data(static,SignalReadyLock);
+static unsigned int     SignalReadyWait = 0xFFFFFFFFU;
 
 #define MMCR0_SUPPORT_MASK 0xf83f1fff
 #define MMCR1_SUPPORT_MASK 0xffc00000
@@ -409,7 +409,16 @@ cpu_machine_init(
 		cpu_sync_timebase();
 	}
 	ml_init_interrupt();
+	if (cpu != master_cpu)
+		simple_lock(&SignalReadyLock);
 	tproc_info->cpu_flags |= BootDone|SignalReady;
+	if (cpu != master_cpu) {
+		if (SignalReadyWait != 0) {
+			SignalReadyWait--;
+			thread_wakeup(&tproc_info->cpu_flags);
+		}
+		simple_unlock(&SignalReadyLock);
+	}
 }
 
 kern_return_t
@@ -461,6 +470,11 @@ cpu_start(
 	} else {
 		extern void _start_cpu(void);
 
+		if (SignalReadyWait == 0xFFFFFFFFU) {
+			SignalReadyWait = 0;
+			simple_lock_init(&SignalReadyLock,0);
+		}
+
 		proc_info->cpu_number = cpu;
 		proc_info->cpu_flags &= BootDone;
 		proc_info->istackptr = (vm_offset_t)&intstack + (INTSTACK_SIZE*(cpu+1)) - sizeof (struct ppc_saved_state);
@@ -474,10 +488,19 @@ cpu_start(
 		proc_info->cpu_data = (unsigned int)&cpu_data[cpu];
 		proc_info->active_stacks = (unsigned int)&active_stacks[cpu];
 		proc_info->need_ast = (unsigned int)&need_ast[cpu];
+<<<<<<< HEAD
 		proc_info->FPU_thread = 0;
 		proc_info->FPU_vmmCtx = 0;
 		proc_info->VMX_thread = 0;
 		proc_info->VMX_vmmCtx = 0;
+=======
+		proc_info->FPU_owner = 0;
+		proc_info->VMX_owner = 0;
+		proc_info->rtcPop = 0xFFFFFFFFFFFFFFFFULL;
+		mp = (mapping *)(&proc_info->ppCIOmp);
+		mp->mpFlags = 0x01000000 | mpSpecial | 1;
+		mp->mpSpace = invalSpace;
+>>>>>>> origin/10.3
 
 		if (proc_info->start_paddr == EXCEPTION_VECTOR(T_RESET)) {
 
@@ -513,11 +536,33 @@ cpu_start(
 		    proc_info->start_paddr == EXCEPTION_VECTOR(T_RESET)) {
 
 			/* TODO: realese mutex lock reset_handler_lock */
+		} else {
+			simple_lock(&SignalReadyLock);
+
+			while (!((*(volatile short *)&per_proc_info[cpu].cpu_flags) & SignalReady)) {
+				SignalReadyWait++;
+				thread_sleep_simple_lock((event_t)&per_proc_info[cpu].cpu_flags,
+							&SignalReadyLock, THREAD_UNINT);
+			}
+			simple_unlock(&SignalReadyLock);
 		}
 		return(ret);
 	}
 }
 
+<<<<<<< HEAD
+=======
+void
+cpu_exit_wait(
+	int cpu)
+{
+	if ( cpu != master_cpu)
+		while (!((*(volatile short *)&per_proc_info[cpu].cpu_flags) & SleepState)) {};
+}
+
+perfTrap perfCpuSigHook = 0;            /* Pointer to CHUD cpu signal hook routine */
+
+>>>>>>> origin/10.3
 /*
  *	Here is where we implement the receiver of the signaling protocol.
  *	We wait for the signal status area to be passed to us. Then we snarf
@@ -536,10 +581,10 @@ cpu_signal_handler(
 	int cpu;
 	struct SIGtimebase *timebaseAddr;
 	natural_t tbu, tbu2, tbl;
-	
+	broadcastFunc xfunc;
 	cpu = cpu_number();								/* Get the CPU number */
 	pproc = &per_proc_info[cpu];					/* Point to our block */
-
+	
 /*
  *	Since we've been signaled, wait about 31 ms for the signal lock to pass
  */
@@ -624,6 +669,41 @@ cpu_signal_handler(
 
 							return;
 
+<<<<<<< HEAD
+=======
+						case CPRQsegload:
+							return;
+						
+ 						case CPRQchud:
+ 							parmAddr = (unsigned int *)holdParm2;	/* Get the destination address */
+ 							if(perfCpuSigHook) {
+ 								struct savearea *ssp = current_act()->mact.pcb;
+ 								if(ssp) {
+ 									(perfCpuSigHook)(parmAddr[1] /* request */, ssp, 0, 0);
+ 								}
+   							}
+ 							parmAddr[1] = 0;
+ 							parmAddr[0] = 0;		/* Show we're done */
+  							return;
+						
+						case CPRQscom:
+							if(((scomcomm *)holdParm2)->scomfunc) {	/* Are we writing */
+								((scomcomm *)holdParm2)->scomstat = ml_scom_write(((scomcomm *)holdParm2)->scomreg, ((scomcomm *)holdParm2)->scomdata);	/* Write scom */
+							}
+							else {					/* No, reading... */
+								((scomcomm *)holdParm2)->scomstat = ml_scom_read(((scomcomm *)holdParm2)->scomreg, &((scomcomm *)holdParm2)->scomdata);	/* Read scom */
+							}
+							return;
+
+						case CPRQsps:
+							{
+								extern void ml_set_processor_speed_slave(unsigned long speed);
+
+								ml_set_processor_speed_slave(holdParm2);
+								return;
+							}
+							
+>>>>>>> origin/10.3
 						default:
 							panic("cpu_signal_handler: unknown CPU request - %08X\n", holdParm1);
 							return;
@@ -641,6 +721,12 @@ cpu_signal_handler(
 				case SIGPwake:						/* Wake up CPU */
 					pproc->numSIGPwake++;			/* Count this one */
 					return;							/* No need to do anything, the interrupt does it all... */
+					
+				case SIGPcall:						/* Call function on CPU */
+					pproc->hwCtr.numSIGPcall++;		/* Count this one */
+					xfunc = holdParm1;				/* Do this since I can't seem to figure C out */
+					xfunc(holdParm2);				/* Call the passed function */
+					return;							/* Done... */
 					
 				default:
 					panic("cpu_signal_handler: unknown SIGP message order - %08X\n", holdParm0);
@@ -834,4 +920,43 @@ cpu_sync_timebase(
 		continue;
 
 	(void)ml_set_interrupts_enabled(intr);
+}
+
+/*
+ *	Call a function on all running processors
+ *
+ *	Note that the synch paramter is used to wait until all functions are complete.
+ *	It is not passed to the other processor and must be known by the called function.
+ *	The called function must do a thread_wakeup on the synch if it decrements the
+ *	synch count to 0.
+ */
+
+
+int32_t cpu_broadcast(uint32_t *synch, broadcastFunc func, uint32_t parm) {
+
+	int sigproc, cpu, ocpu;
+
+	cpu = cpu_number();									/* Who are we? */
+	sigproc = 0;										/* Clear called processor count */
+
+	if(real_ncpus > 1) {								/* Are we just a uni? */
+	
+		assert_wait((event_t)synch, THREAD_UNINT);		/* If more than one processor, we may have to wait */
+
+		for(ocpu = 0; ocpu < real_ncpus; ocpu++) {		/* Tell everyone to call */
+			if(ocpu == cpu) continue;					/* If we talk to ourselves, people will wonder... */
+			hw_atomic_add(synch, 1);					/* Tentatively bump synchronizer  */
+			sigproc++;									/* Tentatively bump signal sent count */
+			if(KERN_SUCCESS != cpu_signal(ocpu, SIGPcall, (uint32_t)func, parm)) {	/* Call the function on the other processor */
+				hw_atomic_sub(synch, 1);				/* Other guy isn't really there, ignore it  */
+				sigproc--;								/* and don't count it */
+			}
+		}
+
+		if(!sigproc) clear_wait(current_thread(), THREAD_AWAKENED);	/* Clear wait if we never signalled */
+		else thread_block(THREAD_CONTINUE_NULL);		/* Wait for everyone to get into step... */
+	}
+
+	return sigproc;										/* Return the number of guys actually signalled */
+
 }

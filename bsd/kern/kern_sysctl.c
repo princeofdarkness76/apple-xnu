@@ -1,8 +1,13 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2011 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
 <<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,11 +33,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -112,12 +127,17 @@
 #include <sys/sysctl.h>
 #include <sys/user.h>
 #include <sys/aio_kern.h>
+<<<<<<< HEAD
 #include <sys/reboot.h>
 #include <sys/memory_maintenance.h>
 #include <sys/priv.h>
 
 #include <security/audit/audit.h>
 #include <kern/kalloc.h>
+=======
+
+#include <bsm/audit_kernel.h>
+>>>>>>> origin/10.3
 
 #include <mach/machine.h>
 #include <mach/mach_host.h>
@@ -344,6 +364,7 @@ fill_loadavg32(struct loadavg *la, struct user32_loadavg *la32)
 	la32->fscale	= (user32_long_t)la->fscale;
 }
 
+<<<<<<< HEAD
 /*
  * Attributes stored in the kernel.
  */
@@ -354,6 +375,19 @@ extern int sugid_coredump;
 #if COUNT_SYSCALLS
 extern int do_count_syscalls;
 #endif
+=======
+	AUDIT_ARG(ctlname, name, uap->namelen);
+
+	/* CTL_UNSPEC is used to get oid to AUTO_OID */
+	if (uap->new != NULL
+		&& ((name[0] == CTL_KERN
+				&& !(name[1] == KERN_IPC || name[1] == KERN_PANICINFO))
+			|| (name[0] == CTL_HW)
+			|| (name[0] == CTL_VM)
+			|| (name[0] == CTL_VFS))
+		&& (error = suser(p->p_ucred, &p->p_acflag)))
+		return (error);
+>>>>>>> origin/10.3
 
 <<<<<<< HEAD
 #ifdef INSECURE
@@ -485,7 +519,31 @@ out:
 	return error;
 }
 
+<<<<<<< HEAD
 SYSCTL_PROC(_kern, OID_AUTO, sched_stats, CTLFLAG_LOCKED, 0, 0, sysctl_sched_stats, "-", "");
+=======
+/*
+ * Attributes stored in the kernel.
+ */
+extern char hostname[MAXHOSTNAMELEN]; /* defined in bsd/kern/init_main.c */
+extern int hostnamelen;
+extern char domainname[MAXHOSTNAMELEN];
+extern int domainnamelen;
+extern char classichandler[32];
+extern long classichandler_fsid;
+extern long classichandler_fileid;
+__private_extern__ char corefilename[MAXPATHLEN+1];
+__private_extern__ do_coredump;
+__private_extern__ sugid_coredump;
+
+
+extern long hostid;
+#ifdef INSECURE
+int securelevel = -1;
+#else
+int securelevel;
+#endif
+>>>>>>> origin/10.3
 
 STATIC int
 sysctl_sched_stats_enable(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, __unused struct sysctl_req *req)
@@ -572,11 +630,188 @@ sysctl_docountsyscalls SYSCTL_HANDLER_ARGS
 		}
 	}
 
+<<<<<<< HEAD
 	/* adjust index so we return the right required/consumed amount */
 	if (!error)
 		req->oldidx += req->oldlen;
 
 	return (error);
+=======
+/*
+ * kernel related system variables.
+ */
+int
+kern_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
+	int *name;
+	u_int namelen;
+	void *oldp;
+	size_t *oldlenp;
+	void *newp;
+	size_t newlen;
+	struct proc *p;
+{
+	int error, level, inthostid, tmp;
+	unsigned int oldval=0;
+	char *str;
+	extern char ostype[], osrelease[], version[];
+	extern int netboot_root();
+
+	/* all sysctl names not listed below are terminal at this level */
+	if (namelen != 1
+		&& !(name[0] == KERN_PROC
+			|| name[0] == KERN_PROF 
+			|| name[0] == KERN_KDEBUG
+			|| name[0] == KERN_PROCARGS
+			|| name[0] == KERN_PROCARGS2
+			|| name[0] == KERN_PCSAMPLES
+			|| name[0] == KERN_IPC
+			|| name[0] == KERN_SYSV
+			|| name[0] == KERN_AFFINITY
+			|| name[0] == KERN_CLASSIC
+			|| name[0] == KERN_PANICINFO)
+		)
+		return (ENOTDIR);		/* overloaded */
+
+	switch (name[0]) {
+	case KERN_OSTYPE:
+		return (sysctl_rdstring(oldp, oldlenp, newp, ostype));
+	case KERN_OSRELEASE:
+		return (sysctl_rdstring(oldp, oldlenp, newp, osrelease));
+	case KERN_OSREV:
+		return (sysctl_rdint(oldp, oldlenp, newp, BSD));
+	case KERN_VERSION:
+		return (sysctl_rdstring(oldp, oldlenp, newp, version));
+	case KERN_MAXVNODES:
+		oldval = desiredvnodes;
+		error = sysctl_int(oldp, oldlenp, newp, 
+				newlen, &desiredvnodes);
+		reset_vmobjectcache(oldval, desiredvnodes);
+		resize_namecache(desiredvnodes);
+		return(error);
+	case KERN_MAXPROC:
+		return (sysctl_maxproc(oldp, oldlenp, newp, newlen));
+	case KERN_MAXFILES:
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &maxfiles));
+	case KERN_MAXPROCPERUID:
+		return( sysctl_maxprocperuid( oldp, oldlenp, newp, newlen ) );
+	case KERN_MAXFILESPERPROC:
+		return( sysctl_maxfilesperproc( oldp, oldlenp, newp, newlen ) );
+	case KERN_ARGMAX:
+		return (sysctl_rdint(oldp, oldlenp, newp, ARG_MAX));
+	case KERN_SECURELVL:
+		level = securelevel;
+		if ((error = sysctl_int(oldp, oldlenp, newp, newlen, &level)) ||
+		    newp == NULL)
+			return (error);
+		if (level < securelevel && p->p_pid != 1)
+			return (EPERM);
+		securelevel = level;
+		return (0);
+	case KERN_HOSTNAME:
+		error = sysctl_string(oldp, oldlenp, newp, newlen,
+		    hostname, sizeof(hostname));
+		if (newp && !error)
+			hostnamelen = newlen;
+		return (error);
+	case KERN_DOMAINNAME:
+		error = sysctl_string(oldp, oldlenp, newp, newlen,
+		    domainname, sizeof(domainname));
+		if (newp && !error)
+			domainnamelen = newlen;
+		return (error);
+	case KERN_HOSTID:
+		inthostid = hostid;  /* XXX assumes sizeof long <= sizeof int */
+		error =  sysctl_int(oldp, oldlenp, newp, newlen, &inthostid);
+		hostid = inthostid;
+		return (error);
+	case KERN_CLOCKRATE:
+		return (sysctl_clockrate(oldp, oldlenp));
+	case KERN_BOOTTIME:
+		return (sysctl_rdstruct(oldp, oldlenp, newp, &boottime,
+		    sizeof(struct timeval)));
+	case KERN_VNODE:
+		return (sysctl_vnode(oldp, oldlenp));
+	case KERN_PROC:
+		return (sysctl_doproc(name + 1, namelen - 1, oldp, oldlenp));
+	case KERN_FILE:
+		return (sysctl_file(oldp, oldlenp));
+#ifdef GPROF
+	case KERN_PROF:
+		return (sysctl_doprof(name + 1, namelen - 1, oldp, oldlenp,
+		    newp, newlen));
+#endif
+	case KERN_POSIX1:
+		return (sysctl_rdint(oldp, oldlenp, newp, _POSIX_VERSION));
+	case KERN_NGROUPS:
+		return (sysctl_rdint(oldp, oldlenp, newp, NGROUPS_MAX));
+	case KERN_JOB_CONTROL:
+		return (sysctl_rdint(oldp, oldlenp, newp, 1));
+	case KERN_SAVED_IDS:
+#ifdef _POSIX_SAVED_IDS
+		return (sysctl_rdint(oldp, oldlenp, newp, 1));
+#else
+		return (sysctl_rdint(oldp, oldlenp, newp, 0));
+#endif
+	case KERN_KDEBUG:
+		return (kdebug_ops(name + 1, namelen - 1, oldp, oldlenp, p));
+	case KERN_PCSAMPLES:
+		return (pcsamples_ops(name + 1, namelen - 1, oldp, oldlenp, p));
+	case KERN_PROCARGS:
+		/* new one as it does not use kinfo_proc */
+		return (sysctl_procargs(name + 1, namelen - 1, oldp, oldlenp, p));
+	case KERN_PROCARGS2:
+		/* new one as it does not use kinfo_proc */
+		return (sysctl_procargs2(name + 1, namelen - 1, oldp, oldlenp, p));
+	case KERN_SYMFILE:
+		error = get_kernel_symfile( p, &str );
+		if ( error )
+			return error;
+		return (sysctl_rdstring(oldp, oldlenp, newp, str));
+	case KERN_NETBOOT:
+		return (sysctl_rdint(oldp, oldlenp, newp, netboot_root()));
+	case KERN_PANICINFO:
+		return(sysctl_dopanicinfo(name + 1, namelen - 1, oldp, oldlenp,
+			newp, newlen, p));
+	case KERN_AFFINITY:
+		return sysctl_affinity(name+1, namelen-1, oldp, oldlenp,
+									newp, newlen, p);
+	case KERN_CLASSIC:
+		return sysctl_classic(name+1, namelen-1, oldp, oldlenp,
+								newp, newlen, p);
+	case KERN_CLASSICHANDLER:
+		return sysctl_classichandler(name+1, namelen-1, oldp, oldlenp,
+										newp, newlen, p);
+	case KERN_AIOMAX:
+		return( sysctl_aiomax( oldp, oldlenp, newp, newlen ) );
+	case KERN_AIOPROCMAX:
+		return( sysctl_aioprocmax( oldp, oldlenp, newp, newlen ) );
+	case KERN_AIOTHREADS:
+		return( sysctl_aiothreads( oldp, oldlenp, newp, newlen ) );
+	case KERN_COREFILE:
+		error = sysctl_string(oldp, oldlenp, newp, newlen,
+		    corefilename, sizeof(corefilename));
+		return (error);
+	case KERN_COREDUMP:
+		tmp = do_coredump;
+		error = sysctl_int(oldp, oldlenp, newp, newlen, &do_coredump);
+		if (!error && (do_coredump < 0) || (do_coredump > 1)) {
+			do_coredump = tmp;
+			error = EINVAL;
+		}
+		return (error);
+	case KERN_SUGID_COREDUMP:
+		tmp = sugid_coredump;
+		error = sysctl_int(oldp, oldlenp, newp, newlen, &sugid_coredump);
+		if (!error && (sugid_coredump < 0) || (sugid_coredump > 1)) {
+			sugid_coredump = tmp;
+			error = EINVAL;
+		}
+		return (error);
+	default:
+		return (EOPNOTSUPP);
+	}
+	/* NOTREACHED */
+>>>>>>> origin/10.3
 }
 SYSCTL_PROC(_kern, KERN_COUNT_SYSCALLS, count_syscalls, CTLTYPE_NODE|CTLFLAG_RD | CTLFLAG_LOCKED,
 	0,			/* Pointer argument (arg1) */
@@ -620,8 +855,35 @@ sysctl_int(user_addr_t oldp, size_t *oldlenp,
 		error = copyout(valp, oldp, sizeof(int));
 	if (error == 0 && newp) {
 		error = copyin(newp, valp, sizeof(int));
+<<<<<<< HEAD
 		AUDIT_ARG(value32, *valp);
 	}
+=======
+		AUDIT_ARG(value, *valp);
+	}
+	return (error);
+}
+
+/*
+ * As above, but read-only.
+ */
+int
+sysctl_rdint(oldp, oldlenp, newp, val)
+	void *oldp;
+	size_t *oldlenp;
+	void *newp;
+	int val;
+{
+	int error = 0;
+
+	if (oldp && *oldlenp < sizeof(int))
+		return (ENOMEM);
+	if (newp)
+		return (EPERM);
+	*oldlenp = sizeof(int);
+	if (oldp)
+		error = copyout((caddr_t)&val, oldp, sizeof(int));
+>>>>>>> origin/10.3
 	return (error);
 }
 
@@ -682,7 +944,25 @@ sysdoproc_filt_KERN_PROC_TTY(proc_t p, void * arg)
 	else
 		retval = 1;
 
+<<<<<<< HEAD
 	return(retval);
+=======
+	len = strlen(str) + 1;
+	if (oldp && *oldlenp < len)
+		return (ENOMEM);
+	if (newp && newlen >= maxlen)
+		return (EINVAL);
+	*oldlenp = len -1; /* deal with NULL strings correctly */
+	if (oldp) {
+		error = copyout(str, oldp, len);
+	}
+	if (error == 0 && newp) {
+		error = copyin(newp, str, newlen);
+		str[newlen] = 0;
+		AUDIT_ARG(text, (char *)str);
+	}
+	return (error);
+>>>>>>> origin/10.3
 }
 
 STATIC int
@@ -1698,6 +1978,7 @@ STATIC int
 sysctl_maxproc
 (__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
 {
+<<<<<<< HEAD
 	int new_value, changed;
 	int error = sysctl_io_number(req, maxproc, sizeof(int), &new_value, &changed);
 	if (changed) {
@@ -1706,6 +1987,28 @@ sysctl_maxproc
 		   limit set at kernel compilation */
 		if (new_value <= hard_maxproc && new_value > 0)
 			maxproc = new_value;
+=======
+	int 	error = 0;
+	int		new_value;
+
+	if ( oldp != NULL && *oldlenp < sizeof(int) )
+		return (ENOMEM);
+	if ( newp != NULL && newlen != sizeof(int) )
+		return (EINVAL);
+		
+	*oldlenp = sizeof(int);
+	if ( oldp != NULL )
+		error = copyout( &maxprocperuid, oldp, sizeof(int) );
+	if ( error == 0 && newp != NULL ) {
+		error = copyin( newp, &new_value, sizeof(int) );
+		if ( error == 0 ) {
+			AUDIT_ARG(value, new_value);
+			if ( new_value <= maxproc && new_value > 0 )
+				maxprocperuid = new_value;
+			else
+				error = EINVAL;
+		}
+>>>>>>> origin/10.3
 		else
 			error = EINVAL;
 	}
@@ -1777,6 +2080,7 @@ sysctl_osversion(__unused struct sysctl_oid *oidp, void *arg1, int arg2, struct 
 {
     int rval = 0;
 
+<<<<<<< HEAD
     rval = sysctl_handle_string(oidp, arg1, arg2, req);
 
     if (req->newptr) {
@@ -1857,6 +2161,27 @@ sysctl_maxvnodes (__unused struct sysctl_oid *oidp, __unused void *arg1, __unuse
 	if (oldval != desiredvnodes) {
 		reset_vmobjectcache(oldval, desiredvnodes);
 		resize_namecache(desiredvnodes);
+=======
+	if ( oldp != NULL && *oldlenp < sizeof(int) )
+		return (ENOMEM);
+	if ( newp != NULL && newlen != sizeof(int) )
+		return (EINVAL);
+		
+	*oldlenp = sizeof(int);
+	if ( oldp != NULL )
+		error = copyout( &maxfilesperproc, oldp, sizeof(int) );
+	if ( error == 0 && newp != NULL ) {
+		error = copyin( newp, &new_value, sizeof(int) );
+		if ( error == 0 ) {
+			AUDIT_ARG(value, new_value);
+			if ( new_value < maxfiles && new_value > 0 )
+				maxfilesperproc = new_value;
+			else
+				error = EINVAL;
+		}
+		else
+			error = EINVAL;
+>>>>>>> origin/10.3
 	}
 
 	return(error);
@@ -1911,6 +2236,7 @@ sysctl_securelvl
 	return(error);
 }
 
+<<<<<<< HEAD
 SYSCTL_PROC(_kern, KERN_SECURELVL, securelevel,
 		CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED,
 		0, 0, sysctl_securelvl, "I", "");
@@ -1924,6 +2250,27 @@ sysctl_domainname
 	error = sysctl_io_string(req, domainname, sizeof(domainname), 0, &changed);
 	if (changed) {
 		domainnamelen = strlen(domainname);
+=======
+	if ( oldp != NULL && *oldlenp < sizeof(int) )
+		return (ENOMEM);
+	if ( newp != NULL && newlen != sizeof(int) )
+		return (EINVAL);
+		
+	*oldlenp = sizeof(int);
+	if ( oldp != NULL )
+		error = copyout( &maxproc, oldp, sizeof(int) );
+	if ( error == 0 && newp != NULL ) {
+		error = copyin( newp, &new_value, sizeof(int) );
+		if ( error == 0 ) {
+			AUDIT_ARG(value, new_value);
+			if ( new_value <= hard_maxproc && new_value > 0 )
+				maxproc = new_value;
+			else
+				error = EINVAL;
+		}
+		else
+			error = EINVAL;
+>>>>>>> origin/10.3
 	}
 	return(error);
 }

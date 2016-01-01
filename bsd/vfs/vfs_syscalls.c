@@ -1,8 +1,13 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 1995-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 1995-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
 <<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,11 +33,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -101,6 +116,7 @@
 #include <sys/sysctl.h>
 #include <sys/ubc.h>
 #include <sys/quota.h>
+<<<<<<< HEAD
 #include <sys/kdebug.h>
 #include <sys/fsevents.h>
 #include <sys/imgsrc.h>
@@ -111,6 +127,12 @@
 #include <sys/ubc_internal.h>
 #include <sys/disk.h>
 #include <sys/content_protection.h>
+=======
+
+#include <bsm/audit_kernel.h>
+#include <bsm/audit_kevents.h>
+
+>>>>>>> origin/10.3
 #include <machine/cons.h>
 #include <machine/limits.h>
 #include <miscfs/specfs/specdev.h>
@@ -206,6 +228,7 @@ static int relocate_imageboot_source(vnode_t pvp, vnode_t vp, struct componentna
 
 int (*union_dircheckp)(struct vnode **, struct fileproc *, vfs_context_t);
 
+<<<<<<< HEAD
 __private_extern__
 int sync_internal(void);
 
@@ -222,6 +245,12 @@ extern lck_attr_t *fd_vn_lck_attr;
  * mount structure utilized by cache_lookup_path
  */
 uint32_t mount_generation = 0;
+=======
+static int change_dir __P((struct nameidata *ndp, struct proc *p));
+static void checkdirs __P((struct vnode *olddp));
+static void enablequotas __P((struct proc *p, struct mount *mp));
+void notify_filemod_watchers(struct vnode *vp, struct proc *p);
+>>>>>>> origin/10.3
 
 /* counts number of mount and unmount operations */
 unsigned int vfs_nummntops=0;
@@ -1969,10 +1998,40 @@ unmount(__unused proc_t p, struct unmount_args *uap, __unused int32_t *retval)
 	struct nameidata nd;
 	vfs_context_t ctx = vfs_context_current();
 
+<<<<<<< HEAD
 	NDINIT(&nd, LOOKUP, OP_UNMOUNT, FOLLOW | AUDITVNPATH1, 
 		UIO_USERSPACE, uap->path, ctx);
 	error = namei(&nd);
 	if (error)
+=======
+	oflags = uap->flags;
+	flags = FFLAGS(uap->flags);
+
+	AUDIT_ARG(fflags, oflags);
+	AUDIT_ARG(mode, uap->mode);
+
+	cmode = ((uap->mode &~ fdp->fd_cmask) & ALLPERMS) &~ S_ISTXT;
+
+	if ((oflags & O_ACCMODE) == O_ACCMODE)
+		return(EINVAL);
+	if (error = falloc(p, &nfp, &indx))
+		return (error);
+	fp = nfp;
+	NDINIT(&nd, LOOKUP, FOLLOW | AUDITVNPATH1, UIO_USERSPACE, uap->path, p);
+	p->p_dupfd = -indx - 1;			/* XXX check for fdopen */
+	if (error = vn_open_modflags(&nd, &flags, cmode)) {
+		ffree(fp);
+		if ((error == ENODEV || error == ENXIO) &&
+		    p->p_dupfd >= 0 &&			/* XXX from fdopen */
+		    (error =
+			dupfdopen(fdp, indx, p->p_dupfd, flags, error)) == 0) {
+			*retval = indx;
+			return (0);
+		}
+		if (error == ERESTART)
+			error = EINTR;
+		fdrelse(p, indx);
+>>>>>>> origin/10.3
 		return (error);
 	vp = nd.ni_vp;
 	mp = vp->v_mount;
@@ -2654,9 +2713,18 @@ statfs(__unused proc_t p, struct statfs_args *uap, __unused int32_t *retval)
 	vfs_context_t ctx = vfs_context_current();
 	vnode_t vp;
 
+<<<<<<< HEAD
 	NDINIT(&nd, LOOKUP, OP_STATFS, FOLLOW | AUDITVNPATH1, 
 		UIO_USERSPACE, uap->path, ctx);
 	error = namei(&nd);
+=======
+	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF | AUDITVNPATH1, UIO_USERSPACE,
+	    uap->path, p);
+	if (error = namei(&nd))
+		return (error);
+	error = vn_stat(nd.ni_vp, &sb, p);
+	vput(nd.ni_vp);
+>>>>>>> origin/10.3
 	if (error)
 		return (error);
 	vp = nd.ni_vp;
@@ -2687,9 +2755,15 @@ fstatfs(__unused proc_t p, struct fstatfs_args *uap, __unused int32_t *retval)
 	struct vfsstatfs *sp;
 	int error;
 
+<<<<<<< HEAD
 	AUDIT_ARG(fd, uap->fd);
 
 	if ( (error = file_vnode(uap->fd, &vp)) )
+=======
+	NDINIT(&nd, LOOKUP, NOFOLLOW | LOCKLEAF | LOCKPARENT | AUDITVNPATH1,
+	       UIO_USERSPACE, uap->path, p);
+	if (error = namei(&nd))
+>>>>>>> origin/10.3
 		return (error);
 
 	error = vnode_getwithref(vp);
@@ -2945,6 +3019,7 @@ __mac_getfsstat(__unused proc_t p, struct __mac_getfsstat_args *uap, int *retval
 	sfsp = uap->buf;
 	count = 0;
 
+<<<<<<< HEAD
 	mp = NULL;
 
 #if CONFIG_MACF
@@ -3010,6 +3085,18 @@ __mac_getfsstat(__unused proc_t p, struct __mac_getfsstat_args *uap, int *retval
 	else
 		*retval = fst.count;
 	return (0);
+=======
+	VOP_LEASE(vp, p, p->p_ucred, LEASE_WRITE);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
+
+	AUDIT_ARG(vnpath, vp, ARG_VNODE1);
+
+	VATTR_NULL(&vattr);
+	vattr.va_flags = uap->flags;
+	error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
+	VOP_UNLOCK(vp, 0, p);
+	return (error);
+>>>>>>> origin/10.3
 }
 
 static int
@@ -3036,6 +3123,7 @@ getfsstat64_callback(mount_t mp, void * arg)
 			return(VFS_RETURNED);
 		}
 
+<<<<<<< HEAD
 		error = statfs64_common(mp, sp, fstp->sfsp);
 		if (error) {
 			fstp->error = error;
@@ -3045,6 +3133,21 @@ getfsstat64_callback(mount_t mp, void * arg)
 	}
 	fstp->count++;
 	return(VFS_RETURNED);
+=======
+	NDINIT(&nd, LOOKUP, FOLLOW | AUDITVNPATH1, UIO_USERSPACE, uap->path, p);
+	error = namei(&nd);
+	if (error)
+		return (error);
+	vp = nd.ni_vp;
+	VOP_LEASE(vp, p, p->p_ucred, LEASE_WRITE);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
+	VATTR_NULL(&vattr);
+	vattr.va_mode = uap->mode & ALLPERMS;
+	error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
+
+	vput(vp);
+	return (error);
+>>>>>>> origin/10.3
 }
 
 /*
@@ -3068,7 +3171,16 @@ getfsstat64(__unused proc_t p, struct getfsstat64_args *uap, int *retval)
 	fst.error = 0;
 	fst.maxcount = maxcount;
 
+<<<<<<< HEAD
 	vfs_iterate(0, getfsstat64_callback, &fst);
+=======
+	VATTR_NULL(&vattr);
+	vattr.va_mode = uap->mode & ALLPERMS;
+	AUDIT_ARG(mode, (mode_t)vattr.va_mode);
+	error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
+
+	VOP_UNLOCK(vp, 0, p);
+>>>>>>> origin/10.3
 
 	if (fst.error ) {
 		KAUTH_DEBUG("ERROR - %s gets %d", p->p_comm, fst.error);
@@ -3110,6 +3222,7 @@ vnode_getfromfd(vfs_context_t ctx, int fd, vnode_t *vpp)
 	if (error)
 		return (error);
 
+<<<<<<< HEAD
 	error = vnode_getwithref(vp);
 	if (error) {
 		(void)fp_drop(p, fd, fp, 0);
@@ -3118,6 +3231,26 @@ vnode_getfromfd(vfs_context_t ctx, int fd, vnode_t *vpp)
 
 	(void)fp_drop(p, fd, fp, 0);
 	*vpp = vp;
+=======
+	/*
+	 * XXX A TEMPORARY HACK FOR NOW: Try to track console_user
+	 * by looking for chown() calls on /dev/console from a console process.
+	 */
+	if ((vp) && (vp->v_type == VBLK || vp->v_type == VCHR) && (vp->v_specinfo) &&
+		(major(vp->v_specinfo->si_rdev) == CONSMAJOR) &&
+		(minor(vp->v_specinfo->si_rdev) == 0)) {
+		console_user = uap->uid;
+	};
+	
+	VOP_LEASE(vp, p, p->p_ucred, LEASE_WRITE);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
+	VATTR_NULL(&vattr);
+	vattr.va_uid = uap->uid;
+	vattr.va_gid = uap->gid;
+	error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
+
+	vput(vp);
+>>>>>>> origin/10.3
 	return (error);
 }
 
@@ -3168,7 +3301,17 @@ nameiat(struct nameidata *ndp, int dirfd)
 		}
 	}
 
+<<<<<<< HEAD
 	return (namei(ndp));
+=======
+	VATTR_NULL(&vattr);
+	vattr.va_uid = uap->uid;
+	vattr.va_gid = uap->gid;
+	error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
+
+	VOP_UNLOCK(vp, 0, p);
+	return (error);
+>>>>>>> origin/10.3
 }
 
 /*
@@ -3225,6 +3368,7 @@ common_fchdir(proc_t p, struct fchdir_args *uap, int per_thread)
 	error = mac_vnode_check_chdir(ctx, vp);
 	if (error)
 		goto out;
+<<<<<<< HEAD
 #endif
 	error = vnode_authorize(vp, NULL, KAUTH_VNODE_SEARCH, ctx);
 	if (error)
@@ -3271,6 +3415,19 @@ common_fchdir(proc_t p, struct fchdir_args *uap, int per_thread)
 	file_drop(uap->fd);
 
 	return (0);
+=======
+
+	AUDIT_ARG(vnpath, vp, ARG_VNODE1);
+
+	VATTR_NULL(&vattr);
+	vattr.va_atime = ts[0];
+	vattr.va_mtime = ts[1];
+	if (nullflag)
+		vattr.va_vaflags |= VA_UTIMES_NULL;
+	error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
+
+	VOP_UNLOCK(vp, 0, p);
+>>>>>>> origin/10.3
 out:
 	vnode_put(vp);
 	file_drop(uap->fd);
@@ -3367,7 +3524,23 @@ common_chdir(proc_t p, struct chdir_args *uap, int per_thread)
 int
 chdir(proc_t p, struct chdir_args *uap, __unused int32_t *retval)
 {
+<<<<<<< HEAD
 	return common_chdir(p, (void *)uap, 0);
+=======
+	struct timespec ts[2];
+	struct file *fp;
+	struct timeval *usrtvp;
+	int error;
+
+	AUDIT_ARG(fd, uap->fd);
+	usrtvp = uap->tptr;
+	if ((error = getutimes(usrtvp, ts)) != 0)
+		return (error);
+	if ((error = getvnode(p, uap->fd, &fp)) != 0)
+		return (error);
+
+	return setutimes(p, (struct vnode *)fp->f_data, ts, usrtvp == NULL);
+>>>>>>> origin/10.3
 }
 
 /*
@@ -3410,6 +3583,7 @@ chroot(proc_t p, struct chroot_args *uap, __unused int32_t *retval)
 	if ((error = suser(kauth_cred_get(), &p->p_acflag)))
 		return (error);
 
+<<<<<<< HEAD
 	NDINIT(&nd, LOOKUP, OP_CHROOT, FOLLOW | AUDITVNPATH1, 
 		UIO_USERSPACE, uap->path, ctx);
 	error = change_dir(&nd, ctx);
@@ -3422,12 +3596,32 @@ chroot(proc_t p, struct chroot_args *uap, __unused int32_t *retval)
 	if (error) {
 		vnode_put(nd.ni_vp);
 		return (error);
+=======
+	if (fp->f_type == DTYPE_PSXSHM) {
+		return(pshm_truncate(p, fp, uap->fd, uap->length, retval));
+>>>>>>> origin/10.3
 	}
 #endif
 
+<<<<<<< HEAD
 	if ( (error = vnode_ref(nd.ni_vp)) ) {
 	        vnode_put(nd.ni_vp);
 		return (error);
+=======
+	AUDIT_ARG(vnpath, (struct vnode *)fp->f_data, ARG_VNODE1);
+
+	if ((fp->f_flag & FWRITE) == 0)
+		return (EINVAL);
+	vp = (struct vnode *)fp->f_data;
+	VOP_LEASE(vp, p, p->p_ucred, LEASE_WRITE);
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
+	if (vp->v_type == VDIR)
+		error = EISDIR;
+	else if ((error = vn_writechk(vp)) == 0) {
+		VATTR_NULL(&vattr);
+		vattr.va_size = uap->length;
+		error = VOP_SETATTR(vp, &vattr, fp->f_cred, p);
+>>>>>>> origin/10.3
 	}
 	vnode_put(nd.ni_vp);
 
@@ -3549,6 +3743,7 @@ open1(vfs_context_t ctx, struct nameidata *ndp, int uflags,
 	if ((oflags & O_ACCMODE) == O_ACCMODE)
 		return(EINVAL);
 
+<<<<<<< HEAD
 	flags = FFLAGS(uflags);
 	CLR(flags, FENCRYPTED);
 	CLR(flags, FUNENCRYPTED);
@@ -3569,6 +3764,26 @@ open1(vfs_context_t ctx, struct nameidata *ndp, int uflags,
 			        *retval = indx;
 				return (0);
 			}
+=======
+	NDINIT(&fromnd, LOOKUP, SAVESTART | AUDITVNPATH1,
+	       UIO_USERSPACE, uap->from, p);
+	if (error = namei(&fromnd))
+		return (error);
+	fvp = fromnd.ni_vp;
+
+	NDINIT(&tond, CREATE, LOCKPARENT | LOCKLEAF | NOCACHE | SAVESTART | AUDITVNPATH2,
+	       UIO_USERSPACE, uap->to, p);
+	if (error = namei(&tond)) {
+		vrele(fvp);
+		goto out1;
+	}
+	tdvp = tond.ni_dvp;
+	tvp = tond.ni_vp;
+	if (tvp != NULL) {
+		if (!(uap->flags & CPF_OVERWRITE)) {
+			error = EEXIST;
+			goto out;
+>>>>>>> origin/10.3
 		}
 		if (error == ERESTART)
 		        error = EINTR;
@@ -4078,6 +4293,7 @@ out:
 static int
 mkfifo1(vfs_context_t ctx, user_addr_t upath, struct vnode_attr *vap)
 {
+<<<<<<< HEAD
 	vnode_t	vp, dvp;
 	int error;
 	struct nameidata nd;
@@ -4085,6 +4301,91 @@ mkfifo1(vfs_context_t ctx, user_addr_t upath, struct vnode_attr *vap)
 	NDINIT(&nd, CREATE, OP_MKFIFO, LOCKPARENT | AUDITVNPATH1, 
 		UIO_USERSPACE, upath, ctx);
 	error = namei(&nd);
+=======
+	register struct vnode *vp;
+	struct file *fp;
+	struct uio auio, kuio;
+	struct iovec aiov, kiov;
+	struct dirent *dp, *edp;
+	caddr_t dirbuf;
+	int error, eofflag, readcnt;
+	long loff;
+
+	AUDIT_ARG(fd, uap->fd);
+	if (error = getvnode(p, uap->fd, &fp))
+		return (error);
+
+	AUDIT_ARG(vnpath, (struct vnode *)fp->f_data, ARG_VNODE1);
+
+	if ((fp->f_flag & FREAD) == 0)
+		return (EBADF);
+	vp = (struct vnode *)fp->f_data;
+unionread:
+	if (vp->v_type != VDIR)
+		return (EINVAL);
+	aiov.iov_base = uap->buf;
+	aiov.iov_len = uap->count;
+	auio.uio_iov = &aiov;
+	auio.uio_iovcnt = 1;
+	auio.uio_rw = UIO_READ;
+	auio.uio_segflg = UIO_USERSPACE;
+	auio.uio_procp = p;
+	auio.uio_resid = uap->count;
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
+	loff = auio.uio_offset = fp->f_offset;
+#	if (BYTE_ORDER != LITTLE_ENDIAN)
+		if (vp->v_mount->mnt_maxsymlinklen <= 0) {
+			error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag,
+			    (int *)0, (u_long **)0);
+			fp->f_offset = auio.uio_offset;
+		} else
+#	endif
+	{
+		kuio = auio;
+		kuio.uio_iov = &kiov;
+		kuio.uio_segflg = UIO_SYSSPACE;
+		kiov.iov_len = uap->count;
+		MALLOC(dirbuf, caddr_t, uap->count, M_TEMP, M_WAITOK);
+		kiov.iov_base = dirbuf;
+		error = VOP_READDIR(vp, &kuio, fp->f_cred, &eofflag,
+			    (int *)0, (u_long **)0);
+		fp->f_offset = kuio.uio_offset;
+		if (error == 0) {
+			readcnt = uap->count - kuio.uio_resid;
+			edp = (struct dirent *)&dirbuf[readcnt];
+			for (dp = (struct dirent *)dirbuf; dp < edp; ) {
+#				if (BYTE_ORDER == LITTLE_ENDIAN)
+					/*
+					 * The expected low byte of
+					 * dp->d_namlen is our dp->d_type.
+					 * The high MBZ byte of dp->d_namlen
+					 * is our dp->d_namlen.
+					 */
+					dp->d_type = dp->d_namlen;
+					dp->d_namlen = 0;
+#				else
+					/*
+					 * The dp->d_type is the high byte
+					 * of the expected dp->d_namlen,
+					 * so must be zero'ed.
+					 */
+					dp->d_type = 0;
+#				endif
+				if (dp->d_reclen > 0) {
+					dp = (struct dirent *)
+					    ((char *)dp + dp->d_reclen);
+				} else {
+					error = EIO;
+					break;
+				}
+			}
+			if (dp >= edp)
+				error = uiomove(dirbuf, readcnt, &auio);
+		}
+		FREE(dirbuf, M_TEMP);
+	}
+	VOP_UNLOCK(vp, 0, p);
+>>>>>>> origin/10.3
 	if (error)
 		return (error);
 	dvp = nd.ni_dvp;
@@ -9885,9 +10186,16 @@ fsctl (proc_t p, struct fsctl_args *uap, __unused int32_t *retval)
 	/* Get the vnode for the file we are getting info on:  */
 	nameiflags = 0;
 	if ((uap->options & FSOPT_NOFOLLOW) == 0) nameiflags |= FOLLOW;
+<<<<<<< HEAD
 	NDINIT(&nd, LOOKUP, OP_FSCTL, nameiflags | AUDITVNPATH1,
 	       UIO_USERSPACE, uap->path, ctx);
 	if ((error = namei(&nd))) goto done;
+=======
+	NDINIT(&nd, LOOKUP, nameiflags | AUDITVNPATH1, UIO_USERSPACE, (char *)uap->path, p);
+
+	if (error = namei(&nd))
+       		 return (error);
+>>>>>>> origin/10.3
 	vp = nd.ni_vp;
 	nameidone(&nd);
 
@@ -9966,8 +10274,24 @@ getxattr(proc_t p, struct getxattr_args *uap, user_ssize_t *retval)
 	int error;
 	char uio_buf[ UIO_SIZEOF(1) ];
 
+<<<<<<< HEAD
 	if (uap->options & (XATTR_NOSECURITY | XATTR_NODEFAULT))
 		return (EINVAL);
+=======
+	/* Do a sanity check on sizeofsearchparams1 and sizeofsearchparams2.  
+	 */
+	if (searchblock.sizeofsearchparams1 > SEARCHFS_MAX_SEARCHPARMS || 
+		searchblock.sizeofsearchparams2 > SEARCHFS_MAX_SEARCHPARMS)
+		return(EINVAL);
+
+	/* Now malloc a big bunch of space to hold the search parameters, the attrlists and the search state. */
+	/* It all has to do into local memory and it's not that big so we might as well  put it all together. */
+	/* Searchparams1 shall be first so we might as well use that to hold the base address of the allocated*/
+	/* block.  											      */
+	
+	mallocsize = searchblock.sizeofsearchparams1+searchblock.sizeofsearchparams2 +
+		      sizeof(struct attrlist) + sizeof(struct searchstate);
+>>>>>>> origin/10.3
 
 	nameiflags = (uap->options & XATTR_NOFOLLOW) ? 0 : FOLLOW;
 	NDINIT(&nd, LOOKUP, OP_GETXATTR, nameiflags, spacetype, uap->path, ctx);
@@ -10350,8 +10674,21 @@ flistxattr(proc_t p, struct flistxattr_args *uap, user_ssize_t *retval)
 	int error;
 	char uio_buf[ UIO_SIZEOF(1) ];
 
+<<<<<<< HEAD
 	if (uap->options & (XATTR_NOFOLLOW | XATTR_NOSECURITY | XATTR_NODEFAULT))
 		return (EINVAL);
+=======
+// XXXdbg fmod watching calls
+#define NUM_CHANGE_NODES 256
+static int                    changed_init=0;
+static volatile int           fmod_watch_enabled = 0;
+static pid_t                  fmod_watch_owner;
+static simple_lock_data_t     changed_nodes_lock;    // guard access
+static volatile struct vnode *changed_nodes[NUM_CHANGE_NODES];
+static volatile pid_t         changed_nodes_pid[NUM_CHANGE_NODES];
+static volatile int           changed_rd_index=0, changed_wr_index=0;
+static volatile int           notifier_sleeping=0;
+>>>>>>> origin/10.3
 
 	if ( (error = file_vnode(uap->fd, &vp)) ) {
 		return (error);
@@ -10366,7 +10703,19 @@ flistxattr(proc_t p, struct flistxattr_args *uap, user_ssize_t *retval)
 		uio_addiov(auio, uap->namebuf, uap->bufsize);
 	}
 
+<<<<<<< HEAD
 	error = vn_listxattr(vp, auio, &attrsize, uap->options, vfs_context_current());
+=======
+void
+notify_filemod_watchers(struct vnode *vp, struct proc *p)
+{
+    int ret;
+    
+    // only want notification on regular files.
+    if (fmod_watch_enabled == 0 || (vp->v_type != VREG && vp->v_type != VDIR)) {
+	return;
+    }
+>>>>>>> origin/10.3
 
 	vnode_put(vp);
 	file_drop(uap->fd);
@@ -10462,14 +10811,30 @@ unionget:
 			memcpy((char *)dbg_parms, buf + (length - dbg_namelen), dbg_namelen);
 		}
 
+<<<<<<< HEAD
 		kdebug_lookup_gen_events(dbg_parms, dbg_namelen, (void *)vp, TRUE);
 	}
+=======
+    if (vp == NULL) {
+	printf("watch_file_changes: Someone put a null vnode in my table! (%d %d)\n",
+	       changed_rd_index, changed_wr_index);
+	error = EINVAL;
+	goto err0;
+    }
+>>>>>>> origin/10.3
 
 	*pathlen = (user_ssize_t)length; /* may be superseded by error */
 
+<<<<<<< HEAD
 out:
 	return (error);
 }
+=======
+    if (vp->v_type != VREG && vp->v_type != VDIR) {
+	error = EBADF;
+	goto err1;
+    }
+>>>>>>> origin/10.3
 
 /*
  * Obtain the full pathname of a file system object by id.
@@ -10635,6 +11000,7 @@ munge_statfs(struct mount *mp, struct vfsstatfs *sfsp,
 		strlcpy(&sfs.f_mntonname[0], &sfsp->f_mntonname[0], MNAMELEN);
 		strlcpy(&sfs.f_mntfromname[0], &sfsp->f_mntfromname[0], MNAMELEN);
 
+<<<<<<< HEAD
 		if (partial_copy) {
 			copy_size -= (sizeof(sfs.f_reserved3) + sizeof(sfs.f_reserved4));
 		}
@@ -10645,6 +11011,11 @@ munge_statfs(struct mount *mp, struct vfsstatfs *sfsp,
 		*sizep = my_size;
 	}
 	return(error);
+=======
+  err0:
+    *retval = -1;
+    return error;
+>>>>>>> origin/10.3
 }
 
 /*
@@ -10686,6 +11057,7 @@ void munge_user64_stat(struct stat *sbp, struct user64_stat *usbp)
 	usbp->st_qspare[1] = sbp->st_qspare[1];
 }
 
+<<<<<<< HEAD
 void munge_user32_stat(struct stat *sbp, struct user32_stat *usbp)
 {
 	bzero(usbp, sizeof(*usbp));
@@ -10720,6 +11092,22 @@ void munge_user32_stat(struct stat *sbp, struct user32_stat *usbp)
 	usbp->st_lspare = sbp->st_lspare;
 	usbp->st_qspare[0] = sbp->st_qspare[0];
 	usbp->st_qspare[1] = sbp->st_qspare[1];
+=======
+    if (!is_suser()) {
+	return EPERM;
+    }
+    
+    // XXXdbg for now we only allow one watcher at a time.
+    if (fmod_watch_enabled) {
+	return EBUSY;
+    }
+    
+    fmod_watch_enabled++;
+    fmod_watch_owner = current_proc()->p_pid;
+
+    *retval = 0;
+    return 0;
+>>>>>>> origin/10.3
 }
 
 /*
@@ -10727,6 +11115,7 @@ void munge_user32_stat(struct stat *sbp, struct user32_stat *usbp)
  */
 void munge_user64_stat64(struct stat64 *sbp, struct user64_stat64 *usbp)
 {
+<<<<<<< HEAD
 	bzero(usbp, sizeof(*usbp));
 
 	usbp->st_dev = sbp->st_dev;
@@ -10764,6 +11153,36 @@ void munge_user64_stat64(struct stat64 *sbp, struct user64_stat64 *usbp)
 	usbp->st_qspare[0] = sbp->st_qspare[0];
 	usbp->st_qspare[1] = sbp->st_qspare[1];
 }
+=======
+    if (!is_suser()) {
+	return EPERM;
+    }
+    
+    if (fmod_watch_enabled < 1) {
+	printf("fmod_watching: too many disables! (%d)\n", fmod_watch_enabled);
+	return EINVAL;
+    }
+
+    fmod_watch_enabled--;
+    
+    // if we're the last guy, clear out any remaining vnodes
+    // in the table so they don't remain referenced.
+    //
+    if (fmod_watch_enabled == 0) {
+	int i;
+	for(i=changed_rd_index; i != changed_wr_index; ) {
+	    if (changed_nodes[i] == NULL) {
+		panic("disable_fmod_watch: index %d is NULL!\n", i);
+	    }
+	    vrele((struct vnode *)changed_nodes[i]);
+	    changed_nodes[i] = NULL;
+	    i = (i + 1) % NUM_CHANGE_NODES;
+	}
+	changed_wr_index = changed_rd_index = 0;
+
+	fmod_watch_owner = 0;
+    }
+>>>>>>> origin/10.3
 
 void munge_user32_stat64(struct stat64 *sbp, struct user32_stat64 *usbp)
 {
@@ -10833,3 +11252,15 @@ vfs_purge(__unused struct proc *p, __unused struct vfs_purge_args *uap, __unused
 	return 0;
 }
 
+<<<<<<< HEAD
+=======
+void
+clean_up_fmod_watch(struct proc *p)
+{
+    if (fmod_watch_enabled && fmod_watch_owner == p->p_pid) {
+	register_t *retval;
+	
+	disable_fmod_watching(&retval);
+    }
+}
+>>>>>>> origin/10.3

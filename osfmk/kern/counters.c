@@ -6,6 +6,7 @@
 =======
  * @APPLE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
 >>>>>>> origin/10.2
  * 
@@ -29,11 +30,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -109,6 +120,11 @@ mach_counter_t c_thread_switch_block = 0;
 mach_counter_t c_thread_switch_handoff = 0;
 mach_counter_t c_vm_fault_page_block_backoff_kernel = 0;
 mach_counter_t c_vm_fault_page_block_busy_kernel = 0;
+<<<<<<< HEAD
+=======
+mach_counter_t c_vm_fault_retry_on_w_prot;
+mach_counter_t c_vm_fault_wait_on_unlock;
+>>>>>>> origin/10.3
 mach_counter_t c_vm_map_simplified = 0;
 mach_counter_t c_vm_map_simplify_called = 0;
 mach_counter_t c_vm_map_simplify_entry_called = 0;

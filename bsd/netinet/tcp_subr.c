@@ -4,6 +4,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
 <<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -28,11 +29,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -183,6 +194,7 @@ SYSCTL_INT(_net_inet_tcp, TCPCTL_V6MSSDFLT, v6mssdflt,
 	"Default TCP Maximum Segment Size for IPv6");
 #endif
 
+<<<<<<< HEAD
 extern int tcp_do_autorcvbuf;
 
 int tcp_sysctl_fastopenkey(struct sysctl_oid *, void *, int ,
@@ -198,6 +210,23 @@ int	tcp_tfo_halfcnt = 0;
 int	tcp_tfo_backlog = 10;
 SYSCTL_INT(_net_inet_tcp, OID_AUTO, fastopen_backlog, CTLFLAG_RW | CTLFLAG_LOCKED,
     &tcp_tfo_backlog, 0, "Backlog queue for half-open TFO connections");
+=======
+/*
+ * Minimum MSS we accept and use. This prevents DoS attacks where
+ * we are forced to a ridiculous low MSS like 20 and send hundreds
+ * of packets instead of one. The effect scales with the available
+ * bandwidth and quickly saturates the CPU and network interface
+ * with packet generation and sending. Set to zero to disable MINMSS
+ * checking. This setting prevents us from sending too small packets.
+ */
+int	tcp_minmss = TCP_MINMSS;
+SYSCTL_INT(_net_inet_tcp, OID_AUTO, minmss, CTLFLAG_RW,
+    &tcp_minmss , 0, "Minmum TCP Maximum Segment Size");
+
+static int	tcp_do_rfc1323 = 1;
+SYSCTL_INT(_net_inet_tcp, TCPCTL_DO_RFC1323, rfc1323, CTLFLAG_RW, 
+    &tcp_do_rfc1323 , 0, "Enable rfc1323 (high performance TCP) extensions");
+>>>>>>> origin/10.3
 
 int	tcp_fastopen = TCP_FASTOPEN_CLIENT | TCP_FASTOPEN_SERVER;
 SYSCTL_INT(_net_inet_tcp, OID_AUTO, fastopen, CTLFLAG_RW | CTLFLAG_LOCKED,
@@ -494,6 +523,7 @@ tcp_init(struct protosw *pp, struct domain *dp)
 	tcp_tfo_init();
 
 	LIST_INIT(&tcb);
+<<<<<<< HEAD
 	tcbinfo.ipi_listhead = &tcb;
 
 	pcbinfo = &tcbinfo;
@@ -578,6 +608,34 @@ tcp_init(struct protosw *pp, struct domain *dp)
 	    "tcp_rxt_seg_zone");
 	zone_change(tcp_rxt_seg_zone, Z_CALLERACCT, FALSE);
 	zone_change(tcp_rxt_seg_zone, Z_EXPAND, TRUE);
+=======
+	tcbinfo.listhead = &tcb;
+#ifndef __APPLE__
+	TUNABLE_INT_FETCH("net.inet.tcp.tcbhashsize", &hashsize);
+#endif
+	if (!powerof2(hashsize)) {
+		printf("WARNING: TCB hash size not a power of 2\n");
+		hashsize = 512; /* safe default */
+	}
+	tcp_tcbhashsize = hashsize;
+	tcbinfo.hashsize = hashsize;
+	tcbinfo.hashbase = hashinit(hashsize, M_PCB, &tcbinfo.hashmask);
+	tcbinfo.porthashbase = hashinit(hashsize, M_PCB,
+					&tcbinfo.porthashmask);
+#ifdef __APPLE__
+	str_size = (vm_size_t) sizeof(struct inp_tp);
+	tcbinfo.ipi_zone = (void *) zinit(str_size, 120000*str_size, 8192, "tcpcb");
+#else
+	tcbinfo.ipi_zone = zinit("tcpcb", sizeof(struct inp_tp), maxsockets,
+				 ZONE_INTERRUPT, 0);
+#endif
+
+	tcp_reass_maxseg = nmbclusters / 16;
+#ifndef __APPLE__
+	TUNABLE_INT_FETCH("net.inet.tcp.reass.maxsegments",
+	    &tcp_reass_maxseg);
+#endif
+>>>>>>> origin/10.3
 
 #if INET6
 #define TCP_MINPROTOHDR (sizeof(struct ip6_hdr) + sizeof(struct tcphdr))
@@ -1250,6 +1308,7 @@ tcp_close(tp)
 	struct rtentry *rt;
 	int dosavessthresh;
 
+<<<<<<< HEAD
 	/* tcp_close was called previously, bail */
 	if (inp->inp_ppcb == NULL) 
 		return(NULL);
@@ -1257,6 +1316,12 @@ tcp_close(tp)
 	tcp_canceltimers(tp);
 	KERNEL_DEBUG(DBG_FNC_TCP_CLOSE | DBG_FUNC_START, tp,0,0,0,0);
 
+=======
+	if ( inp->inp_ppcb == NULL) /* tcp_close was called previously, bail */
+		return;
+
+#ifndef __APPLE__
+>>>>>>> origin/10.3
 	/*
 	 * If another thread for this tcp is currently in ip (indicated by
 	 * the TF_SENDINPROG flag), defer the cleanup until after it returns
@@ -1274,6 +1339,11 @@ tcp_close(tp)
 		tp->t_flags |= TF_CLOSING;
 		return (NULL);
 	}
+<<<<<<< HEAD
+=======
+#endif
+	
+>>>>>>> origin/10.3
 
 	DTRACE_TCP4(state__change, void, NULL, struct inpcb *, inp,
 		struct tcpcb *, tp, int32_t, TCPS_CLOSED);
@@ -1599,7 +1669,12 @@ tcp_freeq(tp)
 	while((q = LIST_FIRST(&tp->t_segq)) != NULL) {
 		LIST_REMOVE(q, tqe_q);
 		m_freem(q->tqe_m);
+<<<<<<< HEAD
 		zfree(tcp_reass_zone, q);
+=======
+		FREE(q, M_TSEGQ);
+		tcp_reass_qsize--;
+>>>>>>> origin/10.3
 		rv = 1;
 	}
 	tp->t_reassqlen = 0;
@@ -1619,6 +1694,7 @@ tcp_drain()
 	struct inpcb *inp;
 	struct tcpcb *tp;
 
+<<<<<<< HEAD
 	if (!lck_rw_try_lock_exclusive(tcbinfo.ipi_lock)) 
 		return;
 
@@ -1636,6 +1712,28 @@ tcp_drain()
 
 			if (do_tcpdrain)	
 				tcp_freeq(tp);
+=======
+	/*
+	 * Walk the tcpbs, if existing, and flush the reassembly queue,
+	 * if there is one...
+	 * XXX: The "Net/3" implementation doesn't imply that the TCP
+	 *      reassembly queue should be flushed, but in a situation
+	 * 	where we're really low on mbufs, this is potentially
+	 *  	usefull.	
+	 */
+		for (inpb = LIST_FIRST(tcbinfo.listhead); inpb;
+	    		inpb = LIST_NEXT(inpb, inp_list)) {
+				if ((tcpb = intotcpcb(inpb))) {
+					while ((te = LIST_FIRST(&tcpb->t_segq))
+					       != NULL) {
+					LIST_REMOVE(te, tqe_q);
+					m_freem(te->tqe_m);
+					FREE(te, M_TSEGQ);
+					tcp_reass_qsize--;
+				}
+			}
+		}
+>>>>>>> origin/10.3
 
 			so_drain_extended_bk_idle(inp->inp_socket);
 

@@ -1,8 +1,13 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
 <<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,11 +33,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -252,7 +267,13 @@ processor_shutdown(
 	processor_doshutdown(processor);
 	splx(s);
 
+<<<<<<< HEAD
 	cpu_exit_wait(processor->cpu_id);
+=======
+#ifdef	__ppc__
+	cpu_exit_wait(processor->slot_num);
+#endif
+>>>>>>> origin/10.3
 
 	return (KERN_SUCCESS);
 }
@@ -302,10 +323,22 @@ processor_doshutdown(
 	/*
 	 *	Continue processor shutdown in shutdown context.
 	 */
+<<<<<<< HEAD
 	thread_bind(prev);
 	old_thread = machine_processor_shutdown(self, processor_offline, processor);
 
 	thread_dispatch(old_thread, self);
+=======
+	thread_bind(self, prev);
+	old_thread = switch_to_shutdown_context(self,
+									processor_offline, processor);
+	if (processor != current_processor())
+		timer_call_shutdown(processor);
+
+	_mk_sp_thread_begin(self, self->last_processor);
+
+	thread_dispatch(old_thread);
+>>>>>>> origin/10.3
 }
 
 /*

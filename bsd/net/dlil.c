@@ -19,8 +19,13 @@
 =======
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -40,6 +45,15 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
 =======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
  * 
  * @APPLE_LICENSE_HEADER_END@
 >>>>>>> origin/10.2
@@ -6240,6 +6254,7 @@ ifp_if_framer(struct ifnet *ifp, struct mbuf **m,
 	return (ifp_if_framer_extended(ifp, m, sa, ll, t, NULL, NULL));
 }
 
+<<<<<<< HEAD
 static errno_t
 ifp_if_framer_extended(struct ifnet *ifp, struct mbuf **m,
     const struct sockaddr *sa, const char *ll, const char *t,
@@ -6795,6 +6810,108 @@ if_get_state(struct ifnet *ifp,
 	}
 
 	ifnet_lock_done(ifp);
+=======
+int
+dlil_ioctl(u_long	proto_fam,
+	   struct ifnet *ifp,
+	   u_long	ioctl_code,
+	   caddr_t	ioctl_arg)
+{
+     struct dlil_filterq_entry	 *tmp;
+     struct dlil_filterq_head	 *fhead;
+     int			 retval  = EOPNOTSUPP;
+     int                         retval2 = EOPNOTSUPP;
+     u_long			 dl_tag;
+     struct if_family_str    *if_family;
+
+
+     if (proto_fam) {
+	  if (dlil_find_dltag(ifp->if_family, ifp->if_unit,
+			      proto_fam, &dl_tag) == 0) {
+	       if (dl_tag_array[dl_tag].ifp != ifp)
+		    return ENOENT;
+	
+/*
+ * Run any attached protocol filters.
+ */
+	       TAILQ_FOREACH(tmp, dl_tag_array[dl_tag].pr_flt_head, que) {
+		    if (PFILT(tmp).filter_dl_ioctl) {
+			 retval = 
+			      (*PFILT(tmp).filter_dl_ioctl)(PFILT(tmp).cookie, 
+							    dl_tag_array[dl_tag].ifp,
+							    ioctl_code, 
+							    ioctl_arg);
+								   
+			 if (retval) {
+			      if (retval == EJUSTRETURN)
+				   return 0;
+			      else
+				   return retval;
+			 }
+		    }
+	       }
+
+	       if (dl_tag_array[dl_tag].proto->dl_ioctl)
+		    retval =  
+			 (*dl_tag_array[dl_tag].proto->dl_ioctl)(dl_tag,
+								 dl_tag_array[dl_tag].ifp, 
+								 ioctl_code, 
+								 ioctl_arg);
+	       else
+		    retval = EOPNOTSUPP;
+	  }
+     }
+
+     if ((retval) && (retval != EOPNOTSUPP)) {
+	  if (retval == EJUSTRETURN)
+	       return 0;
+	  else
+	       return retval;
+     }
+
+
+     fhead = (struct dlil_filterq_head *) &ifp->if_flt_head;
+     TAILQ_FOREACH(tmp, fhead, que) {
+	  if (IFILT(tmp).filter_if_ioctl) {
+	       retval2 = (*IFILT(tmp).filter_if_ioctl)(IFILT(tmp).cookie, ifp,
+						       ioctl_code, ioctl_arg);
+	       if (retval2) {
+		    if (retval2 == EJUSTRETURN)
+			 return 0;
+		    else
+			 return retval2;
+	       }
+	  }
+     }
+
+
+     if_family = find_family_module(ifp->if_family);
+     if ((if_family) && (if_family->ifmod_ioctl)) {
+	  retval2 = (*if_family->ifmod_ioctl)(ifp, ioctl_code, ioctl_arg);
+
+	  if ((retval2) && (retval2 != EOPNOTSUPP)) {
+	       if (retval2 == EJUSTRETURN)
+		    return 0;
+	       else
+		    return retval;
+	  }
+
+	  if (retval == EOPNOTSUPP)
+	       retval = retval2;
+     }
+
+     if (ifp->if_ioctl) 
+	  retval2 = (*ifp->if_ioctl)(ifp, ioctl_code, ioctl_arg);
+
+     if (retval == EOPNOTSUPP) 
+	  return retval2;
+     else {
+	  if (retval2 == EOPNOTSUPP)
+	       return 0;
+	  else
+	       return retval2;
+     }
+>>>>>>> origin/10.3
 }
 
 errno_t

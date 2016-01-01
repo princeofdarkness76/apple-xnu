@@ -1,6 +1,7 @@
 /*
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2001 Apple Computer, Inc. All rights reserved.
@@ -8,9 +9,13 @@
 =======
  * Copyright (c) 2000-2002 Apple Computer, Inc. All rights reserved.
 >>>>>>> origin/10.2
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
 <<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -36,11 +41,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -141,7 +156,13 @@
 
 #include <pexpert/pexpert.h>
 
+<<<<<<< HEAD
 #define NFS_VFS_DBG(...) NFS_DBG(NFS_FAC_VFS, 7, ## __VA_ARGS__)
+=======
+extern int	nfs_ticks;
+extern int	nfs_mount_type;
+extern int	nfs_resv_mounts;
+>>>>>>> origin/10.3
 
 /*
  * NFS client globals
@@ -742,7 +763,6 @@ nfs_vfs_getattr(mount_t mp, struct vfs_attr *fsap, vfs_context_t ctx)
 	int error = 0, v3 = (nmp->nm_flag & NFSMNT_NFSV3), retattr;
 	struct mbuf *mreq, *mrep, *md, *mb, *mb2;
 	struct ucred *cred;
-	u_quad_t tquad;
 	extern int nfs_mount_type;
 	u_int64_t xid;
 
@@ -760,7 +780,7 @@ nfs_vfs_getattr(mount_t mp, struct vfs_attr *fsap, vfs_context_t ctx)
 	nfsm_reqhead(vp, NFSPROC_FSSTAT, NFSX_FH(v3));
 	nfsm_fhtom(vp, v3);
 	nfsm_request(vp, NFSPROC_FSSTAT, p, cred, &xid);
-	if (v3)
+	if (v3 && mrep)
 		nfsm_postop_attr(vp, retattr, &xid);
 	nfsm_dissect(sfp, struct nfs_statfs *, NFSX_STATFS(v3));
 
@@ -771,6 +791,7 @@ nfs_vfs_getattr(mount_t mp, struct vfs_attr *fsap, vfs_context_t ctx)
 	sbp->f_type = nfs_mount_type;
 >>>>>>> origin/10.1
 #endif
+<<<<<<< HEAD
 		} else if (nmp->nm_lockmode == NFS_LOCK_MODE_DISABLED) {
 			/* locks disabled on this mount, so they definitely won't work */
 			valid = VOL_CAP_INT_ADVLOCK | VOL_CAP_INT_FLOCK;
@@ -843,6 +864,60 @@ nfs_vfs_getattr(mount_t mp, struct vfs_attr *fsap, vfs_context_t ctx)
 		VFSATTR_SET_SUPPORTED(fsap, f_attributes);
 	}
 
+=======
+	sbp->f_flags = nmp->nm_flag;
+	sbp->f_iosize = nfs_iosize(nmp);
+	if (v3) {
+		/*
+		 * Adjust block size to get total block count to fit in a long.
+		 * If we can't increase block size enough, clamp to max long.
+		 */
+		u_quad_t tquad, tquad2, bsize;
+		bsize = NFS_FABLKSIZE;
+
+		fxdr_hyper(&sfp->sf_tbytes, &tquad);
+		tquad /= bsize;
+		while ((tquad & ~0x7fffffff) && (bsize < 0x40000000)) {
+			bsize <<= 1;
+			tquad >>= 1;
+		}
+		sbp->f_blocks = (tquad & ~0x7fffffff) ? 0x7fffffff : (long)tquad;
+
+		fxdr_hyper(&sfp->sf_fbytes, &tquad);
+		tquad /= bsize;
+		sbp->f_bfree = (tquad & ~0x7fffffff) ? 0x7fffffff : (long)tquad;
+
+		fxdr_hyper(&sfp->sf_abytes, &tquad);
+		tquad /= bsize;
+		sbp->f_bavail = (tquad & ~0x7fffffff) ? 0x7fffffff : (long)tquad;
+
+		sbp->f_bsize = (long)bsize;
+
+		/* adjust file slots too... */
+		fxdr_hyper(&sfp->sf_tfiles, &tquad);
+		fxdr_hyper(&sfp->sf_ffiles, &tquad2);
+		while (tquad & ~0x7fffffff) {
+			tquad >>= 1;
+			tquad2 >>= 1;
+		}
+		sbp->f_files = tquad;
+		sbp->f_ffree = tquad2;
+	} else {
+		sbp->f_bsize = fxdr_unsigned(long, sfp->sf_bsize);
+		sbp->f_blocks = fxdr_unsigned(long, sfp->sf_blocks);
+		sbp->f_bfree = fxdr_unsigned(long, sfp->sf_bfree);
+		sbp->f_bavail = fxdr_unsigned(long, sfp->sf_bavail);
+		sbp->f_files = 0;
+		sbp->f_ffree = 0;
+	}
+	if (sbp != &mp->mnt_stat) {
+		bcopy(mp->mnt_stat.f_mntonname, sbp->f_mntonname, MNAMELEN);
+		bcopy(mp->mnt_stat.f_mntfromname, sbp->f_mntfromname, MNAMELEN);
+	}
+	nfsm_reqdone;
+	VOP_UNLOCK(vp, 0, p);
+	crfree(cred);
+>>>>>>> origin/10.3
 	return (error);
 }
 
@@ -903,7 +978,9 @@ nfs3_fsinfo(struct nfsmount *nmp, nfsnode_t np, vfs_context_t ctx)
 	nfsm_reqhead(vp, NFSPROC_FSINFO, NFSX_FH(1));
 	nfsm_fhtom(vp, 1);
 	nfsm_request(vp, NFSPROC_FSINFO, p, cred, &xid);
-	nfsm_postop_attr(vp, retattr, &xid);
+	if (mrep) {
+		nfsm_postop_attr(vp, retattr, &xid);
+	}
 	if (!error) {
 		nfsm_dissect(fsp, struct nfsv3_fsinfo *, NFSX_V3FSINFO);
 		pref = fxdr_unsigned(u_long, fsp->fs_wtpref);
@@ -1096,6 +1173,15 @@ tryagain:
 tryagain:
 	error = nfs_boot_getfh(&nd, procp, v3);
 	if (error) {
+		if (error == EHOSTDOWN || error == EHOSTUNREACH) {
+			if (nd.nd_root.ndm_path)
+				FREE_ZONE(nd.nd_root.ndm_path, 
+					  MAXPATHLEN, M_NAMEI);
+			if (nd.nd_private.ndm_path)
+				FREE_ZONE(nd.nd_private.ndm_path, 
+					  MAXPATHLEN, M_NAMEI);
+			return (error);
+		}
 		if (v3) {
 			printf("nfs_boot_getfh(v3) failed with %d, trying v2...\n", error);
 			v3 = 0;
@@ -1706,7 +1792,50 @@ nfs_convert_old_nfs_args(mount_t mp, user_addr_t data, vfs_context_t ctx, int ar
 	uint32_t nfsvers, nfslockmode = 0, argslength_offset, attrslength_offset, end_offset;
 	struct xdrbuf xb;
 
+<<<<<<< HEAD
 	*xdrbufp = NULL;
+=======
+	error = copyin(data, (caddr_t)&args, sizeof (struct nfs_args));
+	if (error)
+		return (error);
+	if (args.version != NFS_ARGSVERSION) {
+#ifndef NO_COMPAT_PRELITE2
+		/*
+		 * If the argument version is unknown, then assume the
+		 * caller is a pre-lite2 4.4BSD client and convert its
+		 * arguments.
+		 */
+		struct onfs_args oargs;
+		error = copyin(data, (caddr_t)&oargs, sizeof (struct onfs_args));
+		if (error)
+			return (error);
+		nfs_convert_oargs(&args,&oargs);
+#else /* NO_COMPAT_PRELITE2 */
+		return (EPROGMISMATCH);
+#endif /* !NO_COMPAT_PRELITE2 */
+	}
+	if (args.fhsize < 0 || args.fhsize > NFSX_V3FHMAX)
+		return (EINVAL);
+	error = copyin((caddr_t)args.fh, (caddr_t)nfh, args.fhsize);
+	if (error)
+		return (error);
+	error = copyinstr(path, pth, MNAMELEN-1, &len);
+	if (error)
+		return (error);
+	bzero(&pth[len], MNAMELEN - len);
+	error = copyinstr(args.hostname, hst, MNAMELEN-1, &len);
+	if (error)
+		return (error);
+	bzero(&hst[len], MNAMELEN - len);
+	/* sockargs() call must be after above copyin() calls */
+	error = sockargs(&nam, (caddr_t)args.addr, args.addrlen, MT_SONAME);
+	if (error)
+		return (error);
+	args.fh = nfh;
+	error = mountnfs(&args, mp, nam, pth, hst, &vp);
+	return (error);
+}
+>>>>>>> origin/10.3
 
 	/* allocate a temporary buffer for mntfrom */
 	MALLOC_ZONE(mntfrom, char*, MAXPATHLEN, M_NAMEI, M_WAITOK);
@@ -4901,6 +5030,7 @@ nfs3_getquota(struct nfsmount *nmp, vfs_context_t ctx, uid_t id, int type, struc
 			mreq, R_XID32(xid), 0, timeo, &nmrep);
 	nfsmout_if(error);
 
+<<<<<<< HEAD
 	/* parse rquota response */
 	nfsm_chain_get_32(error, &nmrep, val);
 	if (!error && (val != RQUOTA_STAT_OK)) {
@@ -4932,6 +5062,17 @@ nfs3_getquota(struct nfsmount *nmp, vfs_context_t ctx, uid_t id, int type, struc
 nfsmout:
 	nfsm_chain_cleanup(&nmreq);
 	nfsm_chain_cleanup(&nmrep);
+=======
+	if (nmp->nm_flag & NFSMNT_RESVPORT)
+		nfs_resv_mounts++;
+	nmp->nm_state |= NFSSTA_MOUNTED;
+	return (0);
+bad:
+	nfs_disconnect(nmp);
+	FREE_ZONE((caddr_t)nmp, sizeof (struct nfsmount), M_NFSMNT);
+bad2:
+	m_freem(nam);
+>>>>>>> origin/10.3
 	return (error);
 }
 
@@ -5003,6 +5144,7 @@ nfs4_getquota(struct nfsmount *nmp, vfs_context_t ctx, uid_t id, int type, struc
 	 * The credential passed to the server needs to have
 	 * an effective uid that matches the given uid.
 	 */
+<<<<<<< HEAD
 	if (id != kauth_cred_getuid(cred)) {
 		struct posix_cred temp_pcred;
 		posix_cred_t pcred = posix_cred_get(cred);
@@ -5015,6 +5157,14 @@ nfs4_getquota(struct nfsmount *nmp, vfs_context_t ctx, uid_t id, int type, struc
 			return (ENOMEM);
 	} else {
 		kauth_cred_ref(cred);
+=======
+	if (nmp->nm_flag & (NFSMNT_NQNFS | NFSMNT_KERB))
+		nmp->nm_state |= NFSSTA_DISMNT;
+	nmp->nm_state &= ~NFSSTA_MOUNTED;
+	if (nmp->nm_flag & NFSMNT_RESVPORT) {
+		if (--nfs_resv_mounts == 0)
+			nfs_bind_resv_thread_wake();
+>>>>>>> origin/10.3
 	}
 
 <<<<<<< HEAD
@@ -5045,6 +5195,7 @@ nfs4_getquota(struct nfsmount *nmp, vfs_context_t ctx, uid_t id, int type, struc
 	nfsm_chain_null(&nmreq);
 	nfsm_chain_null(&nmrep);
 
+<<<<<<< HEAD
 	// PUTFH + GETATTR
 	numops = 2;
 	nfsm_chain_build_alloc_init(error, &nmreq, 15 * NFSX_UNSIGNED);
@@ -5078,6 +5229,23 @@ nfsmout:
 	vnode_put(NFSTOV(np));
 	kauth_cred_unref(&cred);
 	return (error);
+=======
+		for (rp = nfs_reqq.tqh_first; rp; rp = rp->r_chain.tqe_next)
+			if (rp->r_nmp == nmp)
+				rp->r_nmp = (struct nfsmount *)0;
+#if NFSDIAG && 0
+		if (hw_atomic_sub(&nfsreqqusers, 1) != 0)
+			nfsatompanic("unmount sub");
+#endif
+		/* Need to wake up any rcvlock waiters so they notice the unmount. */
+		if (nmp->nm_state & NFSSTA_WANTRCV) {
+			nmp->nm_state &= ~NFSSTA_WANTRCV;
+			wakeup(&nmp->nm_state);
+		}
+		FREE_ZONE((caddr_t)nmp, sizeof (struct nfsmount), M_NFSMNT);
+	}
+	return (0);
+>>>>>>> origin/10.3
 }
 
 int
@@ -5573,11 +5741,18 @@ nfs_vfs_sysctl(int *name, u_int namelen, user_addr_t oldp, size_t *oldlenp,
            user_addr_t newp, size_t newlen, vfs_context_t ctx)
 {
 	int error = 0, val;
+<<<<<<< HEAD
 	int softnobrowse;
 	struct sysctl_req *req = NULL;
 	union union_vfsidctl vc;
 	mount_t mp;
 	struct nfsmount *nmp = NULL;
+=======
+	struct sysctl_req *req;
+	struct vfsidctl vc;
+	struct mount *mp;
+	struct nfsmount *nmp;
+>>>>>>> origin/10.3
 	struct vfsquery vq;
 	struct nfsreq *rq;
 	boolean_t is_64_bit;
@@ -5614,11 +5789,17 @@ nfs_vfs_sysctl(int *name, u_int namelen, user_addr_t oldp, size_t *oldlenp,
 	case VFS_CTL_NOLOCKS:
 	case VFS_CTL_NSTATUS:
 	case VFS_CTL_QUERY:
+<<<<<<< HEAD
 		req = CAST_DOWN(struct sysctl_req *, oldp);
 		if (req == NULL) {
 			return EFAULT;
 		}
 		error = SYSCTL_IN(req, &vc, is_64_bit? sizeof(vc.vc64):sizeof(vc.vc32));
+=======
+	case VFS_CTL_NOLOCKS:
+		req = oldp;
+		error = SYSCTL_IN(req, &vc, sizeof(vc));
+>>>>>>> origin/10.3
 		if (error)
 			return (error);
 		mp = vfs_getvfs(&vc.vc32.vc_fsid); /* works for 32 and 64 */
@@ -5924,6 +6105,7 @@ ustat_skip:
 			/* reclaim old expired user nodes */
 			nfsrv_active_user_list_reclaim();
 		}
+<<<<<<< HEAD
 
 		error = copyout(&nfsrv_user_stat_node_count, oldp, sizeof(nfsrv_user_stat_node_count));
 		break;
@@ -5933,10 +6115,17 @@ ustat_skip:
 			lck_mtx_lock(&nmp->nm_lock);
 			val = (nmp->nm_lockmode == NFS_LOCK_MODE_DISABLED) ? 1 : 0;
 			lck_mtx_unlock(&nmp->nm_lock);
+=======
+		return 0;
+	case VFS_CTL_NOLOCKS:
+		val = (nmp->nm_flag & NFSMNT_NOLOCKS) ? 1 : 0;
+ 		if (req->oldptr != NULL) {
+>>>>>>> origin/10.3
  			error = SYSCTL_OUT(req, &val, sizeof(val));
  			if (error)
  				return (error);
  		}
+<<<<<<< HEAD
  		if (req->newptr != USER_ADDR_NULL) {
  			error = SYSCTL_IN(req, &val, sizeof(val));
  			if (error)
@@ -5959,6 +6148,16 @@ ustat_skip:
 				nmp->nm_lockmode = NFS_LOCK_MODE_ENABLED;
 			}
 			lck_mtx_unlock(&nmp->nm_lock);
+=======
+ 		if (req->newptr != NULL) {
+ 			error = SYSCTL_IN(req, &val, sizeof(val));
+ 			if (error)
+ 				return (error);
+			if (val)
+				nmp->nm_flag |= NFSMNT_NOLOCKS;
+			else
+				nmp->nm_flag &= ~NFSMNT_NOLOCKS;
+>>>>>>> origin/10.3
  		}
 		break;
 	case VFS_CTL_QUERY:
@@ -5967,6 +6166,7 @@ ustat_skip:
 		softnobrowse = (NMFLAG(nmp, SOFT) && (vfs_flags(nmp->nm_mountp) & MNT_DONTBROWSE));
 		if (!softnobrowse && (nmp->nm_state & NFSSTA_TIMEO))
 			vq.vq_flags |= VQ_NOTRESP;
+<<<<<<< HEAD
 		if (!softnobrowse && (nmp->nm_state & NFSSTA_JUKEBOXTIMEO) && !NMFLAG(nmp, MUTEJUKEBOX))
 			vq.vq_flags |= VQ_NOTRESP;
 		if (!softnobrowse && (nmp->nm_state & NFSSTA_LOCKTIMEO) &&
@@ -5975,6 +6175,11 @@ ustat_skip:
 		if (nmp->nm_state & NFSSTA_DEAD)
 			vq.vq_flags |= VQ_DEAD;
 		lck_mtx_unlock(&nmp->nm_lock);
+=======
+		if (!(nmp->nm_flag & NFSMNT_NOLOCKS) &&
+		    (nmp->nm_state & NFSSTA_LOCKTIMEO))
+			vq.vq_flags |= VQ_NOTRESPLOCK;
+>>>>>>> origin/10.3
 		error = SYSCTL_OUT(req, &vq, sizeof(vq));
 		break;
  	case VFS_CTL_TIMEO:

@@ -4,6 +4,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
 <<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -28,11 +29,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -301,6 +312,7 @@ SYSCTL_INT(_net_inet_tcp, OID_AUTO, obey_ifef_nowindowscale,
     &tcp_obey_ifef_nowindowscale, 0, "");
 #endif
 
+<<<<<<< HEAD
 extern int tcp_TCPTV_MIN;
 extern int tcp_acc_iaj_high;
 extern int tcp_acc_iaj_react_limit;
@@ -312,6 +324,27 @@ struct timeval tcp_uptime;	/* uptime when tcp_now was last updated */
 lck_spin_t *tcp_uptime_lock;	/* Used to sychronize updates to tcp_now */
 
 =======
+=======
+SYSCTL_NODE(_net_inet_tcp, OID_AUTO, reass, CTLFLAG_RW, 0,
+    "TCP Segment Reassembly Queue");
+
+__private_extern__ int tcp_reass_maxseg = 0;
+SYSCTL_INT(_net_inet_tcp_reass, OID_AUTO, maxsegments, CTLFLAG_RW,
+    &tcp_reass_maxseg, 0,
+    "Global maximum number of TCP Segments in Reassembly Queue");
+
+__private_extern__ int tcp_reass_qsize = 0;
+SYSCTL_INT(_net_inet_tcp_reass, OID_AUTO, cursegments, CTLFLAG_RD,
+    &tcp_reass_qsize, 0,
+    "Global number of TCP Segments currently in Reassembly Queue");
+
+static int tcp_reass_overflows = 0;
+SYSCTL_INT(_net_inet_tcp_reass, OID_AUTO, overflows, CTLFLAG_RD,
+    &tcp_reass_overflows, 0,
+    "Global number of TCP Segment Reassembly Queue Overflows");
+
+
+>>>>>>> origin/10.3
 __private_extern__ int slowlink_wsize = 8192;
 SYSCTL_INT(_net_inet_tcp, OID_AUTO, slowlink_wsize, CTLFLAG_RW,
 	&slowlink_wsize, 0, "Maximum advertised window size for slowlink");
@@ -654,6 +687,21 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m,
 		return (0);
 	}
 
+	/*
+	 * Limit the number of segments in the reassembly queue to prevent
+	 * holding on to too many segments (and thus running out of mbufs).
+	 * Make sure to let the missing segment through which caused this
+	 * queue.  Always keep one global queue entry spare to be able to
+	 * process the missing segment.
+	 */
+	if (th->th_seq != tp->rcv_nxt &&
+	    tcp_reass_qsize + 1 >= tcp_reass_maxseg) {
+		tcp_reass_overflows++;
+		tcpstat.tcps_rcvmemdrop++;
+		m_freem(m);
+		return (0);
+	}
+
 	/* Allocate a new queue entry. If we can't, just drop the pkt. XXX */
 	te = (struct tseg_qent *) zalloc(tcp_reass_zone);
 	if (te == NULL) {
@@ -661,7 +709,11 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m,
 		m_freem(m);
 		return (0);
 	}
+<<<<<<< HEAD
 	tp->t_reassqlen++;
+=======
+	tcp_reass_qsize++;
+>>>>>>> origin/10.3
 
 	/*
 	 * Find a segment which begins after this one does.
@@ -711,9 +763,14 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m,
 					tp->t_stat.rxduplicatebytes += *tlenp;
 				}
 				m_freem(m);
+<<<<<<< HEAD
 				zfree(tcp_reass_zone, te);
 				te = NULL;
 				tp->t_reassqlen--;
+=======
+				FREE(te, M_TSEGQ);
+				tcp_reass_qsize--;
+>>>>>>> origin/10.3
 				/*
 				 * Try to present any queued data
 				 * at the left window edge to the user.
@@ -778,8 +835,13 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m,
 		nq = LIST_NEXT(q, tqe_q);
 		LIST_REMOVE(q, tqe_q);
 		m_freem(q->tqe_m);
+<<<<<<< HEAD
 		zfree(tcp_reass_zone, q);
 		tp->t_reassqlen--;
+=======
+		FREE(q, M_TSEGQ);
+		tcp_reass_qsize--;
+>>>>>>> origin/10.3
 		q = nq;
 	}
 
@@ -839,6 +901,7 @@ present:
 		LIST_REMOVE(q, tqe_q);
 		if (so->so_state & SS_CANTRCVMORE) {
 			m_freem(q->tqe_m);
+<<<<<<< HEAD
 		} else {
 			so_recv_data_stat(so, q->tqe_m, 0); /* XXXX */
 			if (so->so_flags & SOF_ENABLE_MSGS) {
@@ -865,6 +928,12 @@ present:
 		}
 		zfree(tcp_reass_zone, q);
 		tp->t_reassqlen--;
+=======
+		else
+			sbappend(&so->so_rcv, q->tqe_m);
+		FREE(q, M_TSEGQ);
+		tcp_reass_qsize--;
+>>>>>>> origin/10.3
 		q = nq;
 	} while (q && q->tqe_th->th_seq == tp->rcv_nxt);
 

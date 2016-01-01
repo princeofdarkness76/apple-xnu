@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -28,11 +29,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -101,12 +112,15 @@
 #include <vm/vm_pageout.h>
 #include <vm/vm_fault.h>
 
+<<<<<<< HEAD
 #include <sys/kdebug.h>
 #include <libkern/OSAtomic.h>  
 
 <<<<<<< HEAD
 #include <sys/sdt.h>
 =======
+=======
+>>>>>>> origin/10.3
 #define CL_READ      0x01
 #define CL_ASYNC     0x02
 #define CL_COMMIT    0x04
@@ -143,9 +157,26 @@ static int cluster_phys_read(struct vnode *vp, struct uio *uio,
 static int cluster_phys_write(struct vnode *vp, struct uio *uio,
 		off_t newEOF, int devblocksize, int flags);
 static int cluster_align_phys_io(struct vnode *vp, struct uio *uio,
+<<<<<<< HEAD
                 vm_offset_t usr_paddr, int xsize, int devblocksize, int flags);
 static int cluster_push_x(struct vnode *vp, off_t EOF, daddr_t first, daddr_t last, int can_delay);
 static int cluster_try_push(struct vnode *vp, off_t newEOF, int can_delay, int push_all);
+=======
+                addr64_t usr_paddr, int xsize, int devblocksize, int flags);
+static int cluster_push_x(struct vnode *vp, off_t EOF, unsigned int first, unsigned int last, int can_delay);
+static int cluster_try_push(struct vnode *vp, off_t EOF, int can_delay, int push_all);
+
+static int sparse_cluster_switch(struct vnode *vp, off_t EOF);
+static int sparse_cluster_push(struct vnode *vp, off_t EOF, int push_all);
+static int sparse_cluster_add(struct vnode *vp, off_t EOF, daddr_t first, daddr_t last);
+
+static kern_return_t vfs_drt_mark_pages(void **cmapp, off_t offset, u_int length, int *setcountp);
+static kern_return_t vfs_drt_unmark_pages(void **cmapp, off_t offset, u_int length);
+static kern_return_t vfs_drt_get_cluster(void **cmapp, off_t *offsetp, u_int *lengthp);
+static kern_return_t vfs_drt_control(void **cmapp, int op_type);
+
+int     ubc_page_op_with_control __P((memory_object_control_t, off_t, int, ppnum_t *, int *));
+>>>>>>> origin/10.3
 
 >>>>>>> origin/10.2
 
@@ -7119,12 +7150,21 @@ sparse_cluster_switch(struct cl_writebehind *wbp, vnode_t vp, off_t EOF, int (*c
 =======
 
 static int
+<<<<<<< HEAD
 cluster_nocopy_read(vp, uio, filesize, devblocksize, flags)
 	struct vnode *vp;
 	struct uio   *uio;
 	off_t         filesize;
 	int           devblocksize;
 	int           flags;
+=======
+cluster_push_x(vp, EOF, first, last, can_delay)
+        struct vnode *vp;
+	off_t  EOF;
+	unsigned int first;
+	unsigned int last;
+	int    can_delay;
+>>>>>>> origin/10.3
 {
 	upl_t            upl;
 	upl_page_info_t  *pl;
@@ -7178,8 +7218,13 @@ sparse_cluster_push(void **scmap, vnode_t vp, off_t EOF, int push_flag, int io_f
 		if ( !(push_flag & PUSH_ALL) )
 		        break;
 	}
+<<<<<<< HEAD
 	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 79)) | DBG_FUNC_END, vp, (*scmap), 0, 0, 0);
 }
+=======
+	upl_size = pages_in_upl * PAGE_SIZE;
+	upl_f_offset = (off_t)((unsigned long long)first * PAGE_SIZE_64);
+>>>>>>> origin/10.3
 
 
 /*
@@ -7470,8 +7515,18 @@ cluster_copy_upl_data(struct uio *uio, upl_t upl, int upl_offset, int *io_resid)
 			 */
 			goto wait_for_reads;
 
+<<<<<<< HEAD
 		upl_offset = (vm_offset_t)iov->iov_base & PAGE_MASK_64;
 		upl_needed_size = (upl_offset + io_size + (PAGE_SIZE -1)) & ~PAGE_MASK;
+=======
+static int
+sparse_cluster_push(struct vnode *vp, off_t EOF, int push_all)
+{
+        unsigned int first;
+	unsigned int last;
+        off_t offset;
+	u_int length;
+>>>>>>> origin/10.3
 
 		KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 72)) | DBG_FUNC_START,
 			     (int)upl_offset, upl_needed_size, (int)iov->iov_base, io_size, 0);
@@ -7481,9 +7536,20 @@ cluster_copy_upl_data(struct uio *uio, upl_t upl, int upl_offset, int *io_resid)
 			upl_size = upl_needed_size;
 			upl_flags = UPL_FILE_IO | UPL_NO_SYNC | UPL_CLEAN_IN_PLACE | UPL_SET_INTERNAL;
 
+<<<<<<< HEAD
 			kret = vm_map_get_upl(current_map(),
 					      (vm_offset_t)iov->iov_base & ~PAGE_MASK,
 					      &upl_size, &upl, NULL, &pages_in_pl, &upl_flags, force_data_sync);
+=======
+	for (;;) {
+	        if (vfs_drt_get_cluster(&(vp->v_scmap), &offset, &length) != KERN_SUCCESS) {
+		        vp->v_flag &= ~VHASDIRTY;
+		        vp->v_clen = 0;
+			break;
+		}
+		first = (unsigned int)(offset / PAGE_SIZE_64);
+		last  = (unsigned int)((offset + length) / PAGE_SIZE_64);
+>>>>>>> origin/10.3
 
 			if (kret != KERN_SUCCESS) {
 			        KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 72)) | DBG_FUNC_END,
@@ -7640,8 +7706,41 @@ cluster_phys_read(vp, uio, filesize, devblocksize, flags)
 	 *  -- the target address is physically contiguous
 	 */
 
+<<<<<<< HEAD
 	iov = uio->uio_iov;
 >>>>>>> origin/10.2
+=======
+/*
+ *	NOTE:  There is no prototype for the following in BSD. It, and the definitions
+ *	of the defines for cppvPsrc, cppvPsnk, cppvFsnk, and cppvFsrc will be found in
+ *	osfmk/ppc/mappings.h.  They are not included here because there appears to be no
+ *	way to do so without exporting them to kexts as well.
+ */
+	if (flags & CL_READ)
+//		copypv(ubc_paddr, usr_paddr, xsize, cppvPsrc | cppvPsnk | cppvFsnk);	/* Copy physical to physical and flush the destination */
+		copypv(ubc_paddr, usr_paddr, xsize,        2 |        1 |        4);	/* Copy physical to physical and flush the destination */
+	else
+//		copypv(usr_paddr, ubc_paddr, xsize, cppvPsrc | cppvPsnk | cppvFsrc);	/* Copy physical to physical and flush the source */
+		copypv(usr_paddr, ubc_paddr, xsize,        2 |        1 |        8);	/* Copy physical to physical and flush the source */
+	
+	if ( !(flags & CL_READ) || (upl_valid_page(pl, 0) && upl_dirty_page(pl, 0))) {
+	        /*
+		 * issue a synchronous write to cluster_io
+		 */
+		error = cluster_io(vp, upl, 0, uio->uio_offset & ~PAGE_MASK_64, PAGE_SIZE, devblocksize,
+					0, (struct buf *)0, (struct clios *)0);
+	}
+	if (error == 0) {
+		uio->uio_offset += xsize;
+		iov->iov_base   += xsize;
+		iov->iov_len    -= xsize;
+		uio->uio_resid  -= xsize;
+	}
+	ubc_upl_abort_range(upl, 0, PAGE_SIZE, UPL_ABORT_DUMP_PAGES | UPL_ABORT_FREE_ON_EMPTY);
+	
+	return (error);
+}
+>>>>>>> origin/10.3
 
 	return (cluster_copy_ubc_data_internal(vp, uio, io_resid, mark_dirty, 1));
 }

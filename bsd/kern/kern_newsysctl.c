@@ -1,8 +1,13 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
 <<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,11 +33,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  *
@@ -88,7 +103,26 @@
 #include <sys/systm.h>
 #include <sys/sysproto.h>
 
+<<<<<<< HEAD
 #include <security/audit/audit.h>
+=======
+#include <bsm/audit_kernel.h>
+
+/*
+struct sysctl_oid_list sysctl__debug_children;
+struct sysctl_oid_list sysctl__kern_children;
+struct sysctl_oid_list sysctl__net_children;
+struct sysctl_oid_list sysctl__sysctl_children;
+*/
+
+extern struct sysctl_oid *newsysctl_list[];
+extern struct sysctl_oid *machdep_sysctl_list[];
+
+
+static void
+sysctl_sysctl_debug_dump_node(struct sysctl_oid_list *l, int i);
+
+>>>>>>> origin/10.3
 
 lck_grp_t * sysctl_lock_group = NULL;
 lck_rw_t * sysctl_geometry_lock = NULL;
@@ -1054,7 +1088,11 @@ sysctl_sysctl_name2oid(__unused struct sysctl_oid *oidp, __unused void *arg1,
 	return (error);
 }
 
+<<<<<<< HEAD
 SYSCTL_PROC(_sysctl, 3, name2oid, CTLFLAG_RW|CTLFLAG_ANYBODY|CTLFLAG_KERN | CTLFLAG_LOCKED, 0, 0, 
+=======
+SYSCTL_PROC(_sysctl, 3, name2oid, CTLFLAG_RW|CTLFLAG_ANYBODY|CTLFLAG_KERN, 0, 0, 
+>>>>>>> origin/10.3
 	sysctl_sysctl_name2oid, "I", "");
 
 /*
@@ -1176,8 +1214,18 @@ sysctl_handle_long(__unused struct sysctl_oid *oidp, void *arg1,
 	__unused int arg2, struct sysctl_req *req)
 {
 	if (!arg1)
+<<<<<<< HEAD
 		return (EINVAL);
 	return sysctl_io_number(req, *(long*)arg1, sizeof(long), arg1, NULL);
+=======
+		error = EPERM;
+	else
+		error = SYSCTL_IN(req, arg1, sizeof(int));
+
+	if (error == 0)
+		AUDIT_ARG(value, *(int *)arg1);
+	return (error);
+>>>>>>> origin/10.3
 }
 
 /*

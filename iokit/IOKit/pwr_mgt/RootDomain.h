@@ -4,6 +4,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
 <<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -28,11 +29,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -105,6 +116,7 @@ enum {
     kPCICantSleep                   = 0x00000004
 };
 
+<<<<<<< HEAD
 /*
  *IOPMrootDomain registry property keys
  */
@@ -159,6 +171,32 @@ IOReturn        acknowledgeSleepWakeNotification(void * );
 
 IOReturn        vetoSleepWakeNotification(void * PMrefcon);
 __END_DECLS
+=======
+// Constants for use as arguments to registerPMSettingsController
+enum {
+    kIOPMAutoWakeSetting = 1,
+    kIOPMAutoPowerOnSetting,
+    kIOPMWakeOnRingSetting,
+    kIOPMAutoRestartOnPowerLossSetting,
+    kIOPMWakeOnLidSetting,
+    kIOPMWakeOnACChangeSetting
+};
+typedef int IOPMSystemSettingType;
+
+
+
+typedef IOReturn (*IOPMSettingControllerCallback)(IOPMSystemSettingType arg_type, int arg_val, void *info);
+
+extern "C"
+{
+	IONotifier * registerSleepWakeInterest(IOServiceInterestHandler, void *, void * = 0);
+        IONotifier * registerPrioritySleepWakeInterest(IOServiceInterestHandler handler, void * self, void * ref = 0);
+        IOReturn acknowledgeSleepWakeNotification(void * );
+        IOReturn vetoSleepWakeNotification(void * PMrefcon);
+        IOReturn rootDomainRestart ( void );
+        IOReturn rootDomainShutdown ( void );
+}
+>>>>>>> origin/10.3
 
 #define IOPM_ROOTDOMAIN_REV        2
 =======
@@ -428,7 +466,19 @@ public:
     void stopIgnoringClamshellEventsDuringWakeup ( void );
     void wakeFromDoze( void );
     void publishFeature( const char *feature );
+<<<<<<< HEAD
 >>>>>>> origin/10.1
+=======
+    void unIdleDevice( IOService *, unsigned long );
+    void announcePowerSourceChange( void );
+        
+    // Override of these methods for logging purposes.
+    virtual IOReturn changePowerStateTo ( unsigned long ordinal );
+    virtual IOReturn changePowerStateToPriv ( unsigned long ordinal );
+>>>>>>> origin/10.3
+
+    IOReturn registerPMSettingController(IOPMSettingControllerCallback, void *);
+    IOReturn registerPlatformPowerProfiles(OSArray *);
 
 private:
     virtual IOReturn    changePowerStateTo( unsigned long ordinal ) APPLE_KEXT_COMPATIBILITY_OVERRIDE;
@@ -940,6 +990,9 @@ private:
     static bool displayWranglerPublished( void * target, void * refCon,
                                     IOService * newService);
 
+    static bool batteryLocationPublished( void * target, void * refCon,
+                                    IOService * resourceService );
+
     void setQuickSpinDownTimeout ( void );
     void adjustPowerState( void );
     void restoreUserSpinDownTimeout ( void );
@@ -960,8 +1013,22 @@ private:
     unsigned int ignoringClamshellDuringWakeup:1;
     unsigned int reservedA:6;
     unsigned char reservedB[3];
+    
+    struct PMSettingCtrl {
+        IOPMSettingControllerCallback       func;
+        void                                *refcon;
+    };
 
-    thread_call_t diskSyncCalloutEntry;
+    // Private helper to call PM setting controller
+    IOReturn setPMSetting(int type, OSNumber *);
+ 
+    struct ExpansionData {    
+        PMSettingCtrl           *_settingController;
+        thread_call_t           diskSyncCalloutEntry;
+        IONotifier              *_batteryLocationNotifier;
+        IONotifier              *_displayWranglerNotifier;
+    };
+    ExpansionData   *_reserved;
     IOOptionBits platformSleepSupport;
 >>>>>>> origin/10.1
 };

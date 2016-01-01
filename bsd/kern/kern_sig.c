@@ -1,8 +1,13 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 1995-2007 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
 <<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,11 +33,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -99,13 +114,14 @@
 #include <sys/stat.h>
 #include <sys/lock.h>
 #include <sys/kdebug.h>
-
 #include <sys/mount.h>
 #include <sys/sysproto.h>
 
 #include <security/audit/audit.h>
 
 #include <machine/spl.h>
+
+#include <bsm/audit_kernel.h>
 
 #include <kern/cpu_number.h>
 
@@ -1492,6 +1508,8 @@ kill(proc_t cp, struct kill_args *uap, __unused int32_t *retval)
        AUDIT_ARG(pid, uap->pid);
        AUDIT_ARG(signum, uap->signum);
 
+	AUDIT_ARG(pid, uap->pid);
+	AUDIT_ARG(signum, uap->signum);
 	if ((u_int)uap->signum >= NSIG)
 		return (EINVAL);
 	if (uap->pid > 0) {
@@ -1507,10 +1525,15 @@ kill(proc_t cp, struct kill_args *uap, __unused int32_t *retval)
 			return (ESRCH);
 		}
 		AUDIT_ARG(process, p);
+<<<<<<< HEAD
 		if (!cansignal(cp, uc, p, uap->signum, 0)) {
 			proc_rele(p);
 			return(EPERM);
 		}
+=======
+		if (!cansignal(cp, pc, p, uap->signum))
+			return (EPERM);
+>>>>>>> origin/10.3
 		if (uap->signum)
 			psignal(p, uap->signum);
 		proc_rele(p);
@@ -1534,6 +1557,7 @@ killpg1_filt(proc_t p, void * arg)
 	proc_t cp = kfargp->cp;
 	int posix = kfargp->posix;
 
+<<<<<<< HEAD
 
 	if (p->p_pid <= 1 || p->p_flag & P_SYSTEM ||
 		(!posix && p == cp))
@@ -1592,6 +1616,13 @@ killpg1_callback(proc_t p, void * arg)
 	}
 
 	return(PROC_RETURNED);
+=======
+	AUDIT_ARG(pid, uap->pgid);
+	AUDIT_ARG(signum, uap->signum);
+	if ((u_int)uap->signum >= NSIG)
+		return (EINVAL);
+	return (killpg1(p, uap->signum, uap->pgid, 0));
+>>>>>>> origin/10.3
 }
 
 /*
@@ -2100,6 +2131,7 @@ psignal_internal(proc_t p, task_t task, thread_t thread, int flavor, int signum)
 		 *	(except for SIGCONT).
 		 */
 		if (prop & SA_CONT) {
+<<<<<<< HEAD
 			OSBitOrAtomic(P_CONTINUED, &sig_proc->p_flag);
 			(void) task_resume_internal(sig_task);
 			sig_proc->p_stat = SRUN;
@@ -2128,6 +2160,18 @@ psignal_internal(proc_t p, task_t task, thread_t thread, int flavor, int signum)
 		}
 
 		goto runlocked;
+=======
+			if (p->p_flag & P_TTYSLEEP) {
+				p->p_flag &= ~P_TTYSLEEP;
+				wakeup(&p->p_siglist);
+			} else {
+				(void) task_resume(sig_task);
+			}
+			p->p_stat = SRUN;
+		} else if (p->p_stat == SSTOP)
+			goto psigout;
+		goto run;
+>>>>>>> origin/10.3
 	} else {
 		/*	Default action - varies */
 		if (mask & stopsigmask) {
@@ -2244,7 +2288,223 @@ psignal_internal(proc_t p, task_t task, thread_t thread, int flavor, int signum)
 			 * cause their handlers to fire.  If it's only
 			 * the SIGCONT, then don't wake up.
 			 */
+<<<<<<< HEAD
 			if (((flavor & (PSIG_VFORK|PSIG_THREAD)) == 0) && (((uth->uu_siglist & ~uth->uu_sigmask) & ~sig_proc->p_sigignore) & ~mask)) {
+=======
+			if (p->p_stat == SSTOP)
+				goto psigout;
+			goto run;
+		}
+	}
+	/*NOTREACHED*/
+run:
+	/*
+	 * If we're being traced (possibly because someone attached us
+	 * while we were stopped), check for a signal from the debugger.
+	 */
+	if (p->p_stat == SSTOP) {
+		if ((p->p_flag & P_TRACED) != 0 && p->p_xstat != 0)
+			uth->uu_siglist |= sigmask(p->p_xstat); 
+	} else {
+		/*
+	 	 * setrunnable(p) in BSD and
+	 	 * Wake up the thread if it is interruptible.
+	 	 */
+		p->p_stat = SRUN;
+		thread_abort_safely(sig_thread_act);
+	}
+psigout:
+	if (withlock) 
+		signal_unlock(p);
+	if (sw_funnel)
+		thread_funnel_switch(KERNEL_FUNNEL, NETWORK_FUNNEL);
+}
+
+
+/* psignal_lock(p, signum, withlock ) */
+void
+psignal_uthread(thr_act, signum)
+	thread_act_t thr_act;
+	int signum;
+{
+	struct proc *p;
+	register int s, prop;
+	register sig_t action;
+	thread_act_t	sig_thread_act;
+	register task_t		sig_task;
+	int mask;
+	struct uthread *uth;
+	kern_return_t kret;
+	int error = 0;
+
+	p = (struct proc *)get_bsdtask_info(get_threadtask(thr_act));
+	if ((u_int)signum >= NSIG || signum == 0)
+		panic("Invalid signal number in psignal_uthread"); 
+	mask = sigmask(signum);
+	prop = sigprop[signum];
+
+#if SIGNAL_DEBUG
+        if(rdebug_proc && (p == rdebug_proc)) {
+                ram_printf(3);
+        }
+#endif /* SIGNAL_DEBUG */
+
+	/*
+	 *	We will need the task pointer later.  Grab it now to
+	 *	check for a zombie process.  Also don't send signals
+	 *	to kernel internal tasks.
+	 */
+	if (((sig_task = p->task) == TASK_NULL)  || is_kerneltask(sig_task)) {
+		return;
+	}
+
+	sig_thread_act = thr_act;
+	/*
+	 * do not send signals to the process that has the thread
+	 * doing a reboot(). Not doing so will mark that thread aborted
+	 * and can cause IO failures wich will cause data loss.
+	 */
+	if (ISSET(p->p_flag, P_REBOOT)) {
+		return;
+	}
+
+	signal_lock(p);
+
+	/*
+	 *	Deliver the signal to the first thread in the task. This
+	 *	allows single threaded applications which use signals to
+	 *	be able to be linked with multithreaded libraries.  We have
+	 *	an implicit reference to the current thread, but need
+	 *	an explicit one otherwise.  The thread reference keeps
+	 *	the corresponding task data structures around too.  This
+	 *	reference is released by thread_deallocate.
+	 */
+	
+	if (((p->p_flag & P_TRACED) == 0) && (p->p_sigignore & mask))
+		goto puthout;
+
+	kret = check_actforsig(sig_task, sig_thread_act, 1);
+
+	if (kret != KERN_SUCCESS) {
+		error = EINVAL;
+		goto puthout;
+	}
+
+
+	uth = get_bsdthread_info(sig_thread_act);
+
+	/*
+	 * If proc is traced, always give parent a chance.
+	 */
+	if (p->p_flag & P_TRACED)
+		action = SIG_DFL;
+	else {
+		/*
+		 * If the signal is being ignored,
+		 * then we forget about it immediately.
+		 * (Note: we don't set SIGCONT in p_sigignore,
+		 * and if it is set to SIG_IGN,
+		 * action will be SIG_DFL here.)
+		 */
+		if (p->p_sigignore & mask)
+			goto puthout;
+		if (uth->uu_sigwait & mask)
+			action = SIG_WAIT;
+		if (uth->uu_sigmask & mask)
+			action = SIG_HOLD;
+		else if (p->p_sigcatch & mask)
+			action = SIG_CATCH;
+		else
+			action = SIG_DFL;
+	}
+
+	if (p->p_nice > NZERO && action == SIG_DFL && (prop & SA_KILL) &&
+		(p->p_flag & P_TRACED) == 0)
+		p->p_nice = NZERO;
+
+	if (prop & SA_CONT) {
+		uth->uu_siglist &= ~stopsigmask;
+		p->p_siglist &= ~stopsigmask;
+	}
+
+	if (prop & SA_STOP) {
+		/*
+		 * If sending a tty stop signal to a member of an orphaned
+		 * process group, discard the signal here if the action
+		 * is default; don't stop the process below if sleeping,
+		 * and don't clear any pending SIGCONT.
+		 */
+		if (prop & SA_TTYSTOP && p->p_pgrp->pg_jobc == 0 &&
+			action == SIG_DFL)
+			goto puthout;
+		uth->uu_siglist &= ~contsigmask;
+		p->p_siglist &= ~contsigmask;
+	}
+	uth->uu_siglist |= mask;
+	p->p_siglist |= mask;   /* just for lame ones looking here */
+
+	/*
+	 * Defer further processing for signals which are held,
+	 * except that stopped processes must be continued by SIGCONT.
+	 */
+	if (action == SIG_HOLD && ((prop & SA_CONT) == 0 || p->p_stat != SSTOP))
+		goto puthout;
+		
+	/*
+	 *	SIGKILL priority twiddling moved here from above because
+	 *	it needs sig_thread.  Could merge it into large switch
+	 *	below if we didn't care about priority for tracing
+	 *	as SIGKILL's action is always SIG_DFL.
+	 */
+	if ((signum == SIGKILL) && (p->p_nice > NZERO)) {
+		p->p_nice = NZERO;
+	}
+
+	/*
+	 *	Process is traced - wake it up (if not already
+	 *	stopped) so that it can discover the signal in
+	 *	issig() and stop for the parent.
+	 */
+	if (p->p_flag & P_TRACED) {
+	   	if (p->p_stat != SSTOP)
+			goto psurun;
+		else
+			goto puthout;
+	}
+
+	if (action == SIG_WAIT) {
+		uth->uu_sigwait = mask;
+		uth->uu_siglist &= ~mask;
+		p->p_siglist &= ~mask;
+		wakeup(&uth->uu_sigwait);
+		/* if it is SIGCONT resume whole process */
+		if (prop & SA_CONT)
+			(void) task_resume(sig_task);
+		goto puthout;
+	}
+
+	if (action != SIG_DFL) {
+		/*
+		 *	User wants to catch the signal.
+		 *	Wake up the thread, but don't un-suspend it
+		 *	(except for SIGCONT).
+		 */
+		if (prop & SA_CONT)
+			(void) task_resume(sig_task);
+		goto psurun;
+	} else {
+		/*	Default action - varies */
+		if (mask & stopsigmask) {
+			/*
+			 * These are the signals which by default
+			 * stop a process.
+			 *
+			 * Don't clog system with children of init
+			 * stopped from the keyboard.
+			 */
+			if (!(prop & SA_STOP) && p->p_pptr == initproc) {
+				psignal_lock(p, SIGKILL, 0);
+>>>>>>> origin/10.3
 				uth->uu_siglist &= ~mask;
 				sig_proc->p_stat = SRUN;
 				goto runlocked;
@@ -2763,6 +3023,7 @@ CURSIG(proc_t p)
 static void
 stop(proc_t p, proc_t parent)
 {
+<<<<<<< HEAD
 	OSBitAndAtomic(~((uint32_t)P_CONTINUED), &p->p_flag);
 	if ((parent != PROC_NULL) && (parent->p_stat != SSTOP)) {
 		proc_list_lock();
@@ -2770,6 +3031,13 @@ stop(proc_t p, proc_t parent)
 		proc_list_unlock();
 	}
 	(void) task_suspend_internal(p->task);
+=======
+	p->p_stat = SSTOP;
+	p->p_flag &= ~P_WAITED;
+	if (p->p_pptr->p_stat != SSTOP)
+	wakeup((caddr_t)p->p_pptr);
+	(void) task_suspend(p->task);	/*XXX*/
+>>>>>>> origin/10.3
 }
 
 /*

@@ -4,6 +4,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
 <<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -28,11 +29,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -703,6 +714,11 @@ again:
 				found_srcaddr = 1;
 		}
 
+<<<<<<< HEAD
+=======
+      if ((tp->t_inpcb->inp_route.ro_rt != NULL &&
+           (tp->t_inpcb->inp_route.ro_rt->generation_id != route_generation)) || (tp->t_inpcb->inp_route.ro_rt == NULL)) {
+>>>>>>> origin/10.3
 		/* check that the source address is still valid */
 		if (found_srcaddr == 0) {
 			soevent(so,
@@ -742,6 +758,7 @@ again:
 				return(0); /* silently ignore, keep data in socket: address may be back */
 			}
 		}
+<<<<<<< HEAD
 		if (ia != NULL)
 			IFA_REMREF(&ia->ia_ifa);
 
@@ -783,6 +800,9 @@ again:
 		cell = IFNET_IS_CELLULAR(rt->rt_ifp);
 		wifi = (!cell && IFNET_IS_WIFI(rt->rt_ifp));
 		wired = (!wifi && IFNET_IS_WIRED(rt->rt_ifp));
+=======
+        }
+>>>>>>> origin/10.3
 	}
 
 	/*

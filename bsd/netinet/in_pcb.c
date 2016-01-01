@@ -19,8 +19,13 @@
 =======
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -40,6 +45,15 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
 =======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
  * 
  * @APPLE_LICENSE_HEADER_END@
 >>>>>>> origin/10.2
@@ -1390,6 +1404,7 @@ in_pcbdetach(struct inpcb *inp)
 {
 	struct socket *so = inp->inp_socket;
 
+<<<<<<< HEAD
 	if (so->so_pcb == NULL) {
 		/* PCB has been disposed */
 		panic("%s: inp=%p so=%p proto=%d so_pcb is null!\n", __func__,
@@ -1397,6 +1412,12 @@ in_pcbdetach(struct inpcb *inp)
 		/* NOTREACHED */
 	}
 	
+=======
+
+	if (so->so_pcb == 0) /* we've been called twice, ignore */
+		return;
+
+>>>>>>> origin/10.3
 #if IPSEC
 	if (inp->inp_sp != NULL) {
 		(void) ipsec4_delete_pcbpolicy(inp);
@@ -1707,6 +1728,7 @@ in_losing(struct inpcb *inp)
 void
 in_rtchange(struct inpcb *inp, int errno)
 {
+<<<<<<< HEAD
 #pragma unused(errno)
 	boolean_t release = FALSE;
 	struct rtentry *rt;
@@ -1725,6 +1747,17 @@ in_rtchange(struct inpcb *inp, int errno)
 		}
 		if (ia != NULL)
 			IFA_REMREF(&ia->ia_ifa);
+=======
+	if (inp->inp_route.ro_rt) {
+		if (ifa_foraddr(inp->inp_laddr.s_addr) == NULL) 
+			return; /* we can't remove the route now. not sure if still ok to use src */
+		rtfree(inp->inp_route.ro_rt);
+		inp->inp_route.ro_rt = 0;
+		/*
+		 * A new route can be allocated the next time
+		 * output is attempted.
+		 */
+>>>>>>> origin/10.3
 	}
 	if (rt == NULL || release)
 		ROUTE_RELEASE(&inp->inp_route);

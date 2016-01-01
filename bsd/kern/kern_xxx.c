@@ -1,8 +1,13 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
 <<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,11 +33,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -88,7 +103,60 @@
 #include <sys/sysctl.h>
 #include <sys/buf.h>
 
+<<<<<<< HEAD
 #include <security/audit/audit.h>
+=======
+#include <bsm/audit_kernel.h>
+
+#include <sys/mount.h>
+
+#if COMPAT_43
+/* ARGSUSED */
+int
+ogethostid(p, uap, retval)
+struct proc *p;
+void *uap;
+register_t *retval;
+{
+
+	*retval = hostid;
+	return 0;
+}
+
+struct osethostid_args {
+	long hostid;
+};
+/* ARGSUSED */
+int
+osethostid(p, uap, retval)
+struct proc *p;
+register struct osethostid_args *uap;
+register_t *retval;
+{
+	int error;
+
+	if (error = suser(p->p_ucred, &p->p_acflag))
+		return (error);
+	hostid = uap->hostid;
+	return (0);
+
+}
+
+struct ogethostname_args {
+		char	*hostname;
+		u_int	len;
+};
+/* ARGSUSED */
+int
+ogethostname(p, uap, retval)
+struct proc *p;
+register struct ogethostname_args *uap;
+register_t *retval;
+{
+	int name;
+
+	name = KERN_HOSTNAME;
+>>>>>>> origin/10.3
 
 #include <sys/mount_internal.h>
 #include <sys/sysproto.h>
@@ -110,7 +178,50 @@ reboot(struct proc *p, register struct reboot_args *uap, __unused int32_t *retva
 
 	message[0] = '\0';
 
+<<<<<<< HEAD
 	if ((error = suser(kauth_cred_get(), &p->p_acflag)))
+=======
+struct osetdomainname_args {
+		char	*domainname;
+		u_int	len;
+};
+/* ARGSUSED */
+int
+osetdomainname(p, uap, retval)
+struct proc *p;
+register struct osetdomainname_args *uap;
+register_t *retval;
+{
+	int name;
+	int error;
+
+	if (error = suser(p->p_ucred, &p->p_acflag))
+		return (error);
+	name = KERN_DOMAINNAME;
+	return (kern_sysctl(&name, 1, 0, 0, uap->domainname,
+	    uap->len));
+}
+#endif /* COMPAT_43 */
+
+struct reboot_args {
+		int	opt;
+		char	*command;
+};
+
+reboot(p, uap, retval)
+struct proc *p;
+register struct reboot_args *uap;
+register_t *retval;
+{
+	char command[64];
+	int error;
+	int dummy=0;
+
+	AUDIT_ARG(cmd, uap->opt);
+	command[0] = '\0';
+
+	if (error = suser(p->p_cred->pc_ucred, &p->p_acflag))
+>>>>>>> origin/10.3
 		return(error);	
 	
 	if (uap->opt & RB_COMMAND)

@@ -19,8 +19,13 @@
 =======
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -40,6 +45,15 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
 =======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
  * 
  * @APPLE_LICENSE_HEADER_END@
 >>>>>>> origin/10.2
@@ -628,6 +642,7 @@ loopit:
 	 * cache with IPv6.
 	 */
 
+<<<<<<< HEAD
 	if (ro->ro_rt != NULL) {
 		if (ROUTE_UNUSABLE(ro) && ip->ip_src.s_addr != INADDR_ANY &&
 		    !(flags & (IP_ROUTETOIF | IP_FORWARDING))) {
@@ -657,6 +672,19 @@ loopit:
 		if (!ipobf.select_srcif && ro->ro_rt != NULL &&
 		    RT_GENID_OUTOFSYNC(ro->ro_rt))
 			RT_GENID_SYNC(ro->ro_rt);
+=======
+	if (ro->ro_rt && (ro->ro_rt->generation_id != route_generation) &&
+		((flags & (IP_ROUTETOIF | IP_FORWARDING)) == 0) && (ip->ip_src.s_addr != INADDR_ANY) &&
+	   	(ifa_foraddr(ip->ip_src.s_addr) == NULL)) {
+	 	error = EADDRNOTAVAIL;
+		goto bad;
+	}
+	if (ro->ro_rt && ((ro->ro_rt->rt_flags & RTF_UP) == 0 ||
+	   dst->sin_family != AF_INET ||
+	   dst->sin_addr.s_addr != ip->ip_dst.s_addr)) {
+		rtfree(ro->ro_rt);
+		ro->ro_rt = (struct rtentry *)0;
+>>>>>>> origin/10.3
 	}
 	if (ro->ro_rt == NULL) {
 		bzero(dst, sizeof (*dst));
@@ -1789,7 +1817,30 @@ skip_ipsec:
 	}
 
 pass:
+<<<<<<< HEAD
 #endif /* IPFIREWALL */
+=======
+#if __APPLE__
+	/* Do not allow loopback address to wind up on a wire */
+	if ((ifp->if_flags & IFF_LOOPBACK) == 0 &&
+		 ((ntohl(ip->ip_src.s_addr) >> IN_CLASSA_NSHIFT) == IN_LOOPBACKNET ||
+		  (ntohl(ip->ip_dst.s_addr) >> IN_CLASSA_NSHIFT) == IN_LOOPBACKNET)) {
+		ipstat.ips_badaddr++;
+		m_freem(m);
+		/*
+		 * Simply drop the packet just like a firewall -- we do not want the
+		 * the application to feel the pain, not yet...
+		 * Returning ENETUNREACH like ip6_output does in some similar cases  
+		 * could startle the otherwise clueless process that specifies
+		 * loopback as the source address.
+		 */
+		goto done;
+	}
+#endif
+	m->m_pkthdr.csum_flags |= CSUM_IP;
+	sw_csum = m->m_pkthdr.csum_flags 
+		& ~IF_HWASSIST_CSUM_FLAGS(ifp->if_hwassist);
+>>>>>>> origin/10.3
 
 	/* 127/8 must not appear on wire - RFC1122 */
 	if (!(ifp->if_flags & IFF_LOOPBACK) &&
@@ -1799,9 +1850,14 @@ pass:
 		error = EADDRNOTAVAIL;
 		goto bad;
 	}
+<<<<<<< HEAD
 
 	ip_output_checksum(ifp, m, (IP_VHL_HL(ip->ip_vhl) << 2),
 	    ip->ip_len, &sw_csum);
+=======
+	
+	m->m_pkthdr.csum_flags &= IF_HWASSIST_CSUM_FLAGS(ifp->if_hwassist);
+>>>>>>> origin/10.3
 
 	/*
 	 * If small enough for interface, or the interface will take
@@ -2634,7 +2690,16 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 			int priv;
 			struct mbuf *m;
 			int optname;
+<<<<<<< HEAD
 			
+=======
+
+			if (sopt->sopt_valsize > MCLBYTES) {
+				error = EMSGSIZE;
+				break;
+			}
+
+>>>>>>> origin/10.3
 			if ((error = soopt_getm(sopt, &m)) != 0) /* XXX */
 				break;
 			if ((error = soopt_mcopyin(sopt, m)) != 0) /* XXX */
@@ -3551,7 +3616,31 @@ ip_gre_output(struct mbuf *m)
 
 	error = ip_output(m, NULL, &ro, 0, NULL, NULL);
 
+<<<<<<< HEAD
 	ROUTE_RELEASE(&ro);
+=======
+        /*
+        * Mark checksum as valid or calculate checksum for loopback.
+        * 
+        * This is done this way because we have to embed the ifp of
+        * the interface we will send the original copy of the packet
+        * out on in the mbuf. ip_input will check if_hwassist of the
+        * embedded ifp and ignore all csum_flags if if_hwassist is 0.
+        * The UDP checksum has not been calculated yet.
+        */
+        if (copym->m_pkthdr.csum_flags & CSUM_DELAY_DATA) {
+            if (IF_HWASSIST_CSUM_FLAGS(ifp->if_hwassist)) {
+                copym->m_pkthdr.csum_flags |=
+                    CSUM_DATA_VALID | CSUM_PSEUDO_HDR |
+                    CSUM_IP_CHECKED | CSUM_IP_VALID;
+                copym->m_pkthdr.csum_data = 0xffff;
+            } else {
+		NTOHS(ip->ip_len);
+                in_delayed_cksum(copym);
+		HTONS(ip->ip_len);
+	    }
+        }
+>>>>>>> origin/10.3
 
 	return (error);
 }

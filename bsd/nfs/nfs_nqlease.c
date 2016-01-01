@@ -3,22 +3,19 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -1202,7 +1199,16 @@ nqnfs_clientd(nmp, cred, ncd, flag, argp, p)
 	for (rp = nfs_reqq.tqh_first; rp; rp = rp->r_chain.tqe_next)
 		if (rp->r_nmp == nmp)
 			rp->r_nmp = (struct nfsmount *)0;
+<<<<<<< HEAD
 	_FREE_ZONE((caddr_t)nmp, sizeof (struct nfsmount), M_NFSMNT);
+=======
+	/* Need to wake up any rcvlock waiters so they notice the unmount. */
+	if (nmp->nm_state & NFSSTA_WANTRCV) {
+		nmp->nm_state &= ~NFSSTA_WANTRCV;
+		wakeup(&nmp->nm_state);
+	}
+	FREE_ZONE((caddr_t)nmp, sizeof (struct nfsmount), M_NFSMNT);
+>>>>>>> origin/10.3
 	if (error == EWOULDBLOCK)
 		error = 0;
 	return (error);

@@ -1,8 +1,13 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2011, 2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
 <<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,11 +33,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -109,6 +124,7 @@
 #include <sys/_types/_timeval64.h>
 #include <sys/user.h>
 #include <sys/aio_kern.h>
+<<<<<<< HEAD
 #include <sys/sysproto.h>
 #include <sys/signalvar.h>
 #include <sys/kdebug.h>
@@ -119,6 +135,10 @@
 #include <sys/acct.h>		/* acct_process */
 
 #include <security/audit/audit.h>
+=======
+
+#include <bsm/audit_kernel.h>
+>>>>>>> origin/10.3
 #include <bsm/audit_kevents.h>
 
 #include <mach/mach_types.h>
@@ -131,6 +151,7 @@
 #include <kern/thread_call.h>
 #include <kern/sched_prim.h>
 #include <kern/assert.h>
+<<<<<<< HEAD
 #include <sys/codesign.h>
 
 #if VM_PRESSURE_EVENTS
@@ -404,6 +425,18 @@ launchd_crashed_panic(proc_t p, int rv)
 	panic_plain("%s exited (signal %d, exit status %d %s)", (p->p_name[0] != '\0' ? p->p_name : "initproc"), WTERMSIG(rv),
 	            WEXITSTATUS(rv), ((p->p_csflags & CS_KILLED) ? "CS_KILLED" : ""));
 }
+=======
+#if KTRACE   
+#include <sys/ktrace.h>
+#include <sys/ubc.h>
+#endif
+
+extern char init_task_failure_data[];
+int exit1 __P((struct proc *, int, int *));
+void proc_prepareexit(struct proc *p);
+int vfork_exit(struct proc *p, int rv);
+void vproc_exit(struct proc *p);
+>>>>>>> origin/10.3
 
 /*
  * exit --
@@ -448,6 +481,7 @@ exit1_internal(proc_t p, int rv, int *retval, boolean_t thread_can_terminate, bo
 	 */
 
 	 ut = get_bsdthread_info(self);
+<<<<<<< HEAD
 	 if (ut->uu_flag & UT_VFORK) {
 		if (!thread_can_terminate) {
 			return EINVAL;
@@ -501,6 +535,18 @@ exit1_internal(proc_t p, int rv, int *retval, boolean_t thread_can_terminate, bo
 		}
 	}
 
+=======
+	 if (ut->uu_flag & P_VFORK) {
+		if (!vfork_exit(p, rv)) {
+			vfork_return(self, p->p_pptr, p , retval);
+			unix_syscall_return(0);
+			/* NOT REACHED */
+		}  
+		return(EINVAL);
+	 }
+	AUDIT_SYSCALL_EXIT(0, p, ut); /* Exit is always successfull */
+        signal_lock(p);
+>>>>>>> origin/10.3
 	while (p->exit_thread != self) {
 		if (sig_try_locked(p) <= 0) {
 			proc_transend(p, 1);
@@ -948,6 +994,9 @@ proc_exit(proc_t p)
 	if (p->p_tracep) {
 		struct vnode *tvp = p->p_tracep;
 		p->p_tracep = NULL;
+
+		if (UBCINFOEXISTS(tvp))
+		        ubc_rele(tvp);
 		vrele(tvp);
 	}
 #endif
@@ -1659,11 +1708,15 @@ wait4(p, uap, retval)
 		return (0);
 	}
 
+<<<<<<< HEAD
 	/* Save arguments for continuation. Backing storage is in uthread->uu_arg, and will not be deallocated */
 	uth = current_uthread();
 	wait4_data = &uth->uu_kevent.uu_wait4_data;
 	wait4_data->args = uap;
 	wait4_data->retval = retval;
+=======
+	a = (struct wait4_args *)get_bsduthreadarg(current_act());
+>>>>>>> origin/10.3
 
 	if ((error = msleep0((caddr_t)q, proc_list_mlock, PWAIT | PCATCH | PDROP, "wait", 0, wait1continue)))
 		return (error);
@@ -2116,16 +2169,27 @@ init_process(void)
 {
 	register struct proc *p = current_proc();
 
-	if (suser(p->p_ucred, &p->p_acflag))
+	AUDIT_MACH_SYSCALL_ENTER(AUE_INITPROCESS);
+	if (suser(p->p_ucred, &p->p_acflag)) {
+		AUDIT_MACH_SYSCALL_EXIT(KERN_NO_ACCESS);
 		return(KERN_NO_ACCESS);
+<<<<<<< HEAD
 >>>>>>> origin/10.1
+=======
+	}
+>>>>>>> origin/10.3
 
 	proc_list_unlock();
 
+<<<<<<< HEAD
 	if ((cansignal != 0) && (initproc == parent) && (child->p_stat == SZOMB))
 		psignal(initproc, SIGCHLD);
 	if (locked == 1)
 		proc_list_lock();
+=======
+	AUDIT_MACH_SYSCALL_EXIT(KERN_SUCCESS);
+	return(KERN_SUCCESS);
+>>>>>>> origin/10.3
 }
 
 <<<<<<< HEAD
@@ -2148,6 +2212,7 @@ process_terminate_self(void)
  * status and rusage for wait().  Check for child processes and orphan them.
  */
 
+<<<<<<< HEAD
 void
 vfork_exit(proc_t p, int rv)
 {
@@ -2156,6 +2221,12 @@ vfork_exit(proc_t p, int rv)
 
 void
 vfork_exit_internal(proc_t p, int rv, int forceexit)
+=======
+int
+vfork_exit(p, rv)
+	struct proc *p;
+	int rv;
+>>>>>>> origin/10.3
 {
 	thread_t self = current_thread();
 #ifdef FIXME
@@ -2163,6 +2234,7 @@ vfork_exit_internal(proc_t p, int rv, int forceexit)
 #endif
 	struct uthread *ut;
 
+<<<<<<< HEAD
 	/*
 	 * If a thread in this task has already
 	 * called exit(), then halt any others
@@ -2171,6 +2243,17 @@ vfork_exit_internal(proc_t p, int rv, int forceexit)
 
 	 ut = get_bsdthread_info(self);
 
+=======
+	ut = get_bsdthread_info(self);
+	if (p->exit_thread) {
+		return(1);
+	} 
+	p->exit_thread = self;
+	
+	s = splsched();
+	p->p_flag |= P_WEXIT;
+	splx(s);
+>>>>>>> origin/10.3
 
 	proc_lock(p);
 	 if ((p->p_lflag & P_LPEXIT) == P_LPEXIT) {
@@ -2241,6 +2324,7 @@ vfork_exit_internal(proc_t p, int rv, int forceexit)
 	ut->uu_siglist = 0;
 
 	vproc_exit(p);
+	return(0);
 }
 
 void 
@@ -2469,6 +2553,9 @@ vproc_exit(proc_t p)
 	if (p->p_tracep) {
 		struct vnode *tvp = p->p_tracep;
 		p->p_tracep = NULL;
+
+		if (UBCINFOEXISTS(tvp))
+		        ubc_rele(tvp);
 		vrele(tvp);
 	}
 #endif

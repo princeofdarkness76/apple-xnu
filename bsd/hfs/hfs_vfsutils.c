@@ -8,6 +8,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
 <<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -32,11 +33,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -4783,6 +4794,7 @@ check_for_dataless_file(struct vnode *vp, uint64_t op_type)
 int
 hfs_generate_document_id(struct hfsmount *hfsmp, uint32_t *docid)
 {
+<<<<<<< HEAD
 	struct vnode *rvp;
 	struct cnode *cp;
 	int error;
@@ -4801,6 +4813,15 @@ hfs_generate_document_id(struct hfsmount *hfsmp, uint32_t *docid)
 	int lockflags;
 	if (hfs_start_transaction(hfsmp) != 0) {
 		return error;
+=======
+	struct hfs_index *entry;
+
+	if (index > 0) {
+		SLIST_FOREACH(entry, &dcp->c_indexlist, hi_link) {
+			if (entry->hi_index == index)
+				return (entry->hi_name);
+		}
+>>>>>>> origin/10.3
 	}
 	lockflags = hfs_systemfile_lock(hfsmp, SFL_CATALOG, HFS_EXCLUSIVE_LOCK);
 					
@@ -4838,6 +4859,7 @@ hfs_generate_document_id(struct hfsmount *hfsmp, uint32_t *docid)
 int 
 hfs_getinfo_metadata_blocks(struct hfsmount *hfsmp, struct hfsinfo_metadata *hinfo)
 {
+<<<<<<< HEAD
 	int lockflags = 0;
 	int ret_lockflags = 0;
 
@@ -4859,6 +4881,18 @@ hfs_getinfo_metadata_blocks(struct hfsmount *hfsmp, struct hfsinfo_metadata *hin
 		/* Release any locks that were acquired */
 		hfs_systemfile_unlock(hfsmp, ret_lockflags);
 		return EPERM;
+=======
+	struct hfs_index *entry;
+	int len;
+
+	if (index > 0) {
+		len = strlen(namehint);
+		MALLOC(entry, struct hfs_index *, len + sizeof(struct hfs_index),
+			M_TEMP, M_WAITOK);
+		entry->hi_index = index;
+		bcopy(namehint, entry->hi_name, len + 1);
+		SLIST_INSERT_HEAD(&dcp->c_indexlist, entry, hi_link);
+>>>>>>> origin/10.3
 	}
 
 	/* Get information about all the btrees */
@@ -4892,6 +4926,7 @@ hfs_freezewrite_callback(struct vnode *vp, __unused void *cargs)
 __private_extern__
 int hfs_freeze(struct hfsmount *hfsmp)
 {
+<<<<<<< HEAD
 	// First make sure some other process isn't freezing
 	hfs_lock_mount(hfsmp);
 	while (hfsmp->hfs_freeze_state != HFS_THAWED) {
@@ -4912,6 +4947,18 @@ int hfs_freeze(struct hfsmount *hfsmp)
 			hfs_thaw_locked(hfsmp);
 			hfs_unlock_mount(hfsmp);
 			return EINTR;				
+=======
+	struct hfs_index *entry;
+
+	if (index > 0) {
+		SLIST_FOREACH(entry, &dcp->c_indexlist, hi_link) {
+			if (entry->hi_index == index) {
+				SLIST_REMOVE(&dcp->c_indexlist, entry, hfs_index,
+					hi_link);
+				FREE(entry, M_TEMP);
+				break;
+			}
+>>>>>>> origin/10.3
 		}
 	}
 	hfs_unlock_mount(hfsmp);

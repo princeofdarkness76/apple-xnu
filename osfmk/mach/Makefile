@@ -77,6 +77,7 @@ MIG_USHDRS = \
 	sysdiagnose_notification_server.h
 
 MIG_UUHDRS = \
+	audit_triggers.h \
 	clock.h \
 	clock_priv.h \
 	host_priv.h \

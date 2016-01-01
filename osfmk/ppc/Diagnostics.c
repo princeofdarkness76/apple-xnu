@@ -3,22 +3,19 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -66,9 +63,12 @@
 #include <ppc/trap.h>
 
 extern struct vc_info vinfo;
+extern uint32_t warFlags;
+#define warDisMBpoff	0x80000000
 
 kern_return_t testPerfTrap(int trapno, struct savearea *ss, 
 	unsigned int dsisr, unsigned int dar);
+
 
 int diagCall(struct savearea *save) {
 
@@ -78,8 +78,16 @@ int diagCall(struct savearea *save) {
 	} ttt, adj;
 	natural_t tbu, tbu2, tbl;
 	struct per_proc_info *per_proc;					/* Area for my per_proc address */
+<<<<<<< HEAD
 	int cpu;
 	unsigned int tstrt, tend, temp, temp2;
+=======
+	int cpu, ret, subc;
+	unsigned int tstrt, tend, temp, temp2, oldwar;
+	addr64_t src, snk;
+	uint64_t scom, hid1, hid4, srrwrk, stat;
+	scomcomm sarea;
+>>>>>>> origin/10.3
 
 	if(!(dgWork.dgFlags & enaDiagSCs)) return 0;	/* If not enabled, cause an exception */
 
@@ -251,6 +259,97 @@ int diagCall(struct savearea *save) {
 			return 1;								/* Return and check for ASTs... */
 			
 		
+<<<<<<< HEAD
+=======
+			setPmon(save->save_r4, save->save_r5);	/* Go load up MMCR0 and MMCR1 */
+			return -1;								/* Regurn and don't check for ASTs */
+
+/*
+ *		Map a page
+ *		Don't bother to check for any errors.
+ *		parms - vaddr, paddr, prot, attributes
+ */
+		case dgMapPage:
+					
+			(void)mapping_map(current_act()->map->pmap, /* Map in the page */ 
+				(addr64_t)(((save->save_r5 & 0xFFFFFFFF) << 32) | (save->save_r5 & 0xFFFFFFFF)), save->save_r6, 0, 1, VM_PROT_READ|VM_PROT_WRITE);
+
+			return -1;								/* Return and check for ASTs... */
+		
+/*
+ *		SCOM interface
+ *		parms - pointer to scomcomm
+ */
+		case dgScom:
+					
+			ret = copyin((unsigned int)(save->save_r4), &sarea, sizeof(scomcomm));	/* Get the data */
+			if(ret) return 0;						/* Copyin failed - return an exception */
+			
+			sarea.scomstat = 0xFFFFFFFFFFFFFFFFULL;	/* Clear status */
+			cpu = cpu_number();						/* Get us */
+			
+			if((sarea.scomcpu < NCPUS) && machine_slot[sarea.scomcpu].running) {
+				if(sarea.scomcpu == cpu) {			/* Is it us? */
+					if(sarea.scomfunc) {			/* Are we writing */
+						sarea.scomstat = ml_scom_write(sarea.scomreg, sarea.scomdata);	/* Write scom */
+					}
+					else {
+						sarea.scomstat = ml_scom_read(sarea.scomreg, &sarea.scomdata);	/* Read scom */
+					}
+				}
+				else {									/* Otherwise, tell the other processor */
+					(void)cpu_signal(sarea.scomcpu, SIGPcpureq, CPRQscom ,(unsigned int)&sarea);	/* Ask him to do this */
+					(void)hw_cpu_sync((unsigned long)&sarea.scomstat, LockTimeOut);	/* Wait for the other processor to get its temperature */
+				}
+			}
+
+			ret = copyout(&sarea, (unsigned int)(save->save_r4), sizeof(scomcomm));	/* Get the data */
+			if(ret) return 0;						/* Copyin failed - return an exception */
+	
+			return -1;								/* Return and check for ASTs... */
+		
+		case dgWar:									/* Set or reset workaround flags */
+		
+			save->save_r3 = (uint32_t)warFlags;		/* Get the old flags */
+			oldwar = warFlags;						/* Remember the old war flags */
+			
+			subc = (int32_t)save->save_r4;			/* Extract the subcommand */
+			switch(subc) {							/* Do what we need */
+				case 1:								/* Replace all */
+					warFlags = (uint32_t)save->save_r5;	/* Do them all */
+					break;
+				
+				case 2:								/* Turn on selected workarounds */
+					warFlags = warFlags | (uint32_t)save->save_r5;
+					break;
+					
+				case 3:								/* Turn off selected workarounds */
+					warFlags = warFlags & ~((uint32_t)save->save_r5);
+					break;
+				
+				case 4:								/* Start up selected workaround */
+					break;
+				
+				case 5:								/* Stop selected workaround */
+					break;
+				
+				case 6:								/* Reset specific workaround parameters to default */
+					break;
+				
+				case 7:								/* Set workaround parameters */
+					break;
+
+				default:
+				
+					break;
+					
+			}
+
+			save->save_r3 = oldwar;					/* Pass back original */
+			return -1;				
+		
+
+>>>>>>> origin/10.3
 		default:									/* Handle invalid ones */
 			return 0;								/* Return an exception */
 		
@@ -269,3 +368,4 @@ kern_return_t testPerfTrap(int trapno, struct savearea *ss,
 	return KERN_SUCCESS;
 
 }
+

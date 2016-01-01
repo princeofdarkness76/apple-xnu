@@ -1,8 +1,13 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
 <<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,11 +33,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -90,6 +105,7 @@
 #include <sys/file_internal.h>
 #include <sys/resourcevar.h>
 #include <sys/malloc.h>
+<<<<<<< HEAD
 #include <sys/proc_internal.h>
 #include <sys/kauth.h>
 #include <machine/spl.h>
@@ -98,7 +114,14 @@
 #include <sys/sysproto.h>
 
 #include <security/audit/audit.h>
+=======
+#include <sys/proc.h>
+#include <sys/mount.h>
+>>>>>>> origin/10.3
 
+#include <bsm/audit_kernel.h>
+
+#include <machine/spl.h>
 #include <machine/vmparam.h>
 
 #include <mach/mach_types.h>
@@ -368,6 +391,10 @@ setpriority(struct proc *curp, struct setpriority_args *uap, int32_t *retval)
 	/* would also test (uap->who < 0), but id_t is unsigned */
 	if (uap->who > 0x7fffffff)
 		return (EINVAL);
+
+	AUDIT_ARG(cmd, uap->which);
+	AUDIT_ARG(owner, uap->who, 0);
+	AUDIT_ARG(value, uap->prio);
 
 	switch (uap->which) {
 

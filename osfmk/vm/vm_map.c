@@ -4,6 +4,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
 <<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -28,11 +29,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -3347,6 +3358,7 @@ vm_map_enter_mem_object_helper(
 		return KERN_INVALID_OBJECT;
 	}
 
+<<<<<<< HEAD
 	if (object != VM_OBJECT_NULL &&
 	    object->named &&
 	    object->pager != MEMORY_OBJECT_NULL &&
@@ -3354,6 +3366,37 @@ vm_map_enter_mem_object_helper(
 		memory_object_t pager;
 		vm_prot_t	pager_prot;
 		kern_return_t	kr;
+=======
+	/* coalesce the map entries, if possible */
+	current = entry;
+	while (current != vm_map_to_entry(map) &&
+	       current->vme_start <= end) {
+		vm_map_simplify_entry(map, current);
+		current = current->vme_next;
+	}
+
+	vm_map_unlock(map);
+	return(KERN_SUCCESS);
+}
+
+/*
+ *	vm_map_inherit:
+ *
+ *	Sets the inheritance of the specified address
+ *	range in the target map.  Inheritance
+ *	affects how the map will be shared with
+ *	child maps at the time of vm_map_fork.
+ */
+kern_return_t
+vm_map_inherit(
+	register vm_map_t	map,
+	register vm_offset_t	start,
+	register vm_offset_t	end,
+	register vm_inherit_t	new_inheritance)
+{
+	register vm_map_entry_t	entry;
+	vm_map_entry_t	temp_entry;
+>>>>>>> origin/10.3
 
 		/*
 		 * For "named" VM objects, let the pager know that the
@@ -6555,6 +6598,7 @@ vm_map_delete(
 
 		entry = next;
 
+<<<<<<< HEAD
 		if(entry == vm_map_to_entry(map)) {
 			break;
 		}
@@ -6583,10 +6627,29 @@ vm_map_delete(
 		}
 		last_timestamp = map->timestamp;
 	}
+=======
+	/*
+	 *	Check that the end address doesn't overflow
+	 */
+	src_end = src_addr + len;
+	if (src_end < src_addr)
+		return KERN_INVALID_ADDRESS;
+
+	/*
+	 * If the copy is sufficiently small, use a kernel buffer instead
+	 * of making a virtual copy.  The theory being that the cost of
+	 * setting up VM (and taking C-O-W faults) dominates the copy costs
+	 * for small regions.
+	 */
+	if ((len < msg_ool_size_small) && !use_maxprot)
+	  return vm_map_copyin_kernel_buffer(src_map, src_addr, len,
+					     src_destroy, copy_result);
+>>>>>>> origin/10.3
 
 	if (map->wait_for_space)
 		thread_wakeup((event_t) map);
 	/*
+<<<<<<< HEAD
 	 * wake up anybody waiting on entries that we have already deleted.
 	 */
 	if (need_wakeup)
@@ -6594,6 +6657,12 @@ vm_map_delete(
 
 	return KERN_SUCCESS;
 }
+=======
+	 *	Compute (page aligned) start and end of region
+	 */
+	src_start = trunc_page_32(src_addr);
+	src_end = round_page_32(src_end);
+>>>>>>> origin/10.3
 
 /*
  *	vm_map_remove:
@@ -6613,6 +6682,7 @@ vm_map_remove(
 	vm_map_lock(map);
 	VM_MAP_RANGE_CHECK(map, start, end);
 	/*
+<<<<<<< HEAD
 	 * For the zone_map, the kernel controls the allocation/freeing of memory.
 	 * Any free to the zone_map should be within the bounds of the map and
 	 * should free up memory. If the VM_MAP_RANGE_CHECK() silently converts a
@@ -6626,6 +6696,13 @@ vm_map_remove(
 
 	return(result);
 }
+=======
+	 *	Allocate a header element for the list.
+	 *
+	 *	Use the start and end in the header to 
+	 *	remember the endpoints prior to rounding.
+	 */
+>>>>>>> origin/10.3
 
 
 /*
@@ -13730,10 +13807,19 @@ vm_map_remap(
 {
 	kern_return_t		result;
 	vm_map_entry_t		entry;
+<<<<<<< HEAD
 	vm_map_entry_t		insp_entry = VM_MAP_ENTRY_NULL;
 	vm_map_entry_t		new_entry;
 	struct vm_map_header	map_header;
 	vm_map_offset_t		offset_in_mapping;
+=======
+	register
+	vm_offset_t		start;
+	vm_region_basic_info_64_t	basic;
+	vm_region_extended_info_t	extended;
+	vm_region_top_info_t	top;
+	vm_region_object_info_64_t	object_info_64;
+>>>>>>> origin/10.3
 
 	if (target_map == VM_MAP_NULL)
 		return KERN_INVALID_ARGUMENT;
@@ -13909,8 +13995,63 @@ StartAgain: ;
 			VM_MAP_HIGHEST_ENTRY(map, entry, start);
 		} else {
 
+<<<<<<< HEAD
 			if (map->holelistenabled) {
 				hole_entry = (vm_map_entry_t)map->holes_list;
+=======
+	    vm_map_unlock_read(map);
+	    return(KERN_SUCCESS);
+	}
+	case VM_REGION_OBJECT_INFO_64:
+	{
+	    if (*count < VM_REGION_OBJECT_INFO_COUNT_64)
+		return(KERN_INVALID_ARGUMENT);
+
+	    object_info_64 = (vm_region_object_info_64_t) info;
+	    *count = VM_REGION_OBJECT_INFO_COUNT_64;
+
+	    vm_map_lock_read(map);
+
+	    start = *address;
+	    if (!vm_map_lookup_entry(map, start, &tmp_entry)) {
+		if ((entry = tmp_entry->vme_next) == vm_map_to_entry(map)) {
+			vm_map_unlock_read(map);
+		   	return(KERN_INVALID_ADDRESS);
+		}
+	    } else {
+		entry = tmp_entry;
+	    }
+
+	    start = entry->vme_start;
+
+	    object_info_64->offset = entry->offset;
+	    object_info_64->protection = entry->protection;
+	    object_info_64->inheritance = entry->inheritance;
+	    object_info_64->max_protection = entry->max_protection;
+	    object_info_64->behavior = entry->behavior;
+	    object_info_64->user_wired_count = entry->user_wired_count;
+	    object_info_64->is_sub_map = entry->is_sub_map;
+	    *address = start;
+	    *size = (entry->vme_end - start);
+
+	    if (object_name) *object_name = IP_NULL;
+	    if (entry->is_sub_map) {
+	        object_info_64->shared = FALSE;
+		object_info_64->object_id = 0;
+	    } else {
+	        object_info_64->shared = entry->is_shared;
+		object_info_64->object_id =
+			(vm_offset_t) entry->object.vm_object;
+	    }
+
+	    vm_map_unlock_read(map);
+	    return(KERN_SUCCESS);
+	}
+	default:
+	    return(KERN_INVALID_ARGUMENT);
+	}
+}
+>>>>>>> origin/10.3
 
 				if (hole_entry == NULL) {
 					/*
@@ -14166,6 +14307,7 @@ vm_map_switch(
  *		threads.
  *
  */
+<<<<<<< HEAD
 kern_return_t
 vm_map_write_user(
 	vm_map_t		map,
@@ -14192,6 +14334,70 @@ vm_map_write_user(
 		}
 		vm_map_switch(oldmap);
 		vm_map_deallocate(map);
+=======
+void
+vm_map_simplify_entry(
+	vm_map_t	map,
+	vm_map_entry_t	this_entry)
+{
+	vm_map_entry_t	prev_entry;
+
+	prev_entry = this_entry->vme_prev;
+
+	if ((this_entry != vm_map_to_entry(map)) &&
+	    (prev_entry != vm_map_to_entry(map)) &&
+
+	    (prev_entry->vme_end == this_entry->vme_start) &&
+
+	    (prev_entry->is_sub_map == FALSE) &&
+	    (this_entry->is_sub_map == FALSE) &&
+ 
+	    (prev_entry->object.vm_object == this_entry->object.vm_object) &&
+	    ((prev_entry->offset + (prev_entry->vme_end -
+				    prev_entry->vme_start))
+	     == this_entry->offset) &&
+ 
+	    (prev_entry->inheritance == this_entry->inheritance) &&
+	    (prev_entry->protection == this_entry->protection) &&
+	    (prev_entry->max_protection == this_entry->max_protection) &&
+	    (prev_entry->behavior == this_entry->behavior) &&
+	    (prev_entry->alias == this_entry->alias) &&
+	    (prev_entry->wired_count == this_entry->wired_count) &&
+	    (prev_entry->user_wired_count == this_entry->user_wired_count) &&
+	    (prev_entry->needs_copy == this_entry->needs_copy) &&
+ 
+	    (prev_entry->use_pmap == FALSE) &&
+	    (this_entry->use_pmap == FALSE) &&
+	    (prev_entry->in_transition == FALSE) &&
+	    (this_entry->in_transition == FALSE) &&
+	    (prev_entry->needs_wakeup == FALSE) &&
+	    (this_entry->needs_wakeup == FALSE) &&
+	    (prev_entry->is_shared == FALSE) &&
+	    (this_entry->is_shared == FALSE)
+		) {
+		_vm_map_entry_unlink(&map->hdr, prev_entry);
+		this_entry->vme_start = prev_entry->vme_start;
+		this_entry->offset = prev_entry->offset;
+		vm_object_deallocate(prev_entry->object.vm_object);
+		vm_map_entry_dispose(map, prev_entry);
+		SAVE_HINT(map, this_entry);
+		counter(c_vm_map_simplified++);
+	}
+	counter(c_vm_map_simplify_entry_called++);
+}
+
+void
+vm_map_simplify(
+	vm_map_t	map,
+	vm_offset_t	start)
+{
+	vm_map_entry_t	this_entry;
+
+	vm_map_lock(map);
+	if (vm_map_lookup_entry(map, start, &this_entry)) {
+		vm_map_simplify_entry(map, this_entry);
+		vm_map_simplify_entry(map, this_entry->vme_next);
+>>>>>>> origin/10.3
 	}
 	return kr;
 }

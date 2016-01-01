@@ -318,11 +318,19 @@ ipsec4_getpolicybysock(struct mbuf *m,
 	/* sanity check */
 	if (m == NULL || so == NULL || error == NULL)
 		panic("ipsec4_getpolicybysock: NULL pointer was passed.\n");
+<<<<<<< HEAD
 		
 		if (so->so_pcb == NULL) {
 			printf("ipsec4_getpolicybysock: so->so_pcb == NULL\n");
 			return ipsec4_getpolicybyaddr(m, dir, 0, error);
 		}
+=======
+
+	if (so->so_pcb == NULL) {
+		/* Socket may be closing or without PCB */
+		return ipsec4_getpolicybyaddr(m, dir, 0, error);
+	}
+>>>>>>> origin/10.3
 	
 	switch (SOCK_DOM(so)) {
 		case PF_INET:

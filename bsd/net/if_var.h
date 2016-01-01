@@ -19,8 +19,13 @@
 =======
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -40,6 +45,15 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
 =======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
  * 
  * @APPLE_LICENSE_HEADER_END@
 >>>>>>> origin/10.2
@@ -169,6 +183,25 @@ struct net_event_data {
 
 #pragma pack(4)
 
+<<<<<<< HEAD
+=======
+#ifdef __APPLE__
+#ifdef KERNEL_PRIVATE
+/* bottom 16 bits reserved for hardware checksum */
+#define IF_HWASSIST_CSUM_IP		0x0001	/* will csum IP */
+#define IF_HWASSIST_CSUM_TCP		0x0002	/* will csum TCP */
+#define IF_HWASSIST_CSUM_UDP		0x0004	/* will csum UDP */
+#define IF_HWASSIST_CSUM_IP_FRAGS	0x0008	/* will csum IP fragments */
+#define IF_HWASSIST_CSUM_FRAGMENT	0x0010  /* will do IP fragmentation */
+#define IF_HWASSIST_CSUM_TCP_SUM16	0x1000	/* simple TCP Sum16 computation */
+#define IF_HWASSIST_CSUM_MASK		0xffff
+#define IF_HWASSIST_CSUM_FLAGS(hwassist)	((hwassist) & IF_HWASSIST_CSUM_MASK)
+
+/* VLAN support */
+#define IF_HWASSIST_VLAN_TAGGING	0x10000	/* supports VLAN tagging */
+#define IF_HWASSIST_VLAN_MTU		0x20000 /* supports VLAN MTU-sized packet (for software VLAN) */
+#endif KERNEL_PRIVATE
+>>>>>>> origin/10.3
 /*
  * Structure describing information about an interface
  * which may be of interest to management entities.
@@ -187,6 +220,7 @@ struct if_data {
 	u_int32_t	ifi_metric;	/* routing metric (external only) */
 	u_int32_t	ifi_baudrate;	/* linespeed */
 	/* volatile statistics */
+<<<<<<< HEAD
 	u_int32_t	ifi_ipackets;	/* packets received on interface */
 	u_int32_t	ifi_ierrors;	/* input errors on interface */
 	u_int32_t	ifi_opackets;	/* packets sent on interface */
@@ -205,6 +239,36 @@ struct if_data {
 	u_int32_t	ifi_hwassist;	/* HW offload capabilities */
 	u_int32_t	ifi_reserved1;	/* for future use */
 	u_int32_t	ifi_reserved2;	/* for future use */
+=======
+	u_long	ifi_ipackets;		/* packets received on interface */
+	u_long	ifi_ierrors;		/* input errors on interface */
+	u_long	ifi_opackets;		/* packets sent on interface */
+	u_long	ifi_oerrors;		/* output errors on interface */
+	u_long	ifi_collisions;		/* collisions on csma interfaces */
+	u_long	ifi_ibytes;		/* total number of octets received */
+	u_long	ifi_obytes;		/* total number of octets sent */
+	u_long	ifi_imcasts;		/* packets received via multicast */
+	u_long	ifi_omcasts;		/* packets sent via multicast */
+	u_long	ifi_iqdrops;		/* dropped on input, this interface */
+	u_long	ifi_noproto;		/* destined for unsupported protocol */
+#ifdef __APPLE__
+	u_long	ifi_recvtiming;		/* usec spent receiving when timing */
+	u_long	ifi_xmittiming;		/* usec spent xmitting when timing */
+#endif
+	struct	timeval ifi_lastchange;	/* time of last administrative change */
+#ifdef __APPLE__
+	u_long	default_proto;		/* Default dl_tag when none is specified 
+								 * on dlil_output */
+#endif
+	u_long	ifi_hwassist;		/* HW offload capabilities */
+#ifdef KERNEL_PRIVATE
+	u_short ifi_nvlans;		/* number of attached vlans */
+	u_short ifi_reserved_1;		/* for future use */
+#else KERNEL_PRIVATE
+	u_long	ifi_reserved1;		/* for future use */
+#endif KERNEL_PRIVATE
+	u_long	ifi_reserved2;		/* for future use */
+>>>>>>> origin/10.3
 };
 
 /*
@@ -682,6 +746,7 @@ struct if_measured_bw {
 #define	if_lastchange	if_data.ifi_lastchange
 #define if_recvquota	if_data.ifi_recvquota
 #define	if_xmitquota	if_data.ifi_xmitquota
+<<<<<<< HEAD
 #endif /* PRIVATE */
 #ifdef BSD_KERNEL_PRIVATE
 #define	if_tso_v4_mtu	if_data.ifi_tso_v4_mtu
@@ -691,6 +756,12 @@ struct if_measured_bw {
 #define	if_fpackets	if_data.ifi_fpackets
 #define	if_fbytes	if_data.ifi_fbytes
 #endif /* BSD_KERNEL_PRIVATE */
+=======
+#ifdef KERNEL_PRIVATE
+#define if_nvlans	if_data.ifi_nvlans
+#endif KERNEL_PRIVATE
+#define if_rawoutput(if, m, sa) if_output(if, m, sa, (struct rtentry *)0)
+>>>>>>> origin/10.3
 
 #ifdef BSD_KERNEL_PRIVATE
 /*
@@ -755,6 +826,26 @@ TAILQ_HEAD(ddesc_head_name, dlil_demux_desc);
 
 #ifdef PRIVATE
 #define	IFXNAMSIZ	(IFNAMSIZ + 8)	/* external name (name + unit) */
+#endif
+#ifdef KERNEL_PRIVATE
+/*
+ * Structure describing a `cloning' interface.
+ */
+struct if_clone {
+	LIST_ENTRY(if_clone) ifc_list;	/* on list of cloners */
+	const char *ifc_name;		/* name of device, e.g. `vlan' */
+	size_t ifc_namelen;		/* length of name */
+	int ifc_minifs;			/* minimum number of interfaces */
+	int ifc_maxunit;		/* maximum unit number */
+	unsigned char *ifc_units;	/* bitmap to handle units */
+	int ifc_bmlen;			/* bitmap length */
+
+	int	(*ifc_create)(struct if_clone *, int);
+	void	(*ifc_destroy)(struct ifnet *);
+};
+
+#define IF_CLONE_INITIALIZER(name, create, destroy, minifs, maxunit)	\
+    { { 0 }, name, sizeof(name) - 1, minifs, maxunit, NULL, 0, create, destroy }
 #endif
 
 #ifdef BSD_KERNEL_PRIVATE
@@ -1367,10 +1458,54 @@ __private_extern__ void if_inetdata_lock_exclusive(struct ifnet *ifp);
 __private_extern__ void if_inetdata_lock_done(struct ifnet *ifp);
 #endif
 
+<<<<<<< HEAD
 #if INET6
 __private_extern__ void if_inet6data_lock_shared(struct ifnet *ifp);
 __private_extern__ void if_inet6data_lock_exclusive(struct ifnet *ifp);
 __private_extern__ void if_inet6data_lock_done(struct ifnet *ifp);
+=======
+int	if_addmulti __P((struct ifnet *, struct sockaddr *,
+			 struct ifmultiaddr **));
+int	if_allmulti __P((struct ifnet *, int));
+void	if_attach __P((struct ifnet *));
+int	if_delmultiaddr __P((struct ifmultiaddr *ifma));
+int	if_delmulti __P((struct ifnet *, struct sockaddr *));
+void	if_down __P((struct ifnet *));
+void	if_route __P((struct ifnet *, int flag, int fam));
+void	if_unroute __P((struct ifnet *, int flag, int fam));
+void	if_up __P((struct ifnet *));
+/*void	ifinit __P((void));*/ /* declared in systm.h for main() */
+int	ifioctl __P((struct socket *, u_long, caddr_t, struct proc *));
+int	ifpromisc __P((struct ifnet *, int));
+struct	ifnet *ifunit __P((const char *));
+struct  ifnet *if_withname __P((struct sockaddr *));
+
+int	if_poll_recv_slow __P((struct ifnet *ifp, int *quotap));
+void	if_poll_xmit_slow __P((struct ifnet *ifp, int *quotap));
+void	if_poll_throttle __P((void));
+void	if_poll_unthrottle __P((void *));
+void	if_poll_init __P((void));
+void	if_poll __P((void));
+#ifdef KERNEL_PRIVATE
+void	if_clone_attach(struct if_clone *);
+void	if_clone_detach(struct if_clone *);
+#endif KERNEL_PRIVATE
+
+struct	ifaddr *ifa_ifwithaddr __P((struct sockaddr *));
+struct	ifaddr *ifa_ifwithdstaddr __P((struct sockaddr *));
+struct	ifaddr *ifa_ifwithnet __P((struct sockaddr *));
+struct	ifaddr *ifa_ifwithroute __P((int, struct sockaddr *,
+					struct sockaddr *));
+struct	ifaddr *ifaof_ifpforaddr __P((struct sockaddr *, struct ifnet *));
+void	ifafree __P((struct ifaddr *));
+void	ifaref __P((struct ifaddr *));
+
+struct	ifmultiaddr *ifmaof_ifpforaddr __P((struct sockaddr *, 
+					    struct ifnet *));
+#ifndef __APPLE__
+int	if_simloop __P((struct ifnet *ifp, struct mbuf *m,
+		struct sockaddr *dst, int hlen));
+>>>>>>> origin/10.3
 #endif
 
 __private_extern__ void	ifnet_head_lock_shared(void);

@@ -3,22 +3,19 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -88,6 +85,7 @@ typedef struct savearea {
 
 	savearea_comm	save_hdr;					/* Stuff common to all saveareas */
 
+<<<<<<< HEAD
 	unsigned int	save_060[8];				/* Fill 32 bytes */
 												/* offset 0x0080 */
 	unsigned int 	save_r0;
@@ -132,6 +130,61 @@ typedef struct savearea {
 												/* offset 0x100 */
 	unsigned int 	save_srr0;
 	unsigned int 	save_srr1;
+=======
+	uint64_t		save_xdat0;					/* Exception data 0 */
+	uint64_t		save_xdat1;					/* Exception data 1 */
+	uint64_t		save_xdat2;					/* Exception data 2 */
+	uint64_t		save_xdat3;					/* Exception data 3 */
+                                             
+                                                /* offset 0x0080 */
+	uint64_t	 	save_r0;
+	uint64_t	 	save_r1;
+	uint64_t	 	save_r2;
+	uint64_t	 	save_r3;
+                                                /* offset 0x0A0 */
+	uint64_t	 	save_r4;
+	uint64_t	 	save_r5;
+	uint64_t	 	save_r6;
+	uint64_t	 	save_r7;
+                                                /* offset 0x0C0 */
+	uint64_t	 	save_r8;
+	uint64_t	 	save_r9;
+	uint64_t	 	save_r10;
+	uint64_t	 	save_r11;
+                                                /* offset 0x0E0 */
+	uint64_t	 	save_r12;
+	uint64_t	 	save_r13;
+	uint64_t	 	save_r14;
+	uint64_t	 	save_r15;
+                                                /* offset 0x100 */
+	uint64_t	 	save_r16;
+	uint64_t	 	save_r17;
+	uint64_t	 	save_r18;
+	uint64_t	 	save_r19;
+                                                /* offset 0x120 */
+	uint64_t	 	save_r20;
+	uint64_t	 	save_r21;
+	uint64_t	 	save_r22;
+	uint64_t	 	save_r23;
+                                                /* offset 0x140 */
+	uint64_t	 	save_r24;
+	uint64_t	 	save_r25;
+	uint64_t	 	save_r26;	
+	uint64_t	 	save_r27;
+                                                /* offset 0x160 */
+	uint64_t	 	save_r28;
+	uint64_t		save_r29;
+	uint64_t	 	save_r30;
+	uint64_t	 	save_r31;
+                                                /* offset 0x180 */
+	uint64_t	 	save_srr0;
+ 	uint64_t	 	save_srr1;
+	uint64_t	 	save_xer;
+	uint64_t	 	save_lr;
+                                                /* offset 0x1A0 */
+	uint64_t	 	save_ctr;
+	uint64_t	 	save_dar;
+>>>>>>> origin/10.3
 	unsigned int	save_cr;
 	unsigned int 	save_xer;
 	unsigned int 	save_lr;
@@ -358,6 +411,14 @@ struct savearea_comm	*save_trim_freet(void);			/* Remove free pages from saveare
 #define SAVrststk	0x00010000				/* Indicates that the current stack should be reset to empty */
 #define SAVsyscall	0x00020000				/* Indicates that the savearea is associated with a syscall */
 #define SAVredrive	0x00040000				/* Indicates that the low-level fault handler associated */
+<<<<<<< HEAD
+=======
+#define SAVredriveb	13						/* Indicates that the low-level fault handler associated */
+#define	SAVinstrument 0x00080000			/* Indicates that we should return instrumentation data */
+#define	SAVinstrumentb 12					/* Indicates that we should return instrumentation data */
+#define	SAVeat 		0x00100000				/* Indicates that interruption should be ignored */
+#define	SAVeatb 	11						/* Indicates that interruption should be ignored */
+>>>>>>> origin/10.3
 #define SAVtype		0x0000FF00				/* Shows type of savearea */
 #define SAVtypeshft	8						/* Shift to position type */
 #define SAVempty	0x86					/* Savearea is on free list */

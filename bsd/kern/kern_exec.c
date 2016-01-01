@@ -1,8 +1,13 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2011 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
 <<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,11 +33,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -123,6 +138,7 @@
 #include <sys/codesign.h>
 #include <crypto/sha1.h>
 
+<<<<<<< HEAD
 #include <libkern/libkern.h>
 
 #include <security/audit/audit.h>
@@ -136,6 +152,10 @@
 #include <mach/thread_act.h>
 #include <mach/vm_map.h>
 #include <mach/mach_vm.h>
+=======
+#include <bsm/audit_kernel.h>
+
+>>>>>>> origin/10.3
 #include <mach/vm_param.h>
 
 #include <kern/sched_prim.h> /* thread_wakeup() */
@@ -217,6 +237,7 @@ __attribute__((noinline)) int __EXEC_WAITING_ON_TASKGATED_CODE_SIGNATURE_UPCALL_
 #include <mach-o/fat.h>
 #include <mach-o/loader.h>
 #include <machine/vmparam.h>
+<<<<<<< HEAD
 #include <sys/imgact.h>
 
 #include <sys/sdt.h>
@@ -228,6 +249,12 @@ __attribute__((noinline)) int __EXEC_WAITING_ON_TASKGATED_CODE_SIGNATURE_UPCALL_
  *			it as malformed/corrupt.
  */
 #define EAI_ITERLIMIT		3
+=======
+#if KTRACE   
+#include <sys/ktrace.h>
+#include <sys/ubc.h>
+#endif
+>>>>>>> origin/10.3
 
 /*
  * For #! interpreter parsing
@@ -267,7 +294,26 @@ static errno_t exec_handle_spawnattr_policy(proc_t p, int psa_apptype, uint64_t 
 int execve(struct proc *p, struct execve_args *uap, register_t *retval);
 static int execargs_alloc(vm_offset_t *addrp);
 static int execargs_free(vm_offset_t addr);
+<<<<<<< HEAD
 >>>>>>> origin/10.1
+=======
+static int sugid_scripts = 0;
+SYSCTL_INT (_kern, OID_AUTO, sugid_scripts, CTLFLAG_RW, &sugid_scripts, 0, "");
+
+int
+execv(p, args, retval)
+	struct proc *p;
+	void *args;
+	int *retval;
+{
+	((struct execve_args *)args)->envp = NULL;
+	return (execve(p, args, retval));
+}
+
+extern char classichandler[32];
+extern long classichandler_fsid;
+extern long classichandler_fileid;
+>>>>>>> origin/10.3
 
 /*
  * exec_add_user_string
@@ -515,6 +561,83 @@ exec_shell_imgact(struct image_params *imgp)
 		/* All whitespace, like "#!           " */
 		return (ENOEXEC);
 	}
+<<<<<<< HEAD
+=======
+#endif /* lint */
+	mach_header = &exdata.mach_header;
+	fat_header = &exdata.fat_header;
+	if ((mach_header->magic == MH_CIGAM) &&
+	    (classichandler[0] == 0)) {
+		error = EBADARCH;
+		goto bad;
+	} else if ((mach_header->magic == MH_MAGIC) || 
+               (mach_header->magic == MH_CIGAM)) {
+	    is_fat = FALSE;
+	} else if ((fat_header->magic == FAT_MAGIC) ||
+		       (fat_header->magic == FAT_CIGAM)) {
+	    is_fat = TRUE;
+	} else {
+	  /* If we've already redirected once from an interpreted file
+	   * to an interpreter, don't permit the second time.
+	   */
+		if (exdata.ex_shell[0] != '#' ||
+		    exdata.ex_shell[1] != '!' ||
+		    executingInterpreter) {
+			error = ENOEXEC;
+			goto bad;
+		}
+		if (executingClassic == 1) {
+		  error = EBADARCH;
+		  goto bad;
+		}
+
+		/* Check to see if SUGID scripts are permitted.  If they aren't then
+		 * clear the SUGID bits.
+		 */
+	        if (sugid_scripts == 0) {
+		   origvattr.va_mode &= ~(VSUID | VSGID);
+        	}
+
+		cp = &exdata.ex_shell[2];		/* skip "#!" */
+		while (cp < &exdata.ex_shell[SHSIZE]) {
+			if (*cp == '\t')		/* convert all tabs to spaces */
+				*cp = ' ';
+			else if (*cp == '\n' || *cp == '#') {
+				*cp = '\0';			/* trunc the line at nl or comment */
+
+ 				/* go back and remove the spaces before the /n or # */
+ 				/* todo: do we have to do this if we fix the passing of args to shells ? */
+				if ( cp != &exdata.ex_shell[2] ) {
+					do {
+						if ( *(cp-1) != ' ')
+							break;
+						*(--cp) = '\0';
+					} while ( cp != &exdata.ex_shell[2] );
+				}
+				break;
+			}
+			cp++;
+		}
+		if (*cp != '\0') {
+			error = ENOEXEC;
+			goto bad;
+		}
+		cp = &exdata.ex_shell[2];
+		while (*cp == ' ')
+			cp++;
+		execnamep = cp;
+		while (*cp && *cp != ' ')
+			cp++;
+		cfarg[0] = '\0';
+		cpnospace = cp;
+		if (*cp) {
+			*cp++ = '\0';
+			while (*cp == ' ')
+				cp++;
+			if (*cp)
+				bcopy((caddr_t)cp, (caddr_t)cfarg, SHSIZE);
+		}
+>>>>>>> origin/10.3
 
 	line_startp = ihp;
 
@@ -681,6 +804,9 @@ exec_fat_imgact(struct image_params *imgp)
 			struct vnode *tvp = p->p_tracep;
 			p->p_tracep = NULL;
 			p->p_traceflag = 0;
+
+			if (UBCINFOEXISTS(tvp))
+			        ubc_rele(tvp);
 			vrele(tvp);
 		}
 #endif
@@ -690,10 +816,22 @@ exec_fat_imgact(struct image_params *imgp)
 			p->p_ucred->cr_gid = origvattr.va_gid;
 >>>>>>> origin/10.1
 
+<<<<<<< HEAD
 			if (pref == CPU_TYPE_ANY) {
 				/* Fall through to regular grading */
 				goto regular_grading;
 			}
+=======
+		/*
+		 * Have mach reset the task port.  We don't want
+		 * anyone who had the task port before a setuid
+		 * exec to be able to access/control the task
+		 * after.
+		 */
+		ipc_task_reset(task);
+
+		p->p_flag |= P_SUGID;
+>>>>>>> origin/10.3
 
 			lret = fatfile_getbestarch_for_cputype(pref,
 							(vm_offset_t)fat_header,
@@ -703,6 +841,13 @@ exec_fat_imgact(struct image_params *imgp)
 				goto use_arch;
 			}
 		}
+<<<<<<< HEAD
+=======
+	}
+	p->p_cred->p_svuid = p->p_ucred->cr_uid;
+	p->p_cred->p_svgid = p->p_ucred->cr_gid;
+	set_security_token(p);
+>>>>>>> origin/10.3
 
 		/* Requested binary preference was not honored */
 		error = EBADEXEC;

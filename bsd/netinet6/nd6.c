@@ -137,6 +137,7 @@ int nd6_optimistic_dad =
 /* for debugging? */
 static int nd6_inuse, nd6_allocated;
 
+<<<<<<< HEAD
 /*
  * Synchronization notes:
  *
@@ -173,6 +174,11 @@ static lck_grp_t	*nd_if_lock_grp = NULL;
 static lck_attr_t	*nd_if_lock_attr = NULL;
 
 /* Protected by nd6_mutex */
+=======
+struct llinfo_nd6 llinfo_nd6 = {&llinfo_nd6, &llinfo_nd6};
+size_t nd_ifinfo_indexlim = 8;
+struct nd_ifinfo *nd_ifinfo = NULL;
+>>>>>>> origin/10.3
 struct nd_drhead nd_defrouter;
 struct nd_prhead nd_prefix = { 0 };
 
@@ -3634,12 +3640,34 @@ sendpkt:
 		}
 	}
 
+<<<<<<< HEAD
 	if (rt != NULL) {
 		RT_LOCK_SPIN(rt);
 		/* Mark use timestamp */
 		if (rt->rt_llinfo != NULL)
 			nd6_llreach_use(rt->rt_llinfo);
 		RT_UNLOCK(rt);
+=======
+	if ((ifp->if_flags & IFF_LOOPBACK) != 0) {
+		m->m_pkthdr.rcvif = origifp; /* forwarding rules require the original scope_id */
+		return (dlil_output(ifptodlt(origifp, PF_INET6), m, (caddr_t)rt, (struct sockaddr *)dst,0));	
+	} else {
+		/* Do not allow loopback address to wind up on a wire */
+		struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
+		
+		if ((IN6_IS_ADDR_LOOPBACK(&ip6->ip6_src) ||
+			IN6_IS_ADDR_LOOPBACK(&ip6->ip6_dst))) {
+			ip6stat.ip6s_badscope++;
+			/* 
+			 * Simply drop the packet just like a firewall -- we do not want the 
+			 * the application to feel the pain, not yet...
+			 * Returning ENETUNREACH like ip6_output does in some similar cases  
+			 * could startle the otherwise clueless process that specifies
+			 * loopback as the source address.
+			 */
+			goto bad;
+		}
+>>>>>>> origin/10.3
 	}
 
 	struct mbuf *mcur = m0;

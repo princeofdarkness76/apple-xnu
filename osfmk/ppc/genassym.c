@@ -3,22 +3,19 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -193,7 +190,14 @@ int main(int argc, char *argv[])
 	DECLARE("FamVMenabit",		FamVMenabit);
 	DECLARE("FamVMmode",		FamVMmode);
 	DECLARE("FamVMmodebit",		FamVMmodebit);
+<<<<<<< HEAD
 >>>>>>> origin/10.2
+=======
+	DECLARE("perfMonitor",		perfMonitor);
+	DECLARE("perfMonitorbit",	perfMonitorbit);
+	DECLARE("OnProc",		OnProc);
+	DECLARE("OnProcbit",		OnProcbit);
+>>>>>>> origin/10.3
 
 	/* Per Proc info structure */
 	DECLARE("PP_CPU_NUMBER",		offsetof(struct per_proc_info *, cpu_number));
@@ -202,11 +206,18 @@ int main(int argc, char *argv[])
 	DECLARE("PP_INTSTACK_TOP_SS",	offsetof(struct per_proc_info *, intstack_top_ss));
 	DECLARE("PP_DEBSTACKPTR",		offsetof(struct per_proc_info *, debstackptr));
 	DECLARE("PP_DEBSTACK_TOP_SS",	offsetof(struct per_proc_info *, debstack_top_ss));
+<<<<<<< HEAD
 	DECLARE("PP_TEMPWORK1",			offsetof(struct per_proc_info *, tempwork1));
 	DECLARE("PP_USERSPACE",			offsetof(struct per_proc_info *, userspace));
 	DECLARE("PP_USERPMAP",			offsetof(struct per_proc_info *, userpmap));
 	DECLARE("PP_LASTPMAP",			offsetof(struct per_proc_info *, Lastpmap));
 	DECLARE("savedSave",			offsetof(struct per_proc_info *, savedSave));
+=======
+	DECLARE("FPUowner",				offsetof(struct per_proc_info *, FPU_owner));
+	DECLARE("VMXowner",				offsetof(struct per_proc_info *, VMX_owner));
+	DECLARE("holdQFret",			offsetof(struct per_proc_info *, holdQFret));
+	DECLARE("rtcPop",				offsetof(struct per_proc_info *, rtcPop));
+>>>>>>> origin/10.3
 
 	DECLARE("PP_SAVE_EXCEPTION_TYPE", offsetof(struct per_proc_info *, save_exception_type));
 	DECLARE("PP_CPU_DATA", 			offsetof(struct per_proc_info *, cpu_data));
@@ -252,6 +263,7 @@ int main(int argc, char *argv[])
 	DECLARE("pfCanNapb",			pfCanNapb);
 	DECLARE("pfCanDoze",			pfCanDoze);
 	DECLARE("pfCanDozeb",			pfCanDozeb);
+<<<<<<< HEAD
 	DECLARE("pfCanDoze",			pfCanDoze);
 	DECLARE("pfCanDozeb",			pfCanDozeb);
 	DECLARE("pfThermal",			pfThermal);
@@ -262,6 +274,8 @@ int main(int argc, char *argv[])
 	DECLARE("pfWillNapb",			pfWillNapb);
 	DECLARE("pfNoMSRir",			pfNoMSRir);
 	DECLARE("pfNoMSRirb",			pfNoMSRirb);
+=======
+>>>>>>> origin/10.3
 	DECLARE("pfSlowNap",				pfSlowNap);
 	DECLARE("pfSlowNapb",				pfSlowNapb);
 	DECLARE("pfNoMuMMCK",				pfNoMuMMCK);
@@ -307,6 +321,7 @@ int main(int argc, char *argv[])
 	DECLARE("pfLDSTDB", 			offsetof(struct per_proc_info *, pf.pfLDSTDB));
 	DECLARE("pfl2crOriginal", 		offsetof(struct per_proc_info *, pf.l2crOriginal));
 	DECLARE("pfl3crOriginal", 		offsetof(struct per_proc_info *, pf.l3crOriginal));
+<<<<<<< HEAD
 	DECLARE("pfBootConfig", 		offsetof(struct per_proc_info *, pf.pfBootConfig));
 	DECLARE("pfSize", 				sizeof(procFeatures));
 	
@@ -319,6 +334,71 @@ int main(int argc, char *argv[])
 
 	DECLARE("napStamp", 			offsetof(struct per_proc_info *, napStamp));
 	DECLARE("napTotal", 			offsetof(struct per_proc_info *, napTotal));
+=======
+	DECLARE("pfBootConfig",			offsetof(struct per_proc_info *, pf.pfBootConfig));
+	DECLARE("pfPowerModes",			offsetof(struct per_proc_info *, pf.pfPowerModes));
+	DECLARE("pfPowerTune0",			offsetof(struct per_proc_info *, pf.pfPowerTune0));
+	DECLARE("pfPowerTune1",			offsetof(struct per_proc_info *, pf.pfPowerTune1));
+	DECLARE("pmDPLLVmin",			pmDPLLVmin);
+	DECLARE("pmDPLLVminb",			pmDPLLVminb);
+	DECLARE("pmPowerTune",			pmPowerTune);
+	DECLARE("pmPowerTuneb",			pmPowerTuneb);
+	DECLARE("pmDFS",				pmDFS);
+	DECLARE("pmDFSb",				pmDFSb);
+	DECLARE("pmDualPLL",			pmDualPLL);
+	DECLARE("pmDualPLLb",			pmDualPLLb);
+	DECLARE("pfPTEG", 				offsetof(struct per_proc_info *, pf.pfPTEG));
+	DECLARE("pfMaxVAddr", 			offsetof(struct per_proc_info *, pf.pfMaxVAddr));
+	DECLARE("pfMaxPAddr", 			offsetof(struct per_proc_info *, pf.pfMaxPAddr));
+	DECLARE("pfSize", 				sizeof(procFeatures));
+	
+	DECLARE("validSegs", 			offsetof(struct per_proc_info *, validSegs));
+	DECLARE("ppUserPmapVirt", 		offsetof(struct per_proc_info *, ppUserPmapVirt));
+	DECLARE("ppUserPmap", 			offsetof(struct per_proc_info *, ppUserPmap));
+	DECLARE("ppMapFlags", 			offsetof(struct per_proc_info *, ppMapFlags));
+	DECLARE("ppInvSeg", 			offsetof(struct per_proc_info *, ppInvSeg));
+	DECLARE("ppCurSeg", 			offsetof(struct per_proc_info *, ppCurSeg));
+	DECLARE("ppSegSteal", 			offsetof(struct per_proc_info *, ppSegSteal));
+
+	DECLARE("VMMareaPhys", 			offsetof(struct per_proc_info *, VMMareaPhys));
+	DECLARE("VMMXAFlgs", 			offsetof(struct per_proc_info *, VMMXAFlgs));
+	DECLARE("FAMintercept", 		offsetof(struct per_proc_info *, FAMintercept));
+
+	DECLARE("ppCIOmp", 				offsetof(struct per_proc_info *, ppCIOmp));
+
+	DECLARE("tempr0", 				offsetof(struct per_proc_info *, tempr0));
+	DECLARE("tempr1", 				offsetof(struct per_proc_info *, tempr1));
+	DECLARE("tempr2", 				offsetof(struct per_proc_info *, tempr2));
+	DECLARE("tempr3", 				offsetof(struct per_proc_info *, tempr3));
+	DECLARE("tempr4", 				offsetof(struct per_proc_info *, tempr4));
+	DECLARE("tempr5", 				offsetof(struct per_proc_info *, tempr5));
+	DECLARE("tempr6", 				offsetof(struct per_proc_info *, tempr6));
+	DECLARE("tempr7", 				offsetof(struct per_proc_info *, tempr7));
+	DECLARE("tempr8", 				offsetof(struct per_proc_info *, tempr8));
+	DECLARE("tempr9", 				offsetof(struct per_proc_info *, tempr9));
+	DECLARE("tempr10", 				offsetof(struct per_proc_info *, tempr10));
+	DECLARE("tempr11", 				offsetof(struct per_proc_info *, tempr11));
+	DECLARE("tempr12", 				offsetof(struct per_proc_info *, tempr12));
+	DECLARE("tempr13", 				offsetof(struct per_proc_info *, tempr13));
+	DECLARE("tempr14", 				offsetof(struct per_proc_info *, tempr14));
+	DECLARE("tempr15", 				offsetof(struct per_proc_info *, tempr15));
+	DECLARE("tempr16", 				offsetof(struct per_proc_info *, tempr16));
+	DECLARE("tempr17", 				offsetof(struct per_proc_info *, tempr17));
+	DECLARE("tempr18", 				offsetof(struct per_proc_info *, tempr18));
+	DECLARE("tempr19", 				offsetof(struct per_proc_info *, tempr19));
+	DECLARE("tempr20", 				offsetof(struct per_proc_info *, tempr20));
+	DECLARE("tempr21", 				offsetof(struct per_proc_info *, tempr21));
+	DECLARE("tempr22", 				offsetof(struct per_proc_info *, tempr22));
+	DECLARE("tempr23", 				offsetof(struct per_proc_info *, tempr23));
+	DECLARE("tempr24", 				offsetof(struct per_proc_info *, tempr24));
+	DECLARE("tempr25", 				offsetof(struct per_proc_info *, tempr25));
+	DECLARE("tempr26", 				offsetof(struct per_proc_info *, tempr26));
+	DECLARE("tempr27", 				offsetof(struct per_proc_info *, tempr27));
+	DECLARE("tempr28", 				offsetof(struct per_proc_info *, tempr28));
+	DECLARE("tempr29", 				offsetof(struct per_proc_info *, tempr29));
+	DECLARE("tempr30", 				offsetof(struct per_proc_info *, tempr30));
+	DECLARE("tempr31", 				offsetof(struct per_proc_info *, tempr31));
+>>>>>>> origin/10.3
 
 	DECLARE("emfp0", 				offsetof(struct per_proc_info *, emfp0));
 	DECLARE("emfp1", 				offsetof(struct per_proc_info *, emfp1));
@@ -391,9 +471,99 @@ int main(int argc, char *argv[])
 	DECLARE("ppSize",				sizeof(struct per_proc_info));
 	DECLARE("patcharea", 			offsetof(struct per_proc_info *, patcharea));
 
+<<<<<<< HEAD
 	DECLARE("RESETHANDLER_TYPE", 			offsetof(struct resethandler *, type));
 	DECLARE("RESETHANDLER_CALL", 			offsetof(struct resethandler *, call_paddr));
 	DECLARE("RESETHANDLER_ARG", 			offsetof(struct resethandler *, arg__paddr));
+=======
+	DECLARE("hwCounts",				offsetof(struct per_proc_info *, hwCtr));
+	DECLARE("hwInVains",			offsetof(struct per_proc_info *, hwCtr.hwInVains));
+	DECLARE("hwResets",				offsetof(struct per_proc_info *, hwCtr.hwResets));
+	DECLARE("hwMachineChecks",		offsetof(struct per_proc_info *, hwCtr.hwMachineChecks));
+	DECLARE("hwDSIs",				offsetof(struct per_proc_info *, hwCtr.hwDSIs));
+	DECLARE("hwISIs",				offsetof(struct per_proc_info *, hwCtr.hwISIs));
+	DECLARE("hwExternals",			offsetof(struct per_proc_info *, hwCtr.hwExternals));
+	DECLARE("hwAlignments",			offsetof(struct per_proc_info *, hwCtr.hwAlignments));
+	DECLARE("hwPrograms",			offsetof(struct per_proc_info *, hwCtr.hwPrograms));
+	DECLARE("hwFloatPointUnavailable",	offsetof(struct per_proc_info *, hwCtr.hwFloatPointUnavailable));
+	DECLARE("hwDecrementers",		offsetof(struct per_proc_info *, hwCtr.hwDecrementers));
+	DECLARE("hwIOErrors",			offsetof(struct per_proc_info *, hwCtr.hwIOErrors));
+	DECLARE("hwrsvd0",				offsetof(struct per_proc_info *, hwCtr.hwrsvd0));
+	DECLARE("hwSystemCalls",		offsetof(struct per_proc_info *, hwCtr.hwSystemCalls));
+	DECLARE("hwTraces",				offsetof(struct per_proc_info *, hwCtr.hwTraces));
+	DECLARE("hwFloatingPointAssists",	offsetof(struct per_proc_info *, hwCtr.hwFloatingPointAssists));
+	DECLARE("hwPerformanceMonitors",	offsetof(struct per_proc_info *, hwCtr.hwPerformanceMonitors));
+	DECLARE("hwAltivecs",			offsetof(struct per_proc_info *, hwCtr.hwAltivecs));
+	DECLARE("hwrsvd1",				offsetof(struct per_proc_info *, hwCtr.hwrsvd1));
+	DECLARE("hwrsvd2",				offsetof(struct per_proc_info *, hwCtr.hwrsvd2));
+	DECLARE("hwrsvd3",				offsetof(struct per_proc_info *, hwCtr.hwrsvd3));
+	DECLARE("hwInstBreakpoints",	offsetof(struct per_proc_info *, hwCtr.hwInstBreakpoints));
+	DECLARE("hwSystemManagements",	offsetof(struct per_proc_info *, hwCtr.hwSystemManagements));
+	DECLARE("hwAltivecAssists",		offsetof(struct per_proc_info *, hwCtr.hwAltivecAssists));
+	DECLARE("hwThermal",			offsetof(struct per_proc_info *, hwCtr.hwThermal));
+	DECLARE("hwrsvd5",				offsetof(struct per_proc_info *, hwCtr.hwrsvd5));
+	DECLARE("hwrsvd6",				offsetof(struct per_proc_info *, hwCtr.hwrsvd6));
+	DECLARE("hwrsvd7",				offsetof(struct per_proc_info *, hwCtr.hwrsvd7));
+	DECLARE("hwrsvd8",				offsetof(struct per_proc_info *, hwCtr.hwrsvd8));
+	DECLARE("hwrsvd9",				offsetof(struct per_proc_info *, hwCtr.hwrsvd9));
+	DECLARE("hwrsvd10",				offsetof(struct per_proc_info *, hwCtr.hwrsvd10));
+	DECLARE("hwrsvd11",				offsetof(struct per_proc_info *, hwCtr.hwrsvd11));
+	DECLARE("hwrsvd12",				offsetof(struct per_proc_info *, hwCtr.hwrsvd12));
+	DECLARE("hwrsvd13",				offsetof(struct per_proc_info *, hwCtr.hwrsvd13));
+	DECLARE("hwTrace601",			offsetof(struct per_proc_info *, hwCtr.hwTrace601));
+	DECLARE("hwSIGPs",				offsetof(struct per_proc_info *, hwCtr.hwSIGPs));
+	DECLARE("hwPreemptions",		offsetof(struct per_proc_info *, hwCtr.hwPreemptions));
+	DECLARE("hwContextSwitchs",		offsetof(struct per_proc_info *, hwCtr.hwContextSwitchs));
+	DECLARE("hwShutdowns",			offsetof(struct per_proc_info *, hwCtr.hwShutdowns));
+	DECLARE("hwChokes",				offsetof(struct per_proc_info *, hwCtr.hwChokes));
+	DECLARE("hwDataSegments",		offsetof(struct per_proc_info *, hwCtr.hwDataSegments));
+	DECLARE("hwInstructionSegments",	offsetof(struct per_proc_info *, hwCtr.hwInstructionSegments));
+	DECLARE("hwSoftPatches",		offsetof(struct per_proc_info *, hwCtr.hwSoftPatches));
+	DECLARE("hwMaintenances",		offsetof(struct per_proc_info *, hwCtr.hwMaintenances));
+	DECLARE("hwInstrumentations",	offsetof(struct per_proc_info *, hwCtr.hwInstrumentations));
+	DECLARE("hwRedrives",			offsetof(struct per_proc_info *, hwCtr.hwRedrives));
+	DECLARE("hwIgnored",			offsetof(struct per_proc_info *, hwCtr.hwIgnored));
+	DECLARE("hwhdec",				offsetof(struct per_proc_info *, hwCtr.hwhdec));
+	DECLARE("hwSteals",				offsetof(struct per_proc_info *, hwCtr.hwSteals));
+
+	DECLARE("hwMckHang",			offsetof(struct per_proc_info *, hwCtr.hwMckHang));
+	DECLARE("hwMckSLBPE",			offsetof(struct per_proc_info *, hwCtr.hwMckSLBPE));
+	DECLARE("hwMckTLBPE",			offsetof(struct per_proc_info *, hwCtr.hwMckTLBPE));
+	DECLARE("hwMckERCPE",			offsetof(struct per_proc_info *, hwCtr.hwMckERCPE));
+	DECLARE("hwMckL1DPE",			offsetof(struct per_proc_info *, hwCtr.hwMckL1DPE));
+	DECLARE("hwMckL1TPE",			offsetof(struct per_proc_info *, hwCtr.hwMckL1TPE));
+	DECLARE("hwMckUE",				offsetof(struct per_proc_info *, hwCtr.hwMckUE));
+	DECLARE("hwMckIUE",				offsetof(struct per_proc_info *, hwCtr.hwMckIUE));
+	DECLARE("hwMckIUEr",			offsetof(struct per_proc_info *, hwCtr.hwMckIUEr));
+	DECLARE("hwMckDUE",				offsetof(struct per_proc_info *, hwCtr.hwMckDUE));
+	DECLARE("hwMckDTW",				offsetof(struct per_proc_info *, hwCtr.hwMckDTW));
+	DECLARE("hwMckUnk",				offsetof(struct per_proc_info *, hwCtr.hwMckUnk));
+	DECLARE("hwMckExt",				offsetof(struct per_proc_info *, hwCtr.hwMckExt));
+	DECLARE("hwMckICachePE",		offsetof(struct per_proc_info *, hwCtr.hwMckICachePE));
+	DECLARE("hwMckITagPE",			offsetof(struct per_proc_info *, hwCtr.hwMckITagPE));
+	DECLARE("hwMckIEratPE",			offsetof(struct per_proc_info *, hwCtr.hwMckIEratPE));
+	DECLARE("hwMckDEratPE",			offsetof(struct per_proc_info *, hwCtr.hwMckDEratPE));
+
+	DECLARE("napStamp", 			offsetof(struct per_proc_info *, hwCtr.napStamp));
+	DECLARE("napTotal", 			offsetof(struct per_proc_info *, hwCtr.napTotal));
+
+	DECLARE("patchAddr",			offsetof(struct patch_entry *, addr));
+	DECLARE("patchData",			offsetof(struct patch_entry *, data));
+	DECLARE("patchType",			offsetof(struct patch_entry *, type));
+	DECLARE("patchValue",			offsetof(struct patch_entry *, value));
+	DECLARE("peSize", 				sizeof(patch_entry_t));
+	DECLARE("PATCH_PROCESSOR",		PATCH_PROCESSOR);
+	DECLARE("PATCH_FEATURE",		PATCH_FEATURE);
+	DECLARE("PATCH_TABLE_SIZE",		PATCH_TABLE_SIZE);
+	DECLARE("PatchExt32",			PatchExt32);
+	DECLARE("PatchExt32b",			PatchExt32b);
+	DECLARE("PatchLwsync",			PatchLwsync);
+	DECLARE("PatchLwsyncb",			PatchLwsyncb);
+
+	DECLARE("RESETHANDLER_TYPE", 	offsetof(struct resethandler *, type));
+	DECLARE("RESETHANDLER_CALL", 	offsetof(struct resethandler *, call_paddr));
+	DECLARE("RESETHANDLER_ARG", 	offsetof(struct resethandler *, arg__paddr));
+>>>>>>> origin/10.3
 
 	/* we want offset from
 	 * bottom of kernel stack, not offset into structure
@@ -894,6 +1064,11 @@ int main(int argc, char *argv[])
 	DECLARE("savexfpscr",	offsetof(struct savearea *, save_xfpscr));
 	DECLARE("savevrsave",	offsetof(struct savearea *, save_vrsave));	
 
+	DECLARE("savexdat0",	offsetof(struct savearea *, save_xdat0));
+	DECLARE("savexdat1",	offsetof(struct savearea *, save_xdat1));
+	DECLARE("savexdat2",	offsetof(struct savearea *, save_xdat2));
+	DECLARE("savexdat3",	offsetof(struct savearea *, save_xdat3));
+	
 	DECLARE("saver0",		offsetof(struct savearea *, save_r0));
 	DECLARE("saver1",		offsetof(struct savearea *, save_r1));
 	DECLARE("saver2",		offsetof(struct savearea *, save_r2));
@@ -1068,6 +1243,48 @@ int main(int argc, char *argv[])
 	DECLARE("shdIBAT",	offsetof(struct shadowBAT *, IBATs));	
 	DECLARE("shdDBAT",	offsetof(struct shadowBAT *, DBATs));	
 	
+<<<<<<< HEAD
+=======
+	/* Low Memory Globals */
+
+	DECLARE("lgVerCode", 			offsetof(struct lowglo *, lgVerCode));
+	DECLARE("lgPPStart", 			offsetof(struct lowglo *, lgPPStart));
+	DECLARE("trcWork", 				offsetof(struct lowglo *, lgTrcWork));
+	DECLARE("traceMask",			offsetof(struct lowglo *, lgTrcWork.traceMask));
+	DECLARE("traceCurr",			offsetof(struct lowglo *, lgTrcWork.traceCurr));
+	DECLARE("traceStart",			offsetof(struct lowglo *, lgTrcWork.traceStart));
+	DECLARE("traceEnd",				offsetof(struct lowglo *, lgTrcWork.traceEnd));
+	DECLARE("traceMsnd",			offsetof(struct lowglo *, lgTrcWork.traceMsnd));
+
+	DECLARE("Zero", 				offsetof(struct lowglo *, lgZero));
+	DECLARE("saveanchor", 			offsetof(struct lowglo *, lgSaveanchor));
+
+	DECLARE("SVlock",				offsetof(struct lowglo *, lgSaveanchor.savelock));
+	DECLARE("SVpoolfwd",			offsetof(struct lowglo *, lgSaveanchor.savepoolfwd));
+	DECLARE("SVpoolbwd",			offsetof(struct lowglo *, lgSaveanchor.savepoolbwd));
+	DECLARE("SVfree",				offsetof(struct lowglo *, lgSaveanchor.savefree));
+	DECLARE("SVfreecnt",			offsetof(struct lowglo *, lgSaveanchor.savefreecnt));
+	DECLARE("SVadjust",				offsetof(struct lowglo *, lgSaveanchor.saveadjust));
+	DECLARE("SVinuse",				offsetof(struct lowglo *, lgSaveanchor.saveinuse));
+	DECLARE("SVtarget",				offsetof(struct lowglo *, lgSaveanchor.savetarget));
+	DECLARE("SVsize",				sizeof(struct Saveanchor));
+
+	DECLARE("tlbieLock", 			offsetof(struct lowglo *, lgTlbieLck));
+
+	DECLARE("dgFlags",				offsetof(struct lowglo *, lgdgWork.dgFlags));
+	DECLARE("dgLock",				offsetof(struct lowglo *, lgdgWork.dgLock));
+	DECLARE("dgMisc0",				offsetof(struct lowglo *, lgdgWork.dgMisc0));
+	
+	DECLARE("lgKillResv",			offsetof(struct lowglo *, lgKillResv));
+
+	
+	DECLARE("scomcpu",				offsetof(struct scomcomm *, scomcpu));
+	DECLARE("scomfunc",				offsetof(struct scomcomm *, scomfunc));
+	DECLARE("scomreg",				offsetof(struct scomcomm *, scomreg));
+	DECLARE("scomstat",				offsetof(struct scomcomm *, scomstat));
+	DECLARE("scomdata",				offsetof(struct scomcomm *, scomdata));
+
+>>>>>>> origin/10.3
 	return(0);  /* For ANSI C :-) */
 
 

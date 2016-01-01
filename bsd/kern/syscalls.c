@@ -1,24 +1,25 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2002 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -355,6 +356,7 @@ char *syscallnames[] = {
 	"issetugid",		/* 327 = issetugid */
 	"__pthread_kill",	/* 328  = __pthread_kill */
 	"pthread_sigmask",	/* 329  = pthread_sigmask */
+<<<<<<< HEAD
 	"sigwait",			/* 330 = sigwait */
 	"#331",				/* 331 */
 	"#332",				/* 332 */
@@ -375,4 +377,46 @@ char *syscallnames[] = {
 	"#347",				/* 347 */
 	"#348",				/* 348 */
 	"#349"				/* 349 */
+=======
+	"sigwait",		/* 330 = sigwait */
+	"#331",			/* 331 */
+	"#332",			/* 332 */
+	"#333",			/* 333 */
+	"#334",			/* 334 */
+	"utrace",		/* 335 = utrace */
+	"#336",			/* 336 */
+	"#337",			/* 337 */
+	"#338",			/* 338 */
+	"#339",			/* 339 */
+	"#340",			/* 340 = TBD sigprocmask */
+	"#341",			/* 341 = TBD sigsuspend */
+	"#342",			/* 342 = TBD sigaction */
+	"#343",			/* 343 = TBD sigpending */
+	"#344",			/* 344 = TBD sigreturn */
+	"#345",			/* 345 = TBD sigtimedwait */
+	"#346",			/* 346 = TBD sigwaitinfo */
+	"#347",			/* 347 */
+	"#348",			/* 348 */
+	"#349"			/* 349 */
+	"audit",		/* 350 */
+	"auditon",		/* 351 */
+	"#352",			/* 352 */
+	"getauid",		/* 353 */
+	"setauid",		/* 354 */
+	"getaudit",		/* 355 */
+	"setaudit",		/* 356 */
+	"getaudit_addr",	/* 357 */
+	"setaudit_addr",	/* 358 */
+	"auditctl",		/* 359 */
+	"#360",			/* 360 */
+	"#361",			/* 361 */
+	"kqueue",		/* 362 = kqueue */
+	"kevent",		/* 363 = kevent */
+	"#364",			/* 364 */
+	"#365",			/* 365 */
+	"#366",			/* 366 */
+	"#367",			/* 367 */
+	"#368",			/* 368 */
+	"#369"			/* 369 */
+>>>>>>> origin/10.3
 };

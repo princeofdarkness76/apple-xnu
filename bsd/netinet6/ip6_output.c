@@ -2327,8 +2327,17 @@ ip6_ctloutput(struct socket *so, struct sockopt *sopt)
 			case IPV6_2292PKTOPTIONS: {
 				struct mbuf *m;
 
+<<<<<<< HEAD
 				error = soopt_getm(sopt, &m);
 				if (error != 0)
+=======
+				if (sopt->sopt_valsize > MCLBYTES) {
+					error = EMSGSIZE;
+					break;
+				}
+				error = soopt_getm(sopt, &m); /* XXX */
+				if (error != NULL)
+>>>>>>> origin/10.3
 					break;
 				error = soopt_mcopyin(sopt, m);
 				if (error != 0)
@@ -2657,8 +2666,17 @@ ip6_ctloutput(struct socket *so, struct sockopt *sopt)
 				caddr_t req = NULL;
 				size_t len = 0;
 				struct mbuf *m;
+<<<<<<< HEAD
 				
 				if ((error = soopt_getm(sopt, &m)) != 0)
+=======
+
+				if (sopt->sopt_valsize > MCLBYTES) {
+					error = EMSGSIZE;
+					break;
+				}
+				if ((error = soopt_getm(sopt, &m)) != 0) /* XXX */
+>>>>>>> origin/10.3
 					break;
 				if ((error = soopt_mcopyin(sopt, m)) != 0)
 					break;
@@ -2909,6 +2927,7 @@ ip6_ctloutput(struct socket *so, struct sockopt *sopt)
 				error = ip6_getmoptions(in6p, sopt);
 				break;
 #if IPSEC
+<<<<<<< HEAD
 			case IPV6_IPSEC_POLICY: {
 				error = 0; /* This option is no longer supported */
 				break;
@@ -2930,6 +2949,34 @@ ip6_ctloutput(struct socket *so, struct sockopt *sopt)
 					optval = in6p->inp_boundifp->if_index;
 				error = sooptcopyout(sopt, &optval,
 				    sizeof (optval));
+=======
+			case IPV6_IPSEC_POLICY:
+			  {
+				caddr_t req = NULL;
+				size_t len = 0;
+				struct mbuf *m = NULL;
+				struct mbuf **mp = &m;
+
+				if (sopt->sopt_valsize > MCLBYTES) {
+					error = EMSGSIZE;
+					break;
+				}
+				error = soopt_getm(sopt, &m); /* XXX */
+				if (error != NULL)
+					break;
+				error = soopt_mcopyin(sopt, m); /* XXX */
+				if (error != NULL)
+					break;
+				if (m) {
+					req = mtod(m, caddr_t);
+					len = m->m_len;
+				}
+				error = ipsec6_get_policy(in6p, req, len, mp);
+				if (error == 0)
+					error = soopt_mcopyout(sopt, m); /*XXX*/
+				if (error == 0 && m)
+					m_freem(m);
+>>>>>>> origin/10.3
 				break;
 
 			case IPV6_NO_IFT_CELLULAR:

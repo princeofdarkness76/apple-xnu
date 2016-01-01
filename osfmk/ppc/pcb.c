@@ -3,22 +3,19 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -239,6 +236,8 @@ switch_context(
 		old_act->mact.specFlags &=  ~(userProtKey|FamVMmode);
 		old_act->mact.specFlags |= (per_proc_info[my_cpu].spcFlags) & (userProtKey|FamVMmode);
 	}
+	old_act->mact.specFlags &= ~OnProc;
+	new_act->mact.specFlags |= OnProc;
 
 	/*
 	 * We do not have to worry about the PMAP module, so switch.
@@ -968,6 +967,7 @@ stack_handoff(thread_t old,
 		old->top_act->mact.specFlags &= ~(userProtKey|FamVMmode);
 		old->top_act->mact.specFlags |= (per_proc_info[my_cpu].spcFlags) & (userProtKey|FamVMmode);
 	}
+<<<<<<< HEAD
 >>>>>>> origin/10.2
 
 #if NCPUS > 1
@@ -976,6 +976,10 @@ stack_handoff(thread_t old,
 	vec_save(old->top_act);
   }
 #endif
+=======
+	old->top_act->mact.specFlags &= ~OnProc;
+	new->top_act->mact.specFlags |= OnProc;
+>>>>>>> origin/10.3
 
   KERNEL_DEBUG_CONSTANT(MACHDBG_CODE(DBG_MACH_SCHED,MACH_STACK_HANDOFF) | DBG_FUNC_NONE,
 		     (int)old, (int)new, old->sched_pri, new->sched_pri, 0);

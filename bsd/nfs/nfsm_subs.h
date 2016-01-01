@@ -1,8 +1,13 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2011 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
 <<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,11 +33,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -601,25 +616,17 @@ int nfsm_chain_trim_data(struct nfsm_chain *, int, int *);
 			(v) = ttvp; \
 		} }
 
-/* Used as (f) for nfsm_wcc_data() */
-#define NFSV3_WCCRATTR	0
-#define NFSV3_WCCCHK	1
-
-#define	nfsm_wcc_data(v, f, x) \
-		{ int ttattrf, ttretf = 0; \
+#define	nfsm_wcc_data(v, premtime, newpostattr, x) \
+		{ \
 		nfsm_dissect(tl, u_long *, NFSX_UNSIGNED); \
 		if (*tl == nfs_true) { \
 			nfsm_dissect(tl, u_long *, 6 * NFSX_UNSIGNED); \
-			if (f) \
-				ttretf = (VTONFS(v)->n_mtime == \
-					fxdr_unsigned(u_long, *(tl + 2))); \
-		} \
-		nfsm_postop_attr((v), ttattrf, (x)); \
-		if (f) { \
-			(f) = ttretf; \
+			(premtime) = fxdr_unsigned(time_t, *(tl + 2)); \
 		} else { \
-			(f) = ttattrf; \
-		} }
+			(premtime) = 0; \
+		} \
+		nfsm_postop_attr((v), (newpostattr), (x)); \
+		}
 
 #define nfsm_v3sattr(s, a, u, g) \
 		{ (s)->sa_modetrue = nfs_true; \
@@ -725,6 +732,7 @@ int nfsm_chain_trim_data(struct nfsm_chain *, int, int *);
 		} else { \
 			(E) = nfsm_chain_advance((NMC), (LEN)); \
 		} \
+<<<<<<< HEAD
 	} while (0)
 
 /* get a 32bit value from an mbuf chain */
@@ -740,6 +748,69 @@ int nfsm_chain_trim_data(struct nfsm_chain *, int, int *);
 			__tmpptr = &__tmp32; \
 			(E) = nfsm_chain_get_opaque_f((NMC), NFSX_UNSIGNED, (u_char*)__tmpptr); \
 			if (E) break; \
+=======
+		t2 = nfsm_rndup(s)+NFSX_UNSIGNED; \
+		if (t2 <= M_TRAILINGSPACE(mb)) { \
+			nfsm_build(tl,u_long *,t2); \
+			*tl++ = txdr_unsigned(s); \
+			*(tl+((t2>>2)-2)) = 0; \
+			bcopy((caddr_t)(a), (caddr_t)tl, (s)); \
+		} else if ((t2 = nfsm_strtmbuf(&mb, &bpos, (a), (s)))) { \
+			error = t2; \
+			m_freem(mreq); \
+			goto nfsmout; \
+		}
+
+#define	nfsm_srvdone \
+		nfsmout: \
+		return(error)
+
+#define	nfsm_reply(s) \
+		{ \
+		nfsd->nd_repstat = error; \
+		if (error && !(nfsd->nd_flag & ND_NFSV3)) \
+		   (void) nfs_rephead(0, nfsd, slp, error, cache, &frev, \
+			mrq, &mb, &bpos); \
+		else \
+		   (void) nfs_rephead((s), nfsd, slp, error, cache, &frev, \
+			mrq, &mb, &bpos); \
+		m_freem(mrep); \
+		mrep = NULL; \
+		mreq = *mrq; \
+		if (error && (!(nfsd->nd_flag & ND_NFSV3) || \
+			error == EBADRPC)) \
+			return(0); \
+		}
+
+#define	nfsm_writereply(s, v3) \
+		{ \
+		nfsd->nd_repstat = error; \
+		if (error && !(v3)) \
+		   (void) nfs_rephead(0, nfsd, slp, error, cache, &frev, \
+			&mreq, &mb, &bpos); \
+		else \
+		   (void) nfs_rephead((s), nfsd, slp, error, cache, &frev, \
+			&mreq, &mb, &bpos); \
+		}
+
+#define	nfsm_adv(s) \
+		{ t1 = mtod(md, caddr_t)+md->m_len-dpos; \
+		if (t1 >= (s)) { \
+			dpos += (s); \
+		} else if ((t1 = nfs_adv(&md, &dpos, (s), t1))) { \
+			error = t1; \
+			m_freem(mrep); \
+			goto nfsmout; \
+		} }
+
+#define nfsm_srvmtofh(f) \
+		{ if (nfsd->nd_flag & ND_NFSV3) { \
+			nfsm_dissect(tl, u_long *, NFSX_UNSIGNED); \
+			if (fxdr_unsigned(int, *tl) != NFSX_V3FH) { \
+				error = EBADRPC; \
+				nfsm_reply(0); \
+			} \
+>>>>>>> origin/10.3
 		} \
 		(LVAL) = fxdr_unsigned(uint32_t, *__tmpptr); \
 	} while (0)

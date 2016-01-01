@@ -4,6 +4,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
 <<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -28,11 +29,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -102,6 +113,7 @@ typedef struct {
 } tir_t;
 
 /* XXX should be static */
+<<<<<<< HEAD
 void collectth_state(thread_t th_act, void *tirp);
 
 extern int freespace_mb(vnode_t vp);
@@ -152,6 +164,17 @@ process_cpu_subtype(proc_t core_proc)
 #endif
 	return what_we_think;
 }
+=======
+void collectth_state(thread_act_t th_act, tir_t *t);
+
+/* XXX not in a Mach header anywhere */
+kern_return_t thread_getstatus(register thread_act_t act, int flavor,
+	thread_state_t tstate, mach_msg_type_number_t *count);
+
+
+__private_extern__ do_coredump = 1;	/* default: dump cores */
+__private_extern__ sugid_coredump = 0;	/* deafult: but not on SGUID binaries */
+>>>>>>> origin/10.3
 
 void
 collectth_state(thread_t th_act, void *tirp)
@@ -192,6 +215,11 @@ collectth_state(thread_t th_act, void *tirp)
 		t->hoffset = hoffset;
 }
 
+<<<<<<< HEAD
+=======
+extern boolean_t coredumpok(vm_map_t map, vm_offset_t va);  /* temp fix */
+extern task_t current_task(void);	/* XXX */
+>>>>>>> origin/10.3
 
 /*
  * coredump
@@ -213,7 +241,11 @@ collectth_state(thread_t th_act, void *tirp)
  */
 #define	MAX_TSTATE_FLAVORS	10
 int
+<<<<<<< HEAD
 coredump(proc_t core_proc, uint32_t reserve_mb, int coredump_flags)
+=======
+coredump(struct proc *p)
+>>>>>>> origin/10.3
 {
 /* Begin assumptions that limit us to only the current process */
 	vfs_context_t ctx = vfs_context_current();
@@ -229,6 +261,7 @@ coredump(proc_t core_proc, uint32_t reserve_mb, int coredump_flags)
 	off_t		foffset;
 	mach_vm_offset_t vmoffset;
 	vm_offset_t	header;
+<<<<<<< HEAD
 	mach_vm_size_t	vmsize;
 	vm_prot_t	prot;
 	vm_prot_t	maxprot;
@@ -236,6 +269,18 @@ coredump(proc_t core_proc, uint32_t reserve_mb, int coredump_flags)
 	int		error1 = 0;
 	char		stack_name[MAXCOMLEN+6];
 	char		*alloced_name = NULL;
+=======
+	struct machine_slot	*ms;
+	struct mach_header	*mh;
+	struct segment_command	*sc;
+	vm_size_t	size;
+	vm_prot_t	prot;
+	vm_prot_t	maxprot;
+	vm_inherit_t	inherit;
+	int		error1;
+	task_t		task;
+	char		core_name[MAXCOMLEN+6];
+>>>>>>> origin/10.3
 	char		*name;
 	mythread_state_flavor_t flavors[MAX_TSTATE_FLAVORS];
 	vm_size_t	mapsize;
@@ -246,6 +291,7 @@ coredump(proc_t core_proc, uint32_t reserve_mb, int coredump_flags)
 	mach_msg_type_number_t vbrcount = 0;
 	tir_t tir1;
 	struct vnode * vp;
+<<<<<<< HEAD
 	struct mach_header	*mh = NULL;	/* protected by is_64 */
 	struct mach_header_64	*mh64 = NULL;	/* protected by is_64 */
 	int		is_64 = 0;
@@ -272,6 +318,16 @@ coredump(proc_t core_proc, uint32_t reserve_mb, int coredump_flags)
 		mach_header_sz = sizeof(struct mach_header_64);
 		segment_command_sz = sizeof(struct segment_command_64);
 	}
+=======
+
+	if (do_coredump == 0 ||		/* Not dumping at all */
+	    ( (sugid_coredump == 0) &&	/* Not dumping SUID/SGID binaries */
+	      ( (pcred->p_svuid != pcred->p_ruid) ||
+	        (pcred->p_svgid != pcred->p_rgid)))) {
+	    
+		return (EFAULT);
+	}
+>>>>>>> origin/10.3
 
 	mapsize = get_vmmap_size(map);
 
@@ -279,6 +335,7 @@ coredump(proc_t core_proc, uint32_t reserve_mb, int coredump_flags)
 	    (mapsize >=  core_proc->p_rlimit[RLIMIT_CORE].rlim_cur))
 		return (EFAULT);
 
+<<<<<<< HEAD
 	(void) task_suspend_internal(task);
 
 	MALLOC(alloced_name, char *, MAXPATHLEN, M_TEMP, M_NOWAIT | M_ZERO);
@@ -299,6 +356,22 @@ coredump(proc_t core_proc, uint32_t reserve_mb, int coredump_flags)
 
 	VATTR_INIT(&va);
 	VATTR_WANTED(&va, va_nlink);
+=======
+	/* create name according to sysctl'able format string */
+	name = proc_core_name(p->p_comm, p->p_ucred->cr_uid, p->p_pid);
+
+	/* if name creation fails, fall back to historical behaviour... */
+	if (name == NULL) {
+	sprintf(core_name, "/cores/core.%d", p->p_pid);
+		name = core_name;
+	}
+
+	NDINIT(&nd, LOOKUP, NOFOLLOW, UIO_SYSSPACE, name, p);
+	if((error = vn_open(&nd, O_CREAT | FWRITE | O_NOFOLLOW, S_IRUSR )) != 0)
+		return (error);
+	vp = nd.ni_vp;
+	
+>>>>>>> origin/10.3
 	/* Don't dump to non-regular files or files with links. */
 	if (vp->v_type != VREG ||
 	    vnode_getattr(vp, &va, ctx) || va.va_nlink != 1) {
@@ -325,10 +398,16 @@ coredump(proc_t core_proc, uint32_t reserve_mb, int coredump_flags)
 
 	thread_count = get_task_numacts(task);
 	segment_count = get_vmmap_entries(map);	/* XXX */
+<<<<<<< HEAD
 	tir1.flavor_count = sizeof(thread_flavor_array)/sizeof(mythread_state_flavor_t);
 	bcopy(thread_flavor_array, flavors,sizeof(thread_flavor_array));
 	tstate_size = 0;
 	for (i = 0; i < tir1.flavor_count; i++)
+=======
+	bcopy(thread_flavor_array,flavors,sizeof(thread_flavor_array));
+	tstate_size = 0;
+	for (i = 0; i < mynum_flavors; i++)
+>>>>>>> origin/10.3
 		tstate_size += sizeof(mythread_state_flavor_t) +
 		  (flavors[i].count * sizeof(int));
 	command_size = segment_count * segment_command_sz +

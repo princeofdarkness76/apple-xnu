@@ -4,6 +4,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
 <<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -28,11 +29,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -535,6 +546,7 @@ SYSCTL_DECL(_user);
 #define KERN_COREFILE		50	/* string: corefile format string */
 #define KERN_COREDUMP		51	/* int: whether to coredump at all */
 #define	KERN_SUGID_COREDUMP	52	/* int: whether to dump SUGID cores */
+<<<<<<< HEAD
 #define	KERN_PROCDELAYTERM	53	/* int: set/reset current proc for delayed termination during shutdown */
 #define KERN_SHREG_PRIVATIZABLE	54	/* int: can shared regions be privatized ? */
                              /* 55 was KERN_PROC_LOW_PRI_IO... now deprecated */
@@ -581,6 +593,9 @@ SYSCTL_DECL(_user);
 /* KERN_OPENEVT types */
 #define KERN_OPENEVT_PROC     1
 #define KERN_UNOPENEVT_PROC   2
+=======
+#define	KERN_MAXID		53	/* number of valid kern ids */
+>>>>>>> origin/10.3
 
 /* KERN_TFP types */
 #define KERN_TFP_POLICY 		1
@@ -672,6 +687,7 @@ SYSCTL_DECL(_user);
 	{ "procargs2",CTLTYPE_STRUCT }, \
 	{ "corefile",CTLTYPE_STRING }, \
 	{ "coredump", CTLTYPE_INT }, \
+<<<<<<< HEAD
 	{ "sugid_coredump", CTLTYPE_INT }, \
 	{ "delayterm", CTLTYPE_INT }, \
 	{ "shreg_private", CTLTYPE_INT }, \
@@ -692,6 +708,9 @@ SYSCTL_DECL(_user);
 	{ "tty", CTLTYPE_NODE },	\
 	{ "check_openevt", CTLTYPE_INT }, \
 	{ "thread_name", CTLTYPE_STRING } \
+=======
+	{ "sugid_coredump", CTLTYPE_INT } \
+>>>>>>> origin/10.3
 }
 
 /*

@@ -3,22 +3,19 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -2238,16 +2235,33 @@ LEXT(stVectors)
 
 LEXT(stSpecrs)
 
+<<<<<<< HEAD
 			mfmsr	r0					; Save the MSR
 			rlwinm	r0,r0,0,MSR_FP_BIT+1,MSR_FP_BIT-1	; Force floating point off
 			rlwinm	r0,r0,0,MSR_VEC_BIT+1,MSR_VEC_BIT-1	; Force vectors off
 			rlwinm	r4,r0,0,MSR_EE_BIT,MSR_EE_BIT	; Turn off interruptions
+=======
+
+			lis		r2,hi16(MASK(MSR_VEC))			; Get the vector enable 
+			li		r4,0
+			ori		r2,r2,lo16(MASK(MSR_FP))		; Get the FP enable 
+			ori		r4,r4,lo16(MASK(MSR_EE))		; Get the EE bit
+
+ 			mfsprg	r9,2							; Get feature flags 
+			mtcrf	0x02,r9							; move pf64Bit cr6
+
+			mfmsr	r0								; Save the MSR
+			andc	r0,r0,r2						; Turn off VEC and FP
+			andc	r4,r0,r4						; And EE
+>>>>>>> origin/10.3
 			mtmsr	r4
 			isync
 			
 			mfpvr	r12
 			stw		r12,4(r3)
 			rlwinm	r12,r12,16,16,31
+
+			bt++	pf64Bitb,stsSF1					; skip if 64-bit (only they take the hint)
 
 			mfdbatu	r4,0
 			mfdbatl	r5,0
@@ -2294,7 +2308,7 @@ LEXT(stSpecrs)
 			
 			mfsdr1	r4
 			stw		r4,88(r3)
-			
+
 			la		r4,92(r3)
 			li		r5,0
 			
@@ -2304,10 +2318,14 @@ stSnsr:		mfsrin	r6,r5
 			mr.		r5,r5
 			addi	r4,r4,4
 			bne+	stSnsr
+<<<<<<< HEAD
 
 			cmplwi	cr1,r12,PROCESSOR_VERSION_604e		
 			cmplwi	cr5,r12,PROCESSOR_VERSION_604ev
 			cror	cr1_eq,cr1_eq,cr5_eq			; Set if 604 type
+=======
+			
+>>>>>>> origin/10.3
 			cmplwi	r12,PROCESSOR_VERSION_750
 			mfspr	r4,hid0
 			stw		r4,(39*4)(r3)
@@ -2371,3 +2389,203 @@ nnmax:		stw		r4,(48*4)(r3)
 			isync
 
 			blr
+<<<<<<< HEAD
+=======
+
+stsSF1:		mfsprg	r4,0
+			mfsprg	r5,1
+			mfsprg	r6,2
+			mfsprg	r7,3
+			std		r4,(18*4)(r3)
+			std		r5,(20*4)(r3)
+			std		r6,(22*4)(r3)
+			std		r7,(24*4)(r3)
+			
+			mfsdr1	r4
+			std		r4,(26*4)(r3)
+
+			mfspr	r4,hid0
+			std		r4,(28*4)(r3)
+			mfspr	r4,hid1
+			std		r4,(30*4)(r3)
+			mfspr	r4,hid4
+			std		r4,(32*4)(r3)
+			mfspr	r4,hid5
+			std		r4,(34*4)(r3)
+
+
+stsSF2:		li		r5,0
+			la		r4,(80*4)(r3)
+			
+stsslbm:	slbmfee	r6,r5
+			slbmfev	r7,r5
+			std		r6,0(r4)
+			std		r7,8(r4)
+			addi	r5,r5,1
+			cmplwi	r5,64
+			addi	r4,r4,16
+			blt		stsslbm
+
+			
+			mtmsr	r0
+			isync
+
+			blr
+
+;
+;			fwEmMck - this forces the hardware to emulate machine checks
+;			Only valid on 64-bit machines
+;			Note: we want interruptions disabled here
+;
+
+			.globl	EXT(fwEmMck)
+			
+			.align	5
+
+LEXT(fwEmMck)
+
+
+			rlwinm	r3,r3,0,1,0						; Copy low of high high - scomd
+			rlwinm	r5,r5,0,1,0						; Copy low of high high - hid1
+			rlwinm	r7,r7,0,1,0						; Copy low of high high - hid4
+			rlwimi	r3,r4,0,0,31					; Copy low of low low
+			rlwimi	r5,r6,0,0,31					; Copy low of low low
+			rlwimi	r7,r8,0,0,31					; Copy low of low low
+
+			lis		r9,3							; Start forming hid1 error inject mask
+			lis		r10,hi16(0x01084083)			; Start formaing hid4 error inject mask
+			ori		r9,r9,0xC000					; Next bit
+			ori		r10,r10,lo16(0x01084083)		; Next part
+			sldi	r9,r9,32						; Shift up high
+			sldi	r10,r10,8						; Shift into position
+			
+			mfspr	r0,hid1							; Get hid1
+			mfspr	r2,hid4							; and hid4
+			
+			and		r5,r5,r9						; Keep only error inject controls - hid1
+			and		r7,r7,r10						; Keep only error inject controls - hid4
+			
+			andc	r0,r0,r9						; Clear error inject controls hid1
+			andc	r2,r2,r10						; Clear error inject controls hid4
+			
+			or		r0,r0,r5						; Add in the new controls hid1
+			or		r2,r2,r7						; Add in the new controls hid4
+			
+/* ? */
+#if 0
+			lis		r12,CoreErrI					; Get the error inject controls
+			sync
+
+			mtspr	scomd,r3						; Set the error inject controls
+			mtspr	scomc,r12						; Request error inject
+			mfspr	r11,scomc						; Get back the status (we just ignore it)
+#endif
+			sync
+			isync							
+			
+			mtspr	hid1,r0							; Move in hid1 controls
+			mtspr	hid1,r0							; We need to do it twice
+			isync
+			
+			sync
+			mtspr	hid4,r2							; Move in hid4 controls
+			isync
+			
+			blr										; Leave...
+
+;
+;			fwSCOMrd - read/write SCOM
+;
+			.align	5
+			.globl	EXT(fwSCOM)
+
+LEXT(fwSCOM)
+
+			lhz		r12,scomfunc(r3)				; Get the function
+			lwz		r4,scomreg(r3)					; Get the register
+			rldicr	r4,r4,8,47						; Position for SCOM
+
+			mr.		r12,r12							; See if read or write
+			bne		fwSCwrite						; Go do a write
+
+			mfsprg	r0,2							; Get the feature flags
+			ori		r4,r4,0x8000					; Set to read data
+			rlwinm.	r0,r0,pfSCOMFixUpb+1,31,31		; Set shift if we need a fix me up
+			sync
+
+			mtspr	scomc,r4						; Request the register
+			mfspr	r11,scomd						; Get the register contents
+			mfspr	r10,scomc						; Get back the status
+			sync
+			isync							
+
+			sld		r11,r11,r0						; Fix up if needed
+			
+			std		r11,scomdata(r3)				; Save result
+			eieio
+			std		r10,scomstat(r3)				; Save status
+
+			blr
+
+fwSCwrite:	ld		r5,scomdata(r3)					; Get the data
+			
+			sync
+
+			mtspr	scomd,r5						; Set the data
+			mtspr	scomc,r4						; Set it
+			mfspr	r10,scomc						; Get back the status
+			sync
+			isync							
+
+			std		r10,scomstat(r3)				; Save status
+			
+			blr
+
+;
+;			diagTrap - this is used to trigger checks from user space
+;			any "twi 31,r31,0xFFFx" will come here (x = 0 to F).
+;			On entry R3 points to savearea.
+;			R4 is the "x" from instruction;
+;			Pass back 1 to no-op twi and return to user
+;			Pass back 0 to treat as normal twi.
+;
+
+			.globl	EXT(diagTrap)
+			
+			.align	5
+
+LEXT(diagTrap)
+
+			li		r3,1							; Ignore TWI
+			blr										; Leave...
+
+
+
+
+;
+;			setPmon - this is used to manipulate MMCR0 and MMCR1
+
+			.globl	EXT(setPmon)
+			
+			.align	5
+
+LEXT(setPmon)
+
+			li		r0,0
+			isync
+			mtspr	mmcr0,r0						; Clear MMCR0
+			mtspr	mmcr1,r0						; Clear MMCR1
+			mtspr	pmc1,r0
+			mtspr	pmc2,r0
+			mtspr	pmc3,r0
+			mtspr	pmc4,r0
+
+			isync
+
+			mtspr	mmcr0,r3						; Set MMCR0
+			mtspr	mmcr1,r4						; Set MMCR1
+			isync
+			blr										; Leave...
+
+
+>>>>>>> origin/10.3

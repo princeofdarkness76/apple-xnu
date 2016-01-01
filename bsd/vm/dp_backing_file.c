@@ -1,8 +1,13 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.3
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
 <<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
@@ -28,11 +33,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -63,6 +78,9 @@
 #include <default_pager/default_pager_object.h>
 
 #include <security/audit/audit.h>
+#include <bsm/audit_kevents.h>
+
+#include <bsm/audit_kernel.h>
 #include <bsm/audit_kevents.h>
 
 #include <mach/mach_types.h>
@@ -318,6 +336,13 @@ macx_swapon(
 		}
 	}
 
+<<<<<<< HEAD
+=======
+	AUDIT_MACH_SYSCALL_ENTER(AUE_SWAPON);
+	AUDIT_ARG(value, priority);
+
+	funnel_state = thread_funnel_set(kernel_flock, TRUE);
+>>>>>>> origin/10.3
 	ndp = &nd;
 
 	if ((error = suser(kauth_cred_get(), 0)))
@@ -326,9 +351,14 @@ macx_swapon(
 	/*
 	 * Get a vnode for the paging area.
 	 */
+<<<<<<< HEAD
 	NDINIT(ndp, LOOKUP, OP_LOOKUP, FOLLOW | LOCKLEAF | AUDITVNPATH1,
 	       ((IS_64BIT_PROCESS(p)) ? UIO_USERSPACE64 : UIO_USERSPACE32),
 	       (user_addr_t) args->filename, ctx);
+=======
+	NDINIT(ndp, LOOKUP, FOLLOW | LOCKLEAF | AUDITVNPATH1, UIO_USERSPACE,
+	    filename, p);
+>>>>>>> origin/10.3
 
 	if ((error = namei(ndp)))
 		goto swapon_bailout;
@@ -466,6 +496,7 @@ swapon_bailout:
 	if (vp) {
 		vnode_put(vp);
 	}
+<<<<<<< HEAD
 	lck_mtx_unlock(macx_lock);
 	AUDIT_MACH_SYSCALL_EXIT(error);
 
@@ -474,6 +505,10 @@ swapon_bailout:
 	else
 		printf("macx_swapon SUCCESS\n");
 
+=======
+	(void) thread_funnel_set(kernel_flock, FALSE);
+	AUDIT_MACH_SYSCALL_EXIT(error);
+>>>>>>> origin/10.3
 	return(error);
 }
 
@@ -499,9 +534,13 @@ macx_swapoff(
 	int			orig_iopol_disk;
 
 	AUDIT_MACH_SYSCALL_ENTER(AUE_SWAPOFF);
+<<<<<<< HEAD
 
 	lck_mtx_lock(macx_lock);
 	
+=======
+	funnel_state = thread_funnel_set(kernel_flock, TRUE);
+>>>>>>> origin/10.3
 	backing_store = NULL;
 	ndp = &nd;
 
@@ -511,9 +550,14 @@ macx_swapoff(
 	/*
 	 * Get the vnode for the paging area.
 	 */
+<<<<<<< HEAD
 	NDINIT(ndp, LOOKUP, OP_LOOKUP, FOLLOW | LOCKLEAF | AUDITVNPATH1,
 	       ((IS_64BIT_PROCESS(p)) ? UIO_USERSPACE64 : UIO_USERSPACE32),
 	       (user_addr_t) args->filename, ctx);
+=======
+	NDINIT(ndp, LOOKUP, FOLLOW | LOCKLEAF | AUDITVNPATH1, UIO_USERSPACE,
+	    filename, p);
+>>>>>>> origin/10.3
 
 	if ((error = namei(ndp)))
 		goto swapoff_bailout;
@@ -587,6 +631,11 @@ swapoff_bailout:
 	else
 		printf("macx_swapoff SUCCESS\n");
 
+<<<<<<< HEAD
+=======
+	(void) thread_funnel_set(kernel_flock, FALSE);
+	AUDIT_MACH_SYSCALL_EXIT(error);
+>>>>>>> origin/10.3
 	return(error);
 }
 

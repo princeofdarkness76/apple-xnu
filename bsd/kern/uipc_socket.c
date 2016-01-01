@@ -19,8 +19,13 @@
 =======
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -40,6 +45,15 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
 =======
+=======
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
+>>>>>>> origin/10.3
  * 
  * @APPLE_LICENSE_HEADER_END@
 >>>>>>> origin/10.2
@@ -228,7 +242,11 @@ MALLOC_DEFINE(M_PCB, "pcb", "protocol control block");
 #define	DBG_FNC_SORECEIVE_LIST	NETDBG_CODE(DBG_NETSOCK, (8 << 8) | 3)
 #define	DBG_FNC_SOSHUTDOWN	NETDBG_CODE(DBG_NETSOCK, (9 << 8))
 
+<<<<<<< HEAD
 #define	MAX_SOOPTGETM_SIZE	(128 * MCLBYTES)
+=======
+#define MAX_SOOPTGETM_SIZE	(128 * MCLBYTES)
+>>>>>>> origin/10.3
 
 int somaxconn = SOMAXCONN;
 SYSCTL_INT(_kern_ipc, KIPC_SOMAXCONN, somaxconn,
@@ -2993,6 +3011,7 @@ soreceive_addr(struct proc *p, struct socket *so, struct sockaddr **psa,
 		SBLASTRECORDCHK(&so->so_rcv, "soreceive 1b");
 		SBLASTMBUFCHK(&so->so_rcv, "soreceive 1b");
 	}
+<<<<<<< HEAD
 #endif /* CONFIG_MACF_SOCKET_SUBSET */
 	if (psa != NULL) {
 		*psa = dup_sockaddr(mtod(m, struct sockaddr *), canwait);
@@ -3014,6 +3033,36 @@ soreceive_addr(struct proc *p, struct socket *so, struct sockaddr **psa,
 		m = so->so_rcv.sb_mb;
 		if (m != NULL) {
 			m->m_nextpkt = nextrecord;
+=======
+dontblock:
+#ifndef __APPLE__
+	if (uio->uio_procp)
+		uio->uio_procp->p_stats->p_ru.ru_msgrcv++;
+#else	/* __APPLE__ */
+	/*
+	 * 2207985
+	 * This should be uio->uio-procp; however, some callers of this
+	 * function use auto variables with stack garbage, and fail to
+	 * fill out the uio structure properly.
+	 */
+	if (p)
+		p->p_stats->p_ru.ru_msgrcv++;
+#endif	/* __APPLE__ */
+	nextrecord = m->m_nextpkt;
+	if ((pr->pr_flags & PR_ADDR) && m->m_type == MT_SONAME) {
+		KASSERT(m->m_type == MT_SONAME, ("receive 1a"));
+		orig_resid = 0;
+		if (psa) {
+			*psa = dup_sockaddr(mtod(m, struct sockaddr *),
+					    mp0 == 0);
+			if ((*psa == 0) && (flags & MSG_NEEDSA)) {
+				error = EWOULDBLOCK;
+				goto release;
+			}
+		}
+		if (flags & MSG_PEEK) {
+			m = m->m_next;
+>>>>>>> origin/10.3
 		} else {
 			so->so_rcv.sb_mb = nextrecord;
 			SB_EMPTY_FIXUP(&so->so_rcv);
@@ -7075,12 +7124,30 @@ so_get_recv_anyif(struct socket *so)
 {
 	int ret = 0;
 
+<<<<<<< HEAD
 #if INET6
 	if (SOCK_DOM(so) == PF_INET || SOCK_DOM(so) == PF_INET6) {
 #else
 	if (SOCK_DOM(so) == PF_INET) {
 #endif /* !INET6 */
 		ret = (sotoinpcb(so)->inp_flags & INP_RECV_ANYIF) ? 1 : 0;
+=======
+	if (sopt_size > MAX_SOOPTGETM_SIZE)
+		return EMSGSIZE;
+
+	MGET(m, sopt->sopt_p ? M_WAIT : M_DONTWAIT, MT_DATA);
+	if (m == 0)
+		return ENOBUFS;
+	if (sopt_size > MLEN) {
+		MCLGET(m, sopt->sopt_p ? M_WAIT : M_DONTWAIT);
+		if ((m->m_flags & M_EXT) == 0) {
+			m_free(m);
+			return ENOBUFS;
+		}
+		m->m_len = min(MCLBYTES, sopt_size);
+	} else {
+		m->m_len = min(MLEN, sopt_size);
+>>>>>>> origin/10.3
 	}
 
 	return (ret);

@@ -3,22 +3,19 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -116,12 +113,18 @@ typedef struct MachineThrAct {
 #define notifyUnalignbit		10
 #define FamVMenabit			11
 #define FamVMmodebit			12
+<<<<<<< HEAD
+=======
+#define perfMonitorbit          13
+#define OnProcbit				14
+>>>>>>> origin/10.3
 /*	NOTE: Do not move or assign bit 31 without changing exception vector ultra fast path code */
 #define bbThreadbit				28
 #define bbNoMachSCbit	 		29
 #define bbPreemptivebit			30
 #define spfReserved1			31	/* See note above */
 
+<<<<<<< HEAD
 #define ignoreZeroFault		(1<<(31-ignoreZeroFaultbit))
 #define floatUsed			(1<<(31-floatUsedbit))
 #define vectorUsed			(1<<(31-vectorUsedbit))
@@ -137,6 +140,27 @@ typedef struct MachineThrAct {
 #define bbThread			(1<<(31-bbThreadbit))
 #define bbNoMachSC			(1<<(31-bbNoMachSCbit))
 #define bbPreemptive		(1<<(31-bbPreemptivebit))
+=======
+#define ignoreZeroFault		0x80000000  /* (1<<(31-ignoreZeroFaultbit)) */
+#define floatUsed			0x40000000  /* (1<<(31-floatUsedbit)) */
+#define vectorUsed			0x20000000  /* (1<<(31-vectorUsedbit)) */
+
+#define runningVM			0x08000000  /* (1<<(31-runningVMbit)) */
+#define floatCng			0x04000000  /* (1<<(31-floatCngbit)) */
+#define vectorCng			0x02000000  /* (1<<(31-vectorCngbit)) */
+#define timerPop			0x01000000  /* (1<<(31-timerPopbit)) */
+
+#define userProtKey			0x00800000  /* (1<<(31-userProtKeybit)) */
+
+#define	FamVMena			0x00100000  /* (1<<(31-FamVMenabit)) */
+#define	FamVMmode			0x00080000  /* (1<<(31-FamVMmodebit)) */
+#define perfMonitor         0x00040000  /* (1<<(31-perfMonitorbit)) */
+#define	OnProc				0x00020000  /* (1<<(31-OnProcbit)) */
+
+#define bbThread			0x00000008  /* (1<<(31-bbThreadbit)) */
+#define bbNoMachSC			0x00000004  /* (1<<(31-bbNoMachSCbit)) */
+#define bbPreemptive		0x00000002  /* (1<<(31-bbPreemptivebit)) */
+>>>>>>> origin/10.3
 
 #define fvChkb 0
 #define fvChk 0x80000000

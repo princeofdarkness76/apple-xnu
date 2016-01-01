@@ -4,6 +4,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
 <<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -28,11 +29,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -445,6 +456,7 @@ is_sane_zone_ptr(zone_t		zone,
 	 *  TODO: Remove the zone->collectable check when every
 	 *  zone using foreign memory is properly tagged with allows_foreign
 	 */
+<<<<<<< HEAD
 	if (zone->collectable && !zone->allows_foreign) {
 #if ZONE_ALIAS_ADDR
 		/*
@@ -467,6 +479,38 @@ is_sane_zone_ptr(zone_t		zone,
 		if (addr                 >= zone_map_min_address &&
 		   (addr + obj_size - 1) <  zone_map_max_address )
 			return TRUE;
+=======
+	{	vm_size_t best, waste; unsigned int i;
+		best  = PAGE_SIZE;
+		waste = best % size;
+		for (i = 2; i <= 5; i++){	vm_size_t tsize, twaste;
+			tsize  = i * PAGE_SIZE;
+			twaste = tsize % size;
+			if (twaste < waste)
+				best = tsize, waste = twaste;
+		}
+		if (alloc <= best || (alloc % size >= waste))
+			alloc = best;
+	}
+	if (max && (max < alloc))
+		max = alloc;
+
+	z->free_elements = 0;
+	z->cur_size = 0;
+	z->max_size = max;
+	z->elem_size = size;
+	z->alloc_size = alloc;
+	z->zone_name = name;
+	z->count = 0;
+	z->doing_alloc = FALSE;
+	z->doing_gc = FALSE;
+	z->exhaustible = FALSE;
+	z->collectable = TRUE;
+	z->allows_foreign = FALSE;
+	z->expandable  = TRUE;
+	z->waiting = FALSE;
+	z->async_pending = FALSE;
+>>>>>>> origin/10.3
 
 		return FALSE;
 	}
@@ -2493,6 +2537,12 @@ zalloc_internal(
 		addr = try_alloc_from_zone(zone, &check_poison);
 
 
+	while ((addr == 0) && canblock && (zone->doing_gc)) {
+		zone->waiting = TRUE;
+		zone_sleep(zone);
+		REMOVE_FROM_ZONE(zone, addr, vm_offset_t);
+	}
+
 	while ((addr == 0) && canblock) {
 		/*
  		 * zone is empty, try to expand it
@@ -2567,8 +2617,59 @@ zalloc_internal(
 			}
 			unlock_zone(zone);
 
+<<<<<<< HEAD
 			for (;;) {
 				int	zflags = KMA_KOBJECT|KMA_NOPAGEWAIT;
+=======
+			if (zone->collectable) {
+				vm_offset_t space;
+				vm_size_t alloc_size;
+				boolean_t retry = FALSE;
+
+				for (;;) {
+
+				        if (vm_pool_low() || retry == TRUE)
+					        alloc_size = 
+						  round_page_32(zone->elem_size);
+					else
+					        alloc_size = zone->alloc_size;
+
+					retval = kernel_memory_allocate(zone_map,
+									&space, alloc_size, 0,
+									KMA_KOBJECT|KMA_NOPAGEWAIT);
+					if (retval == KERN_SUCCESS) {
+					        zone_page_init(space, alloc_size,
+							       ZONE_PAGE_USED);
+						zcram(zone, space, alloc_size);
+
+						break;
+					} else if (retval != KERN_RESOURCE_SHORTAGE) {
+					        /* would like to cause a zone_gc() */
+					        if (retry == TRUE)
+						        panic("zalloc");
+						retry = TRUE;
+					} else {
+					        break;
+					}
+				}
+				lock_zone(zone);
+				zone->doing_alloc = FALSE; 
+				if (zone->waiting) {
+					zone->waiting = FALSE;
+					zone_wakeup(zone);
+				}
+				REMOVE_FROM_ZONE(zone, addr, vm_offset_t);
+				if (addr == 0 &&
+					retval == KERN_RESOURCE_SHORTAGE) {
+					unlock_zone(zone);
+					
+					VM_PAGE_WAIT();
+					lock_zone(zone);
+				}
+			} else {
+				vm_offset_t space;
+				retval = zget_space(zone->elem_size, &space);
+>>>>>>> origin/10.3
 
 				if (vm_pool_low() || retry >= 1)
 					alloc_size = 
@@ -3520,12 +3621,18 @@ zone_gc(boolean_t all_zones)
 #endif /* MACH_ASSERT */
 
 	for (i = 0; i < max_zones; i++, z = z->next_zone) {
+<<<<<<< HEAD
 		unsigned int			n, m;
 		vm_size_t			elt_size, size_freed;
 		struct zone_free_element	*elt, *base_elt, *base_prev, *prev, *scan, *keep, *tail;
 		int				kmem_frees = 0, total_freed_pages = 0;
 		struct zone_page_metadata		*page_meta;
 		queue_head_t	page_meta_head;
+=======
+		unsigned int				n, m;
+		vm_size_t					elt_size, size_freed;
+		struct zone_free_element	*elt, *base_elt, *base_prev, *prev, *scan, *keep, *tail;
+>>>>>>> origin/10.3
 
 		assert(z != ZONE_NULL);
 
@@ -4112,6 +4219,7 @@ task_zone_info(
 	*namesp = (mach_zone_name_t *) copy;
 	*namesCntp = max_zones;
 
+<<<<<<< HEAD
 	used = max_zones * sizeof *info;
 
 	if (used != info_size)
@@ -4123,6 +4231,42 @@ task_zone_info(
 
 	*infop = (task_zone_info_t *) copy;
 	*infoCntp = max_zones;
+=======
+			if (++n >= 50) {
+				if (z->waiting == TRUE) {
+					lock_zone(z);
+
+					if (keep != NULL) {
+						tail->next = (void *)z->free_elements;
+						(void *)z->free_elements = keep;
+						tail = keep = NULL;
+					} else {
+						m =0;
+						base_elt = elt;
+						base_prev = prev;
+						while ((elt != NULL) && (++m < 50)) { 
+							prev = elt;
+							elt = elt->next;
+						}
+						if (m !=0 ) {
+							prev->next = (void *)z->free_elements;
+							(void *)z->free_elements = (void *)base_elt;
+							base_prev->next = elt;
+							prev = base_prev;
+						}
+					}
+
+					if (z->waiting) {
+						z->waiting = FALSE;
+						zone_wakeup(z);
+					}
+
+					unlock_zone(z);
+				}
+				n =0;
+			}
+		}
+>>>>>>> origin/10.3
 
 	return KERN_SUCCESS;
 }
@@ -4199,10 +4343,15 @@ mach_memory_info(
 	 *	We won't pick up any zones that are allocated later.
 	 */
 
+<<<<<<< HEAD
 	simple_lock(&all_zones_lock);
 	max_zones = (unsigned int)(num_zones + num_fake_zones);
 	z = first_zone;
 	simple_unlock(&all_zones_lock);
+=======
+			if (++n >= 50) {
+				lock_zone(z);
+>>>>>>> origin/10.3
 
 	names_size = round_page(max_zones * sizeof *names);
 	kr = kmem_alloc_pageable(ipc_kernel_map,
@@ -4238,9 +4387,21 @@ mach_memory_info(
 			return kr;
 		}
 
+<<<<<<< HEAD
 		kr = vm_map_wire(ipc_kernel_map, memory_info_addr, memory_info_addr + memory_info_vmsize,
 				     VM_PROT_READ|VM_PROT_WRITE|VM_PROT_MEMORY_TAG_MAKE(VM_KERN_MEMORY_IPC), FALSE);
 		assert(kr == KERN_SUCCESS);
+=======
+				if (keep != NULL) {
+					tail->next = (void *)z->free_elements;
+					(void *)z->free_elements = keep;
+				}
+
+				if (z->waiting) {
+					z->waiting = FALSE;
+					zone_wakeup(z);
+				}
+>>>>>>> origin/10.3
 
 		memory_info = (mach_memory_info_t *) memory_info_addr;
 		vm_page_diagnose(memory_info, num_sites);
@@ -4252,8 +4413,14 @@ mach_memory_info(
 	zn = &names[0];
 	zi = &info[0];
 
+<<<<<<< HEAD
 	for (i = 0; i < max_zones - num_fake_zones; i++) {
 		struct zone zcopy;
+=======
+		lock_zone(z);
+
+		if (size_freed > 0 || keep != NULL) {
+>>>>>>> origin/10.3
 
 		assert(z != ZONE_NULL);
 
@@ -4261,6 +4428,7 @@ mach_memory_info(
 		zcopy = *z;
 		unlock_zone(z);
 
+<<<<<<< HEAD
 		simple_lock(&all_zones_lock);
 		z = z->next_zone;
 		simple_unlock(&all_zones_lock);
@@ -4280,6 +4448,16 @@ mach_memory_info(
 		zi->mzi_collectable = (uint64_t)zcopy.collectable;
 		zn++;
 		zi++;
+=======
+		}
+
+		z->doing_gc = FALSE;
+		if (z->waiting) {
+			z->waiting = FALSE;
+			zone_wakeup(z);
+		}
+		unlock_zone(z);
+>>>>>>> origin/10.3
 	}
 
 	/*

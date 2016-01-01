@@ -4,6 +4,7 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
 <<<<<<< HEAD
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -28,11 +29,21 @@
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+=======
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
+ * 
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+>>>>>>> origin/10.3
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
@@ -2161,9 +2172,26 @@ static OSErr ReadBitmapRange(struct hfsmount *hfsmp, uint32_t offset,
 	struct vnode *vp = NULL;
 	daddr64_t block;
 
+<<<<<<< HEAD
 	/* This function isn't supported for HFS standard */
 	if (hfsmp->vcbSigWord != kHFSPlusSigWord) {
 		return EINVAL;
+=======
+	if (!useMetaZone) {
+		struct hfsmount *hfsmp = VCBTOHFS(vcb);
+
+		
+		if ((hfsmp->hfs_flags & HFS_METADATA_ZONE) &&
+		    (startingBlock <= hfsmp->hfs_metazone_end))
+			startingBlock = hfsmp->hfs_metazone_end + 1;
+	}
+
+	if ((endingBlock - startingBlock) < minBlocks)
+	{
+		//	The set of blocks we're checking is smaller than the minimum number
+		//	of blocks, so we couldn't possibly find a good range.
+		goto DiskFull;
+>>>>>>> origin/10.3
 	}
 
 	if (hfs_kdebug_allocation & HFSDBG_BITMAP_ENABLED) {
@@ -2213,8 +2241,20 @@ static OSErr ReadBitmapRange(struct hfsmount *hfsmp, uint32_t offset,
 		KERNEL_DEBUG_CONSTANT(HFSDBG_READ_BITMAP_RANGE | DBG_FUNC_END, err, 0, 0, 0, 0);
 	}
 
+<<<<<<< HEAD
 	return err;
 }
+=======
+				/*
+				 * Skip over metadata blocks.
+				 */
+				if (!useMetaZone) {
+					currentBlock = NextBitmapBlock(vcb, currentBlock);
+					if (currentBlock >= stopBlock) {
+						goto LoopExit;
+					}
+				}
+>>>>>>> origin/10.3
 
 
 /*
@@ -2303,8 +2343,16 @@ static OSErr ReleaseScanBitmapRange(struct buf *bp ) {
 		KERNEL_DEBUG_CONSTANT(HFSDBG_RELEASE_SCAN_BITMAP | DBG_FUNC_END, 0, 0, 0, 0, 0);
 	}
 
+<<<<<<< HEAD
 	return (0);
 }
+=======
+					nextBlock = NextBitmapBlock(vcb, currentBlock);
+					if (nextBlock != currentBlock) {
+						goto LoopExit;  /* allocation gap, so stop */
+					}
+				}
+>>>>>>> origin/10.3
 
 /* 
  * @extent.startBlock, on input, contains a preferred block for the
@@ -2465,6 +2513,7 @@ static OSErr BlockFindContig(
 				}	
 			}
 		}
+<<<<<<< HEAD
 
 		/* OK, we know we must not have collided . See if this one is recently deleted */
 		if (hfsmp->jnl) {
@@ -2495,6 +2544,10 @@ static OSErr BlockFindContig(
 				}
 			}
 		} // end jnl/deleted case
+=======
+	} while (currentBlock < stopBlock);
+LoopExit:
+>>>>>>> origin/10.3
 
 		/* 
 		 * If we found something good, we'd break out of the loop at the top; foundCount

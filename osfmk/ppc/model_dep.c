@@ -3,22 +3,19 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -146,6 +143,7 @@ volatile unsigned int pbtcnt = 0;
 volatile unsigned int pbtcpu = -1;
 
 unsigned int lastTrace;					/* Value of low-level exception trace controls */
+
 
 volatile unsigned int	cpus_holding_bkpts;	/* counter for number of cpus holding
 											   breakpoints (ie: cpus that did not
@@ -591,7 +589,9 @@ int Call_DebuggerC(
 	int				directcall, wait;
 	vm_offset_t		instr_ptr;
 	unsigned int 	instr;
-	int 			my_cpu, tcpu;
+	int 			my_cpu, tcpu, wasdebugger;
+	struct per_proc_info *pp;
+	uint64_t nowtime, poptime;
 
 	my_cpu = cpu_number();								/* Get our CPU */
 
@@ -636,6 +636,8 @@ int Call_DebuggerC(
 		if (debugger_debug) kprintf("Call_DebuggerC(%d): lasttrace = %08X\n", my_cpu, lastTrace);	/* (TEST/DEBUG) */
 #endif
 		debugger_cpu = my_cpu;							/* Show that we are debugger */
+
+
 		lastTrace = LLTraceSet(0);						/* Disable low-level tracing */
 
 		for(tcpu = 0; tcpu < NCPUS; tcpu++) {			/* Stop all the other guys */
@@ -736,12 +738,16 @@ int Call_DebuggerC(
 debugger_exit:
 #if 0
 	if (debugger_debug) kprintf("Call_DebuggerC(%d): exit - inst = %08X, cpu=%d(%d), run=%d\n", my_cpu, 
-		instr, my_cpu, debugger_cpu, db_run_mode);	/* (TEST/DEBUG) */
+		instr, my_cpu, debugger_cpu, db_run_mode);		/* (TEST/DEBUG) */
 #endif
 	if ((instr == TRAP_DEBUGGER_INST) ||				/* Did we trap to enter debugger? */
 		(instr == TRAP_DIRECT_INST)) saved_state->srr0 += TRAP_INST_SIZE;	/* Yes, point past trap */
 
-	if(debugger_cpu == my_cpu) LLTraceSet(lastTrace);	/* Enable tracing on the way out if we are debugger */
+	wasdebugger = 0;									/* Assume not debugger */
+	if(debugger_cpu == my_cpu) {						/* Are the debugger processor? */
+		wasdebugger = 1;								/* Remember that we were the debugger */
+		LLTraceSet(lastTrace);							/* Enable tracing on the way out if we are debugger */
+	}
 
 	wait = FALSE;										/* Assume we are not going to wait */
 	if (db_run_mode == STEP_CONTINUE) {					/* Are we going to run? */
@@ -768,6 +774,7 @@ debugger_exit:
 	debugger_active[my_cpu]--;							/* Say we aren't active anymore */
 
 	if (wait) while(cpus_holding_bkpts);				/* Wait for breakpoints to clear */
+
 
 	hw_atomic_sub(&debug_mode, 1);						/* Set out of debug now */
 

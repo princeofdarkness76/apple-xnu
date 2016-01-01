@@ -3,22 +3,19 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.1 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -144,6 +141,8 @@ struct ml_processor_info_t {
 	boolean_t			supports_nap;
 	unsigned long		l2cr_value;
 	time_base_enable_t	time_base_enable;
+	uint32_t			power_mode_0;
+	uint32_t			power_mode_1;
 };
 
 typedef struct ml_processor_info_t ml_processor_info_t;
@@ -196,9 +195,14 @@ unsigned int ml_throttle(
 #endif
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 void ml_get_timebase(unsigned long long *timstamp);
 void ml_sense__nmi(void);
 =======
+=======
+void ml_init_lock_timeout(void);
+
+>>>>>>> origin/10.3
 #endif /* MACH_KERNEL_PRIVATE */
 
 void ml_thread_policy(
@@ -244,5 +248,8 @@ void ml_cpu_get_info(ml_cpu_info_t *cpu_info);
 int ml_enable_cache_level(int cache_level, int enable);
 void ml_set_processor_speed(unsigned long speed);
 void ml_set_processor_voltage(unsigned long voltage);
+unsigned int ml_scom_write(uint32_t reg, uint64_t data);
+unsigned int ml_scom_read(uint32_t reg, uint64_t *data);
+uint32_t ml_hdec_ratio(void);
 
 #endif /* _PPC_MACHINE_ROUTINES_H_ */
