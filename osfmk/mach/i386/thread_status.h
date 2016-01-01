@@ -132,10 +132,16 @@
 #define x86_DEBUG_STATE64		11
 #define x86_DEBUG_STATE			12
 #define THREAD_STATE_NONE		13
+<<<<<<< HEAD
 /* 14 and 15 are used for the internal x86_SAVED_STATE flavours */
 #define x86_AVX_STATE32			16
 #define x86_AVX_STATE64			17
 #define x86_AVX_STATE			18
+=======
+/* 15 and 16 are used for the internal x86_SAVED_STATE flavours */
+#define x86_AVX_STATE32			16
+#define x86_AVX_STATE64			17
+>>>>>>> origin/10.6
 
 
 /*
@@ -165,7 +171,10 @@
 	  (x == x86_DEBUG_STATE)	|| \
 	  (x == x86_AVX_STATE32)	|| \
 	  (x == x86_AVX_STATE64)	|| \
+<<<<<<< HEAD
 	  (x == x86_AVX_STATE)		|| \
+=======
+>>>>>>> origin/10.6
 	  (x == THREAD_STATE_NONE))
 
 struct x86_state_hdr {

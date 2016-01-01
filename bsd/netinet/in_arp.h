@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2009-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -69,7 +73,21 @@ extern errno_t arp_lookup_ip(ifnet_t interface,
 extern errno_t inet_arp_lookup(ifnet_t interface,
     const struct sockaddr_in *ip_dest, struct sockaddr_dl *ll_dest,
     size_t ll_dest_len, route_t hint, mbuf_t packet);
+<<<<<<< HEAD
 #endif /* !BSD_KERNEL_PRIVATE */
+=======
+#endif /* BSD_KERNEL_PRIVATE */
+#ifdef KERNEL_PRIVATE
+extern void arp_init(void);
+extern void in_arpdrain(void *);
+/* arp_lookup_ip is obsolete, use inet_arp_lookup */
+extern errno_t arp_lookup_ip(ifnet_t interface,
+    const struct sockaddr_in *ip_dest, struct sockaddr_dl *ll_dest,
+    size_t ll_dest_len, route_t hint, mbuf_t packet);
+__private_extern__ errno_t arp_route_to_gateway_route(const struct sockaddr *,
+    route_t, route_t *);
+#endif /* KERNEL_PRIVATE */
+>>>>>>> origin/10.6
 
 /*!
  *	@function inet_arp_handle_input

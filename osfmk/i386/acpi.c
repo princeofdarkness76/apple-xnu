@@ -59,22 +59,30 @@
 #include <i386/pmCPU.h>
 
 #include <i386/tsc.h>
+<<<<<<< HEAD
 =======
 #include <i386/machine_check.h>
 #include <i386/pmCPU.h>
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.6
 
 #include <kern/cpu_data.h>
 #include <kern/machine.h>
 #include <kern/timer_queue.h>
 #include <console/serial_protos.h>
+<<<<<<< HEAD
 #include <machine/pal_routines.h>
+=======
+>>>>>>> origin/10.6
 #include <vm/vm_page.h>
 
 #if HIBERNATION
 #include <IOKit/IOHibernatePrivate.h>
 #endif
 #include <IOKit/IOPlatformExpert.h>
+#include <sys/kdebug.h>
+
 #include <sys/kdebug.h>
 
 #if CONFIG_SLEEP
@@ -113,6 +121,14 @@ struct acpi_hibernate_callback_data {
 };
 typedef struct acpi_hibernate_callback_data acpi_hibernate_callback_data_t;
 
+<<<<<<< HEAD
+=======
+unsigned int		save_kdebug_enable = 0;
+static uint64_t		acpi_sleep_abstime;
+
+
+#if CONFIG_SLEEP
+>>>>>>> origin/10.6
 static void
 acpi_hibernate(void *refcon)
 {
@@ -151,8 +167,11 @@ acpi_hibernate(void *refcon)
 	}
 	kdebug_enable = 0;
 
+<<<<<<< HEAD
 	IOCPURunPlatformQuiesceActions();
 
+=======
+>>>>>>> origin/10.6
 	acpi_sleep_abstime = mach_absolute_time();
 
 	(data->func)(data->refcon);
@@ -162,10 +181,14 @@ acpi_hibernate(void *refcon)
 #endif /* HIBERNATION */
 #endif /* CONFIG_SLEEP */
 
+<<<<<<< HEAD
 extern void			slave_pstart(void);
 extern void			hibernate_rebuild_vm_structs(void);
 
 extern	unsigned int		wake_nkdbufs;
+=======
+extern void		slave_pstart(void);
+>>>>>>> origin/10.6
 
 void
 acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
@@ -178,9 +201,15 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 	unsigned int	cpu;
 	kern_return_t	rc;
 	unsigned int	my_cpu;
+<<<<<<< HEAD
 	uint64_t	start;
 	uint64_t	elapsed = 0;
 	uint64_t	elapsed_trace_start = 0;
+=======
+	uint64_t	now;
+	uint64_t	my_tsc;
+	uint64_t	my_abs;
+>>>>>>> origin/10.6
 
 	kprintf("acpi_sleep_kernel hib=%d, cpu=%d\n",
 			current_cpu_datap()->cpu_hibernate, cpu_number());
@@ -246,6 +275,14 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 	/*
 	 * Enable FPU/SIMD unit for potential hibernate acceleration
 	 */
+<<<<<<< HEAD
+=======
+	cpu_IA32e_disable(current_cpu_datap());
+#endif
+	/*
+	 * Enable FPU/SIMD unit for potential hibernate acceleration
+	 */
+>>>>>>> origin/10.6
 	clear_ts(); 
 
 	KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 0) | DBG_FUNC_START, 0, 0, 0, 0, 0);
@@ -269,8 +306,12 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 #endif
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	start = mach_absolute_time();
 
+=======
+#ifdef __x86_64__
+>>>>>>> origin/10.6
 	x86_64_post_sleep(old_cr3);
 
 #endif /* CONFIG_SLEEP */
@@ -347,6 +388,12 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 	 */
 	pmMarkAllCPUsOff();
 
+	ml_get_timebase(&now);
+
+	/* re-enable and re-init local apic (prior to starting timers) */
+	if (lapic_probe())
+		lapic_configure();
+
 	/* let the realtime clock reset */
 	rtc_sleep_wakeup(acpi_sleep_abstime);
 	acpi_wake_postrebase_abstime = mach_absolute_time();
@@ -354,6 +401,7 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 
 	kdebug_enable = save_kdebug_enable;
 
+<<<<<<< HEAD
 	if (kdebug_enable == 0) {
 		if (wake_nkdbufs) {
 			start = mach_absolute_time();
@@ -378,10 +426,23 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 		KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 2) | DBG_FUNC_END, 0, 0, 0, 0, 0);
 
 <<<<<<< HEAD
+=======
+	if (did_hibernate) {
+		
+		my_tsc = (now >> 32) | (now << 32);
+		my_abs = tmrCvt(my_tsc, tscFCvtt2n);
+
+		KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 2) | DBG_FUNC_START,
+				      (uint32_t)(my_abs >> 32), (uint32_t)my_abs, 0, 0, 0);
+		hibernate_machine_init();
+		KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 2) | DBG_FUNC_END, 0, 0, 0, 0, 0);
+
+>>>>>>> origin/10.6
 		current_cpu_datap()->cpu_hibernate = 0;
 
 		KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 0) | DBG_FUNC_END, 0, 0, 0, 0, 0);
 	} else
+<<<<<<< HEAD
 #endif /* HIBERNATION */
 		KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 0) | DBG_FUNC_END, 0, 0, 0, 0, 0);
 
@@ -391,6 +452,9 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 	/* re-enable and re-init local apic */
 	if (lapic_probe())
 		lapic_configure();
+=======
+		KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 0) | DBG_FUNC_END, 0, 0, 0, 0, 0);
+>>>>>>> origin/10.6
 
 	/* Restore power management register state */
 	pmCPUMarkRunning(current_cpu_datap());
@@ -399,11 +463,19 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 	pmTimerRestore();
 >>>>>>> origin/10.5
 
+<<<<<<< HEAD
 	/* Restore power management timer state */
 	pmTimerRestore();
 
 	/* Restart timer interrupts */
 	rtc_timer_start();
+=======
+	/* Restart timer interrupts */
+	rtc_timer_start();
+
+	/* Reconfigure FP/SIMD unit */
+	init_fpu();
+>>>>>>> origin/10.6
 
 #if HIBERNATION
 

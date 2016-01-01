@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000,2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -150,6 +154,7 @@ struct	ether_addr *ether_aton(const char *);
 
 #ifdef BSD_KERNEL_PRIVATE
 extern u_char	etherbroadcastaddr[ETHER_ADDR_LEN];
+<<<<<<< HEAD
 
 
 static __inline__ int
@@ -167,6 +172,9 @@ _ether_cmp(const void * a, const void * b)
 }
 
 #endif /* BSD_KERNEL_PRIVATE */
+=======
+#endif
+>>>>>>> origin/10.6
 
 #define ETHER_IS_MULTICAST(addr) (*(addr) & 0x01) /* is address mcast/bcast? */
 

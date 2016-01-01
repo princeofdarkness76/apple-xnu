@@ -421,6 +421,7 @@ OSStatus ReleaseBTreeBlock(FileReference vp, BlockDescPtr blockPtr, ReleaseBlock
 		/* Don't let anyone else try to use this bp, it's been consumed */
 		blockPtr->blockHeader = NULL;
 		
+<<<<<<< HEAD
 =======
 		bp->b_flags |= B_INVAL;
 		if (hfsmp->jnl && (bp->b_flags & B_LOCKED)) {
@@ -429,6 +430,8 @@ OSStatus ReleaseBTreeBlock(FileReference vp, BlockDescPtr blockPtr, ReleaseBlock
 			brelse(bp);	/* note: B-tree code will clear blockPtr->blockHeader and blockPtr->buffer */
 		}
 >>>>>>> origin/10.2
+=======
+>>>>>>> origin/10.6
     } else {
         if (options & kForceWriteBlock) {
 			if (hfsmp->jnl) {
@@ -543,6 +546,7 @@ OSStatus ReleaseBTreeBlock(FileReference vp, BlockDescPtr blockPtr, ReleaseBlock
 			blockPtr->blockHeader = NULL;
         }
     }
+<<<<<<< HEAD
 =======
 				journal_modify_block_end(hfsmp->jnl, bp);
 				blockPtr->isModified = 0;
@@ -552,6 +556,8 @@ OSStatus ReleaseBTreeBlock(FileReference vp, BlockDescPtr blockPtr, ReleaseBlock
         };
     };
 >>>>>>> origin/10.2
+=======
+>>>>>>> origin/10.6
 
 exit:
     return (retval);

@@ -92,9 +92,16 @@ static int hfs_isordered(struct cnode *, struct cnode *);
 extern int hfs_removefile_callback(struct buf *bp, void *hfsmp);
 
 
+<<<<<<< HEAD
 __inline__ int hfs_checkdeleted (struct cnode *cp) {
 	return ((cp->c_flag & (C_DELETED | C_NOEXISTS)) ? ENOENT : 0);	
 }
+=======
+inline int hfs_checkdeleted (struct cnode *cp) {
+	return ((cp->c_flag & (C_DELETED | C_NOEXISTS)) ? ENOENT : 0);
+}
+
+>>>>>>> origin/10.6
 
 /*
  * Function used by a special fcntl() that decorates a cnode/vnode that
@@ -370,6 +377,7 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 					}
 				}
 
+<<<<<<< HEAD
 				/*
 				 * At this point, we have decided that this cnode is
 				 * suitable for full removal.  We are about to deallocate
@@ -392,6 +400,21 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 				if (hfsmp->jnl && vnode_islnk(vp)) {
 					buf_iterate(vp, hfs_removefile_callback, BUF_SKIP_NONLOCKED, (void *)hfsmp);
 				}
+=======
+			error = hfs_vgetrsrc(hfsmp, vp, &rvp, FALSE, FALSE);
+			if (error)
+				goto out;
+			/*
+			 * Defer the vnode_put and ubc_setsize on rvp until hfs_unlock().
+			 */
+			cp->c_flag |= C_NEED_RVNODE_PUT | C_NEED_RSRC_SETSIZE;
+			error = hfs_truncate(rvp, (off_t)0, IO_NDELAY, 1, 0, ap->a_context);
+			if (error)
+				goto out;
+			vnode_recycle(rvp);  /* all done with this vnode */
+		}
+	}
+>>>>>>> origin/10.6
 
 
 				/*
@@ -1226,6 +1249,7 @@ hfs_getnewvnode(
 
 
 	/* 
+<<<<<<< HEAD
 	 * If we get a cnode/vnode pair out of hfs_chash_getcnode, then update the 
 	 * descriptor in the cnode as needed if the cnode represents a hardlink.  
 	 * We want the caller to get the most up-to-date copy of the descriptor
@@ -1350,6 +1374,16 @@ hfs_getnewvnode(
 	if (*vpp != NULL) {
 		retval = 0;
 		goto gnv_exit;
+=======
+	 * Hardlinks may need an updated catalog descriptor.  However, if
+	 * the cnode has already been marked as open-unlinked (C_DELETED), then don't
+	 * replace its descriptor. 
+	 */
+	if (!(hfs_checkdeleted(cp))) {
+		if ((cp->c_flag & C_HARDLINK) && descp->cd_nameptr && descp->cd_namelen > 0) {
+			replace_desc(cp, descp);
+		}
+>>>>>>> origin/10.6
 	}
 
 	/*

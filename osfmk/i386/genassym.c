@@ -233,6 +233,7 @@ main(
 	DECLARE("KSS_R15",	offsetof(struct x86_kernel_state, k_r15));
 	DECLARE("KSS_RIP",	offsetof(struct x86_kernel_state, k_rip));	
 	
+<<<<<<< HEAD
 	DECLARE("DS_DR0",	offsetof(struct x86_debug_state32, dr0));
 	DECLARE("DS_DR1",	offsetof(struct x86_debug_state32, dr1));
 	DECLARE("DS_DR2",	offsetof(struct x86_debug_state32, dr2));
@@ -254,6 +255,32 @@ main(
 	DECLARE("FP_VALID",	offsetof(struct x86_fx_thread_state,fp_valid));
 
 	DECLARE("SS_FLAVOR",	offsetof(x86_saved_state_t, flavor));
+=======
+	DECLARE("PCB_FPS",	offsetof(pcb_t, ifps));
+	DECLARE("PCB_ISS",	offsetof(pcb_t, iss));
+
+	DECLARE("DS_DR0",	offsetof(struct x86_debug_state32 *, dr0));
+	DECLARE("DS_DR1",	offsetof(struct x86_debug_state32 *, dr1));
+	DECLARE("DS_DR2",	offsetof(struct x86_debug_state32 *, dr2));
+	DECLARE("DS_DR3",	offsetof(struct x86_debug_state32 *, dr3));
+	DECLARE("DS_DR4",	offsetof(struct x86_debug_state32 *, dr4));
+	DECLARE("DS_DR5",	offsetof(struct x86_debug_state32 *, dr5));
+	DECLARE("DS_DR6",	offsetof(struct x86_debug_state32 *, dr6));
+	DECLARE("DS_DR7",	offsetof(struct x86_debug_state32 *, dr7));
+
+	DECLARE("DS64_DR0",	offsetof(struct x86_debug_state64 *, dr0));
+	DECLARE("DS64_DR1",	offsetof(struct x86_debug_state64 *, dr1));
+	DECLARE("DS64_DR2",	offsetof(struct x86_debug_state64 *, dr2));
+	DECLARE("DS64_DR3",	offsetof(struct x86_debug_state64 *, dr3));
+	DECLARE("DS64_DR4",	offsetof(struct x86_debug_state64 *, dr4));
+	DECLARE("DS64_DR5",	offsetof(struct x86_debug_state64 *, dr5));
+	DECLARE("DS64_DR6",	offsetof(struct x86_debug_state64 *, dr6));
+	DECLARE("DS64_DR7",	offsetof(struct x86_debug_state64 *, dr7));
+
+	DECLARE("FP_VALID",	offsetof(struct x86_fx_thread_state *,fp_valid));
+
+	DECLARE("SS_FLAVOR",	offsetof(x86_saved_state_t *, flavor));
+>>>>>>> origin/10.6
 	DECLARE("SS_32",	x86_SAVED_STATE32);
 	DECLARE("SS_64",	x86_SAVED_STATE64);
 
@@ -370,9 +397,17 @@ main(
         DECLARE("CPU_HIBERNATE",
 		offsetof(cpu_data_t, cpu_hibernate));
         DECLARE("CPU_INTERRUPT_LEVEL",
+<<<<<<< HEAD
 		offsetof(cpu_data_t, cpu_interrupt_level));
 	DECLARE("CPU_NESTED_ISTACK",
 	    offsetof(cpu_data_t, cpu_nested_istack));
+=======
+		offsetof(cpu_data_t *, cpu_interrupt_level));
+	DECLARE("CPU_NESTED_ISTACK",
+ 	    offsetof(cpu_data_t *, cpu_nested_istack));
+        DECLARE("CPU_SIMPLE_LOCK_COUNT",
+		offsetof(cpu_data_t *,cpu_simple_lock_count));
+>>>>>>> origin/10.6
         DECLARE("CPU_NUMBER_GS",
 		offsetof(cpu_data_t,cpu_number));
         DECLARE("CPU_RUNNING",

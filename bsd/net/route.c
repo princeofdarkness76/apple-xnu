@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -428,6 +432,7 @@ static struct radix_node *node_lookup_default(void);
 static int rn_match_ifscope(struct radix_node *, void *);
 static struct ifaddr *ifa_ifwithroute_common_locked(int,
     const struct sockaddr *, const struct sockaddr *, unsigned int);
+<<<<<<< HEAD
 >>>>>>> origin/10.5
 
 #define	INET6_DEFAULT(sa)						\
@@ -439,6 +444,14 @@ static struct ifaddr *ifa_ifwithroute_common_locked(int,
 #define	RT(r)		((struct rtentry *)r)
 #define	RN(r)		((struct radix_node *)r)
 #define	RT_HOST(r)	(RT(r)->rt_flags & RTF_HOST)
+=======
+static struct rtentry *rte_alloc(void);
+static void rte_free(struct rtentry *);
+static void rtfree_common(struct rtentry *, boolean_t);
+#if IFNET_ROUTE_REFCNT
+static void rte_if_ref(struct ifnet *, int);
+#endif /* IFNET_ROUTE_REFCNT */
+>>>>>>> origin/10.6
 
 SYSCTL_DECL(_net_route);
 
@@ -509,6 +522,15 @@ static unsigned int primary_ifscope = IFSCOPE_NONE;
 
 #define	RT(r)		((struct rtentry *)r)
 #define	RT_HOST(r)	(RT(r)->rt_flags & RTF_HOST)
+
+#if IFNET_ROUTE_REFCNT
+SYSCTL_DECL(_net_idle_route);
+
+static int rt_if_idle_expire_timeout = RT_IF_IDLE_EXPIRE_TIMEOUT;
+SYSCTL_INT(_net_idle_route, OID_AUTO, expire_timeout, CTLFLAG_RW,
+    &rt_if_idle_expire_timeout, 0, "Default expiration time on routes for "
+    "interface idle reference counting");
+#endif /* IFNET_ROUTE_REFCNT */
 
 /*
  * Given a route, determine whether or not it is the non-scoped default
@@ -684,7 +706,10 @@ route_init(void)
 		/* NOTREACHED */
 	}
 	zone_change(rte_zone, Z_EXPAND, TRUE);
+<<<<<<< HEAD
 	zone_change(rte_zone, Z_CALLERACCT, FALSE);
+=======
+>>>>>>> origin/10.6
 	zone_change(rte_zone, Z_NOENCRYPT, TRUE);
 
 	TAILQ_INIT(&rttrash_head);
@@ -1898,8 +1923,19 @@ out:
 int
 rtioctl(unsigned long req, caddr_t data, struct proc *p)
 {
+<<<<<<< HEAD
 #pragma unused(p, req, data)
 	return (ENXIO);
+=======
+#pragma unused(p)
+#if INET && MROUTING
+	return mrt_ioctl(req, data);
+#else
+#pragma unused(req)
+#pragma unused(data)
+	return ENXIO;
+#endif
+>>>>>>> origin/10.6
 }
 
 struct ifaddr *
@@ -2365,6 +2401,13 @@ rtrequest_common_locked(int req, struct sockaddr *dst0,
 			    IFSCOPE_NONE);
 		}
 
+#if IFNET_ROUTE_REFCNT
+		if (rt->rt_if_ref_fn != NULL) {
+			rt->rt_if_ref_fn(rt->rt_ifp, -1);
+			rt->rt_flags &= ~RTF_IFREF;
+		}
+#endif /* IFNET_ROUTE_REFCNT */
+
 		RT_UNLOCK(rt);
 
 		/*
@@ -2678,6 +2721,19 @@ makeroute:
 				RT_ADDREF_LOCKED(*ret_nrt);
 			}
 			RT_UNLOCK(*ret_nrt);
+
+#if IFNET_ROUTE_REFCNT
+			/*
+			 * Enable interface reference counting for unicast
+			 * cloned routes and bump up the reference count.
+			 */
+			if (rt->rt_parent != NULL &&
+			    !(rt->rt_flags & (RTF_BROADCAST | RTF_MULTICAST))) {
+				rt->rt_if_ref_fn = rte_if_ref;
+				rt->rt_if_ref_fn(rt->rt_ifp, 1);
+				rt->rt_flags |= RTF_IFREF;
+			}
+#endif /* IFNET_ROUTE_REFCNT */
 		}
 
 		/*
@@ -2731,11 +2787,16 @@ makeroute:
 		 * because they weren't completed when we called it earlier,
 		 * since the node was embryonic.
 		 */
+<<<<<<< HEAD
 		if ((rt->rt_flags & RTF_GATEWAY) && rt->rt_gwroute != NULL)
 			rt_set_gwroute(rt, rt_key(rt), rt->rt_gwroute);
 
 		if (req == RTM_ADD &&
 		    !(rt->rt_flags & RTF_HOST) && rt_mask(rt) != NULL) {
+=======
+		if (req == RTM_ADD &&
+		    !(rt->rt_flags & RTF_HOST) && rt_mask(rt) != 0) {
+>>>>>>> origin/10.6
 			struct rtfc_arg arg;
 			arg.rnh = rnh;
 			arg.rt0 = rt;
@@ -2868,6 +2929,9 @@ rt_fixchange(struct radix_node *rn, void *vp)
 	xk2 = (u_char *)rt_key(rt);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
 	/*
 	 * Avoid applying a less specific route; do this only if the parent
 	 * route (rt->rt_parent) is a network route, since otherwise its mask
@@ -2877,6 +2941,7 @@ rt_fixchange(struct radix_node *rn, void *vp)
 		int mlen = rt_mask(rt->rt_parent)->sa_len;
 		if (mlen > rt_mask(rt0)->sa_len) {
 			RT_UNLOCK(rt);
+<<<<<<< HEAD
 			return (0);
 		}
 
@@ -2903,6 +2968,17 @@ rt_fixchange(struct radix_node *rn, void *vp)
 	for (i = rnh->rnh_treetop->rn_offset; i < mlen; i++) {
 		if ((xmp[i] & ~(xmp[i] ^ xm1[i])) != xmp[i])
 			return (0);
+=======
+			return (0);
+		}
+
+		for (i = rnh->rnh_treetop->rn_offset; i < mlen; i++) {
+			if ((xmp[i] & ~(xmp[i] ^ xm1[i])) != xmp[i]) {
+				RT_UNLOCK(rt);
+				return (0);
+			}
+		}
+>>>>>>> origin/10.6
 	}
 
 	for (i = rnh->rnh_treetop->rn_offset; i < len; i++) {
@@ -4201,6 +4277,7 @@ rtinit_locked(struct ifaddr *ifa, int cmd, int flags)
 			 * Set the route's ifa.
 			 */
 			rtsetifa(rt, ifa);
+<<<<<<< HEAD
 
 			if (rt->rt_ifp != ifa->ifa_ifp) {
 				/*
@@ -4217,6 +4294,18 @@ rtinit_locked(struct ifaddr *ifa, int cmd, int flags)
 				}
 			}
 
+=======
+#if IFNET_ROUTE_REFCNT
+			/*
+			 * Adjust route ref count for the interfaces.
+			 */
+			if (rt->rt_if_ref_fn != NULL &&
+			    rt->rt_ifp != ifa->ifa_ifp) {
+				rt->rt_if_ref_fn(ifa->ifa_ifp, 1);
+				rt->rt_if_ref_fn(rt->rt_ifp, -1);
+			}
+#endif /* IFNET_ROUTE_REFCNT */
+>>>>>>> origin/10.6
 			/*
 			 * And substitute in references to the ifaddr
 			 * we are adding.
@@ -4266,6 +4355,30 @@ rtinit_locked(struct ifaddr *ifa, int cmd, int flags)
 	}
 done:
 	return (error);
+}
+
+u_int64_t
+rt_expiry(struct rtentry *rt, u_int64_t base, u_int32_t delta)
+{
+#if IFNET_ROUTE_REFCNT
+	u_int64_t retval;
+
+	/*
+	 * If the interface of the route doesn't demand aggressive draining,
+	 * return the expiration time based on the caller-supplied delta.
+	 * Otherwise use the more aggressive route expiration delta (or
+	 * the caller-supplied delta, whichever is less.)
+	 */
+	if (rt->rt_ifp == NULL || rt->rt_ifp->if_want_aggressive_drain == 0)
+		retval = base + delta;
+	else
+		retval = base + MIN(rt_if_idle_expire_timeout, delta);
+
+	return (retval);
+#else
+#pragma unused(rt)
+	return (base + delta);
+#endif /* IFNET_ROUTE_REFCNT */
 }
 
 static void
@@ -4414,6 +4527,10 @@ rte_free(struct rtentry *p)
 	zfree(rte_zone, p);
 }
 
+<<<<<<< HEAD
+=======
+#if IFNET_ROUTE_REFCNT
+>>>>>>> origin/10.6
 static void
 rte_if_ref(struct ifnet *ifp, int cnt)
 {
@@ -4422,6 +4539,7 @@ rte_if_ref(struct ifnet *ifp, int cnt)
 	uint32_t old;
 
 	/* Force cnt to 1 increment/decrement */
+<<<<<<< HEAD
 	if (cnt < -1 || cnt > 1) {
 		panic("%s: invalid count argument (%d)", __func__, cnt);
 		/* NOTREACHED */
@@ -4431,6 +4549,15 @@ rte_if_ref(struct ifnet *ifp, int cnt)
 		panic("%s: ifp=%p negative route refcnt!", __func__, ifp);
 		/* NOTREACHED */
 	}
+=======
+	if (cnt < -1 || cnt > 1)
+		panic("%s: invalid count argument (%d)", __func__, cnt);
+
+	old = atomic_add_32_ov(&ifp->if_route_refcnt, cnt);
+	if (cnt < 0 && old == 0)
+		panic("%s: ifp=%p negative route refcnt!", __func__, ifp);
+
+>>>>>>> origin/10.6
 	/*
 	 * The following is done without first holding the ifnet lock,
 	 * for performance reasons.  The relevant ifnet fields, with
@@ -4461,6 +4588,10 @@ rte_if_ref(struct ifnet *ifp, int cnt)
 		kev_post_msg(&ev_msg);
 	}
 }
+<<<<<<< HEAD
+=======
+#endif /* IFNET_ROUTE_REFCNT */
+>>>>>>> origin/10.6
 
 static inline struct rtentry *
 rte_alloc_debug(void)

@@ -364,8 +364,13 @@ void IOWorkLoop::disableAllInterrupts() const
     
     closeGate();
     if (ISSETP(&fFlags, kLoopTerminate))
+<<<<<<< HEAD
 		goto abort;
 	
+=======
+	goto abort;
+
+>>>>>>> origin/10.6
     if (traceWL)
     	IOTimeStampStartConstant(IODBG_WORKLOOP(IOWL_WORK), (uintptr_t) this);
 	
@@ -403,9 +408,13 @@ void IOWorkLoop::disableAllInterrupts() const
 	IOSimpleLockUnlockEnableInterrupt(workToDoLock, is);
 	for (IOEventSource *evnt = eventChain; evnt; evnt = evnt->getNext()) {
 
-	    IOTimeClientS();
+		if (traceES)
+			IOTimeStampStartConstant(IODBG_WORKLOOP(IOWL_CLIENT), (uintptr_t) this, (uintptr_t) evnt);
+			
 	    more |= evnt->checkForWork();
-	    IOTimeClientE();
+			
+		if (traceES)
+			IOTimeStampEndConstant(IODBG_WORKLOOP(IOWL_CLIENT), (uintptr_t) this, (uintptr_t) evnt);
 
 	    if (ISSETP(&fFlags, kLoopTerminate))
 		goto abort;
@@ -421,7 +430,11 @@ void IOWorkLoop::disableAllInterrupts() const
 	
     if (traceWL)
     	IOTimeStampEndConstant(IODBG_WORKLOOP(IOWL_WORK), (uintptr_t) this);
+<<<<<<< HEAD
 	
+=======
+
+>>>>>>> origin/10.6
 abort:
     openGate();
     return res;

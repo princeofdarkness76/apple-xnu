@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2004-2011 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2004-2009 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2004-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -53,7 +57,12 @@
 #include <kern/machine.h>
 #include <kern/pms.h>
 #include <kern/processor.h>
+<<<<<<< HEAD
 #include <kern/timer_queue.h>
+=======
+#include <kern/etimer.h>
+#include <sys/kdebug.h>
+>>>>>>> origin/10.6
 #include <i386/cpu_threads.h>
 #include <i386/pmCPU.h>
 #include <i386/cpuid.h>
@@ -68,6 +77,7 @@
 #include <i386/rtclock.h>
 #include <kern/sched_prim.h>
 
+<<<<<<< HEAD
 /*
  * Kernel parameter determining whether threads are halted unconditionally
  * in the idle state.  This is the default behavior.
@@ -76,6 +86,8 @@
 int idlehalt					= 1;
 >>>>>>> origin/10.5
 
+=======
+>>>>>>> origin/10.6
 extern int disableConsoleOutput;
 
 #define DELAY_UNSET		0xFFFFFFFFFFFFFFFFULL
@@ -86,13 +98,19 @@ uint64_t *cpu_rtime_bins = &cpu_itime_bins[0];
 /*
  * The following is set when the KEXT loads and initializes.
  */
-pmDispatch_t	*pmDispatch	= NULL;
+pmDispatch_t		*pmDispatch	= NULL;
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 uint32_t		pmInitDone		= 0;
 static boolean_t	earlyTopology		= FALSE;
 static uint64_t		earlyMaxBusDelay	= DELAY_UNSET;
 static uint64_t		earlyMaxIntDelay	= DELAY_UNSET;
+=======
+static uint32_t		pmInitDone	= 0;
+static boolean_t	earlyTopology	= FALSE;
+
+>>>>>>> origin/10.6
 
 /*
  * Initialize the Cstate change code.
@@ -264,13 +282,6 @@ machine_idle(void)
     if (my_cpu == NULL)
 	goto out;
 
-    /*
-     * If idlehalt isn't set, then don't do any power management related
-     * idle handling.
-     */
-    if (!idlehalt)
-	goto out;
-
     my_cpu->lcpu.state = LCPU_IDLE;
     my_cpu->lcpu.flags |= X86CORE_FL_IDLE;
     DBGLOG(cpu_handle, cpu_number(), MP_IDLE);
@@ -278,8 +289,8 @@ machine_idle(void)
 
     if (pmInitDone
 	&& pmDispatch != NULL
-	&& pmDispatch->cstateMachineIdle != NULL)
-	(*pmDispatch->cstateMachineIdle)(0x7FFFFFFFFFFFFFFFULL);
+	&& pmDispatch->MachineIdle != NULL)
+	(*pmDispatch->MachineIdle)(0x7FFFFFFFFFFFFFFFULL);
     else {
 	/*
 	 * If no power management, re-enable interrupts and halt.
@@ -400,12 +411,18 @@ pmMarkAllCPUsOff(void)
 static void
 pmInitComplete(void)
 {
+<<<<<<< HEAD
     if (earlyTopology
 	&& pmDispatch != NULL
 	&& pmDispatch->pmCPUStateInit != NULL) {
 	(*pmDispatch->pmCPUStateInit)();
 	earlyTopology = FALSE;
     }
+=======
+    if (earlyTopology && pmDispatch != NULL && pmDispatch->pmCPUStateInit != NULL)
+	(*pmDispatch->pmCPUStateInit)();
+
+>>>>>>> origin/10.6
     pmInitDone = 1;
 }
 
@@ -583,10 +600,15 @@ pmCPUStateInit(void)
     if (pmDispatch != NULL && pmDispatch->pmCPUStateInit != NULL)
 	(*pmDispatch->pmCPUStateInit)();
 <<<<<<< HEAD
+<<<<<<< HEAD
     else
 	earlyTopology = TRUE;
 =======
 >>>>>>> origin/10.5
+=======
+    else
+	earlyTopology = TRUE;
+>>>>>>> origin/10.6
 }
 
 /*
@@ -951,14 +973,87 @@ active_rt_threads(boolean_t active)
     pmDispatch->pmActiveRTThreads(active);
 =======
 boolean_t
-machine_cpu_is_inactive(int cpu)
+machine_processor_is_inactive(processor_t processor)
 {
+    int		cpu = processor->cpu_id;
+
     if (pmDispatch != NULL
 	&& pmDispatch->pmIsCPUUnAvailable != NULL)
 	return(pmDispatch->pmIsCPUUnAvailable(cpu_to_lcpu(cpu)));
     else
 	return(FALSE);
 >>>>>>> origin/10.5
+}
+
+processor_t
+machine_choose_processor(processor_set_t pset,
+			 processor_t preferred)
+{
+    int		startCPU;
+    int		endCPU;
+    int		preferredCPU;
+    int		chosenCPU;
+
+    if (!pmInitDone)
+	return(preferred);
+
+    if (pset == NULL) {
+	startCPU = -1;
+	endCPU = -1;
+    } else {
+	startCPU = pset->cpu_set_low;
+	endCPU = pset->cpu_set_hi;
+    }
+
+    if (preferred == NULL)
+	preferredCPU = -1;
+    else
+	preferredCPU = preferred->cpu_id;
+
+    if (pmDispatch != NULL
+	&& pmDispatch->pmChooseCPU != NULL) {
+	chosenCPU = pmDispatch->pmChooseCPU(startCPU, endCPU, preferredCPU);
+
+	if (chosenCPU == -1)
+	    return(NULL);
+	return(cpu_datap(chosenCPU)->cpu_processor);
+    }
+
+    return(preferred);
+}
+
+static int
+pmThreadGetUrgency(__unused uint64_t *rt_period, __unused uint64_t *rt_deadline)
+{
+
+    return(0);
+}
+
+void
+thread_tell_urgency(int urgency,
+		    uint64_t rt_period,
+		    uint64_t rt_deadline)
+{
+    KERNEL_DEBUG_CONSTANT(0x1400054,
+			  urgency, rt_period, (rt_deadline >> 32), rt_deadline, 0);
+
+    if (!pmInitDone
+	|| pmDispatch == NULL
+	|| pmDispatch->pmThreadTellUrgency == NULL)
+	return;
+
+    pmDispatch->pmThreadTellUrgency(urgency, rt_period, rt_deadline);
+}
+
+void
+active_rt_threads(boolean_t active)
+{
+    if (!pmInitDone
+	|| pmDispatch == NULL
+	|| pmDispatch->pmActiveRTThreads == NULL)
+	return;
+
+    pmDispatch->pmActiveRTThreads(active);
 }
 
 static uint32_t
@@ -1026,6 +1121,7 @@ pmGetNanotimeInfo(pm_rtc_nanotime_t *rtc_nanotime)
 	 * Make sure that nanotime didn't change while we were reading it.
 	 */
 	do {
+<<<<<<< HEAD
 		rtc_nanotime->generation = pal_rtc_nanotime_info.generation; /* must be first */
 		rtc_nanotime->tsc_base = pal_rtc_nanotime_info.tsc_base;
 		rtc_nanotime->ns_base = pal_rtc_nanotime_info.ns_base;
@@ -1047,6 +1143,23 @@ pmTimerQueueMigrate(int target_cpu)
 
 =======
 >>>>>>> origin/10.5
+=======
+		rtc_nanotime->generation = rtc_nanotime_info.generation; /* must be first */
+		rtc_nanotime->tsc_base = rtc_nanotime_info.tsc_base;
+		rtc_nanotime->ns_base = rtc_nanotime_info.ns_base;
+		rtc_nanotime->scale = rtc_nanotime_info.scale;
+		rtc_nanotime->shift = rtc_nanotime_info.shift;
+	} while(rtc_nanotime_info.generation != 0
+		&& rtc_nanotime->generation != rtc_nanotime_info.generation);
+}
+
+static uint32_t
+pmTimerQueueMigrate(__unused int target_cpu)
+{
+    return (0);
+}
+
+>>>>>>> origin/10.6
 /*
  * Called by the power management kext to register itself and to get the
  * callbacks it might need into other kernel functions.  This interface
@@ -1110,9 +1223,22 @@ pmKextRegister(uint32_t version, pmDispatch_t *cpuFuncs,
 	callbacks->LCPUtoProcessor      = pmLCPUtoProcessor;
 	callbacks->ThreadBind           = thread_bind;
 	callbacks->GetSavedRunCount     = pmGetSavedRunCount;
+<<<<<<< HEAD
+=======
+	callbacks->pmSendIPI		= pmSendIPI;
+	callbacks->GetNanotimeInfo	= pmGetNanotimeInfo;
+	callbacks->ThreadGetUrgency	= pmThreadGetUrgency;
+	callbacks->RTCClockAdjust	= rtc_clock_adjust;
+	callbacks->timerQueueMigrate    = pmTimerQueueMigrate;
+>>>>>>> origin/10.6
 	callbacks->topoParms            = &topoParms;
+	callbacks->InterruptPending	= lapic_is_interrupt_pending;
+	callbacks->IsInterrupting	= lapic_is_interrupting;
+	callbacks->InterruptStats	= lapic_interrupt_counts;
+	callbacks->DisableApicTimer	= lapic_disable_timer;
     } else {
-	panic("Version mis-match between Kernel and CPU PM");
+	panic("Version mis-match between Kernel (%d) and CPU PM (%d)",
+	      PM_DISPATCH_VERSION, version);
     }
 >>>>>>> origin/10.5
 

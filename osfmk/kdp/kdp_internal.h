@@ -69,8 +69,6 @@ typedef struct {
     boolean_t			is_halted;
     unsigned char		exception_seq;
     boolean_t			exception_ack_needed;
-    int				kdp_cpu;
-    thread_t			kdp_thread;
 } kdp_glob_t;
 
 extern kdp_glob_t	kdp;
@@ -227,4 +225,3 @@ kdp_machine_msr64_read(kdp_readmsr64_req_t *, caddr_t /* data */, uint16_t /* lc
 
 int
 kdp_machine_msr64_write(kdp_writemsr64_req_t *, caddr_t /* data */, uint16_t /* lcpu */);
-

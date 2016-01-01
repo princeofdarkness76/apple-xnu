@@ -231,7 +231,13 @@ void PE_init_platform(boolean_t vm_initialized, void * _args)
     }
 
     if (!vm_initialized) {
+<<<<<<< HEAD
 
+=======
+		/* Hack! FIXME.. */ 
+        outb(0x21, 0xff);   /* Maskout all interrupts Pic1 */
+        outb(0xa1, 0xff);   /* Maskout all interrupts Pic2 */
+>>>>>>> origin/10.6
         if (PE_state.deviceTreeHead) {
             DTInit(PE_state.deviceTreeHead);
         }
@@ -339,6 +345,7 @@ int (*PE_poll_input)(unsigned int options, char * c)
 boolean_t
 PE_reboot_on_panic(void)
 {
+<<<<<<< HEAD
 	boot_args *args = (boot_args *)PE_state.bootArgs;
 
 	if (args->flags & kBootArgsFlagRebootOnPanic)
@@ -363,4 +370,7 @@ PE_i_can_has_debugger(uint32_t *debug_flags)
 		*debug_flags = debug_boot_arg;
 	}
 	return TRUE;
+=======
+	return FALSE;
+>>>>>>> origin/10.6
 }

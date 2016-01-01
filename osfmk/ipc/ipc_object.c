@@ -1123,3 +1123,85 @@ io_free(
 	io_lock_destroy(object);
 	zfree(ipc_object_zones[otype], object);
 }
+<<<<<<< HEAD
+=======
+
+#include <mach_kdb.h>
+#if	MACH_KDB
+
+#include <ddb/db_output.h>
+
+#define	printf	kdbprintf 
+
+/*
+ *	Routine:	ipc_object_print
+ *	Purpose:
+ *		Pretty-print an object for kdb.
+ */
+
+const char *ikot_print_array[IKOT_MAX_TYPE] = {
+	"(NONE)             ",
+	"(THREAD)           ",
+	"(TASK)             ",
+	"(HOST)             ",
+	"(HOST_PRIV)        ",
+	"(PROCESSOR)        ",
+	"(PSET)             ",
+	"(PSET_NAME)        ",
+	"(TIMER)            ",
+	"(PAGER_REQUEST)    ",
+	"(DEVICE)           ",	/* 10 */
+	"(XMM_OBJECT)       ",
+	"(XMM_PAGER)        ",
+	"(XMM_KERNEL)       ",
+	"(XMM_REPLY)        ",
+	"(NOTDEF 15)        ",
+	"(NOTDEF 16)        ",
+	"(HOST_SECURITY)    ",
+	"(LEDGER)           ",
+	"(MASTER_DEVICE)    ",
+	"(ACTIVATION)       ",	/* 20 */
+	"(SUBSYSTEM)        ",
+	"(IO_DONE_QUEUE)    ",
+	"(SEMAPHORE)        ",
+	"(LOCK_SET)         ",
+	"(CLOCK)            ",
+	"(CLOCK_CTRL)       ",	/* 26 */
+	"(IOKIT_SPARE)	    ",  /* 27 */
+	"(NAMED_MEM_ENTRY)  ",	/* 28 */
+	"(IOKIT_CONNECT)    ",
+	"(IOKIT_OBJECT)     ",	/* 30 */
+	"(UPL)              ",
+	"(MEM_OBJ_CONTROL)  ",
+	"(AU_SESSIONPORT)   ",	/* 33 */
+	"(FILEPORT)", /* 34 */
+#if CONFIG_MACF_MACH
+	"(LABELH)           ",
+#endif
+/*
+ * Add new entries here.
+ * Please keep in sync with kern/ipc_kobject.h
+ */
+	"(UNKNOWN)          "	/* magic catchall	*/
+};
+
+void
+ipc_object_print(
+	ipc_object_t	object)
+{
+	int kotype;
+
+	iprintf("%s", io_active(object) ? "active" : "dead");
+	printf(", refs=%d", object->io_references);
+	printf(", otype=%d", io_otype(object));
+	kotype = io_kotype(object);
+	if (kotype >= 0 && kotype < IKOT_MAX_TYPE)
+		printf(", kotype=%d %s\n", io_kotype(object),
+		       ikot_print_array[kotype]);
+	else
+		printf(", kotype=0x%x %s\n", io_kotype(object),
+		       ikot_print_array[IKOT_UNKNOWN]);
+}
+
+#endif	/* MACH_KDB */
+>>>>>>> origin/10.6

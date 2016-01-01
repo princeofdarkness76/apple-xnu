@@ -1154,6 +1154,7 @@ get_shadow_dir(vnode_t *sdvpp) {
 	sdvp = NULLVP;
 	bzero (tmpname, sizeof(tmpname));
 
+<<<<<<< HEAD
 	/* 
 	 * Obtain the vnode for "/var/run" directory using the kernel
 	 * context.
@@ -1161,6 +1162,10 @@ get_shadow_dir(vnode_t *sdvpp) {
 	 * This is defined in the SHADOW_DIR_CONTAINER macro
 	 */
 	if (vnode_lookup(SHADOW_DIR_CONTAINER, 0, &dvp, kernelctx) != 0) {
+=======
+	/* Obtain the vnode for "/var/run" directory. */
+	if (vnode_lookup("/var/run", 0, &dvp, context) != 0) {
+>>>>>>> origin/10.6
 		error = ENOTSUP;
 		goto out;
 	}

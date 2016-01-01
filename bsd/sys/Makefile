@@ -142,10 +142,14 @@ KERNELFILES = \
 # Installs header file for Apple internal use for kernel extensions - 
 #	  $(DSTROOT)/System/Library/Frameworks/Kernel.framework/PrivateHeaders
 PRIVATE_KERNELFILES = \
+<<<<<<< HEAD
 	codesign.h \
 	cprotect.h \
 	content_protection.h \
 	csr.h \
+=======
+	cprotect.h \
+>>>>>>> origin/10.6
 	decmpfs.h \
 	disktab.h \
 	fbt.h \

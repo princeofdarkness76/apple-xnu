@@ -1220,7 +1220,20 @@ m_freem_list(m)
 	} else {							\
 		(m)->m_data = (m)->m_pktdat;				\
 		(m)->m_flags = M_PKTHDR;				\
+<<<<<<< HEAD
 		MBUF_INIT_PKTHDR(m);					\
+=======
+		(m)->m_pkthdr.rcvif = NULL;				\
+		(m)->m_pkthdr.len = 0;					\
+		(m)->m_pkthdr.header = NULL;				\
+		(m)->m_pkthdr.csum_flags = 0;				\
+		(m)->m_pkthdr.csum_data = 0;				\
+		(m)->m_pkthdr.tso_segsz = 0;				\
+		(m)->m_pkthdr.vlan_tag = 0;				\
+		(m)->m_pkthdr.socket_id = 0;				\
+		m_tag_init(m);						\
+		m_prio_init(m);						\
+>>>>>>> origin/10.6
 	}								\
 }
 
@@ -4176,6 +4189,7 @@ m_copy_pkthdr(struct mbuf *to, struct mbuf *from)
 	m_redzone_init(to);			/* setup red zone on dst */
 =======
 	m_tag_init(from);			/* purge tags from src */
+	m_prio_init(from);			/* reset priority from src */
 	to->m_flags = (from->m_flags & M_COPYFLAGS) | (to->m_flags & M_EXT);
 	if ((to->m_flags & M_EXT) == 0)
 		to->m_data = to->m_pktdat;

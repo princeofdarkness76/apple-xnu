@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -255,6 +259,7 @@
 
 #ifdef PRIVATE
 #define	SIOCGIFGETRTREFCNT _IOWR('i', 137, struct ifreq) /* get interface route refcnt */
+<<<<<<< HEAD
 #define	SIOCGIFLINKQUALITYMETRIC _IOWR('i', 138, struct ifreq) /* get LQM */
 #define SIOCSIFOPPORTUNISTIC	 _IOWR('i', 139, struct ifreq)	/* deprecated; use SIOCSIFTHROTTLE */
 #define SIOCGIFOPPORTUNISTIC	 _IOWR('i', 140, struct ifreq)	/* deprecated; use SIOCGIFTHROTTLE */
@@ -317,4 +322,9 @@
 #define	SIOCSECNMODE		_IOW('i', 177, struct ifreq)
 #endif /* PRIVATE */
 
+=======
+#endif /* PRIVATE */
+
+
+>>>>>>> origin/10.6
 #endif /* !_SYS_SOCKIO_H_ */

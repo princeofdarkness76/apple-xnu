@@ -362,7 +362,46 @@ task_policy_set(
 			default:
 				result = KERN_INVALID_ARGUMENT;
 				break;
+<<<<<<< HEAD
 		} /* switch (info->role) */
+=======
+			}
+		}
+		else
+		if (info->role == TASK_CONTROL_APPLICATION) {
+			if (	task != current_task()			||
+					task->sec_token.val[0] != 0			)
+				result = KERN_INVALID_ARGUMENT;
+			else {
+				task_priority(task, BASEPRI_CONTROL, task->max_priority);
+				task->role = info->role;
+			}
+		}
+		else
+		if (info->role == TASK_GRAPHICS_SERVER) {
+			if (	task != current_task()			||
+					task->sec_token.val[0] != 0			)
+				result = KERN_INVALID_ARGUMENT;
+			else {
+				task_priority(task, MAXPRI_RESERVED - 3, MAXPRI_RESERVED);
+				task->role = info->role;
+			}
+		}
+		else
+		if (info->role == TASK_THROTTLE_APPLICATION) {
+			task_priority(task, MAXPRI_THROTTLE, MAXPRI_THROTTLE);
+			task->role = info->role;
+		}
+		else
+		if (info->role == TASK_DEFAULT_APPLICATION) {
+			task_priority(task, BASEPRI_DEFAULT, MAXPRI_USER);
+			task->role = info->role;
+		}
+		else
+			result = KERN_INVALID_ARGUMENT;
+
+		task_unlock(task);
+>>>>>>> origin/10.6
 
 		break;
 	}

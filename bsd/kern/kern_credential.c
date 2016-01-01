@@ -382,12 +382,17 @@ kauth_resolver_init(void)
  *		EINTR				Operation interrupted (e.g. by
  *						a signal)
  *		ENOMEM				Could not allocate work item
+<<<<<<< HEAD
  *	copyinstr:EFAULT			Bad message from user space
  *	workp->kr_result:???			An error from the user space
  *						daemon (includes ENOENT!)
  *
  * Implicit returns:
  *		*lkp				Modified
+=======
+ *	workp->kr_result:???			An error from the user space
+ *						daemon (includes ENOENT!)
+>>>>>>> origin/10.6
  *
  * Notes:	Allocate a work queue entry, submit the work and wait for
  *		the operation to either complete or time out.  Outstanding
@@ -459,6 +464,28 @@ kauth_resolver_submit(struct kauth_identity_extlookup *lkp, uint64_t extend_data
 	 */
 	TAILQ_INSERT_TAIL(&kauth_resolver_unsubmitted, workp, kr_link);
 
+<<<<<<< HEAD
+=======
+	wakeup_one((caddr_t)&kauth_resolver_unsubmitted);
+	for (;;) {
+		/* we could compute a better timeout here */
+		ts.tv_sec = kauth_resolver_timeout;
+		ts.tv_nsec = 0;
+		error = msleep(workp, kauth_resolver_mtx, PCATCH, "kr_submit", &ts);
+		/* request has been completed? */
+		if ((error == 0) && (workp->kr_flags & KAUTH_REQUEST_DONE))
+			break;
+		/* woken because the resolver has died? */
+		if (kauth_resolver_identity == 0) {
+			error = EIO;
+			break;
+		}
+		/* an error? */
+		if (error != 0)
+			break;
+	}
+
+>>>>>>> origin/10.6
 	/*
 	 * Wake up an external resolver thread to deal with the new work; one
 	 * may not be available, and if not, then the request will be grabbed
@@ -472,6 +499,7 @@ kauth_resolver_submit(struct kauth_identity_extlookup *lkp, uint64_t extend_data
 	if (error == 0)
 		*lkp = workp->kr_work;
 	
+<<<<<<< HEAD
 	if (error == EWOULDBLOCK) {
 	        if ((kauth_resolver_timeout_cnt++ % KAUTH_COMPLAINT_INTERVAL) == 0) {
                         printf("kauth external resolver timed out (%d timeout(s) of %d seconds).\n",
@@ -506,6 +534,35 @@ kauth_resolver_submit(struct kauth_identity_extlookup *lkp, uint64_t extend_data
                 }
         }
 
+=======
+	/*
+	 * If the request timed out and was never collected, the resolver
+	 * is dead and probably not coming back anytime soon.  In this
+	 * case we revert to no-resolver behaviour, and punt all the other
+	 * sleeping requests to clear the backlog.
+	 */
+	if ((error == EWOULDBLOCK) && (workp->kr_flags & KAUTH_REQUEST_UNSUBMITTED)) {
+		KAUTH_DEBUG("RESOLVER - request timed out without being collected for processing, resolver dead");
+
+		/*
+		 * Make the current resolver non-authoritative, and mark it as
+		 * no longer registered to prevent kauth_cred_ismember_gid()
+		 * enqueueing more work until a new one is registered.  This
+		 * mitigates the damage a crashing resolver may inflict.
+		 */
+		kauth_resolver_identity = 0;
+		kauth_resolver_registered = 0;
+
+		/* kill all the other requestes that are waiting as well */
+		TAILQ_FOREACH(killp, &kauth_resolver_submitted, kr_link)
+		    wakeup(killp);
+		TAILQ_FOREACH(killp, &kauth_resolver_unsubmitted, kr_link)
+		    wakeup(killp);
+		/* Cause all waiting-for-work threads to return EIO */
+		wakeup((caddr_t)&kauth_resolver_unsubmitted);
+	}
+	
+>>>>>>> origin/10.6
 	/*
 	 * drop our reference on the work item, and note whether we should
 	 * free it or not
@@ -603,7 +660,11 @@ identitysvc(__unused struct proc *p, struct identitysvc_args *uap, __unused int3
 			 * Allow user space resolver to override the
 			 * external resolution timeout
 			 */
+<<<<<<< HEAD
 			if (message > 30 && message < 10000) {
+=======
+			if (message >= 30 && message <= 10000) {
+>>>>>>> origin/10.6
 				kauth_resolver_timeout = message;
 				KAUTH_DEBUG("RESOLVER - new resolver changes timeout to %d seconds\n", (int)message);
 			}
@@ -3729,13 +3790,21 @@ kauth_cred_t
 kauth_cred_create(kauth_cred_t cred)
 {
 	kauth_cred_t 	found_cred, new_cred = NULL;
+<<<<<<< HEAD
 	posix_cred_t	pcred = posix_cred_get(cred);
+=======
+>>>>>>> origin/10.6
 	int is_member = 0;
 
 	KAUTH_CRED_HASH_LOCK_ASSERT();
 
+<<<<<<< HEAD
 	if (pcred->cr_flags & CRF_NOMEMBERD) {
 		pcred->cr_gmuid = KAUTH_UID_NONE;
+=======
+	if (cred->cr_flags & CRF_NOMEMBERD) {
+		cred->cr_gmuid = KAUTH_UID_NONE;
+>>>>>>> origin/10.6
 	} else {
 		/*
 		 * If the template credential is not opting out of external
@@ -3754,7 +3823,11 @@ kauth_cred_create(kauth_cred_t cred)
 			 * the answer, so long as it's something the external
 			 * resolver could have vended.
 			 */
+<<<<<<< HEAD
 			pcred->cr_gmuid = pcred->cr_uid;
+=======
+			cred->cr_gmuid = cred->cr_uid;
+>>>>>>> origin/10.6
 		} else {
 			/*
 			 * It's not something the external resolver could
@@ -3765,8 +3838,13 @@ kauth_cred_create(kauth_cred_t cred)
 			 * cost.  Since most credentials are used multiple
 			 * times, we still get some performance win from this.
 			 */
+<<<<<<< HEAD
 			pcred->cr_gmuid = KAUTH_UID_NONE;
 			pcred->cr_flags |= CRF_NOMEMBERD;
+=======
+			cred->cr_gmuid = KAUTH_UID_NONE;
+			cred->cr_flags |= CRF_NOMEMBERD;
+>>>>>>> origin/10.6
 		}
 	}
 

@@ -364,7 +364,11 @@ enum { kFinderInvisibleMask = 1 << 14 };
  * upon the VNOP in question.  Sometimes it is OK to use an open-unlinked file, for example, in,
  * reading.  But other times, such as on the source of a VNOP_RENAME, it should be disallowed.
  */
+<<<<<<< HEAD
 int hfs_checkdeleted(struct cnode *cp);
+=======
+int hfs_checkdeleted (struct cnode *cp);
+>>>>>>> origin/10.6
 
 /*
  * Test for a resource fork

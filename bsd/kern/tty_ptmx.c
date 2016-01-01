@@ -710,9 +710,17 @@ ptsd_kqfilter(dev_t dev, struct knote *kn)
 
         switch (kn->kn_filter) {
         case EVFILT_READ:
+<<<<<<< HEAD
                 KNOTE_ATTACH(&tp->t_rsel.si_note, kn);
                 break;
         case EVFILT_WRITE:
+=======
+                kn->kn_fop = &ptsd_kqops_read;
+                KNOTE_ATTACH(&tp->t_rsel.si_note, kn);
+                break;
+        case EVFILT_WRITE:
+                kn->kn_fop = &ptsd_kqops_write;
+>>>>>>> origin/10.6
                 KNOTE_ATTACH(&tp->t_wsel.si_note, kn);
                 break;
         default:

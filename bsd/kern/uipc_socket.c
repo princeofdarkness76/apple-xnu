@@ -127,8 +127,11 @@
 #include <sys/kdebug.h>
 #include <sys/un.h>
 #include <sys/user.h>
+<<<<<<< HEAD
 #include <sys/priv.h>
 #include <sys/kern_event.h>
+=======
+>>>>>>> origin/10.6
 #include <net/route.h>
 #include <net/init.h>
 #include <net/ntstat.h>
@@ -323,11 +326,17 @@ extern struct inpcbinfo tcbinfo;
 extern int get_inpcb_str_size(void);
 extern int get_tcp_str_size(void);
 
+<<<<<<< HEAD
 static unsigned int sl_zone_size;		/* size of sockaddr_list */
 static struct zone *sl_zone;			/* zone for sockaddr_list */
 
 static unsigned int se_zone_size;		/* size of sockaddr_entry */
 static struct zone *se_zone;			/* zone for sockaddr_entry */
+=======
+extern int uthread_get_background_state(uthread_t);
+
+#ifdef __APPLE__
+>>>>>>> origin/10.6
 
 vm_size_t	so_cache_zone_element_size;
 
@@ -436,6 +445,7 @@ socketinit(void)
 	zone_change(so_cache_zone, Z_CALLERACCT, FALSE);
 	zone_change(so_cache_zone, Z_NOENCRYPT, TRUE);
 
+<<<<<<< HEAD
 	sl_zone_size = sizeof (struct sockaddr_list);
 	if ((sl_zone = zinit(sl_zone_size, 1024 * sl_zone_size, 1024,
 	    "sockaddr_list")) == NULL) {
@@ -453,6 +463,14 @@ socketinit(void)
 	}
 	zone_change(se_zone, Z_CALLERACCT, FALSE);
 	zone_change(se_zone, Z_EXPAND, TRUE);
+=======
+	so_cache_zone = zinit(str_size, 120000*str_size, 8192, "socache zone");
+	zone_change(so_cache_zone, Z_NOENCRYPT, TRUE);
+#if TEMPDEBUG
+	printf("cached_sock_alloc -- so_cache_zone size is %x\n", str_size);
+#endif
+	timeout(so_cache_timer, NULL, (SO_CACHE_FLUSH_INTERVAL * hz));
+>>>>>>> origin/10.6
 
 	bzero(&soextbkidlestat, sizeof(struct soextbkidlestat));
 	soextbkidlestat.so_xbkidle_maxperproc = SO_IDLE_BK_IDLE_MAX_PER_PROC;
@@ -664,9 +682,18 @@ int
 socreate_internal(int dom, struct socket **aso, int type, int proto,
     struct proc *p, uint32_t flags, struct proc *ep)
 {
+<<<<<<< HEAD
 	struct protosw *prp;
 	struct socket *so;
 	int error = 0;
+=======
+	struct proc *p = current_proc();
+	register struct protosw *prp;
+	register struct socket *so;
+	register int error = 0;
+	thread_t thread;
+	struct uthread *ut;
+>>>>>>> origin/10.6
 
 #if TCPDEBUG
 	extern int tcpconsdebug;
@@ -767,6 +794,7 @@ socreate_internal(int dom, struct socket **aso, int type, int proto,
 	if (tcpconsdebug == 2)
 		so->so_options |= SO_DEBUG;
 #endif
+<<<<<<< HEAD
 	so_set_default_traffic_class(so);
 
 	/*
@@ -804,6 +832,27 @@ socreate_internal(int dom, struct socket **aso, int type, int proto,
 	 * APIs.
 	 */
 
+=======
+#endif
+	/*
+	 * If this is a background thread/task, mark the socket as such.
+	 */
+	thread = current_thread();
+	ut = get_bsdthread_info(thread);
+	if (uthread_get_background_state(ut)) {
+		socket_set_traffic_mgt_flags(so, TRAFFIC_MGT_SO_BACKGROUND);
+		so->so_background_thread = thread;
+		/*
+		 * In case setpriority(PRIO_DARWIN_THREAD) was called
+		 * on this thread, regulate network (TCP) traffics.
+		 */
+		if (ut->uu_flag & UT_BACKGROUND_TRAFFIC_MGT) {
+			socket_set_traffic_mgt_flags(so,
+			    TRAFFIC_MGT_SO_BG_REGULATE);
+		}
+	}
+
+>>>>>>> origin/10.6
 	*aso = so;
 
 	return (0);
@@ -6686,9 +6735,32 @@ socket_unlock(struct socket *so, int refcount)
 				/* NOTREACHED */
 			}
 
+<<<<<<< HEAD
 			so->so_usecount--;
 			if (so->so_usecount == 0)
 				sofreelastref(so, 1);
+=======
+#if PKT_PRIORITY
+		case SO_TRAFFIC_CLASS: {
+			error = sooptcopyin(sopt, &optval, sizeof (optval),
+				sizeof (optval));
+			if (error)
+				goto bad;
+			if (optval < SO_TC_BE || optval > SO_TC_VO) {
+				error = EINVAL;
+				goto bad;
+			}
+			so->so_traffic_class = optval;
+		}
+#endif /* PKT_PRIORITY */
+
+		default:
+			error = ENOPROTOOPT;
+			break;
+		}
+		if (error == 0 && so->so_proto && so->so_proto->pr_ctloutput) {
+			(void) ((*so->so_proto->pr_ctloutput)(so, sopt));
+>>>>>>> origin/10.6
 		}
 		lck_mtx_unlock(mutex_held);
 	}
@@ -6974,6 +7046,21 @@ soresume(struct proc *p, struct socket *so, int locked)
 			goto integer;
 #endif
 
+<<<<<<< HEAD
+=======
+			sonpx.npx_flags = (so->so_flags & SOF_NPX_SETOPTSHUT) ? SONPX_SETOPTSHUT : 0;
+			sonpx.npx_mask = SONPX_MASK_VALID;
+
+			error = sooptcopyout(sopt, &sonpx, sizeof(struct so_np_extensions));
+			break;	
+		}
+#if PKT_PRIORITY
+		case SO_TRAFFIC_CLASS:
+			optval = so->so_traffic_class;
+			goto integer;
+#endif /* PKT_PRIORITY */
+
+>>>>>>> origin/10.6
 		default:
 			error = ENOPROTOOPT;
 			break;

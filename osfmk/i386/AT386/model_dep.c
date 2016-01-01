@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple, Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -200,6 +204,7 @@ static unsigned panic_io_port;
 static unsigned	commit_paniclog_to_nvram;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 unsigned int debug_boot_arg;
 
 /*
@@ -291,6 +296,9 @@ print_one_backtrace(pmap_t pmap, vm_offset_t topfp, const char *cur_marker,
 }
 =======
 int debug_boot_arg;
+=======
+unsigned int debug_boot_arg;
+>>>>>>> origin/10.6
 
 >>>>>>> origin/10.5
 void
@@ -303,6 +311,7 @@ machine_startup(void)
             halt_in_debugger = halt_in_debugger ? 0 : 1;
 #endif
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 	if (PE_parse_boot_argn("debug", &debug_boot_arg, sizeof (debug_boot_arg))) {
 		panicDebugging = TRUE;
@@ -329,6 +338,16 @@ machine_startup(void)
 		if (boot_arg & DB_LOG_PI_SCRN) logPanicDataToScreen=TRUE;
 		debug_boot_arg = boot_arg;
 >>>>>>> origin/10.5
+=======
+	if (PE_parse_boot_argn("debug", &debug_boot_arg, sizeof (debug_boot_arg))) {
+		if (debug_boot_arg & DB_HALT) halt_in_debugger=1;
+		if (debug_boot_arg & DB_PRT) disable_debug_output=FALSE; 
+		if (debug_boot_arg & DB_SLOG) systemLogDiags=TRUE; 
+		if (debug_boot_arg & DB_NMI) panicDebugging=TRUE; 
+		if (debug_boot_arg & DB_LOG_PI_SCRN) logPanicDataToScreen=TRUE;
+	} else {
+		debug_boot_arg = 0;
+>>>>>>> origin/10.6
 	}
 
 	if (!PE_parse_boot_argn("nvram_paniclog", &commit_paniclog_to_nvram, sizeof (commit_paniclog_to_nvram)))
@@ -386,11 +405,14 @@ machine_startup(void)
 		sched_poll_yield_shift = boot_arg;
 	}
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 	if (PE_parse_boot_argn("idlehalt", &boot_arg, sizeof (boot_arg))) {
 		idlehalt = boot_arg;
 	}
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.6
 /* The I/O port to issue a read from, in the event of a panic. Useful for
  * triggering logic analyzers.
  */
@@ -913,6 +935,7 @@ panic_io_port_read(void) {
  */
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 uint64_t panic_restart_timeout = ~(0ULL);
 
 #define PANIC_RESTART_TIMEOUT (3ULL * NSEC_PER_SEC)
@@ -920,6 +943,8 @@ uint64_t panic_restart_timeout = ~(0ULL);
 =======
 #if !CONFIG_EMBEDDED
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.6
 static void
 machine_halt_cpu(void) {
 	uint64_t deadline;
@@ -949,7 +974,6 @@ machine_halt_cpu(void) {
 		(*PE_halt_restart)(kPERestartCPU);
 	pmCPUHalt(PM_HALT_DEBUG);
 }
-#endif
 
 static int pid_from_task(task_t task)
 {
@@ -1024,6 +1048,7 @@ Debugger(
 
 		/* Print backtrace - callee is internally synchronized */
 <<<<<<< HEAD
+<<<<<<< HEAD
 		if (task_pid == 1 && (init_task_died)) {
 			/* Special handling of launchd died panics */
 			print_launchd_info();
@@ -1033,6 +1058,9 @@ Debugger(
 =======
 		panic_i386_backtrace(stackptr, 16, NULL, FALSE, NULL);
 >>>>>>> origin/10.5
+=======
+		panic_i386_backtrace(stackptr, 64, NULL, FALSE, NULL);
+>>>>>>> origin/10.6
 
 		/* everything should be printed now so copy to NVRAM
 		 */
@@ -1109,6 +1137,15 @@ Debugger(
 			}
                     }
                 }
+<<<<<<< HEAD
+=======
+
+		/* If the user won't be able to read the dialog,
+		 * don't bother trying to show it
+		 */
+		if (!PE_reboot_on_panic())
+			draw_panic_dialog();
+>>>>>>> origin/10.6
 
 		if (!panicDebugging) {
 			unsigned cnum;
@@ -1116,6 +1153,7 @@ Debugger(
 			 * that a panic occurred while in that codepath.
 			 */
 			mp_rendezvous_break_lock();
+<<<<<<< HEAD
 
 			/* Non-maskably interrupt all other processors
 			 * If a restart timeout is specified, this processor
@@ -1128,6 +1166,18 @@ Debugger(
 				}
 			}
 			machine_halt_cpu();
+=======
+			if (PE_reboot_on_panic()) {
+				PEHaltRestart(kPEPanicRestartCPU);
+			}
+
+			/* Force all CPUs to disable interrupts and HLT.
+			 * We've panicked, and shouldn't depend on the
+			 * PEHaltRestart() mechanism, which relies on several
+			 * bits of infrastructure.
+			 */
+			mp_rendezvous_no_intrs(machine_halt_cpu, NULL);
+>>>>>>> origin/10.6
 			/* NOT REACHED */
 		}
         }

@@ -70,6 +70,7 @@
 #endif
 #endif
 
+<<<<<<< HEAD
 #ifndef MROUTING
 extern u_long	_ip_mcast_src __P((int vifi));
 extern int	_ip_mforward __P((struct ip *ip, struct ifnet *ifp,
@@ -78,6 +79,16 @@ extern int	_ip_mrouter_done __P((void));
 extern int	_ip_mrouter_get __P((struct socket *so, struct sockopt *sopt));
 extern int	_ip_mrouter_set __P((struct socket *so, struct sockopt *sopt));
 extern int	_mrt_ioctl __P((int req, caddr_t data, struct proc *p));
+=======
+#if !MROUTING
+extern u_int32_t	_ip_mcast_src(int vifi);
+extern int	_ip_mforward(struct ip *ip, struct ifnet *ifp,
+				  struct mbuf *m, struct ip_moptions *imo);
+extern int	_ip_mrouter_done(void);
+extern int	_ip_mrouter_get(struct socket *so, struct sockopt *sopt);
+extern int	_ip_mrouter_set(struct socket *so, struct sockopt *sopt);
+extern int	_mrt_ioctl(int req, caddr_t data, struct proc *p);
+>>>>>>> origin/10.6
 
 /*
  * Dummy routines and globals used when multicast routing is not compiled in.

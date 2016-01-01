@@ -231,9 +231,17 @@ void	ml_get_bouncepool_info(
 boolean_t machine_timeout_suspended(void);
 #endif /* PEXPERT_KERNEL_PRIVATE || MACH_KERNEL_PRIVATE  */
 
+<<<<<<< HEAD
 /* Warm up a CPU to receive an interrupt */
 kern_return_t ml_interrupt_prewarm(uint64_t deadline);
 
+=======
+
+void interrupt_latency_tracker_setup(void);
+void interrupt_reset_latency_stats(void);
+void interrupt_populate_latency_stats(char *, unsigned);
+boolean_t ml_fpu_avx_enabled(void);
+>>>>>>> origin/10.6
 #endif /* XNU_KERNEL_PRIVATE */
 
 #ifdef KERNEL_PRIVATE
@@ -429,6 +437,7 @@ void ml_install_interrupt_handler(
 
 __END_DECLS
 
+<<<<<<< HEAD
 #ifdef	XNU_KERNEL_PRIVATE
 
 boolean_t ml_fpu_avx_enabled(void);
@@ -458,4 +467,8 @@ int ml_get_current_cpus(
 >>>>>>> origin/10.2
 
 #endif /* XNU_KERNEL_PRIVATE */
+=======
+
+
+>>>>>>> origin/10.6
 #endif /* _I386_MACHINE_ROUTINES_H_ */

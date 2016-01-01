@@ -79,6 +79,9 @@
  * returned in %ecx:%edx to a CPUID request with %eax of 1: 
  */
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
 #define CPUID_FEATURE_FPU       _Bit(0)   /* Floating point unit on-chip */
 #define CPUID_FEATURE_VME       _Bit(1)   /* Virtual Mode Extension */
 #define CPUID_FEATURE_DE        _Bit(2)   /* Debugging Extension */
@@ -120,12 +123,16 @@
 #define CPUID_FEATURE_TM2       _HBit(8)  /* Thermal Monitor 2 */
 #define CPUID_FEATURE_SSSE3     _HBit(9)  /* Supplemental SSE3 instructions */
 #define CPUID_FEATURE_CID       _HBit(10) /* L1 Context ID */
+<<<<<<< HEAD
 #define CPUID_FEATURE_SEGLIM64  _HBit(11) /* 64-bit segment limit checking */
 #define CPUID_FEATURE_FMA       _HBit(12) /* Fused-Multiply-Add support */
+=======
+>>>>>>> origin/10.6
 #define CPUID_FEATURE_CX16      _HBit(13) /* CmpXchg16b instruction */
 #define CPUID_FEATURE_xTPR      _HBit(14) /* Send Task PRiority msgs */
 #define CPUID_FEATURE_PDCM      _HBit(15) /* Perf/Debug Capability MSR */
 
+<<<<<<< HEAD
 #define CPUID_FEATURE_PCID      _HBit(17) /* ASID-PCID support */
 #define CPUID_FEATURE_DCA       _HBit(18) /* Direct Cache Access */
 #define CPUID_FEATURE_SSE4_1    _HBit(19) /* Streaming SIMD extensions 4.1 */
@@ -218,6 +225,22 @@
 #define CPUID_FEATURE_xAPIC   _HBit(21)	/* Extended APIC Mode */
 #define CPUID_FEATURE_POPCNT  _HBit(23)	/* POPCNT instruction */
 >>>>>>> origin/10.5
+=======
+#define CPUID_FEATURE_DCA       _HBit(18) /* Direct Cache Access */
+#define CPUID_FEATURE_SSE4_1    _HBit(19) /* Streaming SIMD extensions 4.1 */
+#define CPUID_FEATURE_SSE4_2    _HBit(20) /* Streaming SIMD extensions 4.2 */
+#define CPUID_FEATURE_xAPIC     _HBit(21) /* Extended APIC Mode */
+#define CPUID_FEATURE_MOVBE     _HBit(22) /* MOVBE instruction */
+#define CPUID_FEATURE_POPCNT    _HBit(23) /* POPCNT instruction */
+#define CPUID_FEATURE_AES       _HBit(25) /* AES instructions */
+#define CPUID_FEATURE_XSAVE     _HBit(26) /* XSAVE instructions */
+#define CPUID_FEATURE_OSXSAVE   _HBit(27) /* XGETBV/XSETBV instructions */
+#define CPUID_FEATURE_VMM       _HBit(31) /* VMM (Hypervisor) present */
+#define CPUID_FEATURE_SEGLIM64  _HBit(11) /* 64-bit segment limit checking */
+#define CPUID_FEATURE_PCID      _HBit(17) /* ASID-PCID support */
+#define CPUID_FEATURE_TSCTMR    _HBit(24) /* TSC deadline timer */
+#define CPUID_FEATURE_AVX1_0	_HBit(28) /* AVX 1.0 instructions */
+>>>>>>> origin/10.6
 
 /*
  * The CPUID_EXTFEATURE_XXX values define 64-bit values
@@ -225,6 +248,7 @@
  */
 #define CPUID_EXTFEATURE_SYSCALL   _Bit(11)	/* SYSCALL/sysret */
 #define CPUID_EXTFEATURE_XD	   _Bit(20)	/* eXecute Disable */
+<<<<<<< HEAD
 <<<<<<< HEAD
 
 #define CPUID_EXTFEATURE_1GBPAGE   _Bit(26)	/* 1GB pages */
@@ -240,6 +264,14 @@
 
 #define CPUID_EXTFEATURE_LAHF	   _HBit(20)	/* LAFH/SAHF instructions */
 >>>>>>> origin/10.5
+=======
+
+#define CPUID_EXTFEATURE_1GBPAGE   _Bit(26)	/* 1GB pages */
+#define CPUID_EXTFEATURE_RDTSCP	   _Bit(27)	/* RDTSCP */
+#define CPUID_EXTFEATURE_EM64T	   _Bit(29)	/* Extended Mem 64 Technology */
+
+#define CPUID_EXTFEATURE_LAHF	   _HBit(0)	/* LAFH/SAHF instructions */
+>>>>>>> origin/10.6
 
 /*
  * The CPUID_EXTFEATURE_XXX values define 64-bit values
@@ -368,6 +400,7 @@
 #define CPUID_MWAIT_BREAK	_Bit(1)	/* interrupts are break events	   */
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 #define CPUID_MODEL_YONAH		0x0E
 #define CPUID_MODEL_MEROM		0x0F
 #define CPUID_MODEL_PENRYN		0x17
@@ -404,6 +437,21 @@
 #define CPUID_MODEL_PENRYN	23
 #define CPUID_MODEL_NEHALEM	26
 >>>>>>> origin/10.5
+=======
+#define CPUID_MODEL_YONAH	0x0E
+#define CPUID_MODEL_MEROM	0x0F
+#define CPUID_MODEL_PENRYN	0x17
+#define CPUID_MODEL_NEHALEM	0x1A
+#define CPUID_MODEL_FIELDS	0x1E	/* Lynnfield, Clarksfield, Jasper */
+#define CPUID_MODEL_DALES	0x1F	/* Havendale, Auburndale */
+#define CPUID_MODEL_NEHALEM_EX	0x2E
+#define CPUID_MODEL_DALES_32NM	0x25	/* Clarkdale, Arrandale */
+#define CPUID_MODEL_WESTMERE	0x2C	/* Gulftown, Westmere-EP, Westmere-WS */
+#define CPUID_MODEL_WESTMERE_EX	0x2F
+/* Additional internal models go here */
+#define CPUID_MODEL_SANDYBRIDGE	0x2A
+#define CPUID_MODEL_JAKETOWN	0x2D
+>>>>>>> origin/10.6
 
 #ifndef ASSEMBLER
 #include <stdint.h>
@@ -504,12 +552,15 @@ typedef struct {
 	uint8_t		fixed_width;
 } cpuid_arch_perf_leaf_t;
 
+<<<<<<< HEAD
 /* The TSC to Core Crystal (RefCLK) Clock Information leaf */
 typedef struct {
 	uint32_t	numerator;
 	uint32_t	denominator;
 } cpuid_tsc_leaf_t;
 
+=======
+>>>>>>> origin/10.6
 /* Physical CPU info - this is exported out of the kernel (kexts), so be wary of changes */
 typedef struct {
 	char		cpuid_vendor[16];
@@ -549,7 +600,11 @@ typedef struct {
 #define cpuid_mwait_sub_Cstates		cpuid_mwait_leaf.sub_Cstates
 	cpuid_thermal_leaf_t	cpuid_thermal_leaf;
 	cpuid_arch_perf_leaf_t	cpuid_arch_perf_leaf;
+<<<<<<< HEAD
 	uint32_t	unused[4];			/* cpuid_xsave_leaf */
+=======
+	cpuid_xsave_leaf_t	cpuid_xsave_leaf;
+>>>>>>> origin/10.6
 
 	/* Cache details: */
 	uint32_t	cpuid_cache_linesize;
@@ -592,11 +647,14 @@ typedef struct {
 	cpuid_thermal_leaf_t	*cpuid_thermal_leafp;
 	cpuid_arch_perf_leaf_t	*cpuid_arch_perf_leafp;
 	cpuid_xsave_leaf_t	*cpuid_xsave_leafp;
+<<<<<<< HEAD
 	uint64_t		cpuid_leaf7_features;
 	cpuid_tsc_leaf_t	cpuid_tsc_leaf;
 	cpuid_xsave_leaf_t	cpuid_xsave_leaf[2];
 =======
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.6
 } i386_cpu_info_t;
 
 #ifdef MACH_KERNEL_PRIVATE

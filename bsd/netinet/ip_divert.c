@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -349,6 +353,7 @@ div_output(struct socket *so, struct mbuf *m, struct sockaddr_in *sin,
 	struct inpcb *const inp = sotoinpcb(so);
 	struct ip *const ip = mtod(m, struct ip *);
 	int error = 0;
+<<<<<<< HEAD
 	mbuf_svc_class_t msc = MBUF_SC_UNSPEC;
 
 	if (control != NULL) {
@@ -356,6 +361,18 @@ div_output(struct socket *so, struct mbuf *m, struct sockaddr_in *sin,
 
 		m_freem(control);		/* XXX */
 		control = NULL;
+=======
+#if PKT_PRIORITY
+	mbuf_traffic_class_t mtc = MBUF_TC_NONE;
+#endif /* PKT_PRIORITY */
+
+	if (control != NULL) {
+#if PKT_PRIORITY
+		mtc = mbuf_traffic_class_from_control(control);
+#endif /* PKT_PRIORITY */
+
+		m_freem(control);		/* XXX */
+>>>>>>> origin/10.6
 	}
 	/* Loopback avoidance and state recovery */
 	if (sin) {
@@ -420,11 +437,18 @@ div_output(struct socket *so, struct mbuf *m, struct sockaddr_in *sin,
 		/* Copy the cached route and take an extra reference */
 		inp_route_copyout(inp, &ro);
 
+<<<<<<< HEAD
 		set_packet_service_class(m, so, msc, 0);
 
 		imo = inp->inp_moptions;
 		if (imo != NULL)
 			IMO_ADDREF(imo);
+=======
+#if PKT_PRIORITY
+		set_traffic_class(m, so, mtc);
+#endif /* PKT_PRIORITY */
+
+>>>>>>> origin/10.6
 		socket_unlock(so, 0);
 #if CONFIG_MACF_NET
 		mac_mbuf_label_associate_inpcb(inp, m);

@@ -630,7 +630,10 @@ vm_object_bootstrap(void)
 				round_page(512*1024),
 				round_page(12*1024),
 				"vm objects");
+<<<<<<< HEAD
 	zone_change(vm_object_zone, Z_CALLERACCT, FALSE); /* don't charge caller */
+=======
+>>>>>>> origin/10.6
 	zone_change(vm_object_zone, Z_NOENCRYPT, TRUE);
 
 	vm_object_init_lck_grp();
@@ -660,7 +663,10 @@ vm_object_bootstrap(void)
 			      round_page(512*1024),
 			      round_page(12*1024),
 			      "vm object hash entries");
+<<<<<<< HEAD
 	zone_change(vm_object_hash_zone, Z_CALLERACCT, FALSE);
+=======
+>>>>>>> origin/10.6
 	zone_change(vm_object_hash_zone, Z_NOENCRYPT, TRUE);
 
 	for (i = 0; i < VM_OBJECT_HASH_COUNT; i++)
@@ -2253,7 +2259,40 @@ restart_after_sleep:
 		}
 		if (reap_type == REAP_DATA_FLUSH || reap_type == REAP_TERMINATE) {
 
+<<<<<<< HEAD
 			if (p->busy || p->cleaning) {
+=======
+			if (reap_type == REAP_DATA_FLUSH &&
+			    ((p->pageout == TRUE || p->cleaning == TRUE) && p->list_req_pending == TRUE)) {
+				p->list_req_pending = FALSE;
+				p->cleaning = FALSE;
+				/*
+				 * need to drop the laundry count...
+				 * we may also need to remove it
+				 * from the I/O paging queue...
+				 * vm_pageout_throttle_up handles both cases
+				 *
+				 * the laundry and pageout_queue flags are cleared...
+				 */
+#if CONFIG_EMBEDDED
+				if (p->laundry) 
+					vm_pageout_throttle_up(p);
+#else
+				vm_pageout_throttle_up(p);
+#endif
+				if (p->pageout == TRUE) {
+					/*
+					 * toss the wire count we picked up
+					 * when we initially set this page up
+					 * to be cleaned and stolen...
+					 */
+					vm_page_unwire(p, TRUE);
+					p->pageout = FALSE;
+				}
+				PAGE_WAKEUP(p);
+
+			} else if (p->busy || p->cleaning) {
+>>>>>>> origin/10.6
 
 				vm_page_unlock_queues();
 				/*
@@ -2980,12 +3019,22 @@ deactivate_pages_in_object(
 						object->reusable_page_count++;
 						assert(object->resident_page_count >= object->reusable_page_count);
 						reusable++;
+<<<<<<< HEAD
 						/*
 						 * Tell pmap this page is now
 						 * "reusable" (to update pmap
 						 * stats for all mappings).
 						 */
 						pmap_options |=	PMAP_OPTIONS_SET_REUSABLE;
+=======
+#if CONFIG_EMBEDDED
+					} else {
+						if (m->reusable) {
+							m->reusable = FALSE;
+							object->reusable_page_count--;
+						}
+#endif
+>>>>>>> origin/10.6
 					}
 				}
 				pmap_options |= PMAP_OPTIONS_NOFLUSH;
@@ -3209,6 +3258,14 @@ vm_object_deactivate_pages(
 	}
 
 	pmap_flush_context_init(&pmap_flush_context_storage);
+
+#if CONFIG_EMBEDDED
+	if ((reusable_page || all_reusable) && object->all_reusable) {
+		/* This means MADV_FREE_REUSABLE has been called twice, which 
+		 * is probably illegal. */
+		return;
+	}
+#endif
 
 	while (size) {
 		length = deactivate_a_chunk(object, offset, size, kill_page, reusable_page, all_reusable, &pmap_flush_context_storage, pmap, pmap_offset);
@@ -3627,10 +3684,14 @@ vm_object_copy_slowly(
 	fault_info.hi_offset = src_offset + size;
 	fault_info.no_cache  = FALSE;
 	fault_info.stealth = TRUE;
+<<<<<<< HEAD
 	fault_info.io_sync = FALSE;
 	fault_info.cs_bypass = FALSE;
 	fault_info.mark_zf_absent = FALSE;
 	fault_info.batch_pmap_op = FALSE;
+=======
+	fault_info.mark_zf_absent = FALSE;
+>>>>>>> origin/10.6
 
 	for ( ;
 	    size != 0 ;
@@ -6517,7 +6578,19 @@ vm_object_populate_with_private(
 
 	base_page = phys_page;
 
+<<<<<<< HEAD
 	vm_object_lock(object);
+=======
+	    assert((ppnum_t) addr == addr);
+	    vm_page_init(m, (ppnum_t) addr, FALSE);
+	    /*
+	     * private normally requires lock_queues but since we
+	     * are initializing the page, its not necessary here
+	     */
+	    m->private = TRUE;		/* don`t free page */
+	    m->wire_count = 1;
+	    vm_page_insert(m, object, offset);
+>>>>>>> origin/10.6
 
 	if (!object->phys_contiguous) {
 		vm_page_t	m;
@@ -8706,10 +8779,15 @@ _vm_object_lock_try(vm_object_t object)
 boolean_t
 vm_object_lock_try(vm_object_t object)
 {
+<<<<<<< HEAD
 	/*
 	 * Called from hibernate path so check before blocking.
 	 */
 	if (vm_object_lock_avoid(object) && ml_get_interrupts_enabled() && get_preemption_level()==0) {
+=======
+    // called from hibernate path so check before blocking
+	if (vm_object_lock_avoid(object) && ml_get_interrupts_enabled()) {
+>>>>>>> origin/10.6
 		mutex_pause(2);
 	}
 	return _vm_object_lock_try(object);

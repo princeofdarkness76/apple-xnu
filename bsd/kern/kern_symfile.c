@@ -235,7 +235,11 @@ kern_open_file_for_direct_io(const char * name,
 			     dev_t * image_device_result,
                              uint64_t * partitionbase_result,
                              uint64_t * maxiocount_result,
+<<<<<<< HEAD
                              uint32_t * oflags)
+=======
+                             boolean_t * solid_state)
+>>>>>>> origin/10.6
 {
     struct kern_direct_file_io_ref_t * ref;
 
@@ -515,9 +519,23 @@ kern_open_file_for_direct_io(const char * name,
     if (maxiocount_result)
         *maxiocount_result = maxiocount;
 
+<<<<<<< HEAD
     error = do_ioctl(p1, p2, DKIOCISSOLIDSTATE, (caddr_t)&isssd);
     if (!error && isssd)
         flags |= kIOPolledFileSSD;
+=======
+    if (solid_state)
+    {
+        int isssd = 0;
+        error = do_ioctl(p1, p2, DKIOCISSOLIDSTATE, (caddr_t)&isssd);
+        if (error)
+            *solid_state = FALSE;
+        else
+            *solid_state = isssd;
+    }
+
+    // generate the block list
+>>>>>>> origin/10.6
 
     if (partition_device_result)
         *partition_device_result = device;

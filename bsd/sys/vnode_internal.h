@@ -308,8 +308,12 @@ struct fd_vn_data {
 extern	struct vnode *rootvnode;	/* root (i.e. "/") vnode */
 
 #ifdef CONFIG_IMGSRC_ACCESS
+<<<<<<< HEAD
 #define MAX_IMAGEBOOT_NESTING	2
 extern	struct vnode *imgsrc_rootvnodes[];
+=======
+extern	struct vnode *imgsrc_rootvnode;
+>>>>>>> origin/10.6
 #endif /* CONFIG_IMGSRC_ACCESS */
 
 

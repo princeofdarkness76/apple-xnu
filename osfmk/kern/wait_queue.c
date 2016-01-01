@@ -68,6 +68,117 @@
 #include <kern/sched_prim.h>
 
 #include <kern/wait_queue.h>
+<<<<<<< HEAD
+=======
+#include <vm/vm_kern.h>
+
+/* forward declarations */
+static boolean_t wait_queue_member_locked(
+			wait_queue_t		wq,
+			wait_queue_set_t	wq_set);
+
+static void wait_queues_init(void) __attribute__((section("__TEXT, initcode")));
+
+
+#define WAIT_QUEUE_MAX thread_max
+#define WAIT_QUEUE_SET_MAX task_max * 3
+#define WAIT_QUEUE_LINK_MAX PORT_MAX / 2 + (WAIT_QUEUE_MAX * WAIT_QUEUE_SET_MAX) / 64
+
+static zone_t _wait_queue_link_zone;
+static zone_t _wait_queue_set_zone;
+static zone_t _wait_queue_zone;
+
+/* see rdar://6737748&5561610; we need an unshadowed
+ * definition of a WaitQueueLink for debugging,
+ * but it needs to be used somewhere to wind up in
+ * the dSYM file. */
+volatile WaitQueueLink *unused_except_for_debugging;
+
+
+/*
+ *	Waiting protocols and implementation:
+ *
+ *	Each thread may be waiting for exactly one event; this event
+ *	is set using assert_wait().  That thread may be awakened either
+ *	by performing a thread_wakeup_prim() on its event,
+ *	or by directly waking that thread up with clear_wait().
+ *
+ *	The implementation of wait events uses a hash table.  Each
+ *	bucket is queue of threads having the same hash function
+ *	value; the chain for the queue (linked list) is the run queue
+ *	field.  [It is not possible to be waiting and runnable at the
+ *	same time.]
+ *
+ *	Locks on both the thread and on the hash buckets govern the
+ *	wait event field and the queue chain field.  Because wakeup
+ *	operations only have the event as an argument, the event hash
+ *	bucket must be locked before any thread.
+ *
+ *	Scheduling operations may also occur at interrupt level; therefore,
+ *	interrupts below splsched() must be prevented when holding
+ *	thread or hash bucket locks.
+ *
+ *	The wait event hash table declarations are as follows:
+ */
+
+struct wait_queue boot_wait_queue[1];
+__private_extern__ struct wait_queue *wait_queues = &boot_wait_queue[0];
+
+__private_extern__ uint32_t num_wait_queues = 1;
+
+static uint32_t
+compute_wait_hash_size(__unused unsigned cpu_count, __unused uint64_t memsize) {
+	uint32_t hsize = (uint32_t)round_page_64((thread_max / 11) * sizeof(struct wait_queue));
+	uint32_t bhsize;
+	
+	if (PE_parse_boot_argn("wqsize", &bhsize, sizeof(bhsize)))
+		hsize = bhsize;
+
+	return hsize;
+}
+
+static void
+wait_queues_init(void)
+{
+	uint32_t	i, whsize;
+	kern_return_t	kret;
+
+	whsize = compute_wait_hash_size(processor_avail_count, machine_info.max_mem);
+	num_wait_queues = (whsize / ((uint32_t)sizeof(struct wait_queue))) - 1;
+
+	kret = kernel_memory_allocate(kernel_map, (vm_offset_t *) &wait_queues, whsize, 0, KMA_KOBJECT|KMA_NOPAGEWAIT);
+
+	if (kret != KERN_SUCCESS || wait_queues == NULL)
+		panic("kernel_memory_allocate() failed to allocate wait queues, error: %d, whsize: 0x%x", kret, whsize);
+
+	for (i = 0; i < num_wait_queues; i++) {
+		wait_queue_init(&wait_queues[i], SYNC_POLICY_FIFO);
+	}
+}
+
+void
+wait_queue_bootstrap(void)
+{
+	wait_queues_init();
+	_wait_queue_zone = zinit(sizeof(struct wait_queue),
+				      WAIT_QUEUE_MAX * sizeof(struct wait_queue),
+				      sizeof(struct wait_queue),
+				      "wait queues");
+	zone_change(_wait_queue_zone, Z_NOENCRYPT, TRUE);
+
+	_wait_queue_set_zone = zinit(sizeof(struct wait_queue_set),
+				      WAIT_QUEUE_SET_MAX * sizeof(struct wait_queue_set),
+				      sizeof(struct wait_queue_set),
+				      "wait queue sets");
+	zone_change(_wait_queue_set_zone, Z_NOENCRYPT, TRUE);
+
+	_wait_queue_link_zone = zinit(sizeof(struct _wait_queue_link),
+				      WAIT_QUEUE_LINK_MAX * sizeof(struct _wait_queue_link),
+				      sizeof(struct _wait_queue_link),
+				      "wait queue links");
+	zone_change(_wait_queue_link_zone, Z_NOENCRYPT, TRUE);
+}
+>>>>>>> origin/10.6
 
 /*
  *	Routine:        wait_queue_init

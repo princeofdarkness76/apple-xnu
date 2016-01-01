@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -242,6 +246,7 @@ struct so_tcdbg {
 
 #ifdef PRIVATE
 #define	SO_EXECPATH	0x1085 		/* Application Firewall Socket option */
+<<<<<<< HEAD
 /*
  * Traffic service class definitions (lowest to highest):
  *
@@ -382,6 +387,16 @@ typedef struct sa_endpoints {
 	struct sockaddr	*sae_dstaddr;   /* destination address */
 	socklen_t	sae_dstaddrlen; /* size of destination address */
 } sa_endpoints_t;
+=======
+#define SO_TRAFFIC_CLASS	0x1086		/* Traffic class */
+#define  SO_TC_BE	0		/* Best effort, normal */
+#define  SO_TC_BK	1		/* Background, low priority or bulk traffic */
+#define  SO_TC_VI	2		/* Interactive video, constant bit rate, low latency */
+#define  SO_TC_VO	3		/* Interactive voice, constant bit rate, lowest latency */
+#endif
+#define	SO_LABEL	0x1010		/* socket's MAC label */
+#define	SO_PEERLABEL	0x1011		/* socket's peer MAC label */
+>>>>>>> origin/10.6
 #endif	/* (!_POSIX_C_SOURCE || _DARWIN_C_SOURCE) */
 
 /*

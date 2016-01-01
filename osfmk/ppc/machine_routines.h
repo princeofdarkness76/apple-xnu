@@ -196,6 +196,7 @@ unsigned int ml_throttle(
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 void ml_get_timebase(unsigned long long *timstamp);
 void ml_sense__nmi(void);
 =======
@@ -203,6 +204,9 @@ void ml_sense__nmi(void);
 void ml_init_lock_timeout(void);
 
 >>>>>>> origin/10.3
+=======
+boolean_t machine_timeout_suspended(void);
+>>>>>>> origin/10.6
 #endif /* MACH_KERNEL_PRIVATE */
 
 void ml_thread_policy(

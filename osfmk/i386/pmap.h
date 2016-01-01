@@ -327,10 +327,14 @@ pmap_store_pte(pt_entry_t *entryp, pt_entry_t value)
 
 #define INTEL_PTE_INVALID       0
 /* This is conservative, but suffices */
+<<<<<<< HEAD
 #define INTEL_PTE_RSVD		((1ULL << 10) | (1ULL << 11) | (0x1FFULL << 54))
 
 #define INTEL_COMPRESSED	(1ULL << 62) /* marker, for invalid PTE only -- ignored by hardware for both regular/EPT entries*/
 
+=======
+#define INTEL_PTE_RSVD		((1ULL << 8) | (1ULL << 9) | (1ULL << 10) | (1ULL << 11) | (0x1FFULL << 54))
+>>>>>>> origin/10.6
 #define	pa_to_pte(a)		((a) & INTEL_PTE_PFN) /* XXX */
 #define	pte_to_pa(p)		((p) & INTEL_PTE_PFN) /* XXX */
 #define	pte_increment_pa(p)	((p) += INTEL_OFFMASK+1)
@@ -677,10 +681,25 @@ extern int		pmap_list_resident_pages(
 				vm_offset_t	*listp,
 				int		space);
 extern void		x86_filter_TLB_coherency_interrupts(boolean_t);
+<<<<<<< HEAD
 /*
  * Get cache attributes (as pagetable bits) for the specified phys page
  */
 extern	unsigned	pmap_get_cache_attributes(ppnum_t, boolean_t is_ept);
+=======
+#ifdef __i386__
+extern void             pmap_commpage32_init(
+					   vm_offset_t kernel,
+					   vm_offset_t user,
+					   int count);
+extern void             pmap_commpage64_init(
+					   vm_offset_t	kernel,
+					   vm_map_offset_t user,
+					   int count);
+
+#endif
+
+>>>>>>> origin/10.6
 #if NCOPY_WINDOWS > 0
 extern struct cpu_pmap	*pmap_cpu_alloc(
 				boolean_t	is_boot_cpu);
@@ -703,6 +722,22 @@ extern ppnum_t          pmap_find_phys(pmap_t map, addr64_t va);
 
 extern void pmap_cpu_init(void);
 extern void pmap_disable_NX(pmap_t pmap);
+<<<<<<< HEAD
+=======
+#ifdef __i386__
+extern void pmap_set_4GB_pagezero(pmap_t pmap);
+extern void pmap_clear_4GB_pagezero(pmap_t pmap);
+extern void pmap_load_kernel_cr3(void);
+extern vm_offset_t pmap_cpu_high_map_vaddr(int, enum high_cpu_types);
+extern vm_offset_t pmap_high_map_vaddr(enum high_cpu_types);
+extern vm_offset_t pmap_high_map(pt_entry_t, enum high_cpu_types);
+extern vm_offset_t pmap_cpu_high_shared_remap(int, enum high_cpu_types, vm_offset_t, int);
+extern vm_offset_t pmap_high_shared_remap(enum high_fixed_addresses, vm_offset_t, int);
+#endif
+
+extern void pt_fake_zone_info(int *, vm_size_t *, vm_size_t *, vm_size_t *, vm_size_t *, int *, int *);
+extern void pmap_pagetable_corruption_msg_log(int (*)(const char * fmt, ...)__printflike(1,2));
+>>>>>>> origin/10.6
 
 extern void pt_fake_zone_init(int);
 extern void pt_fake_zone_info(int *, vm_size_t *, vm_size_t *, vm_size_t *, vm_size_t *, 

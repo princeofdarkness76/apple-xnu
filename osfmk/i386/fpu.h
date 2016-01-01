@@ -121,6 +121,13 @@ extern void		fpexterrflt(void);
 extern void		fpSSEexterrflt(void);
 extern void		fpflush(thread_t);
 extern void		fp_setvalid(boolean_t);
+<<<<<<< HEAD
+=======
+#ifdef __i386__
+extern void		fxsave64(struct x86_fx_thread_state *);
+extern void		fxrstor64(struct x86_fx_thread_state *);
+#endif
+>>>>>>> origin/10.6
 
 extern void clear_fpu(void);
 extern void fpu_save_context(thread_t thread);

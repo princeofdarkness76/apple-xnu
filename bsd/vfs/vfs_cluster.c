@@ -255,7 +255,13 @@ static lck_spin_t cl_direct_read_spin_lock;
 static lck_grp_t	*cl_mtx_grp;
 static lck_attr_t	*cl_mtx_attr;
 static lck_grp_attr_t   *cl_mtx_grp_attr;
+<<<<<<< HEAD
 static lck_mtx_t	*cl_transaction_mtxp;
+=======
+static lck_mtx_t	*cl_mtxp;
+static lck_mtx_t	*cl_transaction_mtxp;
+
+>>>>>>> origin/10.6
 
 #define	IO_UNKNOWN	0
 #define	IO_DIRECT	1
@@ -519,10 +525,20 @@ cluster_init(void) {
 	if (cl_transaction_mtxp == NULL)
 	        panic("cluster_init: failed to allocate cl_transaction_mtxp");
 
+<<<<<<< HEAD
 	lck_spin_init(&cl_direct_read_spin_lock, cl_mtx_grp, cl_mtx_attr);
 
 	for (int i = 0; i < CL_DIRECT_READ_LOCK_BUCKETS; ++i)
 		LIST_INIT(&cl_direct_read_locks[i]);
+=======
+	if (cl_mtxp == NULL)
+	        panic("cluster_init: failed to allocate cl_mtxp");
+
+	cl_transaction_mtxp = lck_mtx_alloc_init(cl_mtx_grp, cl_mtx_attr);
+
+	if (cl_transaction_mtxp == NULL)
+	        panic("cluster_init: failed to allocate cl_transaction_mtxp");
+>>>>>>> origin/10.6
 }
 
 
@@ -1323,9 +1339,38 @@ cluster_iodone(buf_t bp, void *callback_arg)
 		     cbp_head, bp->b_lblkno, bp->b_bcount, bp->b_flags, 0);
 
 	if (cbp_head->b_trans_next || !(cbp_head->b_flags & B_EOT)) {
+<<<<<<< HEAD
 		boolean_t	need_wakeup = FALSE;
 
 		lck_mtx_lock_spin(cl_transaction_mtxp);
+=======
+
+		lck_mtx_lock_spin(cl_transaction_mtxp);
+
+		bp->b_flags |= B_TDONE;
+		
+		for (cbp = cbp_head; cbp; cbp = cbp->b_trans_next) {
+		        /*
+			 * all I/O requests that are part of this transaction
+			 * have to complete before we can process it
+			 */
+		        if ( !(cbp->b_flags & B_TDONE)) {
+
+			        KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 20)) | DBG_FUNC_END,
+					     cbp_head, cbp, cbp->b_bcount, cbp->b_flags, 0);
+
+				lck_mtx_unlock(cl_transaction_mtxp);
+				return 0;
+			}
+			if (cbp->b_flags & B_EOT)
+			        transaction_complete = TRUE;
+		}
+		lck_mtx_unlock(cl_transaction_mtxp);
+
+		if (transaction_complete == FALSE) {
+		        KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 20)) | DBG_FUNC_END,
+				     cbp_head, 0, 0, 0, 0);
+>>>>>>> origin/10.6
 
 		bp->b_flags |= B_TDONE;
 
@@ -1334,6 +1379,7 @@ cluster_iodone(buf_t bp, void *callback_arg)
 			CLR(bp->b_flags, B_TWANTED);
 			need_wakeup = TRUE;
 		}
+<<<<<<< HEAD
 		for (cbp = cbp_head; cbp; cbp = cbp->b_trans_next) {
 			/*
 			 * all I/O requests that are part of this transaction
@@ -1369,6 +1415,8 @@ cluster_iodone(buf_t bp, void *callback_arg)
 				     cbp_head, 0, 0, 0, 0);
 			return 0;
 		}
+=======
+>>>>>>> origin/10.6
 	}
 	error       = 0;
 	total_size  = 0;
@@ -1981,6 +2029,7 @@ cluster_complete_transaction(buf_t *cbp_head, void *callback_arg, int *retval, i
 	 * so that cluster_iodone sees the transaction as completed
 	 */
 	for (cbp = *cbp_head; cbp; cbp = cbp->b_trans_next)
+<<<<<<< HEAD
 		cbp->b_flags |= B_TDONE;
 	cbp = *cbp_head;
 =======
@@ -2001,6 +2050,11 @@ wait_for_writes:
 		isswapout = TRUE;
 
 	error = cluster_iodone(cbp, callback_arg);
+=======
+	        cbp->b_flags |= B_TDONE;
+
+	error = cluster_iodone(*cbp_head, callback_arg);
+>>>>>>> origin/10.6
 
 	if ( !(flags & CL_ASYNC) && error && *retval == 0) {
 		if (((flags & (CL_PAGEOUT | CL_KEEPCACHED)) != CL_PAGEOUT) || (error != ENXIO))
@@ -4307,10 +4361,14 @@ cluster_write_copy(vnode_t vp, struct uio *uio, u_int32_t io_req_size, off_t old
 			 */
 		        if ((start_offset + total_size) > max_io_size)
 <<<<<<< HEAD
+<<<<<<< HEAD
 			        total_size = max_io_size - start_offset;
 =======
 			        total_size -= start_offset;
 >>>>>>> origin/10.5
+=======
+			        total_size = max_io_size - start_offset;
+>>>>>>> origin/10.6
 		        xfer_resid = total_size;
 
 		        retval = cluster_copy_ubc_data_internal(vp, uio, &xfer_resid, 1, 1);
@@ -5939,7 +5997,10 @@ next_dread:
 		else
 		        no_zero_fill = 0;
 
+<<<<<<< HEAD
 		vm_map_t map = UIO_SEG_IS_USER_SPACE(uio->uio_segflg) ? current_map() : kernel_map;
+=======
+>>>>>>> origin/10.6
 		for (force_data_sync = 0; force_data_sync < 3; force_data_sync++) {
 		        pages_in_pl = 0;
 			upl_size = upl_needed_size;

@@ -860,6 +860,7 @@ mprotect(__unused proc_t p, struct mprotect_args *uap, __unused int32_t *retval)
 	user_addr = (mach_vm_offset_t) uap->addr;
 	user_size = (mach_vm_size_t) uap->len;
 	prot = (vm_prot_t)(uap->prot & (VM_PROT_ALL | VM_PROT_TRUSTED));
+<<<<<<< HEAD
 =======
 	AUDIT_ARG(addr, uap->addr);
 	AUDIT_ARG(len, uap->len);
@@ -868,6 +869,8 @@ mprotect(__unused proc_t p, struct mprotect_args *uap, __unused int32_t *retval)
 	user_size = (vm_size_t) uap->len;
 	prot = (vm_prot_t)(uap->prot & VM_PROT_ALL);
 >>>>>>> origin/10.3
+=======
+>>>>>>> origin/10.6
 
 	if (user_addr & vm_map_page_mask(user_map)) {
 		/* UNIX SPEC: user address is not page-aligned, return EINVAL */
@@ -913,12 +916,18 @@ mprotect(__unused proc_t p, struct mprotect_args *uap, __unused int32_t *retval)
 		 * mac_proc_check_mprotect() hook above. Otherwise, Codesigning will be
 		 * compromised because the check would always succeed and thusly any
 		 * process could sign dynamically. */
+<<<<<<< HEAD
 		result = vm_map_sign(
 			user_map, 
 			vm_map_trunc_page(user_addr,
 					  vm_map_page_mask(user_map)),
 			vm_map_round_page(user_addr+user_size,
 					  vm_map_page_mask(user_map)));
+=======
+		result = vm_map_sign(user_map, 
+				     vm_map_trunc_page(user_addr), 
+				     vm_map_round_page(user_addr+user_size));
+>>>>>>> origin/10.6
 		switch (result) {
 			case KERN_SUCCESS:
 				break;

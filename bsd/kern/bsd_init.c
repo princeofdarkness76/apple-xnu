@@ -230,7 +230,10 @@
 extern shared_region_mapping_t       system_shared_region;
 >>>>>>> origin/10.1
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.6
 void * get_user_regs(thread_t);		/* XXX kludge for <machine/thread.h> */
 void IOKitInitializeTime(void);		/* XXX */
 void IOSleep(unsigned int);		/* XXX */
@@ -884,6 +887,7 @@ bsd_init(void)
 	kernproc->p_fd->fd_cdir = NULL;
 	kernproc->p_fd->fd_rdir = NULL;
 
+<<<<<<< HEAD
 #if CONFIG_FREEZE
 #ifndef CONFIG_MEMORYSTATUS
     #error "CONFIG_FREEZE defined without matching CONFIG_MEMORYSTATUS"
@@ -904,6 +908,13 @@ bsd_init(void)
 
 	bsd_init_kprintf("calling acct_init\n");
 	acct_init();
+=======
+#if CONFIG_EMBEDDED
+	/* Initialize kernel memory status notifications */
+	bsd_init_kprintf("calling kern_memorystatus_init\n");
+	kern_memorystatus_init();
+#endif
+>>>>>>> origin/10.6
 
 #ifdef GPROF
 	/* Initialize kernel profiling. */
@@ -1106,7 +1117,10 @@ bsd_init(void)
 	consider_zone_gc(FALSE);
 #endif
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.6
 	bsd_init_kprintf("done\n");
 }
 

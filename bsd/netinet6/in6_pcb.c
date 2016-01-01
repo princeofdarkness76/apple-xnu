@@ -546,8 +546,12 @@ in6_pcbconnect(struct inpcb *inp, struct sockaddr *nam, struct proc *p)
 	socket_lock(so, 0);
 	if (pcb != NULL) {
 		in_pcb_checkstate(pcb, WNT_RELEASE, pcb == inp ? 1 : 0);
+<<<<<<< HEAD
 		error = EADDRINUSE;
 		goto done;
+=======
+		return (EADDRINUSE);
+>>>>>>> origin/10.6
 	}
 	if (IN6_IS_ADDR_UNSPECIFIED(&inp->in6p_laddr)) {
 		if (inp->inp_lport == 0) {

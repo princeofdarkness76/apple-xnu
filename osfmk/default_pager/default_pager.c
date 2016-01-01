@@ -401,7 +401,10 @@ default_pager_initialize(void)
 	vstruct_zone = zinit(sizeof(struct vstruct),
 			     10000 * sizeof(struct vstruct),
 			     8192, "vstruct zone");
+<<<<<<< HEAD
 	zone_change(vstruct_zone, Z_CALLERACCT, FALSE);
+=======
+>>>>>>> origin/10.6
 	zone_change(vstruct_zone, Z_NOENCRYPT, TRUE);
 
 	VSL_LOCK_INIT();

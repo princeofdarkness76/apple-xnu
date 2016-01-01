@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -143,7 +147,16 @@ extern void throttle_lowpri_io(boolean_t);
  * Forward declarations
  */
 static void user_page_fault_continue(kern_return_t kret);
+<<<<<<< HEAD
 static void panic_trap(x86_saved_state64_t *saved_state, uint32_t pl);
+=======
+#ifdef __i386__
+static void panic_trap(x86_saved_state32_t *saved_state);
+static void set_recovery_ip(x86_saved_state32_t *saved_state, vm_offset_t ip);
+static void panic_64(x86_saved_state_t *, int, const char *, boolean_t);
+#else
+static void panic_trap(x86_saved_state64_t *saved_state);
+>>>>>>> origin/10.6
 static void set_recovery_ip(x86_saved_state64_t *saved_state, vm_offset_t ip);
 
 volatile perfCallback perfTrapHook = NULL; /* Pointer to CHUD trap hook routine */
@@ -349,6 +362,31 @@ interrupt_latency_tracker_setup(void) {
 	PE_parse_boot_argn("-interrupt_latency_assert_enable", &ilat_assert, sizeof(ilat_assert));
 }
 
+<<<<<<< HEAD
+=======
+
+
+/*
+ * Non-zero indicates latency assert is enabled and capped at valued
+ * absolute time units.
+ */
+   
+uint64_t interrupt_latency_cap = 0;
+boolean_t ilat_assert = FALSE;
+
+void
+interrupt_latency_tracker_setup(void) {
+	uint32_t ilat_cap_us;
+	if (PE_parse_boot_argn("interrupt_latency_cap_us", &ilat_cap_us, sizeof(ilat_cap_us))) {
+		interrupt_latency_cap = ilat_cap_us * NSEC_PER_USEC;
+		nanoseconds_to_absolutetime(interrupt_latency_cap, &interrupt_latency_cap);
+	} else {
+		interrupt_latency_cap = LockTimeOut;
+	}
+	PE_parse_boot_argn("-interrupt_latency_assert_enable", &ilat_assert, sizeof(ilat_assert));
+}
+
+>>>>>>> origin/10.6
 void interrupt_reset_latency_stats(void) {
 	uint32_t i;
 	for (i = 0; i < real_ncpus; i++) {
@@ -371,9 +409,15 @@ void interrupt_populate_latency_stats(char *buf, unsigned bufsize) {
 	if (tcpu < real_ncpus)
 		snprintf(buf, bufsize, "0x%x 0x%x 0x%llx", tcpu, cpu_data_ptr[tcpu]->cpu_max_observed_int_latency_vector, cpu_data_ptr[tcpu]->cpu_max_observed_int_latency);
 }
+<<<<<<< HEAD
 
 uint32_t interrupt_timer_coalescing_enabled = 1;
 uint64_t interrupt_coalesced_timers;
+=======
+   
+
+extern void	PE_incoming_interrupt(int interrupt);
+>>>>>>> origin/10.6
 
 /*
  * Handle interrupts:
@@ -387,10 +431,14 @@ interrupt(x86_saved_state_t *state)
 	uint64_t	rsp;
 	int		interrupt_num;
 	boolean_t	user_mode = FALSE;
+<<<<<<< HEAD
 	int		ipl;
 	int		cnum = cpu_number();
 	cpu_data_t	*cdp = cpu_data_ptr[cnum];
 	int		itype = 0;
+=======
+	int		cnum = cpu_number();
+>>>>>>> origin/10.6
 
 	if (is_saved_state64(state) == TRUE) {
 	        x86_saved_state64_t	*state64;
@@ -443,7 +491,11 @@ interrupt(x86_saved_state_t *state)
 	/*
 	 * Handle local APIC interrupts
 	 * else call platform expert for devices.
+<<<<<<< HEAD
 	 */
+=======
+	 */ 
+>>>>>>> origin/10.6
 	if (!lapic_interrupt(interrupt_num, state)) {
 		PE_incoming_interrupt(interrupt_num);
 	}
@@ -490,11 +542,30 @@ interrupt(x86_saved_state_t *state)
 		}
 	}
 
+ 	if (cpu_data_ptr[cnum]->cpu_nested_istack) {
+ 		cpu_data_ptr[cnum]->cpu_nested_istack_events++;
+ 	}
+ 	else {
+		uint64_t int_latency = mach_absolute_time() - cpu_data_ptr[cnum]->cpu_int_event_time;
+		if (ilat_assert && (int_latency > interrupt_latency_cap) && !machine_timeout_suspended()) {
+			panic("Interrupt vector 0x%x exceeded interrupt latency threshold, 0x%llx absolute time delta, prior signals: 0x%x", interrupt_num, int_latency, cpu_data_ptr[cnum]->cpu_prior_signals);
+		}
+		if (int_latency > cpu_data_ptr[cnum]->cpu_max_observed_int_latency) {
+			cpu_data_ptr[cnum]->cpu_max_observed_int_latency = int_latency;
+			cpu_data_ptr[cnum]->cpu_max_observed_int_latency_vector = interrupt_num;
+		}
+	}
+
+
 	/*
 	 * Having serviced the interrupt first, look at the interrupted stack depth.
 	 */
 	if (!user_mode) {
+<<<<<<< HEAD
 		uint64_t depth = cdp->cpu_kernel_stack
+=======
+		uint64_t depth = cpu_data_ptr[cnum]->cpu_kernel_stack
+>>>>>>> origin/10.6
 				 + sizeof(struct x86_kernel_state)
 				 + sizeof(struct i386_exception_link *)
 				 - rsp;
@@ -559,7 +630,22 @@ kernel_trap(
 
 	thread = current_thread();
 
+<<<<<<< HEAD
 	if (__improbable(is_saved_state32(state)))
+=======
+#ifdef __i386__
+	if (is_saved_state64(state)) {
+		panic_64(state, 0, "Kernel trap with 64-bit state", FALSE);
+	}
+	saved_state = saved_state32(state);
+	vaddr = (user_addr_t)saved_state->cr2;
+	type  = saved_state->trapno;
+	code  = saved_state->err & 0xffff;
+	intr  = (saved_state->efl & EFL_IF) != 0;	/* state of ints at trap */
+	kern_ip = (vm_offset_t)saved_state->eip;
+#else
+	if (is_saved_state32(state))
+>>>>>>> origin/10.6
 		panic("kernel_trap(%p) with 32-bit state", state);
 	saved_state = saved_state64(state);
 
@@ -1227,9 +1313,14 @@ user_trap(
 	kprintf("user_trap(0x%08x) type=%d vaddr=0x%016llx\n",
 		saved_state, type, vaddr);
 #endif
+<<<<<<< HEAD
 
 	perfASTCallback astfn = perfASTHook;
 	if (__improbable(astfn != NULL)) {
+=======
+	perfCallback fn = perfASTHook;
+	if (fn) {
+>>>>>>> origin/10.6
 		myast = ast_pending();
 		if (*myast & AST_CHUD_ALL) {
 			astfn(AST_CHUD_ALL, myast);

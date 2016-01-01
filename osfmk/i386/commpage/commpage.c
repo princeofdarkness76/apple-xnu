@@ -354,6 +354,7 @@ commpage_mach_approximate_time_init(void)
         char *cp = commPagePtr32;
 	uint8_t supported;
 
+<<<<<<< HEAD
 #ifdef CONFIG_MACH_APPROXIMATE_TIME
 	supported = 1;
 #else
@@ -369,6 +370,12 @@ commpage_mach_approximate_time_init(void)
 		*(boolean_t *)cp = supported;
 	}
 	commpage_update_mach_approximate_time(0);
+=======
+	if (cpuid_features() & CPUID_FEATURE_AES)
+		bits |= kHasAES;
+
+	_cpu_capabilities = bits;		// set kernel version for use by drivers etc
+>>>>>>> origin/10.6
 }
 
 

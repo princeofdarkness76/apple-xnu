@@ -747,6 +747,7 @@ sigreturn(struct proc *p, struct sigreturn_args *uap, __unused int *retval)
 	        ts_flavor = x86_THREAD_STATE32;
 		ts_count  = x86_THREAD_STATE32_COUNT;
 		ts = (void *)&mctxp->mctx_avx32.ss;
+<<<<<<< HEAD
 
 		if (sig_avx) {
 			fs_flavor = x86_AVX_STATE32;
@@ -757,6 +758,18 @@ sigreturn(struct proc *p, struct sigreturn_args *uap, __unused int *retval)
 			fs_count = x86_FLOAT_STATE32_COUNT;
 		}
 
+=======
+
+		if (sig_avx) {
+			fs_flavor = x86_AVX_STATE32;
+			fs_count = x86_AVX_STATE32_COUNT;
+		}
+		else {
+			fs_flavor = x86_FLOAT_STATE32;
+			fs_count = x86_FLOAT_STATE32_COUNT;
+		}
+
+>>>>>>> origin/10.6
 		fs = (void *)&mctxp->mctx_avx32.fs;
 	}
 

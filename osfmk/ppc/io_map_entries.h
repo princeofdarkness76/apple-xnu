@@ -28,7 +28,14 @@
 #define	_PPC_IO_MAP_ENTRIES_H_
 
 extern vm_offset_t	io_map(
+<<<<<<< HEAD
 				vm_offset_t		phys_addr,
 				vm_size_t		size);
+=======
+				vm_map_offset_t		phys_addr,
+				vm_size_t		size,
+				unsigned int            flags);
+extern vm_offset_t io_map_spec(vm_map_offset_t phys_addr, vm_size_t size, unsigned int flags);
+>>>>>>> origin/10.6
 
 #endif	/* _PPC_IO_MAP_ENTRIES_H_ */

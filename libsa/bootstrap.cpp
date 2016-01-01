@@ -429,6 +429,24 @@ KLDBootstrap::readPrelinkedExtensions(
         OSSafeReleaseNULL(newKext);
     }
     
+<<<<<<< HEAD
+=======
+    /* Get all of the personalities for kexts that were not prelinked and
+     * add them to the catalogue.
+     */
+    personalitiesArray = OSDynamicCast(OSArray,
+        prelinkInfoDict->getObject(kPrelinkPersonalitiesKey));
+    if (!personalitiesArray) {
+        OSKextLog(/* kext */ NULL, kOSKextLogErrorLevel | kOSKextLogArchiveFlag,
+            "The prelinked kernel has no personalities array");
+        goto finish;
+    }
+
+    if (personalitiesArray->getCount()) {
+        gIOCatalogue->addDrivers(personalitiesArray);
+    }
+
+>>>>>>> origin/10.6
    /* Store the number of prelinked kexts in the registry so we can tell
     * when the system has been started from a prelinked kernel.
     */

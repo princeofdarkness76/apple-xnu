@@ -1,6 +1,10 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2007-2012 Apple Inc. All rights reserved.
  * Copyright (c) 1998-2006 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 1998-2011 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -48,6 +52,14 @@
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
+<<<<<<< HEAD
+=======
+
+
+#if __ppc__
+#include <ppc/proc_reg.h> 
+#endif
+>>>>>>> origin/10.6
 
 #include <IOKit/IOLib.h>
 #include <IOKit/IOService.h>
@@ -762,6 +774,7 @@ IOReturn IOSharedInterruptController::handleInterrupt(void * /*refCon*/,
 #if !defined(__i386__) && !defined(__x86_64__)
     OSMemoryBarrier();
 #endif
+<<<<<<< HEAD
 
 	if (!vector->interruptDisabledSoft) {
 	  
@@ -769,20 +782,56 @@ IOReturn IOSharedInterruptController::handleInterrupt(void * /*refCon*/,
 	  if (vector->interruptRegistered) {
 		  
 		  bool	trace = (gIOKitTrace & kIOTraceInterrupts) ? true : false;
+=======
+    if (!vector->interruptDisabledSoft) {
+#if __ppc__
+      isync();
+#endif
+      
+      // Call the handler if it exists.
+      if (vector->interruptRegistered) {
+      
+		  bool		trace		= (gIOKitTrace & kIOTraceInterrupts) ? true : false;
+		  bool		timeHandler	= gIOInterruptThresholdNS ? true : false;
+		  uint64_t	startTime	= 0;
+		  uint64_t	endTime		= 0;
+>>>>>>> origin/10.6
 		  
 		  if (trace)
 			  IOTimeStampStartConstant(IODBG_INTC(IOINTC_HANDLER),
 									   (uintptr_t) vectorNumber, (uintptr_t) vector->handler, (uintptr_t)vector->target);
 		  
+<<<<<<< HEAD
 		  // Call handler.
 		  vector->handler(vector->target, vector->refCon, vector->nub, vector->source);
+=======
+		  if (timeHandler)
+			  startTime = mach_absolute_time();
+		  
+		  // Call handler.
+		  vector->handler(vector->target, vector->refCon, vector->nub, vector->source);
+
+		  if (timeHandler)
+		  {
+			  endTime = mach_absolute_time();
+			  if ((endTime - startTime) > gIOInterruptThresholdNS)
+				  panic("IOSIC::handleInterrupt: interrupt exceeded threshold, handlerTime = %qd, vectorNumber = %d, handler = %p, target = %p\n",
+						endTime - startTime, (int)vectorNumber, vector->handler, vector->target);
+		  }
+>>>>>>> origin/10.6
 		  
 		  if (trace)
 			  IOTimeStampEndConstant(IODBG_INTC(IOINTC_HANDLER),
 									 (uintptr_t) vectorNumber, (uintptr_t) vector->handler, (uintptr_t)vector->target);
 		  
+<<<<<<< HEAD
 		}
 	}
+=======
+      }
+      
+    }
+>>>>>>> origin/10.6
     
     vector->interruptActive = 0;
   }

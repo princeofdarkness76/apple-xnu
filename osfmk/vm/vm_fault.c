@@ -210,15 +210,20 @@ extern void vm_fault_classify_init(void);
 #endif
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 unsigned long vm_pmap_enter_blocked = 0;
 unsigned long vm_pmap_enter_retried = 0;
 =======
 >>>>>>> origin/10.5
+=======
+unsigned long vm_pmap_enter_blocked = 0;
+>>>>>>> origin/10.6
 
 unsigned long vm_cs_validates = 0;
 unsigned long vm_cs_revalidates = 0;
 unsigned long vm_cs_query_modified = 0;
 unsigned long vm_cs_validated_dirtied = 0;
+<<<<<<< HEAD
 <<<<<<< HEAD
 unsigned long vm_cs_bitmap_validated = 0;
 
@@ -230,6 +235,8 @@ extern addr64_t	kdp_compressor_decompressed_page_paddr;
 extern ppnum_t	kdp_compressor_decompressed_page_ppnum;
 =======
 
+=======
+>>>>>>> origin/10.6
 #if CONFIG_ENFORCE_SIGNED_CODE
 #if SECURE_KERNEL
 const int cs_enforcement_disable=0;
@@ -1325,6 +1332,8 @@ vm_fault_page(
 					 */
 					my_fault = vm_fault_zero_page(m, no_zero_fill);
 
+					if (fault_info->mark_zf_absent && no_zero_fill == TRUE)
+						m->absent = TRUE;
 					break;
 				} else {
 					if (must_be_resident)
@@ -2016,6 +2025,8 @@ dont_look_for_page:
 
 			my_fault = vm_fault_zero_page(m, no_zero_fill);
 
+			if (fault_info->mark_zf_absent && no_zero_fill == TRUE)
+				m->absent = TRUE;
 			break;
 
 		} else {
@@ -2668,6 +2679,10 @@ vm_fault_enter(vm_page_t m,
 	       boolean_t *need_retry,
 	       int *type_of_fault)
 {
+<<<<<<< HEAD
+=======
+	unsigned int	cache_attr;
+>>>>>>> origin/10.6
 	kern_return_t	kr, pe_result;
 	boolean_t	previously_pmapped = m->pmapped;
 	boolean_t	must_disconnect = 0;
@@ -2948,6 +2963,7 @@ vm_fault_enter(vm_page_t m,
 		} else {
 			/* proceed with the invalid page */
 			kr = KERN_SUCCESS;
+<<<<<<< HEAD
 			if (!m->cs_validated) {
 				/*
 				 * This page has not been validated, so it
@@ -2980,6 +2996,13 @@ vm_fault_enter(vm_page_t m,
 				must_disconnect = !m->cs_tainted;
 				m->cs_tainted = TRUE;
 			}
+=======
+			/* Page might have been tainted before or not; now it
+			 * definitively is. If the page wasn't tainted, we must
+			 * disconnect it from all pmaps later. */
+			must_disconnect = !m->cs_tainted;
+			m->cs_tainted = TRUE;
+>>>>>>> origin/10.6
 			cs_enter_tainted_accepted++;
 		}
 		if (kr != KERN_SUCCESS) {
@@ -3075,7 +3098,37 @@ MACRO_END
 			m->wpmapped = TRUE;
 		}
 
+<<<<<<< HEAD
 		PMAP_ENTER(pmap, vaddr, m, prot, cache_attr, wired);
+=======
+		/* Prevent a deadlock by not
+		 * holding the object lock if we need to wait for a page in
+		 * pmap_enter() - <rdar://problem/7138958> */
+		PMAP_ENTER_OPTIONS(pmap, vaddr, m, prot, cache_attr,
+				  wired, PMAP_OPTIONS_NOWAIT, pe_result);
+
+		if(pe_result == KERN_RESOURCE_SHORTAGE) {
+			/* The nonblocking version of pmap_enter did not succeed.
+			 * Use the blocking version instead. Requires marking
+			 * the page busy and unlocking the object */
+			boolean_t was_busy = m->busy;
+			m->busy = TRUE;
+			vm_object_unlock(m->object);
+			
+			PMAP_ENTER(pmap, vaddr, m, prot, cache_attr, wired);
+
+			/* Take the object lock again. */
+			vm_object_lock(m->object);
+			
+			/* If the page was busy, someone else will wake it up.
+			 * Otherwise, we have to do it now. */
+			assert(m->busy);
+			if(!was_busy) {
+				PAGE_WAKEUP_DONE(m);
+			}
+			vm_pmap_enter_blocked++;
+		}
+>>>>>>> origin/10.6
 	}
 >>>>>>> origin/10.5
 
@@ -3577,9 +3630,13 @@ RetryFault:
 	pmap = real_map->pmap;
 	fault_info.interruptible = interruptible;
 	fault_info.stealth = FALSE;
+<<<<<<< HEAD
 	fault_info.io_sync = FALSE;
 	fault_info.mark_zf_absent = FALSE;
 	fault_info.batch_pmap_op = FALSE;
+=======
+	fault_info.mark_zf_absent = FALSE;
+>>>>>>> origin/10.6
 
 	/*
 	 * If the page is wired, we must fault for the current protection
@@ -5557,10 +5614,14 @@ vm_fault_unwire(
 	fault_info.hi_offset = (entry->vme_end - entry->vme_start) + VME_OFFSET(entry);
 	fault_info.no_cache = entry->no_cache;
 	fault_info.stealth = TRUE;
+<<<<<<< HEAD
 	fault_info.io_sync = FALSE;
 	fault_info.cs_bypass = FALSE;
 	fault_info.mark_zf_absent = FALSE;
 	fault_info.batch_pmap_op = FALSE;
+=======
+	fault_info.mark_zf_absent = FALSE;
+>>>>>>> origin/10.6
 
 	/*
 	 *	Since the pages are wired down, we must be able to
@@ -6045,10 +6106,14 @@ vm_fault_copy(
 	fault_info_src.hi_offset = fault_info_src.lo_offset + amount_left;
 	fault_info_src.no_cache   = FALSE;
 	fault_info_src.stealth = TRUE;
+<<<<<<< HEAD
 	fault_info_src.io_sync = FALSE;
 	fault_info_src.cs_bypass = FALSE;
 	fault_info_src.mark_zf_absent = FALSE;
 	fault_info_src.batch_pmap_op = FALSE;
+=======
+	fault_info_src.mark_zf_absent = FALSE;
+>>>>>>> origin/10.6
 
 	fault_info_dst.interruptible = interruptible;
 	fault_info_dst.behavior = VM_BEHAVIOR_SEQUENTIAL;
@@ -6058,10 +6123,14 @@ vm_fault_copy(
 	fault_info_dst.hi_offset = fault_info_dst.lo_offset + amount_left;
 	fault_info_dst.no_cache   = FALSE;
 	fault_info_dst.stealth = TRUE;
+<<<<<<< HEAD
 	fault_info_dst.io_sync = FALSE;
 	fault_info_dst.cs_bypass = FALSE;
 	fault_info_dst.mark_zf_absent = FALSE;
 	fault_info_dst.batch_pmap_op = FALSE;
+=======
+	fault_info_dst.mark_zf_absent = FALSE;
+>>>>>>> origin/10.6
 
 	do { /* while (amount_left > 0) */
 		/*

@@ -145,14 +145,21 @@ typedef natural_t	ipc_kobject_type_t;
 #define IKOT_AU_SESSIONPORT		33
 #define IKOT_FILEPORT			34
 #define IKOT_LABELH			35
+<<<<<<< HEAD
 #define IKOT_TASK_RESUME		36
 #define IKOT_VOUCHER			37
 #define IKOT_VOUCHER_ATTR_CONTROL	38
+=======
+>>>>>>> origin/10.6
 /*
  * Add new entries here and adjust IKOT_UNKNOWN.
  * Please keep ipc/ipc_object.c:ikot_print_array up to date.
  */
+<<<<<<< HEAD
 #define	IKOT_UNKNOWN			39	/* magic catchall	*/
+=======
+#define	IKOT_UNKNOWN			36	/* magic catchall	*/
+>>>>>>> origin/10.6
 #define	IKOT_MAX_TYPE	(IKOT_UNKNOWN+1)	/* # of IKOT_ types	*/
 
 

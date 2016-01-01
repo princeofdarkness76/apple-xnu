@@ -285,6 +285,49 @@ __END_DECLS
 
 #define NULL_SEG	0
 
+<<<<<<< HEAD
+=======
+#ifdef __i386__
+/*
+ * User descriptors for MACH - 32-bit flat address space
+ */
+#define	SYSENTER_CS	0x07		/* sysenter kernel code segment */
+#define	SYSENTER_DS	0x0f		/* sysenter kernel data segment */
+#define	USER_CS		0x17		/* user code segment
+					   Must be SYSENTER_CS+16 for sysexit */
+/* Special case: sysenter with EFL_TF (trace bit) set - use iret not sysexit */
+#define SYSENTER_TF_CS	(USER_CS|0x10000)
+#define	USER_DS		0x1f		/* user data segment 
+					   Must be SYSENTER_CS+24 for sysexit */
+#define	USER64_CS	0x27		/* 64-bit user code segment 
+					   Must be USER_CS+16 for sysret */
+#define	USER64_DS	USER_DS		/* 64-bit user data segment == 32-bit */
+#define	SYSCALL_CS	0x2f		/* 64-bit syscall pseudo-segment */
+#define	USER_CTHREAD	0x37		/* user cthread area */
+#define	USER_SETTABLE	0x3f		/* start of user settable ldt entries */
+
+/*
+ * Kernel descriptors for MACH - 32-bit flat address space.
+ */
+#define	KERNEL32_CS	0x08		/* kernel code */
+#define	KERNEL_DS	0x10		/* kernel data */
+#define	KERNEL_LDT	0x18		/* master LDT */
+#define	KERNEL_LDT_2	0x20		/* master LDT expanded for 64-bit */
+#define	KERNEL_TSS	0x28		/* master TSS */
+#define	KERNEL_TSS_2	0x30		/* master TSS expanded for 64-bit */
+
+#define	MC_TSS		0x38		/* machine-check handler TSS */
+
+#define	CPU_DATA_GS	0x48		/* per-cpu data */
+
+#define	DF_TSS		0x50		/* double-fault handler TSS */
+
+#define	USER_LDT	0x58
+#define	USER_TSS	0x60
+#define	FPE_CS		0x68
+
+#else // __x86_64__
+>>>>>>> origin/10.6
 
 /*
  * Kernel descriptors for MACH - 64-bit flat address space.
@@ -304,6 +347,11 @@ __END_DECLS
 #define USER_LDT	0x58		/* 11: */
 					/* 12: other 8 bytes of USER_LDT */
 #define KERNEL_DS	0x68		/* 13: 32-bit kernel data */
+<<<<<<< HEAD
+=======
+
+#endif
+>>>>>>> origin/10.6
 
 
 #define SYSENTER_TF_CS	(USER_CS|0x10000)

@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -204,10 +208,16 @@ static int if_delmulti_common(struct ifmultiaddr *, struct ifnet *,
 static int if_rtmtu(struct radix_node *, void *);
 static void if_rtmtu_update(struct ifnet *);
 
+<<<<<<< HEAD
 static int if_clone_list(int, int *, user_addr_t);
 
 static struct	if_clone *if_clone_lookup(const char *, int *);
 static int	if_clone_list(struct if_clonereq *);
+=======
+#if IF_CLONE_LIST
+static int	if_clone_list(int count, int * total, user_addr_t dst);
+#endif /* IF_CLONE_LIST */
+>>>>>>> origin/10.6
 
 MALLOC_DEFINE(M_IFADDR, "ifaddr", "interface address");
 
@@ -285,6 +295,7 @@ extern lck_mtx_t *nd6_mutex;
 #endif
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 SYSCTL_NODE(_net, PF_LINK, link, CTLFLAG_RW|CTLFLAG_LOCKED, 0, "Link layers");
 SYSCTL_NODE(_net_link, 0, generic, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
 	"Generic link-management");
@@ -323,6 +334,8 @@ ifa_init(void)
 =======
 #define M_CLONE		M_IFADDR
 >>>>>>> origin/10.3
+=======
+>>>>>>> origin/10.6
 
 /*
  * Network interface utility routines.
@@ -534,12 +547,13 @@ if_detach_ifa(struct ifnet *ifp, struct ifaddr *ifa)
  * Create a clone network interface.
  */
 static int
-if_clone_create(char *name, int len)
+if_clone_create(char *name, int len, void *params)
 {
 	struct if_clone *ifc;
 	char *dp;
-	int wildcard, bytoff, bitoff;
-	int unit;
+	int wildcard;
+	u_int32_t bytoff, bitoff;
+	u_int32_t unit;
 	int err;
 
 	ifc = if_clone_lookup(name, &unit);
@@ -550,7 +564,7 @@ if_clone_create(char *name, int len)
 		return (EEXIST);
 
 	bytoff = bitoff = 0;
-	wildcard = (unit < 0);
+	wildcard = (unit == UINT32_MAX);
 	/*
 	 * Find a free unit if none was given.
 	 */
@@ -568,7 +582,7 @@ if_clone_create(char *name, int len)
 	if (unit > ifc->ifc_maxunit)
 		return (ENXIO);
 
-	err = (*ifc->ifc_create)(ifc, unit);
+	err = (*ifc->ifc_create)(ifc, unit, params);
 	if (err != 0)
 		return (err);
 
@@ -611,7 +625,7 @@ if_clone_destroy(const char *name)
 	struct if_clone *ifc;
 	struct ifnet *ifp;
 	int bytoff, bitoff;
-	int unit;
+	u_int32_t unit;
 
 	ifc = if_clone_lookup(name, &unit);
 	if (ifc == NULL)
@@ -644,8 +658,8 @@ if_clone_destroy(const char *name)
  * Look up a network interface cloner.
  */
 
-static struct if_clone *
-if_clone_lookup(const char *name, int *unitp)
+__private_extern__ struct if_clone *
+if_clone_lookup(const char *name, u_int32_t *unitp)
 {
 	struct if_clone *ifc;
 	const char *cp;
@@ -666,7 +680,7 @@ if_clone_lookup(const char *name, int *unitp)
 
  found_name:
 	if (*cp == '\0') {
-		i = -1;
+		i = 0xffff;
 	} else {
 		for (i = 0; *cp != '\0'; cp++) {
 			if (*cp < '0' || *cp > '9') {
@@ -691,7 +705,7 @@ if_clone_attach(struct if_clone *ifc)
 	int bytoff, bitoff;
 	int err;
 	int len, maxclone;
-	int unit;
+	u_int32_t unit;
 
 	KASSERT(ifc->ifc_minifs - 1 <= ifc->ifc_maxunit,
 	    ("%s: %s requested more units then allowed (%d > %d)",
@@ -712,7 +726,7 @@ if_clone_attach(struct if_clone *ifc)
 	if_cloners_count++;
 
 	for (unit = 0; unit < ifc->ifc_minifs; unit++) {
-		err = (*ifc->ifc_create)(ifc, unit);
+		err = (*ifc->ifc_create)(ifc, unit, NULL);
 		KASSERT(err == 0,
 		    ("%s: failed to create required interface %s%d",
 		    __func__, ifc->ifc_name, unit));
@@ -2855,10 +2869,17 @@ ifioctl_ifreq(struct socket *so, u_long cmd, struct ifreq *ifr, struct proc *p)
 
 	switch (cmd) {
 	case SIOCIFCREATE:
+	case SIOCIFCREATE2:
+                error = proc_suser(p);
+                if (error)
+                        return (error);
+                return if_clone_create(ifr->ifr_name, sizeof(ifr->ifr_name),
+			 cmd == SIOCIFCREATE2 ? ifr->ifr_data : NULL);
 	case SIOCIFDESTROY:
 		error = suser(p->p_ucred, &p->p_acflag);
 		if (error)
 			return (error);
+<<<<<<< HEAD
 		return ((cmd == SIOCIFCREATE) ?
 			if_clone_create(ifr->ifr_name, sizeof(ifr->ifr_name)) :
 			if_clone_destroy(ifr->ifr_name));
@@ -2866,6 +2887,24 @@ ifioctl_ifreq(struct socket *so, u_long cmd, struct ifreq *ifr, struct proc *p)
 	case SIOCIFGCLONERS:
 		return (if_clone_list((struct if_clonereq *)data));
 #endif 0
+=======
+		return if_clone_destroy(ifr->ifr_name);
+#if IF_CLONE_LIST
+	case SIOCIFGCLONERS32: {
+		struct if_clonereq32 *ifcr = (struct if_clonereq32 *)data;
+		return (if_clone_list(ifcr->ifcr_count, &ifcr->ifcr_total,
+		    CAST_USER_ADDR_T(ifcr->ifcru_buffer)));
+		/* NOTREACHED */
+
+	}
+	case SIOCIFGCLONERS64: {
+		struct if_clonereq64 *ifcr = (struct if_clonereq64 *)data;
+		return (if_clone_list(ifcr->ifcr_count, &ifcr->ifcr_total,
+		    ifcr->ifcru_buffer));
+		/* NOTREACHED */
+	    }
+#endif /* IF_CLONE_LIST */
+>>>>>>> origin/10.6
 	}
 
 >>>>>>> origin/10.3
@@ -3299,6 +3338,28 @@ ifioctl_ifreq(struct socket *so, u_long cmd, struct ifreq *ifr, struct proc *p)
 			ifr->ifr_2kcl = 0;
 		ifnet_lock_done(ifp);
 		break;
+<<<<<<< HEAD
+=======
+
+	case SIOCGIFGETRTREFCNT:
+#if IFNET_ROUTE_REFCNT
+		ifnet_lock_shared(ifp);
+		ifr->ifr_route_refcnt = ifp->if_route_refcnt;
+		ifnet_lock_done(ifp);
+		break;
+#else
+		return (EOPNOTSUPP);
+#endif /* IFNET_ROUTE_REFCNT */
+
+	default:
+		oif_flags = ifp->if_flags;
+		if (so->so_proto == 0)
+			return (EOPNOTSUPP);
+	    {
+		int ocmd = cmd;
+
+		switch (cmd) {
+>>>>>>> origin/10.6
 
 	case SIOCSIF2KCL:
 		if ((error = priv_check_cred(kauth_cred_get(),

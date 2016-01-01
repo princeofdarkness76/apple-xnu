@@ -65,12 +65,16 @@
 #include <kern/pms.h>
 #include <kern/misc_protos.h>
 <<<<<<< HEAD
+<<<<<<< HEAD
 #include <kern/timer_call.h>
 #include <kern/kalloc.h>
 #include <kern/queue.h>
 #include <prng/random.h>
 =======
 >>>>>>> origin/10.5
+=======
+#include <kern/etimer.h>
+>>>>>>> origin/10.6
 
 #include <vm/vm_map.h>
 #include <vm/vm_kern.h>
@@ -142,6 +146,8 @@
 #define FAST_SLAVE_INIT	((void *)(uintptr_t)1)
 >>>>>>> origin/10.5
 
+#define ABS(v)		(((v) > 0)?(v):-(v))
+
 void 		slave_boot_init(void);
 void		i386_cpu_IPI(int cpu);
 
@@ -190,7 +196,11 @@ static volatile long	mp_rv_complete __attribute__((aligned(64)));
 volatile	uint64_t	debugger_entry_time;
 volatile	uint64_t	debugger_exit_time;
 #if MACH_KDP
+<<<<<<< HEAD
 #include <kdp/kdp.h>
+=======
+
+>>>>>>> origin/10.6
 extern int kdp_snapshot;
 static struct _kdp_xcpu_call_func {
 	kdp_x86_xcpu_func_t func;
@@ -212,10 +222,14 @@ static volatile long   mp_bc_count;
 decl_lck_mtx_data(static, mp_bc_lock);
 lck_mtx_ext_t	mp_bc_lock_ext;
 static	volatile int 	debugger_cpu = -1;
+<<<<<<< HEAD
 volatile long	 NMIPI_acks = 0;
 volatile long	 NMI_count = 0;
 
 extern void	NMI_cpus(void);
+=======
+volatile long NMIPI_acks = 0;
+>>>>>>> origin/10.6
 
 static void	mp_cpus_call_init(void); 
 static void	mp_cpus_call_action(void); 
@@ -309,12 +323,17 @@ smp_init(void)
 	mp_cpus_call_cpu_init(master_cpu);
 
 	if (PE_parse_boot_argn("TSC_sync_margin",
+<<<<<<< HEAD
 					&TSC_sync_margin, sizeof(TSC_sync_margin))) {
 		kprintf("TSC sync Margin 0x%x\n", TSC_sync_margin);
 	} else if (cpuid_vmm_present()) {
 		kprintf("TSC sync margin disabled\n");
 		TSC_sync_margin = 0;
 	}
+=======
+				&TSC_sync_margin, sizeof(TSC_sync_margin)))
+		kprintf("TSC sync Margin 0x%x\n", TSC_sync_margin);
+>>>>>>> origin/10.6
 	smp_initialized = TRUE;
 
 <<<<<<< HEAD
@@ -337,11 +356,14 @@ static volatile long		tsc_entry_barrier __attribute__((aligned(64)));
 static volatile long		tsc_exit_barrier  __attribute__((aligned(64)));
 static volatile uint64_t	tsc_target	  __attribute__((aligned(64)));
 
+<<<<<<< HEAD
 =======
 	return;
 }
 
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.6
 /*
  * Poll a CPU to see when it has marked itself as running.
  */
@@ -349,6 +371,9 @@ static void
 mp_wait_for_cpu_up(int slot_num, unsigned int iters, unsigned int usecdelay)
 {
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
 	while (iters-- > 0) {
 		if (cpu_datap(slot_num)->cpu_running)
 			break;
@@ -410,6 +435,7 @@ static void
 started_cpu(void)
 {
 	/* Here on the started cpu with cpu_running set TRUE */
+<<<<<<< HEAD
 
 	if (TSC_sync_margin &&
 	    start_info.target_cpu == cpu_number()) {
@@ -505,8 +531,23 @@ typedef struct {
 	int		starter_cpu;
  	boolean_t	is_nehalem;
 } processor_start_info_t;
+=======
+>>>>>>> origin/10.6
 
-static processor_start_info_t start_info;
+	if (TSC_sync_margin &&
+	    start_info.target_cpu == cpu_number()) {
+		/*
+		 * I've just started-up, synchronize again with the starter cpu
+		 * and then snap my TSC.
+		 */
+		tsc_target   = 0;
+		atomic_decl(&tsc_entry_barrier, 1);
+		while (tsc_entry_barrier != 0)
+			;	/* spin for starter and target at barrier */
+		tsc_target = rdtsc64();
+		atomic_decl(&tsc_exit_barrier, 1);
+	}
+}
 
 static void
 start_cpu(void *arg)
@@ -536,7 +577,41 @@ start_cpu(void *arg)
 	i *= 10000;
 #endif
 	mp_wait_for_cpu_up(psip->target_cpu, i*100, 100);
+<<<<<<< HEAD
 >>>>>>> origin/10.5
+=======
+	if (TSC_sync_margin &&
+	    cpu_datap(psip->target_cpu)->cpu_running) {
+		/*
+		 * Compare the TSC from the started processor with ours.
+		 * Report and log/panic if it diverges by more than
+		 * TSC_sync_margin (TSC_SYNC_MARGIN) ticks. This margin
+		 * can be overriden by boot-arg (with 0 meaning no checking).
+		 */
+		uint64_t	tsc_starter;
+		int64_t		tsc_delta;
+		atomic_decl(&tsc_entry_barrier, 1);
+		while (tsc_entry_barrier != 0)
+			;	/* spin for both processors at barrier */
+		tsc_starter = rdtsc64();
+		atomic_decl(&tsc_exit_barrier, 1);
+		while (tsc_exit_barrier != 0)
+			;	/* spin for target to store its TSC */
+		tsc_delta = tsc_target - tsc_starter;
+		kprintf("TSC sync for cpu %d: 0x%016llx delta 0x%llx (%lld)\n",
+			psip->target_cpu, tsc_target, tsc_delta, tsc_delta);
+		if (ABS(tsc_delta) > (int64_t) TSC_sync_margin) { 
+#if DEBUG
+			panic(
+#else
+			printf(
+#endif
+				"Unsynchronized  TSC for cpu %d: "
+					"0x%016llx, delta 0x%llx\n",
+				psip->target_cpu, tsc_target, tsc_delta);
+		}
+	}
+>>>>>>> origin/10.6
 }
 
 kern_return_t
@@ -746,7 +821,10 @@ cpu_signal_handler(x86_saved_state_t *regs)
 	 * signals could arrive while these are being processed
 	 * so it's no more than a hint.
 	 */
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.6
 	cpu_data_ptr[my_cpu]->cpu_prior_signals = *my_word;
 
 	do {
@@ -830,15 +908,22 @@ static int
 NMIInterruptHandler(x86_saved_state_t *regs)
 {
 	void 	*stackptr;
-	
+
+	atomic_incl(&NMIPI_acks, 1);
 	sync_iss_to_iks_unconditionally(regs);
 	__asm__ volatile("movl %%ebp, %0" : "=m" (stackptr));
 
 	if (cpu_number() == debugger_cpu)
 			goto NMExit;
 
-	if (pmap_tlb_flush_timeout == TRUE && current_cpu_datap()->cpu_tlb_invalid) {
+	if (spinlock_timed_out) {
+		char pstr[160];
+		snprintf(&pstr[0], sizeof(pstr), "Panic(CPU %d): NMIPI for spinlock acquisition timeout, spinlock: %p, spinlock owner: %p, current_thread: %p, spinlock_owner_cpu: 0x%x\n", cpu_number(), spinlock_timed_out, (void *) spinlock_timed_out->interlock.lock_data, current_thread(), spinlock_owner_cpu);
+		panic_i386_backtrace(stackptr, 64, &pstr[0], TRUE, regs);
+		
+	} else if (pmap_tlb_flush_timeout == TRUE) {
 		char pstr[128];
+<<<<<<< HEAD
 		snprintf(&pstr[0], sizeof(pstr), "Panic(CPU %d): Unresponsive processor\n", cpu_number());
 		panic_i386_backtrace(stackptr, 10, &pstr[0], TRUE, regs);
 		panic_io_port_read();
@@ -850,6 +935,20 @@ NMIInterruptHandler(x86_saved_state_t *regs)
 		}
 	}
 	mp_kdp_wait(FALSE);
+=======
+		snprintf(&pstr[0], sizeof(pstr), "Panic(CPU %d): Unresponsive processor, TLB state:%d\n", cpu_number(), current_cpu_datap()->cpu_tlb_invalid);
+		panic_i386_backtrace(stackptr, 64, &pstr[0], TRUE, regs);
+	}
+
+#if MACH_KDP
+	if (pmsafe_debug && !kdp_snapshot)
+		pmSafeMode(&current_cpu_datap()->lcpu, PM_SAFE_FL_SAFE);
+	current_cpu_datap()->cpu_NMI_acknowledged = TRUE;
+	mp_kdp_wait(FALSE, pmap_tlb_flush_timeout || spinlock_timed_out || panic_active());
+	if (pmsafe_debug && !kdp_snapshot)
+		pmSafeMode(&current_cpu_datap()->lcpu, PM_SAFE_FL_NORMAL);
+#endif
+>>>>>>> origin/10.6
 NMExit:	
 	return 1;
 }
@@ -1429,6 +1528,7 @@ mp_call_alloc(void)
 	boolean_t	intrs_enabled;
 	mp_call_queue_t	*cqp = &mp_cpus_call_freelist;
 
+<<<<<<< HEAD
 	intrs_enabled = mp_call_head_lock(cqp);
 	if (!queue_empty(&cqp->queue))
 		queue_remove_first(&cqp->queue, callp, typeof(callp), link);
@@ -1494,6 +1594,12 @@ mp_cpus_call_cpu_init(int cpu)
 	for (i = 0; i < MP_CPUS_CALL_BUFS_PER_CPU; i++) {
 		callp = (mp_call_t *) kalloc(sizeof(mp_call_t));
 		mp_call_free(callp);
+=======
+	if (i_bit(MP_TLB_FLUSH, my_word) && (pmap_tlb_flush_timeout == FALSE)) {
+		DBGLOG(cpu_handle, cpu_number(), MP_TLB_FLUSH);
+		i_bit_clear(MP_TLB_FLUSH, my_word);
+		pmap_update_interrupt();
+>>>>>>> origin/10.6
 	}
 
 	DBG("mp_cpus_call_init(%d) done\n", cpu);
@@ -1946,6 +2052,7 @@ mp_kdp_enter(void)
 	 */
 	mp_kdp_state = ml_set_interrupts_enabled(FALSE);
 	my_cpu = cpu_number();
+<<<<<<< HEAD
 
 	if (my_cpu == (unsigned) debugger_cpu) {
 		kprintf("\n\nRECURSIVE DEBUGGER ENTRY DETECTED\n\n");
@@ -1954,6 +2061,10 @@ mp_kdp_enter(void)
 	}
 
 	cpu_datap(my_cpu)->debugger_entry_time = mach_absolute_time();
+=======
+	cpu_datap(my_cpu)->debugger_entry_time = mach_absolute_time();
+
+>>>>>>> origin/10.6
 	simple_lock(&mp_kdp_lock);
 
 	if (pmsafe_debug && !kdp_snapshot)
@@ -1973,7 +2084,11 @@ mp_kdp_enter(void)
 =======
 	my_cpu = cpu_number();
 	debugger_cpu = my_cpu;
+<<<<<<< HEAD
 >>>>>>> origin/10.5
+=======
+	ncpus = 1;
+>>>>>>> origin/10.6
 	mp_kdp_ncpus = 1;	/* self */
 	mp_kdp_trap = TRUE;
 	debugger_entry_time = cpu_datap(my_cpu)->debugger_entry_time;
@@ -2035,8 +2150,13 @@ mp_kdp_enter(void)
 			cpu_NMI_interrupt(cpu);
 		}
 
+<<<<<<< HEAD
 	DBG("mp_kdp_enter() %d processors done %s\n",
 	    (int)mp_kdp_ncpus, (mp_kdp_ncpus == ncpus) ? "OK" : "timed out");
+=======
+	DBG("mp_kdp_enter() %lu processors done %s\n",
+	    mp_kdp_ncpus, (mp_kdp_ncpus == ncpus) ? "OK" : "timed out");
+>>>>>>> origin/10.6
 	
 	postcode(MP_KDP_ENTER);
 }

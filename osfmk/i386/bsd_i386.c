@@ -490,15 +490,21 @@ thread_set_cthreadself(thread_t thread, uint64_t pself, int isLP64)
 kern_return_t
 thread_fast_set_cthread_self64(uint64_t self)
 {
+<<<<<<< HEAD
 	pcb_t			pcb;
 	x86_saved_state64_t	*iss;
 
 	pcb = current_thread()->machine.pcb;
+=======
+	pcb_t pcb = current_thread()->machine.pcb;
+	cpu_data_t              *cdp;
+>>>>>>> origin/10.6
 
 	/* check for canonical address, set 0 otherwise  */
 	if (!IS_USERADDR64_CANONICAL(self))
 		self = 0ULL;
 	pcb->cthread_self = self;
+<<<<<<< HEAD
 	current_cpu_datap()->cpu_uber.cu_user_gs_base = self;
 
 	/* XXX for 64-in-32 */
@@ -506,6 +512,17 @@ thread_fast_set_cthread_self64(uint64_t self)
 	iss->gs = USER_CTHREAD;
 	thread_compose_cthread_desc((uint32_t) self, pcb);
 
+=======
+	mp_disable_preemption();
+	cdp = current_cpu_datap();
+#if defined(__x86_64__)
+	if ((cdp->cpu_uber.cu_user_gs_base != pcb->cthread_self) ||
+	    (pcb->cthread_self != rdmsr64(MSR_IA32_KERNEL_GS_BASE)))
+		wrmsr64(MSR_IA32_KERNEL_GS_BASE, self);
+#endif
+	cdp->cpu_uber.cu_user_gs_base = self;
+	mp_enable_preemption();
+>>>>>>> origin/10.6
 	return (USER_CTHREAD);
 }
 

@@ -367,6 +367,7 @@ typedef struct pmap_statistics	*pmap_statistics_t;
 				 VM_FLAGS_OVERWRITE |		\
 				 VM_FLAGS_SUPERPAGE_MASK |	\
 				 VM_FLAGS_ALIAS_MASK)
+<<<<<<< HEAD
 #define VM_FLAGS_USER_MAP	(VM_FLAGS_USER_ALLOCATE |	\
 				 VM_FLAGS_RETURN_4K_DATA_ADDR |	\
 				 VM_FLAGS_RETURN_DATA_ADDR)
@@ -385,6 +386,12 @@ typedef struct pmap_statistics	*pmap_statistics_t;
 #define SUPERPAGE_SIZE_2MB		2
 #define VM_FLAGS_SUPERPAGE_SIZE_2MB (SUPERPAGE_SIZE_2MB<<VM_FLAGS_SUPERPAGE_SHIFT)
 #endif
+=======
+#define VM_FLAGS_USER_MAP	VM_FLAGS_USER_ALLOCATE
+#define VM_FLAGS_USER_REMAP	(VM_FLAGS_FIXED |    \
+				 VM_FLAGS_ANYWHERE | \
+				 VM_FLAGS_OVERWRITE)
+>>>>>>> origin/10.6
 
 #define VM_MEMORY_MALLOC 1
 #define VM_MEMORY_MALLOC_SMALL 2

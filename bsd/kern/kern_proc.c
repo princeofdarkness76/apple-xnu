@@ -174,6 +174,8 @@ extern struct tty cons;
 
 extern int cs_debug;
 
+int cs_debug;	/* declared further down in this file */
+
 #if DEBUG
 #define __PROC_INTERNAL_DEBUG 1
 #endif
@@ -2866,6 +2868,110 @@ proc_knote_drain(struct proc *p)
 	proc_klist_unlock();
 }
 
+<<<<<<< HEAD
+=======
+unsigned long cs_procs_killed = 0;
+unsigned long cs_procs_invalidated = 0;
+int cs_force_kill = 0;
+int cs_force_hard = 0;
+int cs_debug = 0;
+SYSCTL_INT(_vm, OID_AUTO, cs_force_kill, CTLFLAG_RW, &cs_force_kill, 0, "");
+SYSCTL_INT(_vm, OID_AUTO, cs_force_hard, CTLFLAG_RW, &cs_force_hard, 0, "");
+SYSCTL_INT(_vm, OID_AUTO, cs_debug, CTLFLAG_RW, &cs_debug, 0, "");
+
+int
+cs_allow_invalid(struct proc *p)
+{
+#if MACH_ASSERT
+	lck_mtx_assert(&p->p_mlock, LCK_MTX_ASSERT_NOTOWNED);
+#endif
+#if CONFIG_MACF && CONFIG_ENFORCE_SIGNED_CODE
+	/* There needs to be a MAC policy to implement this hook, or else the
+	 * kill bits will be cleared here every time. If we have 
+	 * CONFIG_ENFORCE_SIGNED_CODE, we can assume there is a policy
+	 * implementing the hook. 
+	 */
+	if( 0 != mac_proc_check_run_cs_invalid(p)) {
+		if(cs_debug) printf("CODE SIGNING: cs_allow_invalid() "
+				    "not allowed: pid %d\n", 
+				    p->p_pid);
+		return 0;
+	}
+	if(cs_debug) printf("CODE SIGNING: cs_allow_invalid() "
+			    "allowed: pid %d\n", 
+			    p->p_pid);
+	proc_lock(p);
+	p->p_csflags &= ~(CS_KILL | CS_HARD | CS_VALID);
+	proc_unlock(p);
+	vm_map_switch_protect(get_task_map(p->task), FALSE);
+#endif
+	return (p->p_csflags & (CS_KILL | CS_HARD)) == 0;
+}
+
+int
+cs_invalid_page(
+	addr64_t vaddr)
+{
+	struct proc	*p;
+	int		retval;
+
+	p = current_proc();
+
+	/*
+	 * XXX revisit locking when proc is no longer protected
+	 * by the kernel funnel...
+	 */
+
+	/* XXX for testing */
+	proc_lock(p);
+	if (cs_force_kill)
+		p->p_csflags |= CS_KILL;
+	if (cs_force_hard)
+		p->p_csflags |= CS_HARD;
+
+	/* CS_KILL triggers us to send a kill signal. Nothing else. */
+	if (p->p_csflags & CS_KILL) {
+		p->p_csflags |= CS_KILLED;
+		proc_unlock(p);
+		if (cs_debug) {
+			printf("CODE SIGNING: cs_invalid_page(0x%llx): "
+			       "p=%d[%s] honoring CS_KILL, final status 0x%x\n",
+			       vaddr, p->p_pid, p->p_comm, p->p_csflags);
+		}
+		cs_procs_killed++;
+		psignal(p, SIGKILL);
+		proc_lock(p);
+	}
+	
+	/* CS_HARD means fail the mapping operation so the process stays valid. */
+	if (p->p_csflags & CS_HARD) {
+		proc_unlock(p);
+		if (cs_debug) {
+			printf("CODE SIGNING: cs_invalid_page(0x%llx): "
+			       "p=%d[%s] honoring CS_HARD\n",
+			       vaddr, p->p_pid, p->p_comm);
+		}
+		retval = 1;
+	} else {
+		if (p->p_csflags & CS_VALID) {
+			p->p_csflags &= ~CS_VALID;
+			
+			proc_unlock(p);
+			cs_procs_invalidated++;
+			printf("CODE SIGNING: cs_invalid_page(0x%llx): "
+			       "p=%d[%s] clearing CS_VALID\n",
+			       vaddr, p->p_pid, p->p_comm);
+		} else {
+			proc_unlock(p);
+		}
+		
+		retval = 0;
+	}
+
+	return retval;
+}
+
+>>>>>>> origin/10.6
 void 
 proc_setregister(proc_t p)
 {

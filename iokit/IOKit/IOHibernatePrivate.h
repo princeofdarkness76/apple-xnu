@@ -99,6 +99,7 @@ struct IOHibernateImageHeader
 
     uint32_t	debugFlags;
     uint32_t	options;
+<<<<<<< HEAD
     uint32_t	sleepTime;
     uint32_t    compression;
 
@@ -117,6 +118,13 @@ struct IOHibernateImageHeader
     uint64_t	encryptEnd __attribute__ ((packed));
     uint64_t	deviceBase __attribute__ ((packed));
     uint32_t	deviceBlockSize;
+=======
+
+    uint32_t	reserved[71];		// make sizeof == 512
+
+    uint64_t	encryptEnd __attribute__ ((packed));
+    uint64_t	deviceBase __attribute__ ((packed));
+>>>>>>> origin/10.6
 
     uint32_t		fileExtentMapSize;
     IOPolledFileExtent	fileExtentMap[2];
@@ -315,6 +323,22 @@ void     IOHibernateSystemRestart(void);
 
 #endif /* __cplusplus */
 
+<<<<<<< HEAD
+=======
+#ifdef _SYS_CONF_H_
+typedef void (*kern_get_file_extents_callback_t)(void * ref, uint64_t start, uint64_t size);
+
+struct kern_direct_file_io_ref_t *
+kern_open_file_for_direct_io(const char * name, 
+			     kern_get_file_extents_callback_t callback, 
+			     void *      callback_ref,
+			     dev_t *     device_result,
+                             uint64_t *  partitionbase_result,
+                             uint64_t *  maxiocount_result,
+                             boolean_t * solid_state);
+
+
+>>>>>>> origin/10.6
 void
 vm_compressor_do_warmup(void);
 
@@ -330,11 +354,20 @@ hibernate_alloc_page_lists(
 
 kern_return_t 
 hibernate_setup(IOHibernateImageHeader * header,
+<<<<<<< HEAD
                         boolean_t vmflush,
 			hibernate_page_list_t * page_list,
 			hibernate_page_list_t * page_list_wired,
 			hibernate_page_list_t * page_list_pal);
 
+=======
+                        uint32_t  free_page_ratio,
+                        uint32_t  free_page_time,
+                        boolean_t vmflush,
+			hibernate_page_list_t ** page_list_ret,
+			hibernate_page_list_t ** page_list_wired_ret,
+                        boolean_t * encryptedswap);
+>>>>>>> origin/10.6
 kern_return_t 
 hibernate_teardown(hibernate_page_list_t * page_list,
                     hibernate_page_list_t * page_list_wired,
@@ -456,7 +489,10 @@ enum
     kIOHibernateModeSwitch	= 0x00000020,
     kIOHibernateModeRestart	= 0x00000040,
     kIOHibernateModeSSDInvert	= 0x00000080,
+<<<<<<< HEAD
     kIOHibernateModeFileResize	= 0x00000100,
+=======
+>>>>>>> origin/10.6
 };
 
 // IOHibernateImageHeader.signature
@@ -495,6 +531,12 @@ enum {
     kIOHibernatePreviewUpdates = 0x00000002
 };
 #endif
+
+#define kIOHibernateOptionsKey      "IOHibernateOptions"
+#define kIOHibernateGfxStatusKey    "IOHibernateGfxStatus"
+enum {
+    kIOHibernateGfxStatusUnknown = ((int32_t) 0xFFFFFFFF)
+};
 
 #define kIOHibernateOptionsKey      "IOHibernateOptions"
 #define kIOHibernateGfxStatusKey    "IOHibernateGfxStatus"

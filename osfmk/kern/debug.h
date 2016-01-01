@@ -82,6 +82,7 @@ struct thread_snapshot {
 	int32_t			sched_pri;   /* scheduled (current) priority */
 	int32_t			sched_flags; /* scheduler flags */
 	char			ss_flags;
+<<<<<<< HEAD
 	char			ts_qos;      /* effective qos */
 	char			ts_rqos;     /* requested qos */
 	char			ts_rqos_override; /* requested qos override */
@@ -134,11 +135,14 @@ struct thread_snapshot_v2 {
 	uint8_t   ths_rqos;
 	uint8_t   ths_rqos_override;
 	uint8_t   ths_io_tier;
+=======
+>>>>>>> origin/10.6
 } __attribute__ ((packed));
 
 struct task_snapshot {
 	uint32_t		snapshot_magic;
 	int32_t			pid;
+<<<<<<< HEAD
 	uint64_t		uniqueid;
 	uint64_t		user_time_in_terminated_threads;
 	uint64_t		system_time_in_terminated_threads;
@@ -156,6 +160,11 @@ struct task_snapshot {
 
 	/* 
 	 * We restrict ourselves to a statically defined
+=======
+	uint32_t		nloadinfos;
+	char			ss_flags;
+	/* We restrict ourselves to a statically defined
+>>>>>>> origin/10.6
 	 * (current as of 2009) length for the
 	 * p_comm string, due to scoping issues (osfmk/bsd and user/kernel
 	 * binary compatibility).
@@ -362,6 +371,7 @@ enum {
 	STACKSHOT_ENABLE_FAULTING			= 0x20000
 };
 
+<<<<<<< HEAD
 /*
  * NOTE: Please update libkdd/kcdata/kcdtypes.c if you make any changes
  * in STACKSHOT_KCTYPE_* types.
@@ -389,6 +399,15 @@ enum {
 #define STACKSHOT_TASK_SNAPSHOT_MAGIC   	0xdecafbad
 #define STACKSHOT_MEM_AND_IO_SNAPSHOT_MAGIC	0xbfcabcde
 #define STACKSHOT_MICRO_SNAPSHOT_MAGIC		0x31c54011
+=======
+enum {
+    STACKSHOT_GET_DQ = 0x1,
+    STACKSHOT_SAVE_LOADINFO = 0x2
+};
+
+#define STACKSHOT_THREAD_SNAPSHOT_MAGIC 0xfeedface
+#define STACKSHOT_TASK_SNAPSHOT_MAGIC 0xdecafbad
+>>>>>>> origin/10.6
 
 #endif /* __APPLE_API_UNSTABLE */
 #endif /* __APPLE_API_PRIVATE */
@@ -406,7 +425,11 @@ extern unsigned char *kernel_uuid;
 extern char kernel_uuid_string[];
 =======
 extern char debug_buf[];
+<<<<<<< HEAD
 >>>>>>> origin/10.5
+=======
+extern unsigned int	debug_boot_arg;
+>>>>>>> origin/10.6
 
 #ifdef MACH_KERNEL_PRIVATE
 

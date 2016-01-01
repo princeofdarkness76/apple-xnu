@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -79,9 +83,13 @@
 #include <sys/dirent.h>
 #include <sys/event.h>
 <<<<<<< HEAD
+<<<<<<< HEAD
 #include <sys/disk.h>
 =======
 >>>>>>> origin/10.5
+=======
+#include <sys/disk.h>
+>>>>>>> origin/10.6
 #include <kern/thread_call.h>
 
 #include <kern/locks.h>
@@ -548,8 +556,11 @@ typedef struct hfsmount {
 	u_int64_t       hfs_last_sync_time;
 	uint32_t        hfs_active_threads;
 	thread_call_t   hfs_syncer;	      // removeable devices get sync'ed by this guy
+<<<<<<< HEAD
 
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.6
 } hfsmount_t;
 =======
 
@@ -708,6 +719,7 @@ enum privdirtype {FILE_HARDLINKS, DIR_HARDLINKS};
 #define HFS_RDONLY_DOWNGRADE      0x80000
 #define HFS_DID_CONTIG_SCAN      0x100000
 #define HFS_UNMAP                0x200000
+<<<<<<< HEAD
 #define HFS_SSD                  0x400000
 #define HFS_SUMMARY_TABLE        0x800000
 #define HFS_CS                  0x1000000
@@ -718,6 +730,8 @@ enum privdirtype {FILE_HARDLINKS, DIR_HARDLINKS};
 =======
  * so hfs_start_transaction should return EROFS. */
 #define HFS_RDONLY_DOWNGRADE      0x80000
+=======
+>>>>>>> origin/10.6
 
 >>>>>>> origin/10.5
 
@@ -1261,7 +1275,11 @@ extern u_int32_t hfs_freeblks(struct hfsmount * hfsmp, int wantreserve);
 
 short MacToVFSError(OSErr err);
 
+<<<<<<< HEAD
 void hfs_metadatazone_init(struct hfsmount *hfsmp, int disable);
+=======
+void hfs_metadatazone_init(struct hfsmount *hfsmp);
+>>>>>>> origin/10.6
 
 /* HFS directory hint functions. */
 extern directoryhint_t * hfs_getdirhint(struct cnode *, int, int);
@@ -1331,6 +1349,7 @@ extern void replace_desc(struct cnode *cp, struct cat_desc *cdp);
 
 <<<<<<< HEAD
 extern int hfs_vgetrsrc(struct hfsmount *hfsmp, struct vnode *vp,
+<<<<<<< HEAD
 						struct vnode **rvpp);
 
 typedef enum {
@@ -1339,6 +1358,9 @@ typedef enum {
 } hfs_update_options_t;
 
 extern int hfs_update(struct vnode *, int options);
+=======
+			struct vnode **rvpp, int can_drop_lock, int error_on_unlinked);
+>>>>>>> origin/10.6
 
 typedef enum hfs_sync_mode {
 	HFS_FSYNC,

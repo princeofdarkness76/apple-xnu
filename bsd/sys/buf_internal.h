@@ -136,10 +136,16 @@ struct buf {
 	uint32_t b_redundancy_flags;
 
 	proc_t 	b_proc;			/* Associated proc; NULL if kernel. */
+<<<<<<< HEAD
 #ifdef BUF_MAKE_PRIVATE
 	buf_t   b_data_store;
 #endif
 	struct bufattr b_attr;
+=======
+#if CONFIG_PROTECT
+	struct cprotect *b_cpentry; 	/* address of cp_entry, to be passed further down  */
+#endif /* CONFIG_PROTECT */
+>>>>>>> origin/10.6
 #ifdef JOE_DEBUG
         void *	b_owner;
         int     b_tag;
@@ -182,7 +188,11 @@ extern vm_offset_t buf_kernel_addrperm;
  * Parameters for buffer cache garbage collection 
  */
 #define BUF_STALE_THRESHHOLD 	30	/* Collect if untouched in the last 30 seconds */
+<<<<<<< HEAD
 #define BUF_MAX_GC_BATCH_SIZE	64	/* Under a single grab of the lock */
+=======
+#define BUF_MAX_GC_COUNT	1000	/* Generally 6-8 MB */
+>>>>>>> origin/10.6
 
 /*
  * mask used by buf_flags... these are the readable external flags
@@ -245,6 +255,10 @@ extern vm_offset_t buf_kernel_addrperm;
 #define B_TWANTED	0x20000000	/* but_t that is part of a cluster level transaction is wanted */
 #define B_COMMIT_UPL    0x40000000	/* commit/abort the UPL on I/O success/failure */
 #define B_TDONE		0x80000000	/* buf_t that is part of a cluster level transaction has completed */
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.6
 
 /* Flags to low-level allocation routines. */
 #define B_CLRBUF	0x01	/* Request allocated buffer be cleared. */

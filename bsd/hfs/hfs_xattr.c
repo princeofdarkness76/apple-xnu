@@ -139,7 +139,11 @@ hfs_vnop_getnamedstream(struct vnop_getnamedstream_args* ap)
 		hfs_unlock(cp);
 		return (ENOATTR);
 	}
+<<<<<<< HEAD
 	error = hfs_vgetrsrc(VTOHFS(vp), vp, svpp);
+=======
+	error = hfs_vgetrsrc(VTOHFS(vp), vp, svpp, TRUE, FALSE);
+>>>>>>> origin/10.6
 	hfs_unlock(cp);
 
 	return (error);
@@ -182,7 +186,11 @@ hfs_vnop_makenamedstream(struct vnop_makenamedstream_args* ap)
 	if ((error = hfs_lock(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT))) {
 		return (error);
 	}
+<<<<<<< HEAD
 	error = hfs_vgetrsrc(VTOHFS(vp), vp, svpp);
+=======
+	error = hfs_vgetrsrc(VTOHFS(vp), vp, svpp, TRUE, FALSE);
+>>>>>>> origin/10.6
 	hfs_unlock(cp);
 
 	return (error);
@@ -342,7 +350,11 @@ hfs_vnop_getxattr(struct vnop_getxattr_args *ap)
 				openunlinked = 1;
 			}
 			
+<<<<<<< HEAD
 			result = hfs_vgetrsrc(hfsmp, vp, &rvp);
+=======
+			result = hfs_vgetrsrc(hfsmp, vp, &rvp, TRUE, FALSE);
+>>>>>>> origin/10.6
 			hfs_unlock(cp);
 			if (result) {
 				return (result);
@@ -898,21 +910,32 @@ hfs_vnop_setxattr(struct vnop_setxattr_args *ap)
 			openunlinked = 1;
 		}
 
+<<<<<<< HEAD
 		result = hfs_vgetrsrc(hfsmp, vp, &rvp);
+=======
+		result = hfs_vgetrsrc(hfsmp, vp, &rvp, TRUE, FALSE);
+>>>>>>> origin/10.6
 		hfs_unlock(cp);
 		if (result) {
 			return (result);
 		}
+<<<<<<< HEAD
 		/* VNOP_WRITE marks cnode as needing a modtime update */
+=======
+		/* 
+		 * VNOP_WRITE marks the vnode as needing a modtime update.
+		 */
+>>>>>>> origin/10.6
 		result = VNOP_WRITE(rvp, uio, 0, ap->a_context);
 		
-		/* if open unlinked, force it inactive */
+		/* if open unlinked, force it inactive and recycle */
 		if (openunlinked) {
 			int vref;
 			vref = vnode_ref (rvp);
 			if (vref == 0) {
 				vnode_rele(rvp);
 			}
+<<<<<<< HEAD
 			vnode_recycle (rvp);	
 		} else {
 			/* cnode is not open-unlinked, so re-lock cnode to sync */
@@ -925,8 +948,27 @@ hfs_vnop_setxattr(struct vnop_setxattr_args *ap)
 			/* hfs fsync rsrc fork to force to disk and update modtime */
 			result = hfs_fsync (rvp, MNT_NOWAIT, 0, vfs_context_proc (ap->a_context));
 			hfs_unlock (cp);
+=======
+			vnode_recycle (rvp);
+>>>>>>> origin/10.6
+		}
+		else {
+			/* re-lock the cnode so we can update the modtimes */
+			if ((result = hfs_lock(VTOC(vp), HFS_EXCLUSIVE_LOCK))) {
+				vnode_recycle(rvp);
+				vnode_put(rvp);
+				return (result);
+			}
+
+<<<<<<< HEAD
+=======
+			/* HFS fsync the resource fork to force it out to disk */
+			result = hfs_fsync (rvp, MNT_NOWAIT, 0, vfs_context_proc(ap->a_context));
+
+			hfs_unlock(cp);
 		}
 
+>>>>>>> origin/10.6
 		vnode_put(rvp);
 		return (result);
 	}
@@ -1356,7 +1398,11 @@ hfs_vnop_removexattr(struct vnop_removexattr_args *ap)
 			hfs_unlock(cp);
 			return (ENOATTR);
 		}
+<<<<<<< HEAD
 		result = hfs_vgetrsrc(hfsmp, vp, &rvp);
+=======
+		result = hfs_vgetrsrc(hfsmp, vp, &rvp, TRUE, FALSE);
+>>>>>>> origin/10.6
 		hfs_unlock(cp);
 		if (result) {
 			return (result);
@@ -1498,7 +1544,11 @@ hfs_vnop_removexattr(struct vnop_removexattr_args *ap)
 	}
 	bzero(iterator, sizeof(*iterator));
 
+<<<<<<< HEAD
 	if ((result = hfs_lock(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT))) {
+=======
+	if ((result = hfs_lock(cp, HFS_EXCLUSIVE_LOCK))) {
+>>>>>>> origin/10.6
 		goto exit_nolock;
 	}
 
@@ -1878,9 +1928,17 @@ exit:
 	if (user_start) {
 		vsunlock(user_start, user_len, TRUE);
 	}
+<<<<<<< HEAD
 	if (iterator) {
 		FREE(iterator, M_TEMP);
 	}
+=======
+	
+	if (iterator) {
+		FREE(iterator, M_TEMP);
+	}
+
+>>>>>>> origin/10.6
 	hfs_unlock(cp);
 	hfs_unlock_truncate(cp, HFS_LOCK_DEFAULT);
 	
@@ -2508,7 +2566,10 @@ alloc_attr_blks(struct hfsmount *hfsmp, size_t attrsize, size_t extentbufsize, H
 	lockflags = hfs_systemfile_lock(hfsmp, SFL_BITMAP, HFS_EXCLUSIVE_LOCK);
 
 	for (i = 0; (blkcnt > 0) && (i < maxextents); i++) {
+<<<<<<< HEAD
 		/* Try allocating and see if we find something decent */
+=======
+>>>>>>> origin/10.6
 		result = BlockAllocate(hfsmp, startblk, blkcnt, blkcnt, 0,
 				       &extents[i].startBlock, &extents[i].blockCount);
 		/* 

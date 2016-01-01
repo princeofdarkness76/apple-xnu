@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -1003,6 +1007,7 @@ tcp_respond(
 		return;
 	}
 #endif
+<<<<<<< HEAD
 
 	if (tp != NULL) {
 		u_int32_t svc_flags = 0;
@@ -1024,6 +1029,12 @@ tcp_respond(
 		m->m_pkthdr.pkt_proto = IPPROTO_TCP;
 	}
 
+=======
+#if PKT_PRIORITY
+	if (tp != NULL) 
+		set_traffic_class(m, tp->t_inpcb->inp_socket, MBUF_TC_NONE);
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 #if INET6
 	if (isipv6) {
 <<<<<<< HEAD
@@ -3155,6 +3166,7 @@ tcp_sbspace(struct tcpcb *tp)
 	if (space < 0) 
 		space = 0;
 
+<<<<<<< HEAD
 #if CONTENT_FILTER
 	/* Compensate for data being processed by content filters */
 	pending = cfil_sock_data_space(sb);
@@ -3163,6 +3175,17 @@ tcp_sbspace(struct tcpcb *tp)
 		space = 0;
 	else
 		space -= pending;
+=======
+#if TRAFFIC_MGT
+	if (tp->t_inpcb->inp_socket->so_traffic_mgt_flags & TRAFFIC_MGT_SO_BG_REGULATE) {
+		if (tcp_background_io_enabled &&
+			tp->t_inpcb->inp_socket->so_traffic_mgt_flags & TRAFFIC_MGT_SO_BG_SUPPRESSED) {
+			tp->t_flags |= TF_RXWIN0SENT;
+			return 0; /* Triggers TCP window closing by responding there is no space */
+		}
+	}
+#endif /* TRAFFIC_MGT */
+>>>>>>> origin/10.6
 
 	/* Avoid increasing window size if the current window
 	 * is already very low, we could be in "persist" mode and

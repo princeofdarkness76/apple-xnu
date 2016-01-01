@@ -1901,10 +1901,14 @@ private:
     void all_done ( void );
     void start_ack_timer ( void );
     void stop_ack_timer ( void );
+<<<<<<< HEAD
     void start_ack_timer( UInt32 value, UInt32 scale );
     void startSettleTimer( void );
     void start_spindump_timer( const char * delay_type );
     void stop_spindump_timer( void );
+=======
+    void startSettleTimer( void );
+>>>>>>> origin/10.6
     bool checkForDone ( void );
 <<<<<<< HEAD
     bool responseValid ( uint32_t x, int pid );
@@ -1967,12 +1971,16 @@ private:
     void updatePowerClient( const OSSymbol * client, uint32_t powerState );
     void removePowerClient( const OSSymbol * client );
     IOReturn requestPowerState( const OSSymbol * client, uint32_t state );
+<<<<<<< HEAD
     IOReturn requestDomainPower( IOPMPowerStateIndex ourPowerState, IOOptionBits options = 0 );
     IOReturn configurePowerStatesReport( IOReportConfigureAction action, void *result );
     IOReturn updatePowerStatesReport( IOReportConfigureAction action, void *result, void *destination );
     IOReturn configureSimplePowerReport(IOReportConfigureAction action, void *result );
     IOReturn updateSimplePowerReport( IOReportConfigureAction action, void *result, void *destination );
     void waitForPMDriverCall( IOService * target = 0 );
+=======
+    IOReturn requestDomainPower( unsigned long ourPowerState, IOOptionBits options = 0 );
+>>>>>>> origin/10.6
 #endif /* XNU_KERNEL_PRIVATE */
 =======
     bool responseValid ( unsigned long x );

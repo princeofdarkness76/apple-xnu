@@ -57,11 +57,17 @@
 
 #ifdef XNU_KERNEL_PRIVATE
 struct AggressivesRecord;
+<<<<<<< HEAD
 struct IOPMMessageFilterContext;
 struct IOPMActions;
 struct IOPMSystemSleepParameters;
 class PMSettingObject;
 class PMTraceWorker;
+=======
+class PMAssertionsTracker;
+#endif /* XNU_KERNEL_PRIVATE */
+
+>>>>>>> origin/10.6
 class IOPMPowerStateQueue;
 class RootDomainUserClient;
 class PMAssertionsTracker;
@@ -77,17 +83,33 @@ class PMAssertionsTracker;
  * For creating, releasing, and getting PM assertion levels.
  */
 
+<<<<<<< HEAD
 /*! IOPMDriverAssertionType
  * A bitfield describing a set of assertions. May be used to specify which assertions
  * to set with <link>IOPMrootDomain::createPMAssertion</link>; or to query which
+=======
+/*!
+ * Types for PM Assertions
+ * For creating, releasing, and getting PM assertion levels.
+ */
+ 
+/*! IOPMDriverAssertionType
+ * A bitfield describing a set of assertions. May be used to specify which assertions
+ * to set with <link>IOPMrootDomain::createPMAssertion</link>; or to query which 
+>>>>>>> origin/10.6
  * assertions are set with <link>IOPMrootDomain::releasePMAssertion</link>.
  */
 typedef uint64_t IOPMDriverAssertionType;
 
 /* IOPMDriverAssertionID
  * Drivers may create PM assertions to request system behavior (keep the system awake,
+<<<<<<< HEAD
  *  or keep the display awake). When a driver creates an assertion via
  *  <link>IOPMrootDomain::createPMAssertion</link>, PM returns a handle to
+=======
+ *  or keep the display awake). When a driver creates an assertion via 
+ *  <link>IOPMrootDomain::createPMAssertion</link>, PM returns a handle to 
+>>>>>>> origin/10.6
  *  the assertion of type IOPMDriverAssertionID.
  */
 typedef uint64_t IOPMDriverAssertionID;
@@ -102,6 +124,9 @@ typedef uint32_t IOPMDriverAssertionLevel;
 #define kIOPMDriverAssertionLevelOn           255
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
 /*
  * Flags for get/setSleepSupported()
  */
@@ -147,6 +172,19 @@ enum {
 #define kIOPMLowPowerSleepKey               "Low Power Sleep"
 #define kIOPMThermalEmergencySleepKey       "Thermal Emergency Sleep"
 #define kIOPMMaintenanceSleepKey            "Maintenance Sleep"
+
+enum
+{
+    kIOPMSleepReasonClamshell           = 1,
+    kIOPMSleepReasonPowerButton         = 2,
+    kIOPMSleepReasonSoftware            = 3,
+    kIOPMSleepReasonOSSwitchHibernation = 4,
+    kIOPMSleepReasonIdle                = 5,
+    kIOPMSleepReasonLowPower            = 6,
+    kIOPMSleepReasonThermalEmergency    = 7,
+    kIOPMSleepReasonMaintenance         = 8,
+    kIOPMSleepReasonMax
+};
 
 /*
  * String constants for communication with PM CPU
@@ -227,6 +265,7 @@ public:
     virtual IOReturn    sleepSystem( void );
     IOReturn            sleepSystemOptions( OSDictionary *options );
 
+<<<<<<< HEAD
     virtual IOReturn    setProperties( OSObject * ) APPLE_KEXT_OVERRIDE;
     virtual bool        serializeProperties( OSSerialize * s ) const APPLE_KEXT_OVERRIDE;
     virtual OSObject *  copyProperty( const char * aKey ) const APPLE_KEXT_OVERRIDE;
@@ -236,6 +275,10 @@ public:
     virtual IOReturn setProperties ( OSObject * );
     IOReturn shutdownSystem ( void );
     IOReturn restartSystem ( void );
+=======
+    virtual IOReturn    setProperties( OSObject * );
+    virtual bool        serializeProperties( OSSerialize * s ) const;
+>>>>>>> origin/10.6
 
 >>>>>>> origin/10.5
 /*! @function systemPowerEventOccurred
@@ -512,6 +555,54 @@ public:
     IOReturn registerPMSettingController(IOPMSettingControllerCallback, void *);
     IOReturn registerPlatformPowerProfiles(OSArray *);
 
+/*! @function createPMAssertion
+    @abstract Creates an assertion to influence system power behavior.
+    @param whichAssertionBits A bitfield specify the assertion that the caller requests.
+    @param assertionLevel An integer detailing the initial assertion level, kIOPMDriverAssertionLevelOn
+        or kIOPMDriverAssertionLevelOff.
+    @param ownerService A pointer to the caller's IOService class, for tracking.
+    @param ownerDescription A reverse-DNS string describing the caller's identity and reason.
+    @result On success, returns a new assertion of type IOPMDriverAssertionID
+*/
+    IOPMDriverAssertionID createPMAssertion(
+                                IOPMDriverAssertionType whichAssertionsBits,
+                                IOPMDriverAssertionLevel assertionLevel,
+                                IOService *ownerService,
+                                const char *ownerDescription);
+
+/* @function setPMAssertionLevel
+   @abstract Modify the level of a pre-existing assertion.
+   @discussion Change the value of a PM assertion to influence system behavior, 
+    without undergoing the work required to create or destroy an assertion. Suggested
+    for clients who will assert and de-assert needs for PM behavior several times over
+    their lifespan.
+   @param assertionID An assertion ID previously returned by <link>createPMAssertion</link>
+   @param assertionLevel The new assertion level.
+   @result kIOReturnSuccess if it worked; kIOReturnNotFound or other IOReturn error on failure.
+*/
+    IOReturn setPMAssertionLevel(IOPMDriverAssertionID assertionID, IOPMDriverAssertionLevel assertionLevel);
+
+/*! @function getPMAssertionLevel
+    @absract Returns the active level of the specified assertion(s).
+    @discussion Returns <link>kIOPMDriverAssertionLevelOff</link> or 
+        <link>kIOPMDriverAssertionLevelOn</link>. If multiple assertions are specified
+        in the bitfield, only returns <link>kIOPMDriverAssertionLevelOn</link>
+        if all assertions are active.
+    @param whichAssertionBits Bits defining the assertion or assertions the caller is interested in
+        the level of. If in doubt, pass <link>kIOPMDriverAssertionCPUBit</link> as the argument.
+    @result Returns <link>kIOPMDriverAssertionLevelOff</link> or 
+        <link>kIOPMDriverAssertionLevelOn</link> indicating the specified assertion's levels, if available.
+        If the assertions aren't supported on this machine, or aren't recognized by the OS, the
+        result is undefined.
+*/
+    IOPMDriverAssertionLevel getPMAssertionLevel(IOPMDriverAssertionType whichAssertionBits);
+
+/*! @function releasePMAssertion
+    @abstract Removes an assertion to influence system power behavior.
+    @result On success, returns a new assertion of type IOPMDriverAssertionID *
+*/
+    IOReturn releasePMAssertion(IOPMDriverAssertionID releaseAssertion);
+
 private:
     virtual IOReturn    changePowerStateTo( unsigned long ordinal ) APPLE_KEXT_COMPATIBILITY_OVERRIDE;
     virtual IOReturn    changePowerStateToPriv( unsigned long ordinal );
@@ -540,7 +631,41 @@ private:
 #ifdef XNU_KERNEL_PRIVATE
     /* Root Domain internals */
 public:
+<<<<<<< HEAD
     void        tagPowerPlaneService(
+=======
+
+#if HIBERNATION
+    bool        getHibernateSettings(
+                    uint32_t *  hibernateMode,
+                    uint32_t *  hibernateFreeRatio,
+                    uint32_t *  hibernateFreeTime );
+#endif
+
+#if ROOT_DOMAIN_RUN_STATES
+    void        tagPowerPlaneService(
+                    IOService * service,
+                    uint32_t *  rdFlags );
+
+    void        handleActivityTickleForService( IOService * service, 
+                                                     unsigned long type,
+                                                     unsigned long currentPowerState,
+                                                     uint32_t activityTickleCount );
+
+    void        handlePowerChangeStartForService(
+                    IOService * service,
+                    uint32_t *  rootDomainFlags,
+                    uint32_t    newPowerState,
+                    uint32_t    changeFlags );
+
+    void        handlePowerChangeDoneForService(
+                    IOService * service,
+                    uint32_t *  rootDomainFlags,
+                    uint32_t    newPowerState,
+                    uint32_t    changeFlags );
+
+    void        overridePowerStateForService(
+>>>>>>> origin/10.6
                     IOService *     service,
                     IOPMActions *   actions );
 
@@ -626,9 +751,19 @@ public:
     IOReturn    restartSystem( void );
     void        handleSleepTimerExpiration( void );
 
+<<<<<<< HEAD
     bool        activitySinceSleep(void);
     bool        abortHibernation(void);
     void        updateConsoleUsers(void);
+=======
+    IOReturn shutdownSystem( void );
+    IOReturn restartSystem( void );
+    void handleSleepTimerExpiration( void );
+    void handleForcedSleepTimerExpiration( void );
+    void stopIgnoringClamshellEventsDuringWakeup( void );
+    bool        activitySinceSleep(void);
+    bool        abortHibernation(void);
+>>>>>>> origin/10.6
 
     IOReturn    joinAggressiveness( IOService * service );
     void        handleAggressivesRequests( void );
@@ -678,6 +813,7 @@ public:
 
 private:
     friend class PMSettingObject;
+<<<<<<< HEAD
     friend class RootDomainUserClient;
     friend class PMAssertionsTracker;
 
@@ -726,6 +862,10 @@ private:
     void initializeBootSessionUUID( void );
 
     void fullWakeDelayedWork( void );
+=======
+    friend class PMAssertionsTracker;
+    friend class RootDomainUserClient;
+>>>>>>> origin/10.6
 
     IOService *             wrangler;
     OSDictionary *          wranglerIdleSettings;
@@ -876,6 +1016,17 @@ private:
     };
     uint32_t                fullWakeReason;
 
+    unsigned int            sleepTimerMaintenance   :1;
+    unsigned int            lowBatteryCondition     :1;
+    unsigned int            hibernateDisabled       :1;
+    unsigned int            hibernateNoDefeat       :1;
+    unsigned int            hibernateAborted        :1;
+
+    uint32_t                hibernateMode;
+    uint32_t                userActivityCount;
+    uint32_t                userActivityAtSleep;
+    uint32_t                lastSleepReason;
+
     // Info for communicating system state changes to PMCPU
     int32_t                 idxPMCPUClamshell;
     int32_t                 idxPMCPULimitedPower;
@@ -895,7 +1046,13 @@ private:
     IOService *             pciHostBridgeDevice;
     IOService *             pciHostBridgeDriver;
 
+<<<<<<< HEAD
     IONotifier *            systemCapabilityNotifier;
+=======
+	// IOPMrootDomain internal sleep call
+    IOReturn privateSleepSystem( uint32_t sleepReason );
+    void announcePowerSourceChange( void );
+>>>>>>> origin/10.6
 
     typedef struct {
         uint32_t            pid;
@@ -926,7 +1083,12 @@ private:
     OSArray *               _systemWakeEventsArray;
     bool                    _acceptSystemWakeEvents;
 
+<<<<<<< HEAD
     int         findSuspendedPID(uint32_t pid, uint32_t *outRefCount);
+=======
+    void dispatchPowerEvent( uint32_t event, void * arg0, uint64_t arg1 );
+    void handlePowerNotification( UInt32 msg );
+>>>>>>> origin/10.6
 
     // IOPMrootDomain internal sleep call
     IOReturn    privateSleepSystem( uint32_t sleepReason );
@@ -1029,7 +1191,9 @@ private:
     void adjustPowerState( void );
     void restoreUserSpinDownTimeout ( void );
 
+    IOReturn    setPMAssertionUserLevels(IOPMDriverAssertionType);
     
+<<<<<<< HEAD
     unsigned int user_spindown;       // User's selected disk spindown value
 
     unsigned int systemBooting:1;
@@ -1063,6 +1227,18 @@ private:
     ExpansionData   *_reserved;
     IOOptionBits platformSleepSupport;
 >>>>>>> origin/10.1
+=======
+    void        publishSleepWakeUUID( bool shouldPublish );
+
+#if HIBERNATION
+    bool        getSleepOption( const char * key, uint32_t * option );
+    bool        evaluateSystemSleepPolicy( IOPMSystemSleepParameters * p );
+    void        evaluateSystemSleepPolicyEarly( void );
+    void        evaluateSystemSleepPolicyFinal( void );
+#endif /* HIBERNATION */
+
+#endif /* XNU_KERNEL_PRIVATE */
+>>>>>>> origin/10.6
 };
 
 #ifdef XNU_KERNEL_PRIVATE

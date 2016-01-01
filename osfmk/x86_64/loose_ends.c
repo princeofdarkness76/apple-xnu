@@ -671,7 +671,198 @@ cache_flush_page_phys(ppnum_t pa)
 
 	(void) ml_set_interrupts_enabled(istate);
 
+<<<<<<< HEAD
 	mfence();
+=======
+	__mfence();
+}
+
+
+static int copyio(int, user_addr_t, char *, vm_size_t, vm_size_t *, int);
+static int copyio_phys(addr64_t, addr64_t, vm_size_t, int);
+
+/*
+ * The copy engine has the following characteristics
+ *   - copyio() handles copies to/from user or kernel space
+ *   - copypv() deals with physical or virtual addresses
+ *
+ * Readers familiar with the 32-bit kernel will expect Joe's thesis at this
+ * point describing the full glory of the copy window implementation. In K64,
+ * however, there is no need for windowing. Thanks to the vast shared address
+ * space, the kernel has direct access to userspace and to physical memory.
+ *
+ * User virtual addresses are accessible provided the user's cr3 is loaded.
+ * Physical addresses are accessible via the direct map and the PHYSMAP_PTOV()
+ * translation.
+ *
+ * Copyin/out variants all boil done to just these 2 routines in locore.s which
+ * provide fault-recoverable copying:
+ */
+extern int _bcopy(const void *, void *, vm_size_t);
+extern int _bcopystr(const void *, void *, vm_size_t, vm_size_t *);
+
+
+/*
+ * Types of copies:
+ */
+#define COPYIN		0	/* from user virtual to kernel virtual */
+#define COPYOUT		1	/* from kernel virtual to user virtual */
+#define COPYINSTR	2	/* string variant of copyout */
+#define COPYINPHYS	3	/* from user virtual to kernel physical */
+#define COPYOUTPHYS	4	/* from kernel physical to user virtual */
+
+
+static int
+copyio(int copy_type, user_addr_t user_addr, char *kernel_addr,
+       vm_size_t nbytes, vm_size_t *lencopied, int use_kernel_map)
+{
+        thread_t	thread;
+	pmap_t		pmap;
+	vm_size_t	bytes_copied;
+	int		error = 0;
+	boolean_t	istate = FALSE;
+	boolean_t	recursive_CopyIOActive;
+#if KDEBUG
+	int		debug_type = 0xeff70010;
+	debug_type += (copy_type << 2);
+#endif
+
+	thread = current_thread();
+
+	KERNEL_DEBUG(debug_type | DBG_FUNC_START,
+		     (unsigned)(user_addr >> 32), (unsigned)user_addr,
+		     nbytes, thread->machine.copyio_state, 0);
+
+	if (nbytes == 0)
+		goto out;
+
+        pmap = thread->map->pmap;
+
+
+	assert((vm_offset_t)kernel_addr >= VM_MIN_KERNEL_AND_KEXT_ADDRESS ||
+	       copy_type == COPYINPHYS || copy_type == COPYOUTPHYS);
+
+	/* Sanity and security check for addresses to/from a user */
+
+	if (((pmap != kernel_pmap) && (use_kernel_map == 0)) &&
+	    ((nbytes && (user_addr+nbytes <= user_addr)) || ((user_addr + nbytes) > vm_map_max(thread->map)))) {
+		error = EFAULT;
+		goto out;
+	}
+
+	/*
+	 * If the no_shared_cr3 boot-arg is set (true), the kernel runs on 
+	 * its own pmap and cr3 rather than the user's -- so that wild accesses
+	 * from kernel or kexts can be trapped. So, during copyin and copyout,
+	 * we need to switch back to the user's map/cr3. The thread is flagged
+	 * "CopyIOActive" at this time so that if the thread is pre-empted,
+	 * we will later restore the correct cr3.
+	 */
+	recursive_CopyIOActive = thread->machine.specFlags & CopyIOActive;
+	thread->machine.specFlags |= CopyIOActive;
+	if (no_shared_cr3) {
+		istate = ml_set_interrupts_enabled(FALSE);
+ 		if (get_cr3() != pmap->pm_cr3)
+			set_cr3(pmap->pm_cr3);
+	}
+
+	/*
+	 * Ensure that we're running on the target thread's cr3.
+	 */
+	if ((pmap != kernel_pmap) && !use_kernel_map &&
+	    (get_cr3() != pmap->pm_cr3)) {
+		panic("copyio(%d,%p,%p,%ld,%p,%d) cr3 is %p expects %p",
+			copy_type, (void *)user_addr, kernel_addr, nbytes, lencopied, use_kernel_map,
+			(void *) get_cr3(), (void *) pmap->pm_cr3);
+	}
+	if (no_shared_cr3)
+		(void) ml_set_interrupts_enabled(istate);
+
+	KERNEL_DEBUG(0xeff70044 | DBG_FUNC_NONE, (unsigned)user_addr,
+		     (unsigned)kernel_addr, nbytes, 0, 0);
+
+        switch (copy_type) {
+
+	case COPYIN:
+	        error = _bcopy((const void *) user_addr,
+				kernel_addr,
+				nbytes);
+		break;
+			
+	case COPYOUT:
+	        error = _bcopy(kernel_addr,
+				(void *) user_addr,
+				nbytes);
+		break;
+
+	case COPYINPHYS:
+	        error = _bcopy((const void *) user_addr,
+				PHYSMAP_PTOV(kernel_addr),
+				nbytes);
+		break;
+
+	case COPYOUTPHYS:
+	        error = _bcopy((const void *) PHYSMAP_PTOV(kernel_addr),
+				(void *) user_addr,
+				nbytes);
+		break;
+
+	case COPYINSTR:
+	        error = _bcopystr((const void *) user_addr,
+				kernel_addr,
+				(int) nbytes,
+				&bytes_copied);
+
+		/*
+		 * lencopied should be updated on success
+		 * or ENAMETOOLONG...  but not EFAULT
+		 */
+		if (error != EFAULT)
+		        *lencopied = bytes_copied;
+
+		if (error) {
+#if KDEBUG
+		        nbytes = *lencopied;
+#endif
+		        break;
+		}
+		if (*(kernel_addr + bytes_copied - 1) == 0) {
+		        /*
+			 * we found a NULL terminator... we're done
+			 */
+#if KDEBUG
+		        nbytes = *lencopied;
+#endif
+			break;
+		} else {
+		        /*
+			 * no more room in the buffer and we haven't
+			 * yet come across a NULL terminator
+			 */
+#if KDEBUG
+		        nbytes = *lencopied;
+#endif
+		        error = ENAMETOOLONG;
+			break;
+		}
+		break;
+	}
+
+	if (!recursive_CopyIOActive)
+		thread->machine.specFlags &= ~CopyIOActive;
+	if (no_shared_cr3) {
+		istate = ml_set_interrupts_enabled(FALSE);
+		if  (get_cr3() != kernel_pmap->pm_cr3)
+			set_cr3(kernel_pmap->pm_cr3);
+		(void) ml_set_interrupts_enabled(istate);
+	}
+
+out:
+	KERNEL_DEBUG(debug_type | DBG_FUNC_END, (unsigned)user_addr,
+		     (unsigned)kernel_addr, (unsigned)nbytes, error, 0);
+
+	return (error);
+>>>>>>> origin/10.6
 }
 
 

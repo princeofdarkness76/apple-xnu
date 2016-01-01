@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -179,10 +183,39 @@ ENTRY(ml_phys_read_word)
         movl S_ARG0, %ecx
         movl 0(%ecx), %eax
 
+<<<<<<< HEAD
 	ret
 
 
 /* Read physical address double
+=======
+/* void  _rtc_nanotime_adjust(	
+		uint64_t         tsc_base_delta,
+	        rtc_nanotime_t  *dst);
+*/
+	.globl	EXT(_rtc_nanotime_adjust)
+	.align	FALIGN
+
+LEXT(_rtc_nanotime_adjust)
+	mov	12(%esp),%edx			/* ptr to rtc_nanotime_info */
+	
+	movl	RNT_GENERATION(%edx),%ecx	/* get current generation */
+	movl	$0,RNT_GENERATION(%edx)		/* flag data as being updated */
+
+	movl	4(%esp),%eax			/* get lower 32-bits of delta */
+	addl	%eax,RNT_TSC_BASE(%edx)
+	adcl	$0,RNT_TSC_BASE+4(%edx)		/* propagate carry */
+
+	incl	%ecx				/* next generation */
+	jnz	1f
+	incl	%ecx				/* skip 0, which is a flag */
+1:	movl	%ecx,RNT_GENERATION(%edx)	/* update generation and make usable */
+
+	ret
+
+
+/* unint64_t _rtc_nanotime_read( rtc_nanotime_t *rntp, int slow );
+>>>>>>> origin/10.6
  *
 <<<<<<< HEAD
  *      unsigned long long ml_phys_read_double(vm_offset_t paddr)

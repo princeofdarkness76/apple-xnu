@@ -57,7 +57,15 @@ extern struct sysent sysent[];
 #endif	/* __INIT_SYSENT_C__ */
 
 extern int nsysent;
+<<<<<<< HEAD
 #define NUM_SYSENT	500	/* Current number of defined syscalls */
+=======
+#define NUM_SYSENT	434	/* Current number of defined syscalls */
+
+/* sy_funnel flags bits */
+#define FUNNEL_MASK	0x07f
+#define	UNSAFE_64BIT	0x080
+>>>>>>> origin/10.6
 
 /* 
  * Valid values for sy_cancel

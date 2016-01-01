@@ -309,6 +309,13 @@ kernel_memory_allocate(
 		*addrp = 0;
 		return KERN_INVALID_ARGUMENT;
 	}
+<<<<<<< HEAD
+=======
+	map_size = vm_map_round_page(size);
+	map_mask = (vm_map_offset_t) mask;
+	vm_alloc_flags = 0;
+
+>>>>>>> origin/10.6
 
 	/*
 	 * limit the size of a single extent of wired memory
@@ -407,6 +414,10 @@ kernel_memory_allocate(
 
 			if (flags & KMA_NOPAGEWAIT) {
 <<<<<<< HEAD
+				kr = KERN_RESOURCE_SHORTAGE;
+				goto out;
+			}
+			if ((flags & KMA_LOMEM) && (vm_lopage_needed == TRUE)) {
 				kr = KERN_RESOURCE_SHORTAGE;
 				goto out;
 			}
@@ -514,6 +525,7 @@ kernel_memory_allocate(
 		mem->pmapped = TRUE;
 		mem->wpmapped = TRUE;
 
+<<<<<<< HEAD
 		PMAP_ENTER_OPTIONS(kernel_pmap, map_addr + pg_offset, mem,
 				   kma_prot, VM_PROT_NONE, ((flags & KMA_KSTACK) ? VM_MEM_STACK : 0), TRUE,
 				   PMAP_OPTIONS_NOWAIT, pe_result);
@@ -526,13 +538,21 @@ kernel_memory_allocate(
 
 			vm_object_lock(object);
 		}
+=======
+		PMAP_ENTER(kernel_pmap, map_addr + pg_offset, mem, 
+			   VM_PROT_READ | VM_PROT_WRITE, object->wimg_bits & VM_WIMG_MASK, TRUE);
+
+>>>>>>> origin/10.6
 		if (flags & KMA_NOENCRYPT) {
 			bzero(CAST_DOWN(void *, (map_addr + pg_offset)), PAGE_SIZE);
 
 			pmap_set_noencrypt(mem->phys_page);
 		}
 <<<<<<< HEAD
+<<<<<<< HEAD
 	}
+=======
+>>>>>>> origin/10.6
 	}
 	if ((fill_start + fill_size) < map_size) {
 		if (guard_page_list == NULL)
@@ -1359,6 +1379,7 @@ kmem_suballoc(
 	return (KERN_SUCCESS);
 }
 
+
 /*
  *	kmem_init:
  *
@@ -1406,7 +1427,10 @@ kmem_init(
 			      kr);
 		}	
 	}
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.6
 	/*
 	 * Set the default global user wire limit which limits the amount of
 	 * memory that can be locked via mlock().  We set this to the total

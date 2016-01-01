@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -648,6 +652,7 @@ struct chain_len_stats {
 
 #pragma pack()
 
+<<<<<<< HEAD
 /*
  * Structure defining a queue for a network interface.
  */
@@ -660,6 +665,24 @@ struct	ifqueue {
 };
 
 #ifdef BSD_KERNEL_PRIVATE
+=======
+#ifdef PRIVATE
+struct if_traffic_class {
+	u_int64_t		ifi_ibkpackets;	/* TC_BK packets received on interface */
+	u_int64_t		ifi_ibkbytes;	/* TC_BK bytes received on interface */
+	u_int64_t		ifi_obkpackets;	/* TC_BK packet sent on interface */
+	u_int64_t		ifi_obkbytes;	/* TC_BK bytes sent on interface */
+	u_int64_t		ifi_ivipackets;	/* TC_VI packets received on interface */
+	u_int64_t		ifi_ivibytes;	/* TC_VI bytes received on interface */
+	u_int64_t		ifi_ovipackets;	/* TC_VI packets sent on interface */
+	u_int64_t		ifi_ovibytes;	/* TC_VI bytes sent on interface */
+	u_int64_t		ifi_ivopackets;	/* TC_VO packets received on interface */
+	u_int64_t		ifi_ivobytes;	/* TC_VO bytes received on interface */
+	u_int64_t		ifi_ovopackets;	/* TC_VO packets sent on interface */
+	u_int64_t		ifi_ovobytes;	/* TC_VO bytes sent on interface */
+};
+
+>>>>>>> origin/10.6
 /*
  * Internal storage of if_data. This is bound to change. Various places in the
  * stack will translate this data structure in to the externally visible
@@ -1052,11 +1075,24 @@ struct ifnet {
 	decl_lck_rw_data(, if_inet6data_lock);
 	void			*if_inet6data;
 #endif
+<<<<<<< HEAD
 	decl_lck_rw_data(, if_link_status_lock);
 	struct if_link_status	*if_link_status;
 	struct if_interface_state	if_interface_state;
 	struct if_tcp_ecn_stat *if_ipv4_stat;
 	struct if_tcp_ecn_stat *if_ipv6_stat;
+=======
+	struct route	if_fwd_route;	/* cached IPv4 forwarding route */
+	void	*if_bridge;		/* bridge glue */
+#if IFNET_ROUTE_REFCNT
+	u_int32_t	if_want_aggressive_drain;
+	u_int32_t	if_idle_flags;	/* idle flags */
+	u_int32_t	if_route_refcnt; /* idle: route ref count */
+#endif /* IFNET_ROUTE_REFCNT */
+#if PKT_PRIORITY
+	struct if_traffic_class if_tc __attribute__((aligned(8)));
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 };
 
 #define	IF_TCP_STATINC(_ifp, _s) do {					\
@@ -1085,6 +1121,7 @@ struct ifnet {
  */
 struct if_clone {
 	LIST_ENTRY(if_clone) ifc_list;	/* on list of cloners */
+<<<<<<< HEAD
 	const char	*ifc_name;	/* name of device, e.g. `vlan' */
 	size_t		ifc_namelen;	/* length of name */
 	u_int32_t	ifc_minifs;	/* minimum number of interfaces */
@@ -1094,6 +1131,17 @@ struct if_clone {
 
 	int		(*ifc_create)(struct if_clone *, u_int32_t, void *);
 	int		(*ifc_destroy)(struct ifnet *);
+=======
+	const char *ifc_name;			/* name of device, e.g. `vlan' */
+	size_t ifc_namelen;		/* length of name */
+	u_int32_t ifc_minifs;			/* minimum number of interfaces */
+	u_int32_t ifc_maxunit;		/* maximum unit number */
+	unsigned char *ifc_units;	/* bitmap to handle units */
+	u_int32_t ifc_bmlen;			/* bitmap length */
+
+	int	(*ifc_create)(struct if_clone *, u_int32_t, void *);
+	int	(*ifc_destroy)(struct ifnet *);
+>>>>>>> origin/10.6
 };
 
 #define IF_CLONE_INITIALIZER(name, create, destroy, minifs, maxunit) {	      \
@@ -1102,6 +1150,15 @@ struct if_clone {
 }
 
 #define M_CLONE         M_IFADDR
+<<<<<<< HEAD
+=======
+
+/*
+ * Bit values in if_ipending
+ */
+#define	IFI_RECV	1	/* I want to receive */
+#define	IFI_XMIT	2	/* I want to transmit */
+>>>>>>> origin/10.6
 
 /*
  * Macros to manipulate ifqueue.  Users of these macros are responsible
@@ -1287,6 +1344,7 @@ struct ifmultiaddr {
 	    (struct ifmultiaddr *, int);
 };
 
+<<<<<<< HEAD
 /*
  * Values for ifma_flags
  */
@@ -1294,6 +1352,45 @@ struct ifmultiaddr {
 
 #define	IFMA_LOCK_ASSERT_HELD(_ifma)					\
 	lck_mtx_assert(&(_ifma)->ifma_lock, LCK_MTX_ASSERT_OWNED)
+=======
+#ifdef KERNEL_PRIVATE
+#define IFAREF(ifa) ifaref(ifa)
+#define IFAFREE(ifa) ifafree(ifa)
+
+/*
+ * To preserve kmem compatibility, we define
+ * ifnet_head to ifnet. This should be temp.
+ */
+#define ifnet_head ifnet
+extern	struct ifnethead ifnet_head;
+extern struct	ifnet	**ifindex2ifnet;
+extern	int ifqmaxlen;
+extern	ifnet_t  lo_ifp;
+extern	int if_index;
+extern	struct ifaddr **ifnet_addrs;
+
+int	if_addmulti(struct ifnet *, const struct sockaddr *, struct ifmultiaddr **);
+int	if_allmulti(struct ifnet *, int);
+void	if_attach(struct ifnet *);
+int	if_delmultiaddr(struct ifmultiaddr *ifma, int locked);
+int	if_delmulti(struct ifnet *, const struct sockaddr *);
+void	if_down(struct ifnet *);
+int 	if_down_all(void);
+void	if_route(struct ifnet *, int flag, int fam);
+void	if_unroute(struct ifnet *, int flag, int fam);
+void	if_up(struct ifnet *);
+void	if_updown(struct ifnet *ifp, int up);
+/*void	ifinit(void));*/ /* declared in systm.h for main( */
+int	ifioctl(struct socket *, u_long, caddr_t, struct proc *);
+int	ifioctllocked(struct socket *, u_long, caddr_t, struct proc *);
+struct	ifnet *ifunit(const char *);
+struct  ifnet *if_withname(struct sockaddr *);
+
+int	if_clone_attach(struct if_clone *);
+void	if_clone_detach(struct if_clone *);
+struct if_clone *
+	if_clone_lookup(const char *, u_int32_t *);
+>>>>>>> origin/10.6
 
 #define	IFMA_LOCK_ASSERT_NOTHELD(_ifma)					\
 	lck_mtx_assert(&(_ifma)->ifma_lock, LCK_MTX_ASSERT_NOTOWNED)

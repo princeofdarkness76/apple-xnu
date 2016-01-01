@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -111,7 +115,21 @@
 #if INET6
 #include <netinet6/nd6.h>
 #include <netinet6/in6_ifattach.h>
+<<<<<<< HEAD
 #include <netinet6/ip6_var.h>
+=======
+#endif
+
+
+
+#include <sys/socketvar.h>
+
+#include <net/dlil.h>
+
+
+#if LLC && CCITT
+extern struct ifqueue pkintrq;
+>>>>>>> origin/10.6
 #endif
 
 /* #include "vlan.h" */

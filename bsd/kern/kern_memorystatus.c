@@ -75,7 +75,12 @@ int kern_memorystatus_wakeup = 0;
 int kern_memorystatus_level = 0;
 int kern_memorystatus_last_level = 0;
 unsigned int kern_memorystatus_kev_failure_count = 0;
+<<<<<<< HEAD
 >>>>>>> origin/10.5
+=======
+int kern_memorystatus_level_critical = 5;
+#define kern_memorystatus_level_highwater (kern_memorystatus_level_critical + 5)
+>>>>>>> origin/10.6
 
 #if CONFIG_JETSAM
 /* For logging clarity */
@@ -483,7 +488,11 @@ extern struct knote *vm_find_knote_from_pid(pid_t, struct klist *);
 #if CONFIG_JETSAM
 
 static void
+<<<<<<< HEAD
 memorystatus_debug_dump_bucket_locked (unsigned int bucket_index)
+=======
+jetsam_mark_pid_in_snapshot(pid_t pid, int flag)
+>>>>>>> origin/10.6
 {
 <<<<<<< HEAD
 	proc_t p = NULL;
@@ -503,12 +512,22 @@ memorystatus_debug_dump_bucket_locked (unsigned int bucket_index)
 	int ret;
 >>>>>>> origin/10.5
 
+<<<<<<< HEAD
         if (bucket_index >= MEMSTAT_BUCKET_COUNT) {
 		traverse_all_buckets = TRUE;
 		b = 0;
         } else {
 		traverse_all_buckets = FALSE;
 		b = bucket_index;
+=======
+	int i = 0;
+
+	for (i = 0; i < jetsam_snapshot_list_count; i++) {
+		if (jetsam_snapshot_list[i].pid == pid) {
+			jetsam_snapshot_list[i].flags |= flag;
+			return;
+		}
+>>>>>>> origin/10.6
 	}
 
 	/*
@@ -536,8 +555,13 @@ memorystatus_debug_dump_bucket_locked (unsigned int bucket_index)
         printf("memorystatus_debug_dump ***END***\n");
 }
 
+<<<<<<< HEAD
 static int
 sysctl_memorystatus_debug_dump_bucket SYSCTL_HANDLER_ARGS
+=======
+int
+jetsam_kill_top_proc(void)
+>>>>>>> origin/10.6
 {
 #pragma unused(oidp, arg2)
         int bucket_index = 0;
@@ -546,6 +570,7 @@ sysctl_memorystatus_debug_dump_bucket SYSCTL_HANDLER_ARGS
 	if (error || !req->newptr) {
 		return (error);
 	}
+<<<<<<< HEAD
         error = SYSCTL_IN(req, &bucket_index, sizeof(int));
         if (error || !req->newptr) {
                 return (error);
@@ -558,6 +583,31 @@ sysctl_memorystatus_debug_dump_bucket SYSCTL_HANDLER_ARGS
 		/*
 		 * Only a single bucket will be dumped.
 		 */
+=======
+	lck_mtx_lock(jetsam_list_mlock);
+	while (jetsam_priority_list_index < jetsam_priority_list_count) {
+		pid_t aPid;
+		aPid = jetsam_priority_list[jetsam_priority_list_index].pid;
+		jetsam_priority_list_index++;
+		/* skip empty slots in the list */
+		if (aPid == 0) {
+			continue; // with lock held
+		}
+		lck_mtx_unlock(jetsam_list_mlock);
+		jetsam_mark_pid_in_snapshot(aPid, kJetsamFlagsKilled);
+		p = proc_find(aPid);
+		if (p != NULL) {
+			printf("jetsam: killing pid %d [%s] - memory_status_level: %d - ", 
+					aPid, (p->p_comm ? p->p_comm : "(unknown)"), kern_memorystatus_level);
+			exit1(p, W_EXITCODE(0, SIGKILL), (int *)NULL);
+			proc_rele(p);
+#if DEBUG
+			printf("jetsam: pid %d killed - memory_status_level: %d\n", aPid, kern_memorystatus_level);
+#endif /* DEBUG */
+			return 0;
+		}
+	    lck_mtx_lock(jetsam_list_mlock);
+>>>>>>> origin/10.6
 	}
 
 	proc_list_lock();
@@ -567,6 +617,7 @@ sysctl_memorystatus_debug_dump_bucket SYSCTL_HANDLER_ARGS
 	return (error);
 }
 
+<<<<<<< HEAD
 /*
  * Debug aid to look at jetsam buckets and proc jetsam fields.
  *	Use this sysctl to act on a particular jetsam bucket.
@@ -581,6 +632,55 @@ SYSCTL_PROC(_kern, OID_AUTO, memorystatus_debug_dump_this_bucket, CTLTYPE_INT|CT
 
 static int
 sysctl_memorystatus_highwater_enable SYSCTL_HANDLER_ARGS
+=======
+static int
+jetsam_kill_hiwat_proc(void)
+{
+	proc_t p;
+	int i;
+	if (jetsam_snapshot_list_count == 0) {
+		jetsam_snapshot_procs();
+	}
+	lck_mtx_lock(jetsam_list_mlock);
+	for (i = jetsam_priority_list_index; i < jetsam_priority_list_count; i++) {
+		pid_t aPid;
+		int32_t hiwat;
+		aPid = jetsam_priority_list[i].pid;
+		hiwat = jetsam_priority_list[i].hiwat_pages;	
+		/* skip empty or non-hiwat slots in the list */
+		if (aPid == 0 || (hiwat < 0)) {
+			continue; // with lock held
+		}
+		lck_mtx_unlock(jetsam_list_mlock);
+		p = proc_find(aPid);
+		if (p != NULL) {
+			int32_t pages = (int32_t)jetsam_task_page_count(p->task);
+			if (pages > hiwat) {
+#if DEBUG
+				printf("jetsam: killing pid %d [%s] - %d pages > hiwat (%d)\n", aPid, p->p_comm, pages, hiwat);
+#endif /* DEBUG */
+				exit1(p, W_EXITCODE(0, SIGKILL), (int *)NULL);
+				proc_rele(p);
+#if DEBUG
+				printf("jetsam: pid %d killed - memory_status_level: %d\n", aPid, kern_memorystatus_level);
+#endif /* DEBUG */
+				jetsam_mark_pid_in_snapshot(aPid, kJetsamFlagsKilledHiwat);
+				jetsam_priority_list[i].pid = 0;
+				return 0;
+			} else {
+				proc_rele(p);
+			}
+
+		}
+		lck_mtx_lock(jetsam_list_mlock);
+	}
+	lck_mtx_unlock(jetsam_list_mlock);
+	return -1;
+}
+
+static void
+kern_memorystatus_thread(void)
+>>>>>>> origin/10.6
 {
 #pragma unused(oidp, arg2)
 	proc_t p;
@@ -597,9 +697,19 @@ sysctl_memorystatus_highwater_enable SYSCTL_HANDLER_ARGS
 		return (error);
 	}
 
+<<<<<<< HEAD
 	if (!(enable == 0 || enable == 1)) {
 		return EINVAL;
 	}
+=======
+		while (kern_memorystatus_level <= kern_memorystatus_level_highwater) {
+			if (jetsam_kill_hiwat_proc() < 0) {
+				break;
+			}
+		}
+				
+		kern_memorystatus_last_level = kern_memorystatus_level;
+>>>>>>> origin/10.6
 
 	proc_list_lock();
 
@@ -801,6 +911,33 @@ sysctl_memorystatus_vm_pressure_send SYSCTL_HANDLER_ARGS
 
 	memorystatus_klist_unlock();
 
+<<<<<<< HEAD
+=======
+	if (!ret && req->newptr) {
+		jetsam_priority_list_count = newsize / sizeof(jetsam_priority_list[0]);
+#if DEBUG 
+		printf("set jetsam priority pids = { ");
+		for (i = 0; i < jetsam_priority_list_count; i++) {
+			printf("(%d, 0x%08x, %d) ", temp_list[i].pid, temp_list[i].flags, temp_list[i].hiwat_pages);
+		}
+		printf("}\n");
+#endif /* DEBUG */
+		lck_mtx_lock(jetsam_list_mlock);
+		for (i = 0; i < jetsam_priority_list_count; i++) {
+			jetsam_priority_list[i] = temp_list[i];
+		}
+		for (i = jetsam_priority_list_count; i < kMaxPriorityEntries; i++) {
+			jetsam_priority_list[i].pid = 0;
+			jetsam_priority_list[i].flags = 0;
+			jetsam_priority_list[i].hiwat_pages = -1;
+			jetsam_priority_list[i].hiwat_reserved1 = -1;
+			jetsam_priority_list[i].hiwat_reserved2 = -1;
+			jetsam_priority_list[i].hiwat_reserved3 = -1;
+		}
+		jetsam_priority_list_index = 0;
+		lck_mtx_unlock(jetsam_list_mlock);
+	}	
+>>>>>>> origin/10.6
 	return ret;
 }
 =======

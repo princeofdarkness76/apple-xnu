@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -424,7 +428,18 @@ rip_output(
 		inp->inp_flowhash = inp_calc_flowhash(inp);
 =======
 	struct ip_out_args ipoa;
+	int error = 0;
+#if PKT_PRIORITY
+	mbuf_traffic_class_t mtc = MBUF_TC_NONE;
+#endif /* PKT_PRIORITY */
 
+	if (control != NULL) {
+#if PKT_PRIORITY
+		mtc = mbuf_traffic_class_from_control(control);
+#endif /* PKT_PRIORITY */
+
+		m_freem(control);
+	}
 	/* If socket was bound to an ifindex, tell ip_output about it */
 	ipoa.ipoa_ifscope = (inp->inp_flags & INP_BOUND_IF) ?
 	    inp->inp_boundif : IFSCOPE_NONE;
@@ -507,6 +522,10 @@ rip_output(
 	    PKTF_FLOW_RAWSOCK);
 	m->m_pkthdr.pkt_proto = inp->inp_ip_p;
 
+#if PKT_PRIORITY
+	set_traffic_class(m, so, mtc);
+#endif /* PKT_PRIORITY */
+
 #if CONFIG_MACF_NET
 	mac_mbuf_label_associate_inpcb(inp, m);
 #endif
@@ -520,6 +539,7 @@ rip_output(
 	 * to pass the PCB cached route pointer directly to IP and
 	 * the modules beneath it.
 	 */
+<<<<<<< HEAD
 	// TODO: PASS DOWN ROUTE RULE ID
 	error = ip_output(m, inp->inp_options, &inp->inp_route, flags,
 	    imo, &ipoa);
@@ -570,6 +590,26 @@ rip_output(
 	return (ip_output(m, inp->inp_options, &inp->inp_route, flags,
 	    inp->inp_moptions, &ipoa));
 >>>>>>> origin/10.5
+=======
+	error = ip_output(m, inp->inp_options, &inp->inp_route, flags,
+	    inp->inp_moptions, &ipoa);
+
+#if IFNET_ROUTE_REFCNT
+	/*
+	 * Always discard the cached route for unconnected socket
+	 * or if it is a non-unicast route.
+	 */
+	if (inp->inp_route.ro_rt != NULL &&
+	    ((inp->inp_route.ro_rt->rt_flags & (RTF_MULTICAST|RTF_BROADCAST)) ||
+	    inp->inp_socket == NULL ||
+	    inp->inp_socket->so_state != SS_ISCONNECTED)) {
+		rtfree(inp->inp_route.ro_rt);
+		inp->inp_route.ro_rt = NULL;
+	}
+#endif /* IFNET_ROUTE_REFCNT */
+
+	return (error);
+>>>>>>> origin/10.6
 }
 
 #if IPFIREWALL
@@ -995,6 +1035,7 @@ rip_send(struct socket *so, int flags, struct mbuf *m, struct sockaddr *nam,
 		}
 		dst = ((struct sockaddr_in *)(void *)nam)->sin_addr.s_addr;
 	}
+<<<<<<< HEAD
 	return (rip_output(m, so, dst, control));
 
 bad:
@@ -1006,6 +1047,9 @@ bad:
 		m_freem(control);
 
 	return (error);
+=======
+	return rip_output(m, so, dst, control);
+>>>>>>> origin/10.6
 }
 
 /* note: rip_unlock is called from different protos  instead of the generic socket_unlock,

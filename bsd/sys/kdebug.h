@@ -510,7 +510,11 @@ extern void kernel_debug_string_simple(const char *message);
 
 /* **** The Kernel Debug Sub Classes for IOKIT (DBG_IOKIT) **** */
 #define DBG_IOINTC			0	/* Interrupt controller */
+<<<<<<< HEAD
 #define DBG_IOWORKLOOP			1	/* Work from work loop */
+=======
+#define DBG_IOWORKLOOP		1	/* Work from work loop */
+>>>>>>> origin/10.6
 #define DBG_IOINTES			2	/* Interrupt event source */
 #define DBG_IOCLKES			3	/* Clock event source */
 #define DBG_IOCMDQ			4	/* Command queue latencies */
@@ -547,7 +551,11 @@ extern void kernel_debug_string_simple(const char *message);
 =======
 #define DBG_IOCPUPM			49	/* CPU Power Management */
 #define DBG_IOGRAPHICS		50	/* Graphics */
+<<<<<<< HEAD
 >>>>>>> origin/10.5
+=======
+#define DBG_HIBERNATE		51	/* hibernation related events */
+>>>>>>> origin/10.6
 
 /* Backwards compatibility */
 #define	DBG_IOPOINTING		DBG_IOHID			/* OBSOLETE: Use DBG_IOHID instead */
@@ -578,7 +586,11 @@ extern void kernel_debug_string_simple(const char *message);
 #define DBG_DRVSPI		22	/* SPI */
 =======
 #define DBG_DRVGRAPHICS		18  /* Graphics */
+<<<<<<< HEAD
 >>>>>>> origin/10.5
+=======
+#define DBG_DRVSD			19  /* Secure Digital */
+>>>>>>> origin/10.6
 
 /* Backwards compatibility */
 #define	DBG_DRVPOINTING		DBG_DRVHID	/* OBSOLETE: Use DBG_DRVHID instead */

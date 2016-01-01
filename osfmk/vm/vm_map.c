@@ -831,6 +831,7 @@ vm_map_init(
 	vm_map_zone = zinit((vm_map_size_t) sizeof(struct _vm_map), 40*1024,
 			    PAGE_SIZE, "maps");
 	zone_change(vm_map_zone, Z_NOENCRYPT, TRUE);
+<<<<<<< HEAD
 #if	defined(__LP64__)
 	entry_zone_alloc_size = PAGE_SIZE * 5;
 #else
@@ -855,6 +856,23 @@ vm_map_init(
 	vm_map_holes_zone = zinit((vm_map_size_t) sizeof(struct vm_map_links),
 				 16*1024, PAGE_SIZE, "VM map holes");
 	zone_change(vm_map_holes_zone, Z_NOENCRYPT, TRUE);
+=======
+
+
+	vm_map_entry_zone = zinit((vm_map_size_t) sizeof(struct vm_map_entry),
+				  1024*1024, PAGE_SIZE*5,
+				  "non-kernel map entries");
+	zone_change(vm_map_entry_zone, Z_NOENCRYPT, TRUE);
+
+	vm_map_kentry_zone = zinit((vm_map_size_t) sizeof(struct vm_map_entry),
+				   kentry_data_size, kentry_data_size,
+				   "kernel map entries");
+	zone_change(vm_map_kentry_zone, Z_NOENCRYPT, TRUE);
+
+	vm_map_copy_zone = zinit((vm_map_size_t) sizeof(struct vm_map_copy),
+				 16*1024, PAGE_SIZE, "map copies");
+	zone_change(vm_map_copy_zone, Z_NOENCRYPT, TRUE);
+>>>>>>> origin/10.6
 
 	/*
 	 *	Cram the map and kentry zones with initial data.
@@ -11400,6 +11418,7 @@ submap_recurse:
 			(entry->vme_end - entry->vme_start) + VME_OFFSET(entry);
 		fault_info->no_cache  = entry->no_cache;
 		fault_info->stealth = FALSE;
+<<<<<<< HEAD
 		fault_info->io_sync = FALSE;
 		if (entry->used_for_jit ||
 		    entry->vme_resilient_codesign) {
@@ -11409,6 +11428,9 @@ submap_recurse:
 		}
 		fault_info->mark_zf_absent = FALSE;
 		fault_info->batch_pmap_op = FALSE;
+=======
+		fault_info->mark_zf_absent = FALSE;
+>>>>>>> origin/10.6
 	}
 
 	/*
@@ -12939,10 +12961,14 @@ vm_map_willneed(
 	fault_info.behavior      = VM_BEHAVIOR_SEQUENTIAL;
 	fault_info.no_cache      = FALSE;			/* ignored value */
 	fault_info.stealth	 = TRUE;
+<<<<<<< HEAD
 	fault_info.io_sync = FALSE;
 	fault_info.cs_bypass = FALSE;
 	fault_info.mark_zf_absent = FALSE;
 	fault_info.batch_pmap_op = FALSE;
+=======
+	fault_info.mark_zf_absent = FALSE;
+>>>>>>> origin/10.6
 
 	/*
 	 * The MADV_WILLNEED operation doesn't require any changes to the
@@ -14190,7 +14216,10 @@ vm_map_remap_range_allocate(
 	vm_map_offset_t	start;
 	vm_map_offset_t	end;
 	kern_return_t	kr;
+<<<<<<< HEAD
 	vm_map_entry_t		hole_entry;
+=======
+>>>>>>> origin/10.6
 
 StartAgain: ;
 
@@ -14449,17 +14478,27 @@ StartAgain: ;
 			 */
 			zap_map = vm_map_create(PMAP_NULL,
 						start,
+<<<<<<< HEAD
 						end,
+=======
+						end - start,
+>>>>>>> origin/10.6
 						map->hdr.entries_pageable);
 			if (zap_map == VM_MAP_NULL) {
 				return KERN_RESOURCE_SHORTAGE;
 			}
+<<<<<<< HEAD
 			vm_map_set_page_shift(zap_map, VM_MAP_PAGE_SHIFT(map));
 			vm_map_disable_hole_optimization(zap_map);
 
 			kr = vm_map_delete(map, start, end,
 					   (VM_MAP_REMOVE_SAVE_ENTRIES |
 					    VM_MAP_REMOVE_NO_MAP_ALIGN),
+=======
+
+			kr = vm_map_delete(map, start, end,
+					   VM_MAP_REMOVE_SAVE_ENTRIES,
+>>>>>>> origin/10.6
 					   zap_map);
 			if (kr == KERN_SUCCESS) {
 				vm_map_destroy(zap_map,
@@ -15799,6 +15838,7 @@ void vm_map_switch_protect(vm_map_t	map,
 	vm_map_unlock(map);
 }
 
+<<<<<<< HEAD
 /*
  * IOKit has mapped a region into this map; adjust the pmap's ledgers appropriately.
  * phys_footprint is a composite limit consisting of iokit + physmem, so we need to
@@ -15822,6 +15862,8 @@ vm_map_iokit_unmapped_region(vm_map_t map, vm_size_t bytes)
 	ledger_debit(pmap->ledger, task_ledgers.phys_footprint, bytes);	
 }
 
+=======
+>>>>>>> origin/10.6
 /* Add (generate) code signature for memory range */
 #if CONFIG_DYNAMIC_CODE_SIGNING
 kern_return_t vm_map_sign(vm_map_t map, 
@@ -15858,7 +15900,11 @@ kern_return_t vm_map_sign(vm_map_t map,
 		return(KERN_INVALID_ARGUMENT);
 	}
 	
+<<<<<<< HEAD
 	object = VME_OBJECT(entry);
+=======
+	object = entry->object.vm_object;
+>>>>>>> origin/10.6
 	if (object == VM_OBJECT_NULL) {
 		/*
 		 * Object must already be present or we can't sign.
@@ -15873,8 +15919,12 @@ kern_return_t vm_map_sign(vm_map_t map,
 	while(start < end) {
 		uint32_t refmod;
 		
+<<<<<<< HEAD
 		m = vm_page_lookup(object,
 				   start - entry->vme_start + VME_OFFSET(entry));
+=======
+		m = vm_page_lookup(object, start - entry->vme_start + entry->offset );
+>>>>>>> origin/10.6
 		if (m==VM_PAGE_NULL) {
 			/* shoud we try to fault a page here? we can probably 
 			 * demand it exists and is locked for this request */
@@ -15903,7 +15953,11 @@ kern_return_t vm_map_sign(vm_map_t map,
 		/* Pull the dirty status from the pmap, since we cleared the 
 		 * wpmapped bit */
 		if ((refmod & VM_MEM_MODIFIED) && !m->dirty) {
+<<<<<<< HEAD
 			SET_PAGE_DIRTY(m, FALSE);
+=======
+			m->dirty = TRUE;
+>>>>>>> origin/10.6
 		}
 		
 		/* On to the next page */
@@ -15914,6 +15968,7 @@ kern_return_t vm_map_sign(vm_map_t map,
 	return KERN_SUCCESS;
 }
 #endif
+<<<<<<< HEAD
 
 kern_return_t vm_map_partial_reap(vm_map_t map, unsigned int *reclaimed_resident, unsigned int *reclaimed_compressed)
 {	
@@ -16585,3 +16640,5 @@ void		vm_map_set_prot_copy_allow(vm_map_t		map,
 	vm_map_unlock(map);
 };
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.6

@@ -320,7 +320,13 @@ struct vm_page {
 					   /* other pages		   */
 	                deactivated:1,
 			zero_fill:1,
+<<<<<<< HEAD
 			__unused_object_bits:8;  /* 8 bits available here */
+=======
+			reusable:1,
+		        lopage:1,
+			__unused_object_bits:6;  /* 6 bits available here */
+>>>>>>> origin/10.6
 
 	ppnum_t		phys_page;	/* Physical address of page, passed
 					 *  to pmap_enter (read-only) */
@@ -573,8 +579,11 @@ extern ppnum_t	vm_page_guard_addr;
 
 extern boolean_t	vm_page_deactivate_hint;
 
+<<<<<<< HEAD
 extern int		vm_compressor_mode;
 
+=======
+>>>>>>> origin/10.6
 /*
    0 = all pages avail ( default. )
    1 = disable high mem ( cap max pages to 4G)
@@ -645,7 +654,11 @@ extern vm_page_t	vm_page_alloc_guard(
 extern void		vm_page_init(
 					vm_page_t	page,
 					ppnum_t		phys_page,
+<<<<<<< HEAD
 					boolean_t 	lopage);
+=======
+					boolean_t	lopage);
+>>>>>>> origin/10.6
 
 extern void		vm_page_free(
 	                                vm_page_t	page);

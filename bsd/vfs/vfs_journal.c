@@ -1,6 +1,10 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2002-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 1995-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
 =======
@@ -158,6 +162,7 @@ extern task_t kernel_task;
 #include "vfs_journal.h"
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 #include <sys/kdebug.h>
 
 #if 0
@@ -166,21 +171,34 @@ extern task_t kernel_task;
 #endif
 
 
+=======
+>>>>>>> origin/10.6
 #ifndef CONFIG_HFS_TRIM
 #define CONFIG_HFS_TRIM 0
 #endif
 
+<<<<<<< HEAD
 
 #if JOURNALING
 
 //
 // By default, we grow the list of extents to trim by 4K at a time.
+=======
+#if JOURNALING
+
+//
+// By default, we grow the list of extents to trim by one page at a time.
+>>>>>>> origin/10.6
 // We'll opt to flush a transaction if it contains at least
 // JOURNAL_FLUSH_TRIM_EXTENTS extents to be trimmed (even if the number
 // of modified blocks is small).
 //
 enum {
+<<<<<<< HEAD
     JOURNAL_DEFAULT_TRIM_BYTES = 4096,
+=======
+    JOURNAL_DEFAULT_TRIM_BYTES = PAGE_SIZE,
+>>>>>>> origin/10.6
     JOURNAL_DEFAULT_TRIM_EXTENTS = JOURNAL_DEFAULT_TRIM_BYTES / sizeof(dk_extent_t),
     JOURNAL_FLUSH_TRIM_EXTENTS = JOURNAL_DEFAULT_TRIM_EXTENTS * 15 / 16
 };
@@ -188,7 +206,12 @@ enum {
 unsigned int jnl_trim_flush_limit = JOURNAL_FLUSH_TRIM_EXTENTS;
 SYSCTL_UINT (_kern, OID_AUTO, jnl_trim_flush, CTLFLAG_RW, &jnl_trim_flush_limit, 0, "number of trimmed extents to cause a journal flush");
 
+<<<<<<< HEAD
 /* XXX next prototype should be from libsa/stdlib.h> but conflicts libkern */
+=======
+
+/* XXX next prototytype should be from libsa/stdlib.h> but conflicts libkern */
+>>>>>>> origin/10.6
 __private_extern__ void qsort(
 	void * array,
 	size_t nmembers,
@@ -2874,10 +2897,14 @@ journal_open(struct vnode *jvp,
     	/*
     	 * The volume has probably been resized (such that we had to adjust the
     	 * logical sector size), or copied to media with a different logical
-    	 * sector size.  If the journal is empty, then just switch to the
-    	 * current logical sector size.  If the journal is not empty, then
-    	 * fail to open the journal.
+    	 * sector size.
+	 *
+	 * Temporarily change the device's logical block size to match the
+	 * journal's header size.  This will allow us to replay the journal
+	 * safely.  If the replay succeeds, we will update the journal's header
+	 * size (later in this function).
     	 */
+<<<<<<< HEAD
     	 
     	if (jnl->jhdr->start == jnl->jhdr->end) {
     	    int err;
@@ -2894,6 +2921,15 @@ journal_open(struct vnode *jvp,
 	    goto bad_journal;
 	}
 >>>>>>> origin/10.5
+=======
+
+	orig_blksz = phys_blksz;
+	phys_blksz = jnl->jhdr->jhdr_size;
+	VNOP_IOCTL(jvp, DKIOCSETBLOCKSIZE, (caddr_t)&phys_blksz, FWRITE, &context);
+
+	printf("jnl: %s: open: temporarily switched block size from %u to %u\n",
+	       jdev_name, orig_blksz, phys_blksz);
+>>>>>>> origin/10.6
     }
 
     if (   jnl->jhdr->start <= 0
@@ -2992,6 +3028,7 @@ journal_open(struct vnode *jvp,
     }
 
     // take care of replaying the journal if necessary
+<<<<<<< HEAD
 	if (flags & JOURNAL_RESET) {
 		printf("jnl: journal start/end pointers reset! (jnl 0x%x; s 0x%llx e 0x%llx)\n",
 			   jnl, jnl->jhdr->start, jnl->jhdr->end);
@@ -2999,6 +3036,44 @@ journal_open(struct vnode *jvp,
 	} else if (replay_journal(jnl) != 0) {
 		printf("jnl: journal_open: Error replaying the journal!\n");
 		goto bad_journal;
+=======
+    if (flags & JOURNAL_RESET) {
+	printf("jnl: %s: journal start/end pointers reset! (jnl %p; s 0x%llx e 0x%llx)\n",
+	    jdev_name, jnl, jnl->jhdr->start, jnl->jhdr->end);
+	jnl->jhdr->start = jnl->jhdr->end;
+    } else if (replay_journal(jnl) != 0) {
+	printf("jnl: %s: journal_open: Error replaying the journal!\n", jdev_name);
+	goto bad_journal;
+    }
+
+    /*
+     * When we get here, we know that the journal is empty (jnl->jhdr->start ==
+     * jnl->jhdr->end).  If the device's logical block size was different from
+     * the journal's header size, then we can now restore the device's logical
+     * block size and update the journal's header size to match.
+     *
+     * Note that we also adjust the journal's start and end so that they will
+     * be aligned on the new block size.  We pick a new sequence number to
+     * avoid any problems if a replay found previous transactions using the old
+     * journal header size.  (See the comments in journal_create(), above.)
+     */
+    if (orig_blksz != 0) {
+	VNOP_IOCTL(jvp, DKIOCSETBLOCKSIZE, (caddr_t)&orig_blksz, FWRITE, &context);
+	phys_blksz = orig_blksz;
+	orig_blksz = 0;
+	
+	jnl->jhdr->jhdr_size = phys_blksz;
+	jnl->jhdr->start = phys_blksz;
+	jnl->jhdr->end = phys_blksz;
+	jnl->jhdr->sequence_num = (jnl->jhdr->sequence_num +
+				   (journal_size / phys_blksz) +
+				   (random() % 16384)) & 0x00ffffff;
+	
+	if (write_journal_header(jnl, 1)) {
+		printf("jnl: %s: open: failed to update journal header size\n", jdev_name);
+		goto bad_journal;
+	}
+>>>>>>> origin/10.6
     }
 
 	if (orig_blksz != 0) {
@@ -3015,12 +3090,21 @@ journal_open(struct vnode *jvp,
 	// set this now, after we've replayed the journal
 	size_up_tbuffer(jnl, tbuffer_size, phys_blksz);
 
+<<<<<<< HEAD
 	// TODO: Does this need to change if the device's logical block size changed?
 	if ((off_t)(jnl->jhdr->blhdr_size/sizeof(block_info)-1) > (jnl->jhdr->size/jnl->jhdr->jhdr_size)) {
 		printf("jnl: %s: open: jhdr size and blhdr size are not compatible (0x%llx, %d, %d)\n", jdev_name, jnl->jhdr->size,
 		       jnl->jhdr->blhdr_size, jnl->jhdr->jhdr_size);
 		goto bad_journal;
 	}
+=======
+    // TODO: Does this need to change if the device's logical block size changed?
+    if ((off_t)(jnl->jhdr->blhdr_size/sizeof(block_info)-1) > (jnl->jhdr->size/jnl->jhdr->jhdr_size)) {
+	    printf("jnl: %s: open: jhdr size and blhdr size are not compatible (0x%llx, %d, %d)\n", jdev_name, jnl->jhdr->size,
+		   jnl->jhdr->blhdr_size, jnl->jhdr->jhdr_size);
+	    goto bad_journal;
+    }
+>>>>>>> origin/10.6
 
 	lck_mtx_init(&jnl->jlock, jnl_mutex_group, jnl_lock_attr);
 	lck_mtx_init(&jnl->flock, jnl_mutex_group, jnl_lock_attr);
@@ -3028,6 +3112,7 @@ journal_open(struct vnode *jvp,
 
 	goto journal_open_complete;
 
+<<<<<<< HEAD
 bad_journal:
 	if (orig_blksz != 0) {
 		phys_blksz = orig_blksz;
@@ -3043,6 +3128,21 @@ cleanup_jdev_name:
 	jnl = NULL;
 journal_open_complete:
 	return jnl;    
+=======
+  bad_journal:
+    if (orig_blksz != 0) {
+	phys_blksz = orig_blksz;
+	VNOP_IOCTL(jvp, DKIOCSETBLOCKSIZE, (caddr_t)&orig_blksz, FWRITE, &context);
+	printf("jnl: %s: open: restored block size after error\n", jdev_name);
+    }
+    kmem_free(kernel_map, (vm_offset_t)jnl->header_buf, phys_blksz);
+  bad_kmem_alloc:
+    if (jdev_name) {
+	vfs_removename(jdev_name);
+    }
+    FREE_ZONE(jnl, sizeof(struct journal), M_JNL_JNL);
+    return NULL;    
+>>>>>>> origin/10.6
 }
 
 
@@ -4102,6 +4202,8 @@ journal_modify_block_abort(journal *jnl, struct buf *bp)
 	}
 
     if (jnl->flags & JOURNAL_INVALID) {
+    	/* Still need to buf_brelse(). Callers assume we consume the bp. */
+    	buf_brelse(bp);
 		return EINVAL;
     }
 
@@ -4220,6 +4322,8 @@ journal_modify_block_end(journal *jnl, struct buf *bp)
     CHECK_JOURNAL(jnl);
 
     if (jnl->flags & JOURNAL_INVALID) {
+    	/* Still need to buf_brelse(). Callers assume we consume the bp. */
+    	buf_brelse(bp);
 		return EINVAL;
     }
 
@@ -4531,6 +4635,7 @@ journal_kill_block(journal *jnl, struct buf *bp)
 	return 0;
 }
 
+<<<<<<< HEAD
 /*
 ;________________________________________________________________________________
 ;
@@ -4554,6 +4659,388 @@ journal_kill_block(journal *jnl, struct buf *bp)
 */
 __private_extern__ void
 journal_trim_set_callback(journal *jnl, jnl_trim_callback_t callback, void *arg)
+=======
+
+/*
+;________________________________________________________________________________
+;
+; Routine:		journal_trim_realloc
+;
+; Function:		Increase the amount of memory allocated for the list of extents
+;				to be unmapped (trimmed).  This routine will be called when
+;				adding an extent to the list, and the list already occupies
+;				all of the space allocated to it.  This routine returns ENOMEM
+;				if unable to allocate more space, or 0 if the extent list was
+;				grown successfully.
+;
+; Input Arguments:
+;	tr			- The transaction containing the extent list.
+;
+; Output:
+;	(result)	- ENOMEM or 0.
+;
+; Side effects:
+;	 The allocated_count and extents fields of tr->trim are updated
+;	 if the function returned 0.
+;________________________________________________________________________________
+*/
+static int
+journal_trim_realloc(transaction *tr)
+{
+	if (CONFIG_HFS_TRIM) {
+		void *new_extents;
+		uint32_t new_allocated_count;
+		
+		new_allocated_count = tr->trim.allocated_count + JOURNAL_DEFAULT_TRIM_EXTENTS;
+		new_extents = kalloc(new_allocated_count * sizeof(dk_extent_t));
+		if (new_extents == NULL) {
+			printf("journal_trim_realloc: unable to grow extent list!\n");
+			/*
+			 * Since we could be called when allocating space previously marked
+			 * to be trimmed, we need to empty out the list to be safe.
+			 */
+			tr->trim.extent_count = 0;
+			return ENOMEM;
+		}
+		
+		/* Copy the old extent list to the newly allocated list. */
+		if (tr->trim.extents != NULL) {
+			memmove(new_extents,
+					tr->trim.extents,
+					tr->trim.allocated_count * sizeof(dk_extent_t));
+			kfree(tr->trim.extents,
+				  tr->trim.allocated_count * sizeof(dk_extent_t));
+		}
+		
+		tr->trim.allocated_count = new_allocated_count;
+		tr->trim.extents = new_extents;
+	}
+	return 0;
+}
+
+
+/*
+;________________________________________________________________________________
+;
+; Routine:		journal_trim_add_extent
+;
+; Function:		Make note of a range of bytes that should be unmapped
+;				(trimmed).  That is, the given range of bytes no longer have
+;				useful content, and the device can unmap the previous
+;				contents.  For example, a solid state disk may reuse the
+;				underlying storage for other blocks.
+;
+;				The extent will be unmapped after the transaction is written
+;				to the journal.
+;
+; Input Arguments:
+;	jnl			- The journal for the volume containing the byte range.
+;	offset		- The first byte of the range to be trimmed.
+;	length		- The number of bytes of the extent being trimmed.
+;________________________________________________________________________________
+*/
+__private_extern__ int
+journal_trim_add_extent(journal *jnl, uint64_t offset, uint64_t length)
+{
+	if (CONFIG_HFS_TRIM) {
+		uint64_t end;
+		transaction *tr;
+		dk_extent_t *extent;
+		uint32_t insert_index;
+		uint32_t replace_count;
+		
+		CHECK_JOURNAL(jnl);
+	
+		if (jnl->flags & JOURNAL_TRIM_ERR) {
+			/*
+			 * A previous trim failed, so we have disabled trim for this volume
+			 * for as long as it remains mounted.
+			 */
+			return 0;
+		}
+		
+		if (jnl->flags & JOURNAL_INVALID) {
+			return EINVAL;
+		}
+	
+		tr = jnl->active_tr;
+		CHECK_TRANSACTION(tr);
+	
+		if (jnl->owner != current_thread()) {
+			panic("jnl: trim_add_extent: called w/out a transaction! jnl %p, owner %p, curact %p\n",
+				  jnl, jnl->owner, current_thread());
+		}
+	
+		free_old_stuff(jnl);
+		
+		end = offset + length;
+		
+		/*
+		 * Find the range of existing extents that can be combined with the
+		 * input extent.  We start by counting the number of extents that end
+		 * strictly before the input extent, then count the number of extents
+		 * that overlap or are contiguous with the input extent.
+		 */
+		extent = tr->trim.extents;
+		insert_index = 0;
+		while (insert_index < tr->trim.extent_count && extent->offset + extent->length < offset) {
+			++insert_index;
+			++extent;
+		}
+		replace_count = 0;
+		while (insert_index + replace_count < tr->trim.extent_count && extent->offset <= end) {
+			++replace_count;
+			++extent;
+		}
+		
+		/*
+		 * If none of the existing extents can be combined with the input extent,
+		 * then just insert it in the list (before item number insert_index).
+		 */
+		if (replace_count == 0) {
+			/* If the list was already full, we need to grow it. */
+			if (tr->trim.extent_count == tr->trim.allocated_count) {
+				if (journal_trim_realloc(tr) != 0) {
+					printf("jnl: trim_add_extent: out of memory!");
+					return ENOMEM;
+				}
+			}
+			
+			/* Shift any existing extents with larger offsets. */
+			if (insert_index < tr->trim.extent_count) {
+				memmove(&tr->trim.extents[insert_index+1],
+						&tr->trim.extents[insert_index],
+						(tr->trim.extent_count - insert_index) * sizeof(dk_extent_t));
+			}
+			tr->trim.extent_count++;
+			
+			/* Store the new extent in the list. */
+			tr->trim.extents[insert_index].offset = offset;
+			tr->trim.extents[insert_index].length = length;
+			
+			/* We're done. */
+			return 0;
+		}
+		
+		/*
+		 * Update extent number insert_index to be the union of the input extent
+		 * and all of the replaced extents.
+		 */
+		if (tr->trim.extents[insert_index].offset < offset)
+			offset = tr->trim.extents[insert_index].offset;
+		extent = &tr->trim.extents[insert_index + replace_count - 1];
+		if (extent->offset + extent->length > end)
+			end = extent->offset + extent->length;
+		tr->trim.extents[insert_index].offset = offset;
+		tr->trim.extents[insert_index].length = end - offset;
+		
+		/*
+		 * If we were replacing more than one existing extent, then shift any
+		 * extents with larger offsets, and update the count of extents.
+		 *
+		 * We're going to leave extent #insert_index alone since it was just updated, above.
+		 * We need to move extents from index (insert_index + replace_count) through the end of
+		 * the list by (replace_count - 1) positions so that they overwrite extent #(insert_index + 1).
+		 */
+		if (replace_count > 1 && (insert_index + replace_count) < tr->trim.extent_count) {
+			memmove(&tr->trim.extents[insert_index + 1],
+					&tr->trim.extents[insert_index + replace_count],
+					(tr->trim.extent_count - insert_index - replace_count) * sizeof(dk_extent_t));
+		}
+		tr->trim.extent_count -= replace_count - 1;
+    }
+    return 0;
+}
+
+
+/*
+;________________________________________________________________________________
+;
+; Routine:		journal_trim_remove_extent
+;
+; Function:		Make note of a range of bytes, some of which may have previously
+;				been passed to journal_trim_add_extent, is now in use on the
+;				volume.  The given bytes will be not be trimmed as part of
+;				this transaction.
+;
+; Input Arguments:
+;	jnl			- The journal for the volume containing the byte range.
+;	offset		- The first byte of the range to be trimmed.
+;	length		- The number of bytes of the extent being trimmed.
+;________________________________________________________________________________
+*/
+__private_extern__ int
+journal_trim_remove_extent(journal *jnl, uint64_t offset, uint64_t length)
+{
+	if (CONFIG_HFS_TRIM) {
+		u_int64_t end;
+		dk_extent_t *extent;
+		transaction *tr;
+		u_int32_t keep_before;
+		u_int32_t keep_after;
+		
+		CHECK_JOURNAL(jnl);
+	
+		if (jnl->flags & JOURNAL_TRIM_ERR) {
+			/*
+			 * A previous trim failed, so we have disabled trim for this volume
+			 * for as long as it remains mounted.
+			 */
+			return 0;
+		}
+		
+		if (jnl->flags & JOURNAL_INVALID) {
+			return EINVAL;
+		}
+	
+		tr = jnl->active_tr;
+		CHECK_TRANSACTION(tr);
+	
+		if (jnl->owner != current_thread()) {
+			panic("jnl: trim_remove_extent: called w/out a transaction! jnl %p, owner %p, curact %p\n",
+				  jnl, jnl->owner, current_thread());
+		}
+	
+		free_old_stuff(jnl);
+	
+		end = offset + length;
+	
+		/*
+		 * Find any existing extents that start before or end after the input
+		 * extent.  These extents will be modified if they overlap the input
+		 * extent.  Other extents between them will be deleted.
+		 */
+		extent = tr->trim.extents;
+		keep_before = 0;
+		while (keep_before < tr->trim.extent_count && extent->offset < offset) {
+			++keep_before;
+			++extent;
+		}
+		keep_after = keep_before;
+		if (keep_after > 0) {
+			/* See if previous extent extends beyond both ends of input extent. */
+			--keep_after;
+			--extent;
+		}
+		while (keep_after < tr->trim.extent_count && (extent->offset + extent->length) <= end) {
+			++keep_after;
+			++extent;
+		}
+		
+		/*
+		 * When we get here, the first keep_before extents (0 .. keep_before-1)
+		 * start before the input extent, and extents (keep_after .. extent_count-1)
+		 * end after the input extent.  We'll need to keep, all of those extents,
+		 * but possibly modify #(keep_before-1) and #keep_after to remove the portion
+		 * that overlaps with the input extent.
+		 */
+		
+		/*
+		 * Does the input extent start after and end before the same existing
+		 * extent?  If so, we have to "punch a hole" in that extent and convert
+		 * it to two separate extents.
+		 */
+		if (keep_before >  keep_after) {
+			/* If the list was already full, we need to grow it. */
+			if (tr->trim.extent_count == tr->trim.allocated_count) {
+				if (journal_trim_realloc(tr) != 0) {
+					printf("jnl: trim_remove_extent: out of memory!");
+					return ENOMEM;
+				}
+			}
+			
+			/*
+			 * Make room for a new extent by shifting extents #keep_after and later
+			 * down by one extent.  When we're done, extents #keep_before and
+			 * #keep_after will be identical, and we can fall through to removing
+			 * the portion that overlaps the input extent.
+			 */
+			memmove(&tr->trim.extents[keep_before],
+					&tr->trim.extents[keep_after],
+					(tr->trim.extent_count - keep_after) * sizeof(dk_extent_t));
+			++tr->trim.extent_count;
+			++keep_after;
+			
+			/*
+			 * Fall through.  We now have the case where the length of extent
+			 * #(keep_before - 1) needs to be updated, and the start of extent
+			 * #(keep_after) needs to be updated.
+			 */
+		}
+		
+		/*
+		 * May need to truncate the end of extent #(keep_before - 1) if it overlaps
+		 * the input extent.
+		 */
+		if (keep_before > 0) {
+			extent = &tr->trim.extents[keep_before - 1];
+			if (extent->offset + extent->length > offset) {
+				extent->length = offset - extent->offset;
+			}
+		}
+		
+		/*
+		 * May need to update the start of extent #(keep_after) if it overlaps the
+		 * input extent.
+		 */
+		if (keep_after < tr->trim.extent_count) {
+			extent = &tr->trim.extents[keep_after];
+			if (extent->offset < end) {
+				extent->length = extent->offset + extent->length - end;
+				extent->offset = end;
+			}
+		}
+		
+		/*
+		 * If there were whole extents that overlapped the input extent, get rid
+		 * of them by shifting any following extents, and updating the count.
+		 */
+		if (keep_after > keep_before && keep_after < tr->trim.extent_count) {
+			memmove(&tr->trim.extents[keep_before],
+					&tr->trim.extents[keep_after],
+					(tr->trim.extent_count - keep_after) * sizeof(dk_extent_t));
+		}
+		tr->trim.extent_count -= keep_after - keep_before;
+	}
+	return 0;
+}
+
+
+static int
+journal_trim_flush(journal *jnl, transaction *tr)
+{
+	int errno = 0;
+	
+	if (CONFIG_HFS_TRIM) {
+		if ((jnl->flags & JOURNAL_TRIM_ERR) == 0 && tr->trim.extent_count > 0) {
+			dk_unmap_t unmap;
+			
+			bzero(&unmap, sizeof(unmap));
+			unmap.extents = tr->trim.extents;
+			unmap.extentsCount = tr->trim.extent_count;
+			errno = VNOP_IOCTL(jnl->fsdev, DKIOCUNMAP, (caddr_t)&unmap, FWRITE, vfs_context_kernel());
+			if (errno) {
+				printf("jnl: error %d from DKIOCUNMAP (extents=%lx, count=%u); disabling trim for %s\n",
+						errno, (unsigned long) (tr->trim.extents), tr->trim.extent_count,
+						jnl->jdev_name);
+				jnl->flags |= JOURNAL_TRIM_ERR;
+			}
+		}
+		if (tr->trim.extents) {
+			kfree(tr->trim.extents, tr->trim.allocated_count * sizeof(dk_extent_t));
+			tr->trim.allocated_count = 0;
+			tr->trim.extent_count = 0;
+			tr->trim.extents = NULL;
+		}
+	}
+	
+	return errno;
+}
+
+
+static int
+journal_binfo_cmp(const void *a, const void *b)
+>>>>>>> origin/10.6
 {
 	jnl->trim_callback = callback;
 	jnl->trim_callback_arg = arg;
@@ -4686,8 +5173,35 @@ trim_search_extent(struct jnl_trim_list *trim, uint64_t offset,
 		}
 	}
 
+<<<<<<< HEAD
 	return FALSE;
 }
+=======
+    // if there weren't any modified blocks in the transaction
+    // just save off the transaction pointer and return.
+    if (tr->total_bytes == jnl->jhdr->blhdr_size) {
+		jnl->cur_tr = tr;
+		return 0;
+    }
+
+    // if our transaction buffer isn't very full, just hang
+    // on to it and don't actually flush anything.  this is
+    // what is known as "group commit".  we will flush the
+    // transaction buffer if it's full or if we have more than
+    // one of them so we don't start hogging too much memory.
+    //
+    // We also check the number of extents waiting to be trimmed.
+    // If it is small enough, then keep accumulating more (so we
+    // can reduce the overhead of trimming).  If there was a
+    // prior trim error, then we stop issuing trims for this
+    // volume, so we can also coalesce transactions.
+    //
+    if (   force_it == 0
+		   && (jnl->flags & JOURNAL_NO_GROUP_COMMIT) == 0 
+		   && tr->num_blhdrs < 3
+		   && (tr->total_bytes <= ((tr->tbuffer_size*tr->num_blhdrs) - tr->tbuffer_size/8))
+		   && ((jnl->flags & JOURNAL_TRIM_ERR) || (tr->trim.extent_count < jnl_trim_flush_limit))) {
+>>>>>>> origin/10.6
 
 
 /*
@@ -6138,6 +6652,24 @@ end_transaction(transaction *tr, int force_it)
 		goto bad_journal;
     }
 
+<<<<<<< HEAD
+=======
+	/*
+	 * If the caller supplied a callback, call it now that the blocks have been
+	 * written to the journal.  This is used by journal_relocate so, for example,
+	 * the file system can change its pointer to the new journal.
+	 */
+	if (callback != NULL && callback(callback_arg) != 0) {
+		goto bad_journal;
+	}
+	
+	//
+	// Send a DKIOCUNMAP for the extents trimmed by this transaction, and
+	// free up the extent list.
+	//
+	errno = journal_trim_flush(jnl, tr);
+	
+>>>>>>> origin/10.6
     //
     // setup for looping through all the blhdr's.  we null out the
     // tbuffer and blhdr fields so that they're not used any more.
@@ -6228,7 +6760,12 @@ end_transaction(transaction *tr, int force_it)
 
   bad_journal:
     jnl->flags |= JOURNAL_INVALID;
+<<<<<<< HEAD
     abort_transaction(jnl, tr);
+=======
+    jnl->old_start[sizeof(jnl->old_start)/sizeof(jnl->old_start[0]) - 1] &= ~0x8000000000000000LL;
+    abort_transaction(jnl, tr);		// cleans up list of extents to be trimmed
+>>>>>>> origin/10.6
     return -1;
 >>>>>>> origin/10.2
 }
@@ -6401,6 +6938,12 @@ abort_transaction(journal *jnl, transaction *tr)
 =======
     }
 
+	if (tr->trim.extents) {
+		kfree(tr->trim.extents, tr->trim.allocated_count * sizeof(dk_extent_t));
+	}
+	tr->trim.allocated_count = 0;
+	tr->trim.extent_count = 0;
+	tr->trim.extents = NULL;
     tr->tbuffer     = NULL;
     tr->blhdr       = NULL;
     tr->total_bytes = 0xdbadc0de;

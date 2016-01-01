@@ -33,16 +33,25 @@
 
 /* From dyld/include/dyld_images.h */
 
+<<<<<<< HEAD
 struct user32_dyld_uuid_info {
+=======
+struct dyld_uuid_info {
+>>>>>>> origin/10.6
 	user32_addr_t	imageLoadAddress;	/* base address image is mapped into */
 	uuid_t			imageUUID;			/* UUID of image */
 };
 
+<<<<<<< HEAD
 struct user64_dyld_uuid_info {
+=======
+struct dyld_uuid_info64 {
+>>>>>>> origin/10.6
 	user64_addr_t	imageLoadAddress;	/* base address image is mapped into */
 	uuid_t			imageUUID;			/* UUID of image */
 };
 
+<<<<<<< HEAD
 /* Re-use dyld format for kext load addresses */
 #if __LP64__
 typedef struct user64_dyld_uuid_info kernel_uuid_info;
@@ -62,11 +71,17 @@ struct user64_dyld_image_info {
 	user64_ulong_t	imageFileModDate;	/* time_t of image file */
 };
 
+=======
+>>>>>>> origin/10.6
 // FIXME: dyld is in C++, and some of the fields in dyld_all_image_infos are C++ 
 // native booleans.  There must be a better way...
 typedef uint8_t bool;
 
+<<<<<<< HEAD
 struct user32_dyld_all_image_infos {
+=======
+struct dyld_all_image_infos {
+>>>>>>> origin/10.6
 	uint32_t					version;
 	uint32_t					infoArrayCount;
 	user32_addr_t				infoArray;
@@ -82,10 +97,16 @@ struct user32_dyld_all_image_infos {
 	user32_addr_t				systemOrderFlag;
 	user32_size_t				uuidArrayCount; // dyld defines this as a uintptr_t despite it being a count
 	user32_addr_t				uuidArray;
+<<<<<<< HEAD
 	user32_addr_t				dyldAllImageInfosAddress;
 };
 
 struct user64_dyld_all_image_infos {
+=======
+};
+
+struct dyld_all_image_infos64 {
+>>>>>>> origin/10.6
 	uint32_t					version;
 	uint32_t					infoArrayCount;
 	user64_addr_t				infoArray;
@@ -101,5 +122,8 @@ struct user64_dyld_all_image_infos {
 	user64_addr_t				systemOrderFlag;
 	user64_size_t				uuidArrayCount; // dyld defines this as a uintptr_t despite it being a count
 	user64_addr_t				uuidArray;
+<<<<<<< HEAD
 	user64_addr_t				dyldAllImageInfosAddress;
+=======
+>>>>>>> origin/10.6
 };

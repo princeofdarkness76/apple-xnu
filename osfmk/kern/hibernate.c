@@ -41,17 +41,30 @@
 #include <vm/vm_page.h>
 #include <vm/vm_pageout.h>
 #include <vm/vm_purgeable_internal.h>
+<<<<<<< HEAD
 #include <vm/vm_compressor.h>
+=======
+>>>>>>> origin/10.6
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
 boolean_t	need_to_unlock_decompressor = FALSE;
 
 kern_return_t 
+<<<<<<< HEAD
 hibernate_alloc_page_lists(
 		hibernate_page_list_t ** page_list_ret,
 		hibernate_page_list_t ** page_list_wired_ret,
 		hibernate_page_list_t ** page_list_pal_ret)
+=======
+hibernate_setup(IOHibernateImageHeader * header,
+                        uint32_t  free_page_ratio,
+                        uint32_t  free_page_time,
+                        boolean_t vmflush,
+			hibernate_page_list_t ** page_list_ret,
+			hibernate_page_list_t ** page_list_wired_ret,
+                        boolean_t * encryptedswap)
+>>>>>>> origin/10.6
 {
 <<<<<<< HEAD
     kern_return_t	retval = KERN_SUCCESS;
@@ -106,10 +119,20 @@ hibernate_alloc_page_lists(
 
     hibernate_page_list_t * page_list = NULL;
     hibernate_page_list_t * page_list_wired = NULL;
+<<<<<<< HEAD
     hibernate_page_list_t * page_list_pal = NULL;
 
     page_list = hibernate_page_list_allocate(TRUE);
     if (!page_list) {
+=======
+    uint32_t    	    gobble_count;
+
+    *page_list_ret       = NULL;
+    *page_list_wired_ret = NULL;
+    
+    if (vmflush)
+        hibernate_flush_memory();
+>>>>>>> origin/10.6
 
 <<<<<<< HEAD
 	    retval = KERN_RESOURCE_SHORTAGE;

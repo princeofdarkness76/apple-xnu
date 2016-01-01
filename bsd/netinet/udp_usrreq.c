@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -1349,12 +1353,19 @@ udp_pcblist_n SYSCTL_HANDLER_ARGS
 	struct ip_moptions *mopts;
 	struct route ro;
 	struct ip_out_args ipoa;
+<<<<<<< HEAD
 >>>>>>> origin/10.5
+=======
+#if PKT_PRIORITY
+	mbuf_traffic_class_t mtc = MBUF_TC_NONE;
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 
 SYSCTL_PROC(_net_inet_udp, OID_AUTO, pcblist_n,
     CTLTYPE_STRUCT | CTLFLAG_RD | CTLFLAG_LOCKED, 0, 0, udp_pcblist_n,
     "S,xinpcb_n", "List of active UDP sockets");
 
+<<<<<<< HEAD
 __private_extern__ void
 udp_get_ports_used(uint32_t ifindex, int protocol, uint32_t flags,
     bitstr_t *bitfield)
@@ -1367,6 +1378,17 @@ udp_count_opportunistic(unsigned int ifindex, u_int32_t flags)
 {
 	return (inpcb_count_opportunistic(ifindex, &udbinfo, flags));
 }
+=======
+	if (control != NULL) {
+#if PKT_PRIORITY
+		mtc = mbuf_traffic_class_from_control(control);
+#endif /* PKT_PRIORITY */
+		m_freem(control);
+	}
+	KERNEL_DEBUG(DBG_LAYER_OUT_BEG, inp->inp_fport, inp->inp_lport,
+		     inp->inp_laddr.s_addr, inp->inp_faddr.s_addr,
+		     (htons((u_short)len + sizeof (struct udphdr))));
+>>>>>>> origin/10.6
 
 __private_extern__ uint32_t
 udp_find_anypcb_byaddr(struct ifaddr *ifa)
@@ -1783,6 +1805,7 @@ udp_output(struct inpcb *inp, struct mbuf *m, struct sockaddr *addr,
 	/* Copy the cached route and take an extra reference */
 	inp_route_copyout(inp, &ro);
 
+<<<<<<< HEAD
 	set_packet_service_class(m, so, msc, 0);
 	m->m_pkthdr.pkt_flowsrc = FLOWSRC_INPCB;
 	m->m_pkthdr.pkt_flowid = inp->inp_flowhash;
@@ -1798,6 +1821,11 @@ udp_output(struct inpcb *inp, struct mbuf *m, struct sockaddr *addr,
 		ipoa.ipoa_flags |= IPOAF_BOUND_SRCADDR;
 
 	inp->inp_sndinprog_cnt++;
+=======
+#if PKT_PRIORITY
+	set_traffic_class(m, so, mtc);
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 
 	socket_unlock(so, 0);
 <<<<<<< HEAD
@@ -1845,6 +1873,7 @@ udp_output(struct inpcb *inp, struct mbuf *m, struct sockaddr *addr,
 abort:
 	if (udp_dodisconnect) {
 <<<<<<< HEAD
+<<<<<<< HEAD
 		/* Always discard the cached route for unconnected socket */
 		ROUTE_RELEASE(&inp->inp_route);
 =======
@@ -1854,6 +1883,15 @@ abort:
 			ro.ro_rt = NULL;
 		}
 >>>>>>> origin/10.5
+=======
+#if IFNET_ROUTE_REFCNT
+		/* Always discard the cached route for unconnected socket */
+		if (inp->inp_route.ro_rt != NULL) {
+			rtfree(inp->inp_route.ro_rt);
+			inp->inp_route.ro_rt = NULL;
+		}
+#endif /* IFNET_ROUTE_REFCNT */
+>>>>>>> origin/10.6
 		in_pcbdisconnect(inp);
 		inp->inp_laddr = origladdr;	/* XXX rehash? */
 		/* no reference needed */
@@ -1888,6 +1926,7 @@ abort:
 	} else {
 		ROUTE_RELEASE(&inp->inp_route);
 	}
+<<<<<<< HEAD
 
 	/*
 	 * If output interface was cellular/expensive, and this socket is
@@ -1896,6 +1935,40 @@ abort:
 	if (error != 0 && (ipoa.ipoa_retflags & IPOARF_IFDENIED) &&
 	    (INP_NO_CELLULAR(inp) || INP_NO_EXPENSIVE(inp)))
 		soevent(so, (SO_FILT_HINT_LOCKED|SO_FILT_HINT_IFDENIED));
+=======
+#if IFNET_ROUTE_REFCNT
+	else if (inp->inp_route.ro_rt != NULL &&
+	    (inp->inp_route.ro_rt->rt_flags & (RTF_MULTICAST|RTF_BROADCAST))) {
+		/* Always discard non-unicast cached route */
+		rtfree(inp->inp_route.ro_rt);
+		inp->inp_route.ro_rt = NULL;
+	}
+#endif /* IFNET_ROUTE_REFCNT */
+
+	KERNEL_DEBUG(DBG_FNC_UDP_OUTPUT | DBG_FUNC_END, error, 0,0,0,0);
+	return (error);
+
+abort:
+        if (udp_dodisconnect) {
+#if IFNET_ROUTE_REFCNT
+		/* Always discard the cached route for unconnected socket */
+		if (inp->inp_route.ro_rt != NULL) {
+			rtfree(inp->inp_route.ro_rt);
+			inp->inp_route.ro_rt = NULL;
+		}
+#endif /* IFNET_ROUTE_REFCNT */
+		in_pcbdisconnect(inp);
+		inp->inp_laddr = origladdr; /* XXX rehash? */
+        }
+#if IFNET_ROUTE_REFCNT
+	else if (inp->inp_route.ro_rt != NULL &&
+	    (inp->inp_route.ro_rt->rt_flags & (RTF_MULTICAST|RTF_BROADCAST))) {
+		/* Always discard non-unicast cached route */
+		rtfree(inp->inp_route.ro_rt);
+		inp->inp_route.ro_rt = NULL;
+	}
+#endif /* IFNET_ROUTE_REFCNT */
+>>>>>>> origin/10.6
 
 release:
 	KERNEL_DEBUG(DBG_FNC_UDP_OUTPUT | DBG_FUNC_END, error, 0, 0, 0, 0);

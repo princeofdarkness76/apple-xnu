@@ -395,8 +395,33 @@ static uint32_t
 store_one_page(uint32_t procFlags, uint32_t * src, uint32_t compressedSize, 
 		uint32_t * buffer, uint32_t ppnum)
 {
+<<<<<<< HEAD
 	uint64_t dst = ptoa_64(ppnum);
 	uint8_t scratch[WKdm_SCRATCH_BUF_SIZE] __attribute__ ((aligned (16)));
+=======
+    uint64_t dst;
+    uint32_t sum;
+
+    dst = ptoa_64(ppnum);
+    if (ppnum < 0x00100000)
+	buffer = (uint32_t *) (uintptr_t) dst;
+
+    if (compressedSize != PAGE_SIZE)
+    {
+	WKdm_decompress((WK_word*) src, (WK_word*) buffer, PAGE_SIZE >> 2);
+	src = buffer;
+    }
+
+    sum = hibernate_sum_page((uint8_t *) src, ppnum);
+
+    if (((uint64_t) (uintptr_t) src) == dst)
+	src = 0;
+
+    hibernate_restore_phys_page((uint64_t) (uintptr_t) src, dst, PAGE_SIZE, procFlags);
+
+    return (sum);
+}
+>>>>>>> origin/10.6
 
 	if (compressedSize != PAGE_SIZE)
 	{
@@ -465,9 +490,22 @@ hibernate_kernel_entrypoint(uint32_t p1,
 
     debug_code(kIOHibernateRestoreCodeImageStart, headerPhys);
 
+<<<<<<< HEAD
     memcpy(gIOHibernateCurrentHeader,
 	   (void *) pal_hib_map(IMAGE_AREA, headerPhys), 
 	   sizeof(IOHibernateImageHeader));
+=======
+    if (!p3)
+    {
+	count = header->cryptVarsOffset;
+	if (count)
+	    p3 = (void *)(((uintptr_t) header) - count);
+    }
+    if (p3)
+        bcopy_internal(p3, 
+                gIOHibernateCryptWakeVars, 
+                sizeof(hibernate_cryptwakevars_t));
+>>>>>>> origin/10.6
 
     debug_code(kIOHibernateRestoreCodeSignature, gIOHibernateCurrentHeader->signature);
 

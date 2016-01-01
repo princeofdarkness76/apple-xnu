@@ -391,6 +391,7 @@ load_machfile(
 	} else
 		map = new_map;
 
+<<<<<<< HEAD
 #if   (__ARM_ARCH_7K__ >= 2) && defined(PLATFORM_WatchOS)
 	/* enforce 16KB alignment for watch targets with new ABI */
 	vm_map_set_page_shift(map, SIXTEENK_PAGE_SHIFT);
@@ -427,6 +428,14 @@ load_machfile(
 		dyld_aslr_offset %= max_slide_pages;
 		dyld_aslr_offset <<= vm_map_page_shift(map);
 	}
+=======
+#ifndef	CONFIG_ENFORCE_SIGNED_CODE
+	/* This turns off faulting for executable pages, which allows to 
+	 * circumvent Code Signing Enforcement */
+	if ( (header->flags & MH_ALLOW_STACK_EXECUTION) )
+	        vm_map_disable_NX(map);
+#endif
+>>>>>>> origin/10.6
 	
 	if (!result)
 		result = &myresult;

@@ -25,6 +25,17 @@
 #include <console/video_console.h>
 #include <kdp/kdp_udp.h>
 #include <kern/debug.h>
+<<<<<<< HEAD
+=======
+#include <mach/mach_time.h>
+#include <sys/errno.h>
+#include <string.h>
+#include <machine/machlimits.h>
+#include <pexpert/pexpert.h>
+
+extern struct vc_info vinfo;
+extern boolean_t panicDialogDesired;
+>>>>>>> origin/10.6
 
 #include "panic_image.c"
 #include "rendered_numbers.c"
@@ -128,7 +139,6 @@ static void blit_digit( int digit );
 <<<<<<< HEAD
 =======
 static const char * strnstr(const char * s, const char * find, size_t slen);
-void dim_screen(void);
 static void panic_blit_rect(unsigned int x, unsigned int y, unsigned int width,
 			    unsigned int height, int transparent,
 			    const unsigned char * dataPtr);
@@ -652,6 +662,7 @@ decode_rle( unsigned char * dataPtr, unsigned int * quantity, unsigned int * val
 static void 
 =======
 
+<<<<<<< HEAD
 void 
 >>>>>>> origin/10.5
 dim_screen(void)
@@ -667,6 +678,47 @@ dim_screen(void)
 	    dim_screen_32();
 	    break;
     }
+=======
+/* From user mode Libc - this ought to be in a library */
+static const char *
+strnstr(const char * s, const char * find, size_t slen)
+{
+  char c, sc;
+  size_t len;
+
+  if ((c = *find++) != '\0') {
+    len = strlen(find);
+    do {
+      do {
+    if ((sc = *s++) == '\0' || slen-- < 1)
+      return (NULL);
+      } while (sc != c);
+      if (len > slen)
+    return (NULL);
+    } while (strncmp(s, find, len) != 0);
+    s--; 
+  }       
+  return s;
+} 
+
+/*
+ * these routines are for converting a color into grayscale
+ * in 8-bit mode, if the active clut is different than the
+ * clut used to create the panic dialog, then we must convert to gray
+ */
+
+static unsigned int
+make24bitcolor( unsigned int index, const unsigned char * clut )
+{
+	unsigned int color24 = 0;
+	int i = index * 3;
+
+	color24 |= clut[i+0] << 16;
+	color24 |= clut[i+1] << 8;
+	color24 |= clut[i+2];
+
+	return color24;
+>>>>>>> origin/10.6
 }
 
 static void 

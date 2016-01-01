@@ -68,6 +68,7 @@
 #include <sys/vnode_internal.h>
 #include <sys/namei.h>
 #include <sys/ubc_internal.h>
+#include <sys/mount_internal.h>
 #include <sys/malloc.h>
 #include <sys/user.h>
 #if CONFIG_PROTECT
@@ -273,6 +274,7 @@ macx_triggers(
 
 extern boolean_t dp_isssd;
 
+<<<<<<< HEAD
 /*
  * In the compressed pager world, the swapfiles are created by the kernel.
  * Well, all except the first one. That swapfile is absorbed by the kernel at
@@ -298,6 +300,8 @@ extern boolean_t dp_isssd;
  */
 boolean_t	macx_swapon_allowed = TRUE;
 
+=======
+>>>>>>> origin/10.6
 /*
  *	Routine:	macx_swapon
  *	Function:
@@ -319,6 +323,10 @@ macx_swapon(
 	vfs_context_t		ctx = vfs_context_current();
 	struct proc		*p =  current_proc();
 	int			dp_cluster_size;
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.6
 
 	AUDIT_MACH_SYSCALL_ENTER(AUE_SWAPON);
 	AUDIT_ARG(value32, args->priority);
@@ -385,6 +393,7 @@ macx_swapon(
 	if ((file_size < (off_t)size) && ((error = vnode_setsize(vp, (off_t)size, 0, ctx)) != 0))
 		goto swapon_bailout;
 
+<<<<<<< HEAD
 #if CONFIG_PROTECT
 	{
 		/* initialize content protection keys manually */
@@ -395,6 +404,8 @@ macx_swapon(
 #endif
 
 
+=======
+>>>>>>> origin/10.6
 	if (default_pager_init_flag == 0) {
 		start_def_pager(NULL);
 		default_pager_init_flag = 1;
@@ -427,17 +438,29 @@ macx_swapon(
 	   goto swapon_bailout;
 	}
 
+<<<<<<< HEAD
 	if ((dp_isssd = vnode_pager_isSSD(vp)) == TRUE) {
+=======
+	if (vp->v_mount->mnt_kern_flag & MNTK_SSD) {
+>>>>>>> origin/10.6
 		/*
 		 * keep the cluster size small since the
 		 * seek cost is effectively 0 which means
 		 * we don't care much about fragmentation
 		 */
+<<<<<<< HEAD
+=======
+		dp_isssd = TRUE;
+>>>>>>> origin/10.6
 		dp_cluster_size = 2 * PAGE_SIZE;
 	} else {
 		/*
 		 * use the default cluster size
 		 */
+<<<<<<< HEAD
+=======
+		dp_isssd = FALSE;
+>>>>>>> origin/10.6
 		dp_cluster_size = 0;
 	}
 	kr = default_pager_backing_store_create(default_pager, 

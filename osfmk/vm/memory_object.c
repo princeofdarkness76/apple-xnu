@@ -193,8 +193,38 @@ memory_object_lock_page(
             m, should_return, should_flush, prot, 0);
 
 
+<<<<<<< HEAD
 	if (m->busy || m->cleaning)
 		return (MEMORY_OBJECT_LOCK_RESULT_MUST_BLOCK);
+=======
+	if (m->busy || m->cleaning) {
+		if (m->list_req_pending && (m->pageout || m->cleaning) &&
+		    should_return == MEMORY_OBJECT_RETURN_NONE &&
+		    should_flush == TRUE) {
+			/*
+			 * if pageout is set, page was earmarked by vm_pageout_scan
+			 * to be cleaned and stolen... if cleaning is set, we're
+			 * pre-cleaning pages for a hibernate...
+			 * in either case, we're going
+			 * to take it back since we are being asked to
+			 * flush the page w/o cleaning it (i.e. we don't
+			 * care that it's dirty, we want it gone from
+			 * the cache) and we don't want to stall
+			 * waiting for it to be cleaned for 2 reasons...
+			 * 1 - no use paging it out since we're probably
+			 *     shrinking the file at this point or we no
+			 *     longer care about the data in the page
+			 * 2 - if we stall, we may casue a deadlock in
+			 *     the FS trying to acquire its locks
+			 *     on the VNOP_PAGEOUT path presuming that
+			 *     those locks are already held on the truncate
+			 *     path before calling through to this function
+			 *
+			 * so undo all of the state that vm_pageout_scan
+			 * hung on this page
+			 */
+			m->busy = FALSE;
+>>>>>>> origin/10.6
 
 	if (m->laundry)
 		vm_pageout_steal_laundry(m, FALSE);
@@ -967,10 +997,14 @@ vm_object_update(
 		fault_info.hi_offset = copy_size;
 		fault_info.no_cache   = FALSE;
 		fault_info.stealth = TRUE;
+<<<<<<< HEAD
 		fault_info.io_sync = FALSE;
 		fault_info.cs_bypass = FALSE;
 		fault_info.mark_zf_absent = FALSE;
 		fault_info.batch_pmap_op = FALSE;
+=======
+		fault_info.mark_zf_absent = FALSE;
+>>>>>>> origin/10.6
 
 		vm_object_paging_begin(copy_object);
 
@@ -2180,7 +2214,10 @@ memory_object_control_bootstrap(void)
 
 	i = (vm_size_t) sizeof (struct memory_object_control);
 	mem_obj_control_zone = zinit (i, 8192*i, 4096, "mem_obj_control");
+<<<<<<< HEAD
 	zone_change(mem_obj_control_zone, Z_CALLERACCT, FALSE);
+=======
+>>>>>>> origin/10.6
 	zone_change(mem_obj_control_zone, Z_NOENCRYPT, TRUE);
 	return;
 }

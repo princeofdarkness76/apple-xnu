@@ -1,6 +1,7 @@
 /*
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
@@ -8,6 +9,9 @@
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -318,6 +322,7 @@ struct vfs_attr {
 #define	MNT_UNION	0x00000020	/* union with underlying filesystem */
 #define	MNT_ASYNC	0x00000040	/* file system written asynchronously */
 <<<<<<< HEAD
+<<<<<<< HEAD
 #define	MNT_CPROTECT	0x00000080	/* file system supports content protection */
 =======
 #define MNT_DONTBROWSE	0x00100000	/* file system is not appropriate path to user data */
@@ -325,11 +330,17 @@ struct vfs_attr {
 #define MNT_AUTOMOUNTED 0x00400000	/* filesystem was mounted by automounter */
 #define MNT_JOURNALED   0x00800000  /* filesystem is journaled */
 >>>>>>> origin/10.2
+=======
+#define	MNT_CPROTECT	0x00000080	/* file system supports content protection */
+>>>>>>> origin/10.6
 
 /*
  * NFS export related mount flags.
  */
 #define	MNT_EXPORTED	0x00000100	/* file system is exported */
+#ifdef PRIVATE
+#define MNT_IMGSRC	0x00000200
+#endif /* CONFIG_IMGSRC_ACCESS */
 
 /*
  * MAC labeled / "quarantined" flag
@@ -372,11 +383,15 @@ struct vfs_attr {
 			MNT_ROOTFS	| MNT_DOVOLFS	| MNT_DONTBROWSE | \
 <<<<<<< HEAD
 			MNT_IGNORE_OWNERSHIP | MNT_AUTOMOUNTED | MNT_JOURNALED | \
+<<<<<<< HEAD
 			MNT_NOUSERXATTR | MNT_DEFWRITE	| MNT_MULTILABEL | \
 			MNT_NOATIME | MNT_CPROTECT)
 =======
 			MNT_UNKNOWNPERMISSIONS | MNT_AUTOMOUNTED | MNT_JOURNALED | MNT_FIXEDSCRIPTENCODING )
 >>>>>>> origin/10.2
+=======
+			MNT_NOUSERXATTR | MNT_DEFWRITE	| MNT_MULTILABEL | MNT_NOATIME | MNT_CPROTECT )
+>>>>>>> origin/10.6
 /*
  * External filesystem command modifier flags.
  * Unmount can use the MNT_FORCE flag.
@@ -555,7 +570,11 @@ struct vfsioattr {
 	void *		io_reserved[2];		/* extended attribute information */
 };
 
+<<<<<<< HEAD
 #define VFS_IOATTR_FLAGS_FUA	0x01	/* Write-through cache supported */
+=======
+#define VFS_IOATTR_FLAGS_FUA		0x01	/* Write-through cache supported */
+>>>>>>> origin/10.6
 #define VFS_IOATTR_FLAGS_UNMAP		0x02	/* Unmap (trim) supported */
 
 /*
@@ -1253,6 +1272,7 @@ int	vfs_setattr(mount_t mp, struct vfs_attr *vfa, vfs_context_t ctx);
 int	vfs_extendedsecurity(mount_t);
 mount_t	vfs_getvfs_by_mntonname(char *);
 vnode_t vfs_vnodecovered(mount_t mp); /* Returns vnode with an iocount that must be released with vnode_put() */
+<<<<<<< HEAD
 vnode_t vfs_devvp(mount_t mp); /* Please see block comment with implementation */
 int vfs_nativexattrs (mount_t mp); /* whether or not the FS supports EAs natively */
 void *  vfs_mntlabel(mount_t mp); /* Safe to cast to "struct label*"; returns "void*" to limit dependence of mount.h on security headers.  */
@@ -1328,6 +1348,10 @@ typedef void vfs_trigger_callback_t(mount_t mp, vfs_trigger_callback_op_t op, vo
   */
 int 	vfs_settriggercallback(fsid_t *fsid, vfs_trigger_callback_t vtc, void *data, uint32_t flags, vfs_context_t ctx);
 
+=======
+void * vfs_mntlabel(mount_t mp); /* Safe to cast to "struct label*"; returns "void*" to limit dependence of mount.h on security headers.  */
+void	vfs_setunmountpreflight(mount_t mp);
+>>>>>>> origin/10.6
 #endif	/* KERNEL_PRIVATE */
 __END_DECLS
 

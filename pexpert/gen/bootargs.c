@@ -355,11 +355,16 @@ getval(
 	return (NUM);
 }
 
+<<<<<<< HEAD
 boolean_t
+=======
+boolean_t 
+>>>>>>> origin/10.6
 PE_imgsrc_mount_supported()
 {
 	return TRUE;
 }
+<<<<<<< HEAD
 
 boolean_t
 PE_get_default(
@@ -437,3 +442,5 @@ get_range_bounds(char *c, int64_t *lower, int64_t *upper)
 	}
 	return TRUE;
 }
+=======
+>>>>>>> origin/10.6

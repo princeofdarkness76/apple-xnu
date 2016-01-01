@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -521,6 +525,7 @@ in_clsroute(struct radix_node *rn, struct radix_node_head *head)
 
 		timenow = net_uptime();
 		rt->rt_flags |= RTPRF_OURS;
+<<<<<<< HEAD
 		rt_setexpire(rt, timenow + rtq_reallyold);
 
 		if (verbose) {
@@ -532,6 +537,10 @@ in_clsroute(struct radix_node *rn, struct radix_node_head *head)
 
 		/* We have at least one entry; arm the timer if not already */
 		in_sched_rtqtimo(NULL);
+=======
+		rt->rt_rmx.rmx_expire =
+		    rt_expiry(rt, timenow.tv_sec, rtq_reallyold);
+>>>>>>> origin/10.6
 	}
 }
 
@@ -614,6 +623,7 @@ in_rtqkill(struct radix_node *rn, void *rock)
 			}
 			rtfree_locked(rt);
 		} else {
+<<<<<<< HEAD
 			uint64_t expire = (rt->rt_expire - timenow);
 
 			if (ap->updating && expire > rtq_reallyold) {
@@ -628,6 +638,13 @@ in_rtqkill(struct radix_node *rn, void *rock)
 					    rt->rt_flags, RTF_BITS,
 					    (rt->rt_expire - timenow), expire);
 				}
+=======
+			if (ap->updating &&
+			    (unsigned)(rt->rt_rmx.rmx_expire - timenow.tv_sec) >
+			    rt_expiry(rt, 0, rtq_reallyold)) {
+				rt->rt_rmx.rmx_expire = rt_expiry(rt,
+				    timenow.tv_sec, rtq_reallyold);
+>>>>>>> origin/10.6
 			}
 			ap->nextstop = lmin(ap->nextstop, rt->rt_expire);
 			RT_UNLOCK(rt);

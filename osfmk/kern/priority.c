@@ -402,8 +402,59 @@ static struct shift_data	sched_decay_shifts[SCHED_DECAY_TICKS] = {
  *
  *	Calculate the timesharing priority based upon usage and load.
  */
+<<<<<<< HEAD
 extern int sched_pri_decay_band_limit;
 
+=======
+#ifdef CONFIG_EMBEDDED
+
+#define do_priority_computation(thread, pri)							\
+	MACRO_BEGIN															\
+	(pri) = (thread)->priority		/* start with base priority */		\
+	    - ((thread)->sched_usage >> (thread)->pri_shift);				\
+	if ((pri) < MAXPRI_THROTTLE) {										\
+		if ((thread)->task->max_priority > MAXPRI_THROTTLE)				\
+			(pri) = MAXPRI_THROTTLE;									\
+		else															\
+			if ((pri) < MINPRI_USER)									\
+				(pri) = MINPRI_USER;									\
+	} else																\
+	if ((pri) > MAXPRI_KERNEL)											\
+		(pri) = MAXPRI_KERNEL;											\
+	MACRO_END
+
+#else
+
+#define do_priority_computation(thread, pri)							\
+	MACRO_BEGIN															\
+	(pri) = (thread)->priority		/* start with base priority */		\
+	    - ((thread)->sched_usage >> (thread)->pri_shift);				\
+	if ((pri) < MINPRI_USER)											\
+		(pri) = MINPRI_USER;											\
+	else																\
+	if ((pri) > MAXPRI_KERNEL)											\
+		(pri) = MAXPRI_KERNEL;											\
+	MACRO_END
+
+#endif
+
+/*
+ *	set_priority:
+ *
+ *	Set the base priority of the thread
+ *	and reset its scheduled priority.
+ *
+ *	Called with the thread locked.
+ */
+void
+set_priority(
+	register thread_t	thread,
+	register int		priority)
+{
+	thread->priority = priority;
+	compute_priority(thread, FALSE);
+}
+>>>>>>> origin/10.6
 
 int
 sched_compute_timeshare_priority(thread_t thread)

@@ -94,6 +94,9 @@ static int register_send __P((struct ip6_hdr *, struct mif6 *,
 struct socket  *ip6_mrouter  = NULL;
 int		ip6_mrouter_ver = 0;
 int		ip6_mrtproto = IPPROTO_PIM;    /* for netstat only */
+
+#if MROUTING
+
 struct mrt6stat	mrt6stat;
 
 #define NO_RTE_FOUND 	0x1
@@ -1875,3 +1878,4 @@ pim6_input(mp, offp)
 	rip6_input(&m, offp);
 	return(IPPROTO_DONE);
 }
+#endif

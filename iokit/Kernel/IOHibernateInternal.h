@@ -59,6 +59,35 @@ struct IOHibernateVars
 };
 typedef struct IOHibernateVars IOHibernateVars;
 
+<<<<<<< HEAD
+=======
+
+struct IOPolledFileIOVars
+{
+    struct kern_direct_file_io_ref_t *	fileRef;
+    class OSArray *			pollers;
+    IOByteCount				blockSize;
+    uint8_t *  				buffer;
+    IOByteCount 			bufferSize;
+    IOByteCount 			bufferLimit;
+    IOByteCount 			bufferOffset;
+    IOByteCount 			bufferHalf;
+    IOByteCount				extentRemaining;
+    IOByteCount				lastRead;
+    boolean_t                           solid_state;
+    uint64_t				block0;
+    uint64_t				position;
+    uint64_t				extentPosition;
+    uint64_t				encryptStart;
+    uint64_t				encryptEnd;
+    IOPolledFileExtent * 		extentMap;
+    IOPolledFileExtent * 		currentExtent;
+    bool				io;
+    IOReturn				ioStatus;
+};
+typedef struct IOPolledFileIOVars IOPolledFileIOVars;
+
+>>>>>>> origin/10.6
 #endif		/* __cplusplus */
 
 enum
@@ -72,6 +101,17 @@ extern "C"
 #endif		/* __cplusplus */
 uint32_t
 hibernate_sum_page(uint8_t *buf, uint32_t ppnum);
+<<<<<<< HEAD
+=======
+
+extern vm_offset_t sectHIBB;
+extern unsigned long sectSizeHIB;
+extern vm_offset_t sectDATAB;
+extern unsigned long sectSizeDATA;
+#if defined(__i386__) || defined(__x86_64__)
+extern vm_offset_t sectINITPTB;
+#endif
+>>>>>>> origin/10.6
 
 extern vm_offset_t segHIBB;
 extern unsigned long segSizeHIB;

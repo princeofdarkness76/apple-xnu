@@ -207,8 +207,13 @@ struct thread {
 #define TH_SUSP			0x02			/* stopped or requested to stop */
 #define TH_RUN			0x04			/* running or on runq */
 #define TH_UNINT		0x08			/* waiting uninteruptibly */
+<<<<<<< HEAD
 #define TH_TERMINATE		0x10			/* halted at termination */
 #define TH_TERMINATE2		0x20			/* added to termination queue */
+=======
+#define	TH_TERMINATE	0x10			/* halted at termination */
+#define	TH_TERMINATE2	0x20			/* added to termination queue */
+>>>>>>> origin/10.6
 
 #define TH_IDLE			0x80			/* idling processor */
 

@@ -432,6 +432,7 @@ task_init(void)
 			task_max * sizeof(struct task),
 			TASK_CHUNK * sizeof(struct task),
 			"tasks");
+	zone_change(task_zone, Z_NOENCRYPT, TRUE);
 
 	zone_change(task_zone, Z_NOENCRYPT, TRUE);
 

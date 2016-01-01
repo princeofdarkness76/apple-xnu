@@ -515,6 +515,7 @@ IODMACommand::segmentOp(
 	    {
 		if (SHOULD_COPY_DIR(op, target->fMDSummary.fDirection))
 		{
+<<<<<<< HEAD
 		    addr64_t cpuAddr = address;
 		    addr64_t remapAddr;
 		    uint64_t chunk;
@@ -525,6 +526,11 @@ IODMACommand::segmentOp(
 			cpuAddr = target->fMapper->mapToPhysicalAddress(address);
 		    }
 	
+=======
+		    addr64_t remapAddr;
+		    uint64_t chunk;
+
+>>>>>>> origin/10.6
 		    remapAddr = ptoa_64(vm_page_get_phys_page(lastPage));
 		    if (!state->fDoubleBuffer)
 		    {
@@ -540,12 +546,20 @@ IODMACommand::segmentOp(
 
 		    if (kWalkSyncIn & op)
 		    { // cppvNoModSnk
+<<<<<<< HEAD
 			copypv(remapAddr, cpuAddr, chunk,
+=======
+			copypv(remapAddr, address, chunk,
+>>>>>>> origin/10.6
 					cppvPsnk | cppvFsnk | cppvPsrc | cppvNoRefSrc );
 		    }
 		    else
 		    {
+<<<<<<< HEAD
 			copypv(cpuAddr, remapAddr, chunk,
+=======
+			copypv(address, remapAddr, chunk,
+>>>>>>> origin/10.6
 					cppvPsnk | cppvFsnk | cppvPsrc | cppvNoRefSrc );
 		    }
 		    address += chunk;
@@ -584,6 +598,10 @@ IODMACommand::walkAll(UInt8 op)
 	state->fPrepared       = false;
 	state->fCopyNext       = NULL;
 	state->fCopyPageAlloc  = 0;
+<<<<<<< HEAD
+=======
+	state->fLocalMapperPageAlloc = 0;
+>>>>>>> origin/10.6
 	state->fCopyPageCount  = 0;
 	state->fNextRemapPage  = NULL;
 	state->fCopyMD	       = 0;
@@ -607,12 +625,18 @@ IODMACommand::walkAll(UInt8 op)
 
 	    DEBG("preflight fCopyPageCount %d\n", state->fCopyPageCount);
 
+<<<<<<< HEAD
 	    if (!fMapper && !state->fDoubleBuffer)
 	    {
 		kern_return_t kr;
 
 		if (fMapper) panic("fMapper copying");
 
+=======
+	    if (!state->fDoubleBuffer)
+	    {
+		kern_return_t kr;
+>>>>>>> origin/10.6
 		kr = vm_page_alloc_list(state->fCopyPageCount, 
 					KMA_LOMEM | KMA_NOPAGEWAIT, &mapBase);
 		if (KERN_SUCCESS != kr)
@@ -635,7 +659,13 @@ IODMACommand::walkAll(UInt8 op)
 	    else
 	    {
 		DEBG("alloc IOBMD\n");
+<<<<<<< HEAD
 		state->fCopyMD = createCopyBuffer(fMDSummary.fDirection, state->fPreparedLength);
+=======
+		mach_vm_address_t mask = 0xFFFFF000; //state->fSourceAlignMask
+		state->fCopyMD = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task,
+				    fMDSummary.fDirection, state->fPreparedLength, mask);
+>>>>>>> origin/10.6
 
 		if (state->fCopyMD)
 		{
@@ -649,6 +679,17 @@ IODMACommand::walkAll(UInt8 op)
 		}
 	    }
 	}
+<<<<<<< HEAD
+=======
+
+	if (state->fLocalMapper)
+	{
+	    state->fLocalMapperPageCount = atop_64(round_page(
+	    	    state->fPreparedLength + ((state->fPreparedOffset + fMDSummary.fPageAlign) & page_mask)));
+	    state->fLocalMapperPageAlloc = fMapper->iovmAllocDMACommand(this, state->fLocalMapperPageCount);
+	    state->fMapContig = true;
+	}
+>>>>>>> origin/10.6
     }
 
     if (state->fPrepared && ((kWalkSyncIn | kWalkSyncOut) & op))
@@ -693,6 +734,15 @@ IODMACommand::walkAll(UInt8 op)
 
     if (kWalkComplete & op)
     {
+<<<<<<< HEAD
+=======
+    	if (state->fLocalMapperPageAlloc)
+    	{
+	    fMapper->iovmFreeDMACommand(this, state->fLocalMapperPageAlloc, state->fLocalMapperPageCount);
+	    state->fLocalMapperPageAlloc = 0;
+	    state->fLocalMapperPageCount = 0;
+	}
+>>>>>>> origin/10.6
 	if (state->fCopyPageAlloc)
 	{
 	    vm_page_free_list(state->fCopyPageAlloc, FALSE);
@@ -1122,11 +1172,15 @@ IODMACommand::genIOVMSegments(uint32_t op,
 	state->fOffset                 = 0;
 	state->fIOVMAddr               = 0;
 <<<<<<< HEAD
+<<<<<<< HEAD
 	internalState->fNextRemapPage  = NULL;
 	internalState->fNewMD	       = false;
 	state->fMapped                 = (0 != fMapper);
 =======
 	internalState->fNextRemapIndex = 0;
+=======
+	internalState->fNextRemapPage  = NULL;
+>>>>>>> origin/10.6
 	internalState->fNewMD	       = false;
 	state->fMapped                 = (IS_MAPPED(fMappingOptions) && fMapper);
 >>>>>>> origin/10.5
@@ -1156,7 +1210,13 @@ IODMACommand::genIOVMSegments(uint32_t op,
 
 	    if (internalState->fMapContig && internalState->fLocalMapperAlloc)
 	    {
+<<<<<<< HEAD
 		state->fIOVMAddr = internalState->fLocalMapperAlloc + offset;
+=======
+		ppnum_t pageNum = internalState->fLocalMapperPageAlloc;
+		state->fIOVMAddr = ptoa_64(pageNum) 
+					    + offset - internalState->fPreparedOffset;
+>>>>>>> origin/10.6
 		rtn = kIOReturnSuccess;
 #if 0
 		{
@@ -1206,13 +1266,18 @@ IODMACommand::genIOVMSegments(uint32_t op,
 	{
 	    UInt64 length = state->fLength;
 	    offset	    += length;
+<<<<<<< HEAD
 	    curSeg.fIOVMAddr = state->fIOVMAddr;
+=======
+	    curSeg.fIOVMAddr = state->fIOVMAddr | bypassMask;
+>>>>>>> origin/10.6
 	    curSeg.fLength   = length;
 	    state->fIOVMAddr = 0;
 	}
 
         if (!state->fIOVMAddr)
 	{
+<<<<<<< HEAD
 	    // maxPhys
 	    if ((kWalkClient & op) && (curSeg.fIOVMAddr + curSeg.fLength - 1) > maxPhys)
 	    {
@@ -1236,6 +1301,30 @@ IODMACommand::genIOVMSegments(uint32_t op,
 		}
 		else 
 		{
+=======
+	    if ((kWalkClient & op) && (curSeg.fIOVMAddr + curSeg.fLength - 1) > maxPhys)
+	    {
+		if (internalState->fCursor)
+		{
+		    curSeg.fIOVMAddr = 0;
+		    ret = kIOReturnMessageTooLarge;
+		    break;
+		}
+		else if (curSeg.fIOVMAddr <= maxPhys)
+		{
+		    UInt64 remain, newLength;
+
+		    newLength	     = (maxPhys + 1 - curSeg.fIOVMAddr);
+		    DEBG("trunc %qx, %qx-> %qx\n", curSeg.fIOVMAddr, curSeg.fLength, newLength);
+		    remain	     = curSeg.fLength - newLength;
+		    state->fIOVMAddr = newLength + curSeg.fIOVMAddr;
+		    curSeg.fLength   = newLength;
+		    state->fLength   = remain;
+		    offset	    -= remain;
+		}
+		else 
+		{
+>>>>>>> origin/10.6
 		    UInt64    addr = curSeg.fIOVMAddr;
 		    ppnum_t   addrPage = atop_64(addr);
 		    vm_page_t remap = NULL;

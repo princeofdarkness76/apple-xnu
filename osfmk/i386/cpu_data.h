@@ -133,12 +133,15 @@ typedef struct {
 	addr64_t	cu_user_gs_base;
 } cpu_uber_t;
 
+<<<<<<< HEAD
 typedef	uint16_t	pcid_t;
 typedef	uint8_t		pcid_ref_t;
 
 #define CPU_RTIME_BINS (12)
 #define CPU_ITIME_BINS (CPU_RTIME_BINS)
 
+=======
+>>>>>>> origin/10.6
 /*
  * Per-cpu data.
  *
@@ -168,10 +171,18 @@ typedef struct cpu_data
 	int			cpu_interrupt_level;
 	int			cpu_phys_number;	/* Physical CPU */
 	cpu_id_t		cpu_id;			/* Platform Expert */
+<<<<<<< HEAD
 	volatile int		cpu_signals;		/* IPI events */
 	volatile int		cpu_prior_signals;	/* Last set of events,
 							 * debugging
 							 */
+=======
+	int			cpu_signals;		/* IPI events */
+	int			cpu_prior_signals;	/* Last set of events,
+							 * debugging
+							 */
+	int			cpu_mcount_off;		/* mcount recursion */
+>>>>>>> origin/10.6
 	ast_t			cpu_pending_ast;
 <<<<<<< HEAD
 	volatile int		cpu_running;
@@ -301,8 +312,24 @@ typedef struct cpu_data
 							   * validity flag.
 							   */
 	rtc_nanotime_t		*cpu_nanotime;		/* Nanotime info */
+<<<<<<< HEAD
 							  
 >>>>>>> origin/10.5
+=======
+	thread_t		csw_old_thread;
+	thread_t		csw_new_thread;
+	uint64_t		cpu_max_observed_int_latency;
+	int			cpu_max_observed_int_latency_vector;
+	uint64_t		debugger_entry_time;
+	volatile boolean_t	cpu_NMI_acknowledged;
+	/* A separate nested interrupt stack flag, to account
+	 * for non-nested interrupts arriving while on the interrupt stack
+	 * Currently only occurs when AICPM enables interrupts on the
+	 * interrupt stack during processor offlining.
+	 */
+	uint32_t		cpu_nested_istack;
+	uint32_t		cpu_nested_istack_events;
+>>>>>>> origin/10.6
 } cpu_data_t;
 
 extern cpu_data_t	*cpu_data_ptr[];  

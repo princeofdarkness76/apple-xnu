@@ -815,7 +815,28 @@ unsigned int pmap_free_pages(void)
 	return avail_remaining;
 }
 
+<<<<<<< HEAD
 boolean_t pmap_next_page(vm_offset_t *addrp)
+=======
+/*
+ *	This function allocates physical pages.
+ */
+
+boolean_t
+pmap_next_page_hi(ppnum_t * pnum)
+{
+	return pmap_next_page(pnum);
+}
+
+
+/* Non-optimal, but only used for virtual memory startup.
+ * Allocate memory from a table of free physical addresses
+ * If there are no more free entries, too bad. 
+ */
+
+boolean_t
+pmap_next_page(ppnum_t *addrp)
+>>>>>>> origin/10.6
 {
 	/* Non optimal, but only used for virtual memory startup.
      * Allocate memory from a table of free physical addresses
@@ -1267,6 +1288,24 @@ pmap_page_protect(
 
 	debugLog2(47, 1, 0);						/* Log pmap_map call */
 }
+
+
+boolean_t
+pmap_is_noencrypt(__unused ppnum_t pn)
+{
+	return (FALSE);
+}
+
+void
+pmap_set_noencrypt(__unused ppnum_t pn)
+{
+}
+
+void
+pmap_clear_noencrypt(__unused ppnum_t pn)
+{
+}
+
 
 /*
  * pmap_protect(pmap, s, e, prot)

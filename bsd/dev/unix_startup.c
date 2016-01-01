@@ -70,7 +70,11 @@ extern uint32_t   tcp_recvspace;
 void            bsd_bufferinit(void);
 
 unsigned int	bsd_mbuf_cluster_reserve(boolean_t *);
+<<<<<<< HEAD
 void bsd_scale_setup(int);
+=======
+void bsd_srv_setup(int);
+>>>>>>> origin/10.6
 void bsd_exec_setup(int);
 
 /*
@@ -297,6 +301,7 @@ bsd_mbuf_cluster_reserve(boolean_t *overridden)
 
         if (sane_size > (64 * 1024 * 1024) || ncl != 0) {
 
+<<<<<<< HEAD
 		if (ncl || serverperfmode)
 			was_overridden = TRUE;
 =======
@@ -308,6 +313,11 @@ bsd_mbuf_cluster_reserve(boolean_t *overridden)
 >>>>>>> origin/10.5
 
         if (sane_size > (64 * 1024 * 1024) || ncl) {
+=======
+		if (ncl || srv)
+			was_overridden = TRUE;
+
+>>>>>>> origin/10.6
 	        if ((nmbclusters = ncl) == 0) {
 			/* Auto-configure the mbuf pool size */
 			nmbclusters = mbuf_default_ncl(serverperfmode, sane_size);

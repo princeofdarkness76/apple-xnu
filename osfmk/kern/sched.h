@@ -182,6 +182,7 @@
 #define BASEPRI_BACKGROUND	(BASEPRI_DEFAULT + 15)				/* 46 */
 #define BASEPRI_USER_INITIATED	(BASEPRI_DEFAULT +  6)				/* 37 */
 #define BASEPRI_DEFAULT		(MAXPRI_USER - (NRQS / 4))			/* 31 */
+<<<<<<< HEAD
 #define MAXPRI_SUPPRESSED	(BASEPRI_DEFAULT - 3)				/* 28 */
 #define BASEPRI_UTILITY		(BASEPRI_DEFAULT - 11)				/* 20 */
 #define MAXPRI_THROTTLE		(MINPRI + 4)						/*  4 */
@@ -197,6 +198,16 @@ typedef enum {
 	TH_MODE_FIXED,						/* use fixed priorities, no decay */
 	TH_MODE_TIMESHARE,					/* use timesharing algorithm */
 } sched_mode_t;
+=======
+#define MAXPRI_THROTTLE		(MINPRI + 4)						/*  4 */
+#define MINPRI_USER			MINPRI								/*  0 */
+
+#ifdef CONFIG_EMBEDDED
+#define DEPRESSPRI	MAXPRI_THROTTLE
+#else
+#define DEPRESSPRI	MINPRI			/* depress priority */
+#endif
+>>>>>>> origin/10.6
 
 /*
  *	Macro to check for invalid priorities.

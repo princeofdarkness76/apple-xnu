@@ -177,7 +177,11 @@ struct ipc_port {
 #if	MACH_ASSERT
 #define	IP_NSPARES		4
 #define	IP_CALLSTACK_MAX	16
+<<<<<<< HEAD
 /*	queue_chain_t	ip_port_links;*//* all allocated ports */
+=======
+	queue_chain_t	ip_port_links;	/* all allocated ports */
+>>>>>>> origin/10.6
 	thread_t	ip_thread;	/* who made me?  thread context */
 	unsigned long	ip_timetrack;	/* give an idea of "when" created */
 	uintptr_t	ip_callstack[IP_CALLSTACK_MAX]; /* stack trace */

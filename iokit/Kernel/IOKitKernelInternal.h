@@ -80,14 +80,28 @@ struct IOMemoryDescriptorMapAllocRef
 };
 
 kern_return_t 
+<<<<<<< HEAD
 IOMemoryDescriptorMapAlloc(vm_map_t map, void * ref);
 
+=======
+IOMemoryDescriptorMapMemEntry(vm_map_t * map, ipc_port_t entry, IOOptionBits options, bool pageable,
+				mach_vm_size_t offset, mach_vm_address_t * address, mach_vm_size_t length);
+kern_return_t 
+IOMemoryDescriptorMapCopy(vm_map_t * map, 
+				IOOptionBits options,
+				mach_vm_size_t offset, 
+				mach_vm_address_t * address, mach_vm_size_t length);
+>>>>>>> origin/10.6
 
 mach_vm_address_t
 IOKernelAllocateWithPhysicalRestrict(mach_vm_size_t size, mach_vm_address_t maxPhys, 
 			                mach_vm_size_t alignment, bool contiguous);
 void
 IOKernelFreePhysical(mach_vm_address_t address, mach_vm_size_t size);
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.6
 
 extern vm_size_t debug_iomallocpageable_size;
 
@@ -140,6 +154,7 @@ struct IODMACommandInternal
     vm_page_t fCopyPageAlloc;
     vm_page_t fCopyNext;
     vm_page_t fNextRemapPage;
+<<<<<<< HEAD
 =======
 >>>>>>> origin/10.5
 
@@ -147,6 +162,13 @@ struct IODMACommandInternal
 
     uint64_t  fLocalMapperAlloc;
     uint64_t  fLocalMapperAllocLength;
+=======
+
+    ppnum_t  fCopyPageCount;
+
+    ppnum_t  fLocalMapperPageAlloc;
+    ppnum_t  fLocalMapperPageCount;
+>>>>>>> origin/10.6
 
     class IOBufferMemoryDescriptor * fCopyMD;
 

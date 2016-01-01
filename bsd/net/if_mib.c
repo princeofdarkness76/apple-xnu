@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -88,6 +92,11 @@
 #include <net/if.h>
 #include <net/if_mib.h>
 #include <net/if_var.h>
+<<<<<<< HEAD
+=======
+
+#if NETMIBS
+>>>>>>> origin/10.6
 
 /*
  * A sysctl(3) MIB for generic interface information.  This information
@@ -130,7 +139,11 @@ SYSCTL_NODE(_net_link_generic, IFMIB_IFALLDATA, ifalldata, CTLFLAG_RD | CTLFLAG_
 
 static int make_ifmibdata(struct ifnet *, int *, struct sysctl_req *);
 
+<<<<<<< HEAD
 int
+=======
+int 
+>>>>>>> origin/10.6
 make_ifmibdata(struct ifnet *ifp, int *name, struct sysctl_req *req)
 {
 	struct ifmibdata	ifmd;
@@ -146,18 +159,31 @@ make_ifmibdata(struct ifnet *ifp, int *name, struct sysctl_req *req)
 		/*
 		 * Make sure the interface is in use
 		 */
+<<<<<<< HEAD
 		if (ifnet_is_attached(ifp, 0)) {
 			snprintf(ifmd.ifmd_name, sizeof(ifmd.ifmd_name), "%s",
 				if_name(ifp));
 
+=======
+		if (ifp->if_refcnt > 0) {
+			snprintf(ifmd.ifmd_name, sizeof(ifmd.ifmd_name), "%s%d",
+				ifp->if_name, ifp->if_unit);
+	
+>>>>>>> origin/10.6
 #define COPY(fld) ifmd.ifmd_##fld = ifp->if_##fld
 			COPY(pcount);
 			COPY(flags);
 			if_data_internal_to_if_data64(ifp, &ifp->if_data, &ifmd.ifmd_data);
 #undef COPY
+<<<<<<< HEAD
 			ifmd.ifmd_snd_len = IFCQ_LEN(&ifp->if_snd);
 			ifmd.ifmd_snd_maxlen = IFCQ_MAXLEN(&ifp->if_snd);
 			ifmd.ifmd_snd_drops = ifp->if_snd.ifcq_dropcnt.packets;
+=======
+			ifmd.ifmd_snd_len = ifp->if_snd.ifq_len;
+			ifmd.ifmd_snd_maxlen = ifp->if_snd.ifq_maxlen;
+			ifmd.ifmd_snd_drops = ifp->if_snd.ifq_drops;
+>>>>>>> origin/10.6
 		}
 		error = SYSCTL_OUT(req, &ifmd, sizeof ifmd);
 		if (error || !req->newptr)
@@ -197,6 +223,7 @@ make_ifmibdata(struct ifnet *ifp, int *name, struct sysctl_req *req)
 #endif /* IF_MIB_WR */
 		break;
 
+<<<<<<< HEAD
 	case IFDATA_SUPPLEMENTAL: {
 		struct ifmibdata_supplemental *ifmd_supp;
 
@@ -220,6 +247,13 @@ make_ifmibdata(struct ifnet *ifp, int *name, struct sysctl_req *req)
 		_FREE(ifmd_supp, M_TEMP);
 		break;
 	}
+=======
+#if PKT_PRIORITY
+	case IFDATA_SUPPLEMENTAL:
+		error = SYSCTL_OUT(req, &ifp->if_tc, sizeof(struct if_traffic_class));
+		break;
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 	}
 
 	return error;
@@ -239,7 +273,8 @@ sysctl_ifdata SYSCTL_HANDLER_ARGS /* XXX bad syntax! */
 
 	ifnet_head_lock_shared();
 	if (name[0] <= 0 || name[0] > if_index ||
-	    (ifp = ifindex2ifnet[name[0]]) == NULL) {
+	    (ifp = ifindex2ifnet[name[0]]) == NULL ||
+	    ifp->if_refcnt == 0) {
 		ifnet_head_done();
 		return (ENOENT);
 	}

@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -76,7 +80,11 @@
 #include <kern/misc_protos.h>
 #include <kern/spl.h>
 #include <kern/assert.h>
+<<<<<<< HEAD
 #include <kern/timer_queue.h>
+=======
+#include <kern/etimer.h>
+>>>>>>> origin/10.6
 #include <mach/vm_prot.h>
 #include <vm/pmap.h>
 #include <vm/vm_kern.h>		/* for kernel_map */
@@ -103,21 +111,31 @@
 =======
 #include <i386/rtclock.h>
 
+<<<<<<< HEAD
 #define NSEC_PER_HZ			(NSEC_PER_SEC / 100) /* nsec per tick */
 
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.6
 #define UI_CPUFREQ_ROUNDING_FACTOR	10000000
 
 int		rtclock_init(void);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
 uint64_t	tsc_rebase_abs_time = 0;
 =======
 uint64_t	rtc_decrementer_min;
 
+<<<<<<< HEAD
 void			rtclock_intr(x86_saved_state_t *regs);
 static uint64_t		maxDec;			/* longest interval our hardware timer can handle (nsec) */
 >>>>>>> origin/10.5
+=======
+void		rtclock_intr(x86_saved_state_t *regs);
+>>>>>>> origin/10.6
 
 static void	rtc_set_timescale(uint64_t cycles);
 static uint64_t	rtc_export_speed(uint64_t cycles);
@@ -125,6 +143,167 @@ static uint64_t	rtc_export_speed(uint64_t cycles);
 <<<<<<< HEAD
 =======
 rtc_nanotime_t	rtc_nanotime_info = {0,0,0,0,1,0};
+
+static uint64_t	rtc_decrementer_min;
+static uint64_t	rtc_decrementer_max;
+
+static uint64_t
+deadline_to_decrementer(
+	uint64_t	deadline,
+	uint64_t	now)
+{
+	uint64_t	delta;
+
+	if (deadline <= now)
+		return rtc_decrementer_min;
+	else {
+		delta = deadline - now;
+		return MIN(MAX(rtc_decrementer_min,delta),rtc_decrementer_max); 
+	}
+}
+
+static inline uint64_t
+_absolutetime_to_tsc(uint64_t ns)
+{
+	uint32_t	generation;
+	uint64_t	tsc;
+
+	do {
+		generation =  rtc_nanotime_info.generation;
+		tsc = tmrCvt(ns - rtc_nanotime_info.ns_base, tscFCvtn2t)
+			+ rtc_nanotime_info.tsc_base;
+	} while (generation == 0 ||
+		 generation != rtc_nanotime_info.generation);
+
+	return tsc;
+}
+
+/*
+ * Regular local APIC timer case:
+ */
+static void
+rtc_lapic_config_timer(void)
+{
+	lapic_config_timer(TRUE, one_shot, divide_by_1);
+}
+static uint64_t
+rtc_lapic_set_timer(uint64_t deadline, uint64_t now)
+{
+	uint64_t count;
+	uint64_t set = 0;
+
+	if (deadline > 0) {
+		/*
+		 * Convert delta to bus ticks
+		 * - time now is not relevant
+		 */
+		count = deadline_to_decrementer(deadline, now);
+		set = now + count;
+		lapic_set_timer_fast((uint32_t) tmrCvt(count, busFCvtn2t));
+	} else {
+		lapic_set_timer(FALSE, one_shot, divide_by_1, 0);
+	}
+	return set;
+}
+
+/*
+ * TSC-deadline timer case:
+ */
+static void
+rtc_lapic_config_tsc_deadline_timer(void)
+{
+	lapic_config_tsc_deadline_timer();
+}
+static uint64_t
+rtc_lapic_set_tsc_deadline_timer(uint64_t deadline, uint64_t now)
+{
+	uint64_t	set = 0;
+
+	if (deadline > 0) {
+		/*
+		 * Convert to TSC
+		 */
+		set = now + deadline_to_decrementer(deadline, now);
+		lapic_set_tsc_deadline_timer(_absolutetime_to_tsc(set));
+	} else {
+		lapic_set_tsc_deadline_timer(0);
+	}
+	return set;
+} 
+
+/*
+ * Definitions for timer operations table
+ */
+typedef struct {
+	void	 (*config)(void);
+	uint64_t (*set)   (uint64_t, uint64_t);
+} rtc_timer_t;
+
+rtc_timer_t	rtc_timer_lapic  = {
+	rtc_lapic_config_timer,
+	rtc_lapic_set_timer
+};
+
+rtc_timer_t	rtc_timer_tsc_deadline  = {
+	rtc_lapic_config_tsc_deadline_timer,
+	rtc_lapic_set_tsc_deadline_timer
+};
+
+rtc_timer_t	*rtc_timer = &rtc_timer_lapic;	/* defaults to LAPIC timer */
+
+/*
+ * rtc_timer_init() is called at startup on the boot processor only.
+ */
+static void
+rtc_timer_init(void)
+{
+	int	TSC_deadline_timer = 0;
+	
+	/* See whether we can use the local apic in TSC-deadline mode */
+	if ((cpuid_features() & CPUID_FEATURE_TSCTMR)) {
+		TSC_deadline_timer = 1;
+		PE_parse_boot_argn("TSC_deadline_timer", &TSC_deadline_timer,
+				   sizeof(TSC_deadline_timer));
+		printf("TSC Deadline Timer supported %s enabled\n",
+			TSC_deadline_timer ? "and" : "but not");
+	}
+
+	if (TSC_deadline_timer) {
+		rtc_timer = &rtc_timer_tsc_deadline;
+		rtc_decrementer_max = UINT64_MAX;	/* effectively none */
+		/*
+		 * The min could be as low as 1nsec,
+		 * but we're being conservative for now and making it the same
+		 * as for the local apic timer.
+		 */
+		rtc_decrementer_min = 1*NSEC_PER_USEC;	/* 1 usec */
+	} else {
+		/*
+		 * Compute the longest interval using LAPIC timer.
+		 */
+		rtc_decrementer_max = tmrCvt(0x7fffffffULL, busFCvtt2n);
+		kprintf("maxDec: %lld\n", rtc_decrementer_max);
+		rtc_decrementer_min = 1*NSEC_PER_USEC;	/* 1 usec */
+	}
+
+	/* Point LAPIC interrupts to hardclock() */
+	lapic_set_timer_func((i386_intr_func_t) rtclock_intr);
+}
+
+static inline uint64_t
+rtc_timer_set(uint64_t deadline, uint64_t now)
+{
+	return rtc_timer->set(deadline, now);
+}
+
+void
+rtc_timer_start(void)
+{
+	/*
+	 * Force a complete re-evaluation of timer deadlines.
+	 */
+	etimer_resync_deadlines();
+}
 
 /*
  * tsc_to_nanoseconds:
@@ -144,12 +323,13 @@ _tsc_to_nanoseconds(uint64_t value)
 		 "addl	%%edi,%%eax	;"	
 		 "adcl	$0,%%edx	 "
 		 : "+A" (value)
-		 : "c" (current_cpu_datap()->cpu_nanotime->scale)
+		 : "c" (rtc_nanotime_info.scale)
 		 : "esi", "edi");
 
     return (value);
 }
 
+<<<<<<< HEAD
 static uint32_t
 deadline_to_decrementer(
 	uint64_t	deadline,
@@ -178,6 +358,54 @@ rtc_timer_start(void)
 
 static inline uint32_t
 _absolutetime_to_microtime(uint64_t abstime, clock_sec_t *secs, clock_usec_t *microsecs)
+=======
+static inline uint32_t
+_absolutetime_to_microtime(uint64_t abstime, clock_sec_t *secs, clock_usec_t *microsecs)
+{
+	uint32_t remain;
+#if defined(__i386__)
+	asm volatile(
+			"divl %3"
+				: "=a" (*secs), "=d" (remain)
+				: "A" (abstime), "r" (NSEC_PER_SEC));
+	asm volatile(
+			"divl %3"
+				: "=a" (*microsecs)
+				: "0" (remain), "d" (0), "r" (NSEC_PER_USEC));
+#elif defined(__x86_64__)
+	*secs = abstime / (uint64_t)NSEC_PER_SEC;
+	remain = (uint32_t)(abstime % (uint64_t)NSEC_PER_SEC);
+	*microsecs = remain / NSEC_PER_USEC;
+#else
+#error Unsupported architecture
+#endif
+	return remain;
+}
+
+static inline void
+_absolutetime_to_nanotime(uint64_t abstime, clock_sec_t *secs, clock_usec_t *nanosecs)
+{
+#if defined(__i386__)
+	asm volatile(
+			"divl %3"
+			: "=a" (*secs), "=d" (*nanosecs)
+			: "A" (abstime), "r" (NSEC_PER_SEC));
+#elif defined(__x86_64__)
+	*secs = abstime / (uint64_t)NSEC_PER_SEC;
+	*nanosecs = (clock_usec_t)(abstime % (uint64_t)NSEC_PER_SEC);
+#else
+#error Unsupported architecture
+#endif
+}
+
+/*
+ * Configure the real-time clock device. Return success (1)
+ * or failure (0).
+ */
+
+int
+rtclock_config(void)
+>>>>>>> origin/10.6
 {
 	uint32_t remain;
 	*secs = abstime / (uint64_t)NSEC_PER_SEC;
@@ -237,6 +465,7 @@ static void
 rtc_nanotime_init(uint64_t base)
 {
 <<<<<<< HEAD
+<<<<<<< HEAD
 	_rtc_nanotime_init(&pal_rtc_nanotime_info, base);
 	rtc_nanotime_set_commpage(&pal_rtc_nanotime_info);
 =======
@@ -245,6 +474,10 @@ rtc_nanotime_init(uint64_t base)
 	_rtc_nanotime_init(rntp, base);
 	rtc_nanotime_set_commpage(rntp);
 >>>>>>> origin/10.5
+=======
+	_rtc_nanotime_init(&rtc_nanotime_info, base);
+	rtc_nanotime_set_commpage(&rtc_nanotime_info);
+>>>>>>> origin/10.6
 }
 
 /*
@@ -260,9 +493,13 @@ rtc_nanotime_init_commpage(void)
 	spl_t			s = splclock();
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	rtc_nanotime_set_commpage(&pal_rtc_nanotime_info);
 =======
 	rtc_nanotime_set_commpage(current_cpu_datap()->cpu_nanotime);
+=======
+	rtc_nanotime_set_commpage(&rtc_nanotime_info);
+>>>>>>> origin/10.6
 
 >>>>>>> origin/10.5
 	splx(s);
@@ -283,11 +520,15 @@ rtc_nanotime_read(void)
 	
 #if CONFIG_EMBEDDED
 	if (gPEClockFrequencyInfo.timebase_frequency_hz > SLOW_TSC_THRESHOLD)
-		return	_rtc_nanotime_read(current_cpu_datap()->cpu_nanotime, 1);	/* slow processor */
+		return	_rtc_nanotime_read(&rtc_nanotime_info, 1);	/* slow processor */
 	else
 #endif
+<<<<<<< HEAD
 	return	_rtc_nanotime_read(current_cpu_datap()->cpu_nanotime, 0);	/* assume fast processor */
 >>>>>>> origin/10.5
+=======
+	return	_rtc_nanotime_read(&rtc_nanotime_info, 0);	/* assume fast processor */
+>>>>>>> origin/10.6
 }
 
 /*
@@ -301,10 +542,14 @@ void
 rtc_clock_napped(uint64_t base, uint64_t tsc_base)
 {
 <<<<<<< HEAD
+<<<<<<< HEAD
 	pal_rtc_nanotime_t	*rntp = &pal_rtc_nanotime_info;
 =======
 	rtc_nanotime_t	*rntp = current_cpu_datap()->cpu_nanotime;
 >>>>>>> origin/10.5
+=======
+	rtc_nanotime_t	*rntp = &rtc_nanotime_info;
+>>>>>>> origin/10.6
 	uint64_t	oldnsecs;
 	uint64_t	newnsecs;
 	uint64_t	tsc;
@@ -352,6 +597,25 @@ rtc_clock_adjust(uint64_t tsc_base_delta)
 >>>>>>> origin/10.5
 }
 
+
+/*
+ * Invoked from power management to correct the SFLM TSC entry drift problem:
+ * a small delta is added to the tsc_base. This is equivalent to nudging time
+ * backwards. We require this of the order of a TSC quantum which won't cause
+ * callers of mach_absolute_time() to see time going backwards!
+ */
+void
+rtc_clock_adjust(uint64_t tsc_base_delta)
+{
+	rtc_nanotime_t	*rntp = &rtc_nanotime_info;
+
+	assert(!ml_get_interrupts_enabled());
+	assert(tsc_base_delta < 100ULL);	/* i.e. it's small */
+	_rtc_nanotime_adjust(tsc_base_delta, rntp);
+	rtc_nanotime_set_commpage(rntp);
+}
+
+
 void
 rtc_clock_stepping(__unused uint32_t new_frequency,
 		   __unused uint32_t old_frequency)
@@ -380,7 +644,11 @@ rtc_sleep_wakeup(
 	uint64_t		base)
 {
     	/* Set fixed configuration for lapic timers */
+<<<<<<< HEAD
 	rtc_timer->rtc_config();
+=======
+	rtc_timer->config();
+>>>>>>> origin/10.6
 
 	/*
 	 * Reset nanotime.
@@ -434,8 +702,14 @@ rtclock_init(void)
 		ml_init_delay_spin_threshold(10);
 	}
 
+<<<<<<< HEAD
     	/* Set fixed configuration for lapic timers */
 	rtc_timer->rtc_config();
+=======
+	/* Set fixed configuration for lapic timers */
+	rtc_timer->config();
+
+>>>>>>> origin/10.6
 	rtc_timer_start();
 
 	return (1);
@@ -448,6 +722,7 @@ static void
 rtc_set_timescale(uint64_t cycles)
 {
 <<<<<<< HEAD
+<<<<<<< HEAD
 	pal_rtc_nanotime_t	*rntp = &pal_rtc_nanotime_info;
 	uint32_t    shift = 0;
     
@@ -458,6 +733,9 @@ rtc_set_timescale(uint64_t cycles)
 		cycles <<= 1;
 	}
 	
+=======
+	rtc_nanotime_t	*rntp = &rtc_nanotime_info;
+>>>>>>> origin/10.6
 	rntp->scale = (uint32_t)(((uint64_t)NSEC_PER_SEC << 32) / cycles);
 
 	rntp->shift = shift;
@@ -598,6 +876,7 @@ rtclock_intr(
  */
 
 uint64_t
+<<<<<<< HEAD
 setPop(uint64_t time)
 {
 	uint64_t	now;
@@ -617,6 +896,31 @@ setPop(uint64_t time)
 	x86_lcpu()->rtcDeadline = time;
 	x86_lcpu()->rtcPop	= pop;
 
+=======
+setPop(
+	uint64_t time)
+{
+	uint64_t now;
+	uint64_t pop;
+
+	/* 0 and EndOfAllTime are special-cases for "clear the timer" */
+	if (time == 0 || time == EndOfAllTime) {
+		time = EndOfAllTime;
+		now = 0;
+		pop = rtc_timer_set(0, 0);
+	} else {
+		now = rtc_nanotime_read();
+		pop = rtc_timer_set(time, now);
+	}
+
+	/* Record actual deadline set */
+	x86_lcpu()->rtcDeadline = time;
+	x86_lcpu()->rtcPop = pop;
+
+	/*
+	 * Pass back the delta we set
+	 */
+>>>>>>> origin/10.6
 	return pop - now;
 }
 

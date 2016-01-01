@@ -1208,6 +1208,7 @@ in_pcbladdr(struct inpcb *inp, struct sockaddr *nam, struct in_addr *laddr,
 	if (ifscope == IFSCOPE_NONE && (inp->inp_flags & INP_BOUND_IF))
 		ifscope = inp->inp_boundifp->if_index;
 
+<<<<<<< HEAD
 	/*
 	 * If route is known or can be allocated now,
 	 * our src addr is taken from the i/f, else punt.
@@ -1429,6 +1430,13 @@ in_pcbconnect(struct inpcb *inp, struct sockaddr *nam, struct proc *p,
 	if ((so->so_flags & SOF_ABORTED) != 0)
 		return (ECONNREFUSED);
 
+=======
+	socket_unlock(inp->inp_socket, 0);
+	pcb = in_pcblookup_hash(inp->inp_pcbinfo, sin->sin_addr, sin->sin_port,
+	    inp->inp_laddr.s_addr ? inp->inp_laddr : ifaddr->sin_addr,
+	    inp->inp_lport, 0, NULL);
+	socket_lock(inp->inp_socket, 0);
+>>>>>>> origin/10.6
 	if (pcb != NULL) {
 		in_pcb_checkstate(pcb, WNT_RELEASE, pcb == inp ? 1 : 0);
 		return (EADDRINUSE);
@@ -2611,11 +2619,24 @@ inp_route_copyout(struct inpcb *inp, struct route *dst)
 	lck_mtx_assert(&inp->inpcb_mtx, LCK_MTX_ASSERT_OWNED);
 
 	/*
+<<<<<<< HEAD
 	 * If the route in the PCB is stale or not for IPv4, blow it away;
 	 * this is possible in the case of IPv4-mapped address case.
 	 */
 	if (ROUTE_UNUSABLE(src) || rt_key(src->ro_rt)->sa_family != AF_INET)
 		ROUTE_RELEASE(src);
+=======
+	 * If the route in the PCB is not for IPv4, blow it away;
+	 * this is possible in the case of IPv4-mapped address case.
+	 */
+	if (src->ro_rt != NULL && rt_key(src->ro_rt)->sa_family != AF_INET) {
+		rtfree(src->ro_rt);
+		src->ro_rt = NULL;
+	}
+
+	/* Copy everything (rt, dst, flags) from PCB */
+	bcopy(src, dst, sizeof (*dst));
+>>>>>>> origin/10.6
 
 	route_copyout(dst, src, sizeof (*dst));
 =======

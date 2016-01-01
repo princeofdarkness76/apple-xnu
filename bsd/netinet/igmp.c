@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -792,6 +796,7 @@ igi_delete(const struct ifnet *ifp, struct igmp_inm_relhead *inm_dthead)
 	    ifp, ifp->if_xname);
 }
 
+<<<<<<< HEAD
 __private_extern__ void
 igmp_initsilent(struct ifnet *ifp, struct igmp_ifinfo *igi)
 {
@@ -806,10 +811,20 @@ igmp_initsilent(struct ifnet *ifp, struct igmp_ifinfo *igi)
 	IGI_UNLOCK(igi);
 }
 
+=======
+>>>>>>> origin/10.6
 static void
 igi_initvar(struct igmp_ifinfo *igi, struct ifnet *ifp, int reattach)
 {
+<<<<<<< HEAD
 	IGI_LOCK_ASSERT_HELD(igi);
+=======
+        struct mbuf *m;
+        struct igmp *igmp;
+        struct ip *ip;
+        struct ip_moptions imo;
+	struct route ro;
+>>>>>>> origin/10.6
 
 	igi->igi_ifp = ifp;
 	igi->igi_version = igmp_default_version;
@@ -825,6 +840,7 @@ igi_initvar(struct igmp_ifinfo *igi, struct ifnet *ifp, int reattach)
 	/*
 	 * Responses to general queries are subject to bounds.
 	 */
+<<<<<<< HEAD
 	igi->igi_gq.ifq_maxlen =  IGMP_MAX_RESPONSE_PACKETS;
 	igi->igi_v2q.ifq_maxlen = IGMP_MAX_RESPONSE_PACKETS;
 }
@@ -874,6 +890,14 @@ igi_addref(struct igmp_ifinfo *igi, int locked)
 		IGI_LOCK_SPIN(igi);
 	else
 		IGI_LOCK_ASSERT_HELD(igi);
+=======
+	bzero(&ro, sizeof (ro));
+        (void) ip_output(m, router_alert, &ro, 0, &imo, NULL);
+	if (ro.ro_rt != NULL) {
+		rtfree(ro.ro_rt);
+		ro.ro_rt = NULL;
+	}
+>>>>>>> origin/10.6
 
 	if (++igi->igi_refcnt == 0) {
 		panic("%s: igi=%p wraparound refcnt", __func__, igi);

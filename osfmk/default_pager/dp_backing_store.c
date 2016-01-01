@@ -123,7 +123,11 @@
 int physical_transfer_cluster_count = 0;
 
 #define VM_SUPER_CLUSTER	0x40000
+<<<<<<< HEAD
 #define VM_SUPER_PAGES          (VM_SUPER_CLUSTER / PAGE_MIN_SIZE)
+=======
+#define VM_SUPER_PAGES          (VM_SUPER_CLUSTER / PAGE_SIZE)
+>>>>>>> origin/10.6
 
 /*
  * 0 means no shift to pages, so == 1 page/cluster. 1 would mean
@@ -202,6 +206,10 @@ boolean_t	dp_encryption_inited = FALSE;
 boolean_t	dp_encryption = FALSE;
 
 boolean_t	dp_isssd = FALSE;
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.6
 
 /*
  * Object sizes are rounded up to the next power of 2,
@@ -2947,7 +2955,11 @@ pvs_cluster_read(
 	int			cl_index;
 	unsigned int		xfer_size;
 	dp_offset_t		orig_vs_offset;
+<<<<<<< HEAD
 	dp_offset_t		ps_offset[(VM_SUPER_CLUSTER / PAGE_SIZE) >> VSTRUCT_MIN_CLSHIFT];
+=======
+	dp_offset_t       ps_offset[(VM_SUPER_CLUSTER / PAGE_SIZE) >> VSTRUCT_MIN_CLSHIFT];
+>>>>>>> origin/10.6
 	paging_segment_t        psp[(VM_SUPER_CLUSTER / PAGE_SIZE) >> VSTRUCT_MIN_CLSHIFT];
 	struct clmap		clmap;
 	upl_t			upl;
@@ -3523,6 +3535,7 @@ vs_cluster_write(
 	unsigned int	upl_offset_in_object;
 	boolean_t	minimal_clustering = FALSE;
 	boolean_t	found_dirty;
+<<<<<<< HEAD
 
 	if (!dp_encryption_inited) {
 		/*
@@ -3541,16 +3554,25 @@ vs_cluster_write(
 		 */
 		flags |= UPL_PAGING_ENCRYPTED;
 	}
+=======
+>>>>>>> origin/10.6
 
 	pages_in_cl = 1 << vs->vs_clshift;
 	cl_size = pages_in_cl * vm_page_size;
 	
 #if CONFIG_FREEZE
 	minimal_clustering = TRUE;
+<<<<<<< HEAD
 #else
 	if (dp_isssd == TRUE)
 		minimal_clustering = TRUE;
 #endif
+=======
+#endif
+	if (dp_isssd == TRUE)
+		minimal_clustering = TRUE;
+
+>>>>>>> origin/10.6
 	if (!dp_internal) {
 		unsigned int page_list_count;
 		int	     request_flags;
@@ -3584,7 +3606,6 @@ vs_cluster_write(
 			request_flags |= UPL_ENCRYPT;
 			flags |= UPL_PAGING_ENCRYPTED;
 		}
-
 		page_list_count = 0;
 		memory_object_super_upl_request(vs->vs_control,
 				(memory_object_offset_t)offset,
@@ -3611,6 +3632,7 @@ vs_cluster_write(
 		found_dirty = TRUE;
 
 		for (seg_index = 0, transfer_size = upl->size; transfer_size > 0; ) {
+<<<<<<< HEAD
 
 			unsigned int	seg_pgcnt;
 =======
@@ -3623,11 +3645,15 @@ vs_cluster_write(
 				       transfer_size < cl_size ? 
 				       transfer_size : cl_size, 0);
 >>>>>>> origin/10.2
+=======
+			unsigned int	seg_pgcnt;
+>>>>>>> origin/10.6
 
 			seg_pgcnt = seg_size / PAGE_SIZE;
 
 			if (minimal_clustering == TRUE) {
 				unsigned int	non_dirty;
+<<<<<<< HEAD
 
 				non_dirty = 0;
 				found_dirty = FALSE;
@@ -3636,6 +3662,16 @@ vs_cluster_write(
 					if ((page_index + non_dirty) >= page_max_index)
 						break;
 
+=======
+
+				non_dirty = 0;
+				found_dirty = FALSE;
+
+				for (; non_dirty < seg_pgcnt; non_dirty++) {
+					if ((page_index + non_dirty) >= page_max_index)
+						break;
+
+>>>>>>> origin/10.6
 					if (UPL_DIRTY_PAGE(pl, page_index + non_dirty) ||
 					    UPL_PRECIOUS_PAGE(pl, page_index + non_dirty)) {
 						found_dirty = TRUE;
@@ -3662,7 +3698,11 @@ vs_cluster_write(
 				page_index += seg_pgcnt;
 			        transfer_size -= seg_size;
 				upl_offset_aligned += cl_size;
+<<<<<<< HEAD
 				seg_size = cl_size;
+=======
+				seg_size    = cl_size;
+>>>>>>> origin/10.6
 				seg_index++;
 			} else
 			        transfer_size = 0;

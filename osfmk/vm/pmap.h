@@ -248,11 +248,17 @@ extern kern_return_t	pmap_enter_options(
 					   vm_map_offset_t v,
 					   ppnum_t pn,
 					   vm_prot_t prot,
+<<<<<<< HEAD
 					   vm_prot_t fault_type,
 					   unsigned int flags,
 					   boolean_t wired,
 					   unsigned int options,
 					   void *arg);
+=======
+					   unsigned int flags,
+					   boolean_t wired,
+					   unsigned int options);
+>>>>>>> origin/10.6
 
 extern void		pmap_remove_some_phys(
 				pmap_t		pmap,
@@ -437,6 +443,7 @@ extern kern_return_t	(pmap_attribute)(	/* Get/Set special memory
 	int		__options = 0;					\
 									\
 	PMAP_ENTER_CHECK(__pmap, __page)				\
+<<<<<<< HEAD
 	if (__page->object->internal) {					\
 		__options |= PMAP_OPTIONS_INTERNAL;			\
 	}								\
@@ -454,6 +461,45 @@ extern kern_return_t	(pmap_attribute)(	/* Get/Set special memory
 				  NULL);				\
 	MACRO_END
 #endif	/* !PMAP_ENTER */
+=======
+	pmap_enter(__pmap,					\
+		(virtual_address),					\
+		__page->phys_page,					\
+			(protection),					\
+		(flags),						\
+		(wired));						\
+	MACRO_END
+#endif	/* !PMAP_ENTER */
+
+#ifndef	PMAP_ENTER_OPTIONS
+#define PMAP_ENTER_OPTIONS(pmap, virtual_address, page, protection,	\
+				flags, wired, options, result) \
+	MACRO_BEGIN							\
+	pmap_t		__pmap = (pmap);				\
+	vm_page_t	__page = (page);				\
+									\
+	PMAP_ENTER_CHECK(__pmap, __page)				\
+	result = pmap_enter_options(__pmap,				\
+		(virtual_address),					\
+		__page->phys_page,					\
+			(protection),					\
+		(flags),						\
+		(wired),						\
+		options);					\
+	MACRO_END
+#endif	/* !PMAP_ENTER_OPTIONS */
+
+#define PMAP_ENTER_CHECK(pmap, page)					\
+{									\
+	if ((pmap) != kernel_pmap) {					\
+		ASSERT_PAGE_DECRYPTED(page);				\
+	}								\
+	if ((page)->error) {						\
+		panic("VM page %p should not have an error\n",		\
+			(page));					\
+	}								\
+}
+>>>>>>> origin/10.6
 
 #ifndef	PMAP_ENTER_OPTIONS
 #define PMAP_ENTER_OPTIONS(pmap, virtual_address, page, protection,	\
@@ -623,6 +669,7 @@ extern pmap_t	kernel_pmap;			/* The kernel's map */
 #define VM_WIMG_MASK		0xFF
 
 #define VM_MEM_SUPERPAGE	0x100		/* map a superpage instead of a base page */
+<<<<<<< HEAD
 #define VM_MEM_STACK		0x200
 
 #if __x86_64__
@@ -630,10 +677,13 @@ extern pmap_t	kernel_pmap;			/* The kernel's map */
 #define PMAP_CREATE_EPT		0x2
 #define PMAP_CREATE_KNOWN_FLAGS (PMAP_CREATE_64BIT | PMAP_CREATE_EPT)
 #endif
+=======
+>>>>>>> origin/10.6
 
 #define PMAP_OPTIONS_NOWAIT	0x1		/* don't block, return 
 						 * KERN_RESOURCE_SHORTAGE 
 						 * instead */
+<<<<<<< HEAD
 #define PMAP_OPTIONS_NOENTER	0x2		/* expand pmap if needed
 						 * but don't enter mapping
 						 */
@@ -649,6 +699,8 @@ extern pmap_t	kernel_pmap;			/* The kernel's map */
 #define PMAP_OPTIONS_CLEAR_REUSABLE 0x400	/* page no longer "reusable" */
 #define PMAP_OPTIONS_COMPRESSOR_IFF_MODIFIED 0x800 /* credit the compressor
 						    * iff page was modified */
+=======
+>>>>>>> origin/10.6
 
 #if	!defined(__LP64__)
 extern vm_offset_t	pmap_extract(pmap_t pmap,

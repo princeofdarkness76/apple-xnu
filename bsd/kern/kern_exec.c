@@ -4200,6 +4200,7 @@ handle_mac_transition:
 		 * So we don't set the P_SUGID or reset mach ports and fds 
 		 * on the basis of simply running this code.
 		 */
+<<<<<<< HEAD
 		if (mac_reset_ipc || !leave_sugid_clear) {
 			/*
 			 * Have mach reset the task and thread ports.
@@ -4211,6 +4212,11 @@ handle_mac_transition:
 			ipc_thread_reset((imgp->ip_new_thread != NULL) ?
 				 	 imgp->ip_new_thread : current_thread());
 		}
+=======
+		ipc_task_reset(p->task);
+		ipc_thread_reset((imgp->ip_new_thread != NULL) ?
+				 imgp->ip_new_thread : current_thread());
+>>>>>>> origin/10.6
 
 <<<<<<< HEAD
 		if (!leave_sugid_clear) {

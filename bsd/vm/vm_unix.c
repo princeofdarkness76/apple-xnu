@@ -904,13 +904,20 @@ pid_suspend(struct proc *p __unused, struct pid_suspend_args *args, int *ret)
 	int 	error = 0;
 
 #if CONFIG_MACF
+<<<<<<< HEAD
 	error = mac_proc_check_suspend_resume(p, MAC_PROC_CHECK_SUSPEND);
 	if (error) {
 		error = EPERM;
+=======
+	error = mac_proc_check_suspend_resume(p, 0); /* 0 for suspend */
+	if (error) {
+		error = KERN_FAILURE;
+>>>>>>> origin/10.6
 		goto out;
 	}
 #endif
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 	if (pid == 0) {
 		error = EPERM;
@@ -1003,6 +1010,23 @@ pid_suspend(struct proc *p __unused, struct pid_suspend_args *args, int *ret)
 	NDINIT(ndp, LOOKUP, FOLLOW | LOCKLEAF | AUDITVNPATH1, UIO_SYSSPACE,
 	    filename_str, p);
 >>>>>>> origin/10.3
+=======
+	if (pid == 0) {
+		error = KERN_FAILURE;
+		goto out;
+	}
+
+	targetproc = proc_find(pid);
+	if (!task_for_pid_posix_check(targetproc)) {
+		error = KERN_FAILURE;
+		goto out;
+	}
+
+	target = targetproc->task;
+#ifndef CONFIG_EMBEDDED
+	if (target != TASK_NULL) {
+		mach_port_t tfpport;
+>>>>>>> origin/10.6
 
 		/* If we aren't root and target's task access port is set... */
 		if (!kauth_cred_issuser(kauth_cred_get()) &&
@@ -1011,11 +1035,16 @@ pid_suspend(struct proc *p __unused, struct pid_suspend_args *args, int *ret)
 			(tfpport != IPC_PORT_NULL)) {
 
 			if (tfpport == IPC_PORT_DEAD) {
+<<<<<<< HEAD
 				error = EACCES;
+=======
+				error = KERN_PROTECTION_FAILURE;
+>>>>>>> origin/10.6
 				goto out;
 			}
 
 			/* Call up to the task access server */
+<<<<<<< HEAD
 			error = __KERNEL_WAITING_ON_TASKGATED_CHECK_ACCESS_UPCALL__(tfpport, proc_selfpid(), kauth_getgid(), pid);
 
 			if (error != MACH_MSG_SUCCESS) {
@@ -1023,10 +1052,20 @@ pid_suspend(struct proc *p __unused, struct pid_suspend_args *args, int *ret)
 					error = EINTR;
 				else
 					error = EPERM;
+=======
+			error = check_task_access(tfpport, proc_selfpid(), kauth_getgid(), pid);
+
+			if (error != MACH_MSG_SUCCESS) {
+				if (error == MACH_RCV_INTERRUPTED)
+					error = KERN_ABORTED;
+				else
+					error = KERN_FAILURE;
+>>>>>>> origin/10.6
 				goto out;
 			}
 		}
 	}
+<<<<<<< HEAD
 
 	task_reference(target);
 	error = task_pidsuspend(target);
@@ -1043,6 +1082,12 @@ pid_suspend(struct proc *p __unused, struct pid_suspend_args *args, int *ret)
 	}
 #endif
 
+=======
+#endif
+
+	task_reference(target);
+	error = task_suspend(target);
+>>>>>>> origin/10.6
 	task_deallocate(target);
 
 out:
@@ -1061,19 +1106,30 @@ pid_resume(struct proc *p __unused, struct pid_resume_args *args, int *ret)
 	int 	error = 0;
 
 #if CONFIG_MACF
+<<<<<<< HEAD
 	error = mac_proc_check_suspend_resume(p, MAC_PROC_CHECK_RESUME);
 	if (error) {
 		error = EPERM;
+=======
+	error = mac_proc_check_suspend_resume(p, 1); /* 1 for resume */
+	if (error) {
+		error = KERN_FAILURE;
+>>>>>>> origin/10.6
 		goto out;
 	}
 #endif
 
 	if (pid == 0) {
+<<<<<<< HEAD
 		error = EPERM;
+=======
+		error = KERN_FAILURE;
+>>>>>>> origin/10.6
 		goto out;
 	}
 
 	targetproc = proc_find(pid);
+<<<<<<< HEAD
 	if (targetproc == PROC_NULL) {
 		error = ESRCH;
 		goto out;
@@ -1081,10 +1137,18 @@ pid_resume(struct proc *p __unused, struct pid_resume_args *args, int *ret)
 
 	if (!task_for_pid_posix_check(targetproc)) {
 		error = EPERM;
+=======
+	if (!task_for_pid_posix_check(targetproc)) {
+		error = KERN_FAILURE;
+>>>>>>> origin/10.6
 		goto out;
 	}
 
 	target = targetproc->task;
+<<<<<<< HEAD
+=======
+#ifndef CONFIG_EMBEDDED
+>>>>>>> origin/10.6
 	if (target != TASK_NULL) {
 		mach_port_t tfpport;
 
@@ -1095,11 +1159,16 @@ pid_resume(struct proc *p __unused, struct pid_resume_args *args, int *ret)
 			(tfpport != IPC_PORT_NULL)) {
 
 			if (tfpport == IPC_PORT_DEAD) {
+<<<<<<< HEAD
 				error = EACCES;
+=======
+				error = KERN_PROTECTION_FAILURE;
+>>>>>>> origin/10.6
 				goto out;
 			}
 
 			/* Call up to the task access server */
+<<<<<<< HEAD
 			error = __KERNEL_WAITING_ON_TASKGATED_CHECK_ACCESS_UPCALL__(tfpport, proc_selfpid(), kauth_getgid(), pid);
 
 			if (error != MACH_MSG_SUCCESS) {
@@ -1107,10 +1176,20 @@ pid_resume(struct proc *p __unused, struct pid_resume_args *args, int *ret)
 					error = EINTR;
 				else
 					error = EPERM;
+=======
+			error = check_task_access(tfpport, proc_selfpid(), kauth_getgid(), pid);
+
+			if (error != MACH_MSG_SUCCESS) {
+				if (error == MACH_RCV_INTERRUPTED)
+					error = KERN_ABORTED;
+				else
+					error = KERN_FAILURE;
+>>>>>>> origin/10.6
 				goto out;
 			}
 		}
 	}
+<<<<<<< HEAD
 
 
 	task_reference(target);
@@ -1132,16 +1211,30 @@ pid_resume(struct proc *p __unused, struct pid_resume_args *args, int *ret)
 		}
 	}
 	
+=======
+#endif
+
+	task_reference(target);
+	error = task_resume(target);
+>>>>>>> origin/10.6
 	task_deallocate(target);
 
 out:
 	if (targetproc != PROC_NULL)
 		proc_rele(targetproc);
+<<<<<<< HEAD
 	
 	*ret = error;
 	return error;
 }
 
+=======
+	*ret = error;
+	return error;
+
+	return 0;
+}
+>>>>>>> origin/10.6
 
 static int
 sysctl_settfp_policy(__unused struct sysctl_oid *oidp, void *arg1,

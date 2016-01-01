@@ -121,15 +121,22 @@
  *	Allocated only when necessary.
  */
 
-struct x86_fpsave_state {
-	boolean_t		fp_valid;
-	enum {
+typedef	enum {
 		FXSAVE32 = 1,
+<<<<<<< HEAD
 		FXSAVE64 = 2
 	} fp_save_layout;
         struct x86_fx_save 	fx_save_state __attribute__ ((aligned (16)));
 };
 >>>>>>> origin/10.5
+=======
+		FXSAVE64 = 2,
+		XSAVE32  = 3,
+		XSAVE64  = 4,
+		FP_UNUSED = 5
+	} fp_save_layout_t;
+
+>>>>>>> origin/10.6
 
 #include <machine/pal_routines.h>
 
@@ -150,6 +157,27 @@ struct x86_kernel_state {
 	uint64_t	k_r15;
 	uint64_t	k_rip;
 };
+<<<<<<< HEAD
+=======
+#endif
+
+typedef struct pcb {
+	void			*sf;
+	x86_saved_state_t	*iss;
+	void			*ifps;
+#ifdef	MACH_BSD
+	uint64_t	cthread_self;		/* for use of cthread package */
+        struct real_descriptor cthread_desc;
+	unsigned long  uldt_selector;          /* user ldt selector to set */
+	struct real_descriptor uldt_desc;      /* the actual user setable ldt data */
+#endif
+	decl_simple_lock_data(,lock);
+	uint64_t	iss_pte0;
+	uint64_t	iss_pte1;
+	void		*ids;
+	uint32_t	arg_store_valid;
+} *pcb_t;
+>>>>>>> origin/10.6
 
 /*
  * Maps state flavor to number of words in the state:

@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2008-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2008-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -91,7 +95,19 @@ static errno_t	utun_proto_input(ifnet_t interface, protocol_family_t protocol,
 static errno_t utun_proto_pre_output(ifnet_t interface, protocol_family_t protocol, 
 					 mbuf_t *packet, const struct sockaddr *dest, void *route,
 					 char *frame_type, char *link_layer_dest);
+<<<<<<< HEAD
 __private_extern__ errno_t utun_pkt_input (struct utun_pcb *pcb, mbuf_t m);
+=======
+
+/* Control block allocated for each kernel control connection */
+struct utun_pcb {
+	kern_ctl_ref	utun_ctlref;
+	ifnet_t			utun_ifp;
+	u_int32_t		utun_unit;
+	u_int32_t		utun_flags;
+	int				utun_ext_ifdata_stats;
+};
+>>>>>>> origin/10.6
 
 static kern_ctl_ref	utun_kctlref;
 static u_int32_t	utun_family;
@@ -139,9 +155,15 @@ utun_register_control(void)
 	bzero(&kern_ctl, sizeof(kern_ctl));
 	strlcpy(kern_ctl.ctl_name, UTUN_CONTROL_NAME, sizeof(kern_ctl.ctl_name));
 	kern_ctl.ctl_name[sizeof(kern_ctl.ctl_name) - 1] = 0;
+<<<<<<< HEAD
 	kern_ctl.ctl_flags = CTL_FLAG_PRIVILEGED | CTL_FLAG_REG_EXTENDED; /* Require root */
 	kern_ctl.ctl_sendsize = 512 * 1024;
 	kern_ctl.ctl_recvsize = 512 * 1024;
+=======
+	kern_ctl.ctl_flags = CTL_FLAG_PRIVILEGED; /* Require root */
+	kern_ctl.ctl_sendsize = 64 * 1024;
+	kern_ctl.ctl_recvsize = 64 * 1024;
+>>>>>>> origin/10.6
 	kern_ctl.ctl_connect = utun_ctl_connect;
 	kern_ctl.ctl_disconnect = utun_ctl_disconnect;
 	kern_ctl.ctl_send = utun_ctl_send;
@@ -202,7 +224,10 @@ utun_ctl_connect(
 	*unitinfo = pcb;
 	pcb->utun_ctlref = kctlref;
 	pcb->utun_unit = sac->sc_unit;
+<<<<<<< HEAD
 	pcb->utun_max_pending_packets = 1;
+=======
+>>>>>>> origin/10.6
 	
 	printf("utun_ctl_connect: creating interface utun%d\n", pcb->utun_unit - 1);
 
@@ -211,7 +236,10 @@ utun_ctl_connect(
 	utun_init.ver = IFNET_INIT_CURRENT_VERSION;
 	utun_init.len = sizeof (utun_init);
 	utun_init.name = "utun";
+<<<<<<< HEAD
 	utun_init.start = utun_start;
+=======
+>>>>>>> origin/10.6
 	utun_init.unit = pcb->utun_unit - 1;
 	utun_init.family = utun_family;
 	utun_init.type = IFT_OTHER;
@@ -223,7 +251,11 @@ utun_ctl_connect(
 	utun_init.ioctl = utun_ioctl;
 	utun_init.detach = utun_detached;
 	
+<<<<<<< HEAD
 	result = ifnet_allocate_extended(&utun_init, &pcb->utun_ifp);
+=======
+	result = ifnet_allocate(&utun_init, &pcb->utun_ifp);
+>>>>>>> origin/10.6
 	if (result != 0) {
 		printf("utun_ctl_connect - ifnet_allocate failed: %d\n", result);
 		utun_free(pcb);
@@ -424,9 +456,13 @@ utun_ctl_disconnect(
 	struct utun_pcb	*pcb = unitinfo;
 	ifnet_t			ifp = pcb->utun_ifp;
 	errno_t			result = 0;
+<<<<<<< HEAD
 
 	utun_cleanup_crypto(pcb);
 
+=======
+	
+>>>>>>> origin/10.6
 	pcb->utun_ctlref = NULL;
 	pcb->utun_unit = 0;
 	
@@ -458,6 +494,7 @@ utun_ctl_send(
 	mbuf_t					m,
 	__unused int			flags)
 {
+<<<<<<< HEAD
 	/*
 	 * The userland ABI requires the first four bytes have the protocol family 
 	 * in network byte order: swap them
@@ -468,6 +505,39 @@ utun_ctl_send(
 		printf("%s - unexpected short mbuf pkt len %d\n", __func__, m_pktlen(m) );
 
 	return utun_pkt_input((struct utun_pcb *)unitinfo, m);
+=======
+	struct utun_pcb						*pcb = unitinfo;
+	errno_t								result;
+	
+	mbuf_pkthdr_setrcvif(m, pcb->utun_ifp);
+	
+	bpf_tap_in(pcb->utun_ifp, DLT_NULL, m, 0, 0);
+	
+	if (pcb->utun_flags & UTUN_FLAGS_NO_INPUT) {
+		/* flush data */
+		mbuf_freem(m);
+		return 0;
+	}
+	
+	if (!pcb->utun_ext_ifdata_stats) {
+		struct ifnet_stat_increment_param	incs;
+	
+		bzero(&incs, sizeof(incs));
+		incs.packets_in = 1;
+		incs.bytes_in = mbuf_pkthdr_len(m);
+		result = ifnet_input(pcb->utun_ifp, m, &incs);
+	} else {
+		result = ifnet_input(pcb->utun_ifp, m, NULL);
+	}
+	if (result != 0) {
+		ifnet_stat_increment_in(pcb->utun_ifp, 0, 0, 1);
+		
+		printf("utun_ctl_send - ifnet_input failed: %d\n", result);
+		mbuf_freem(m);
+	}
+	
+	return 0;
+>>>>>>> origin/10.6
 }
 
 static errno_t
@@ -486,7 +556,10 @@ utun_ctl_setopt(
 	switch (opt) {
 		case UTUN_OPT_FLAGS:
 		case UTUN_OPT_EXT_IFDATA_STATS:
+<<<<<<< HEAD
 		case UTUN_OPT_SET_DELEGATE_INTERFACE:
+=======
+>>>>>>> origin/10.6
 			if (kauth_cred_issuser(kauth_cred_get()) == 0) {
 				return EPERM;
 			}
@@ -499,6 +572,7 @@ utun_ctl_setopt(
 				result = EMSGSIZE;
 			else
 				pcb->utun_flags = *(u_int32_t *)data;
+<<<<<<< HEAD
 			break;
 
 		case UTUN_OPT_ENABLE_CRYPTO:
@@ -596,6 +670,40 @@ utun_ctl_setopt(
 			break;
 		}
 		default: {
+=======
+			break;
+
+		case UTUN_OPT_EXT_IFDATA_STATS:
+			if (len != sizeof(int)) {
+				result = EMSGSIZE;
+				break;
+			}
+			pcb->utun_ext_ifdata_stats = (*(int *)data) ? 1 : 0;
+			break;
+			
+		case UTUN_OPT_INC_IFDATA_STATS_IN:
+		case UTUN_OPT_INC_IFDATA_STATS_OUT: {
+			struct utun_stats_param *utsp = (struct utun_stats_param *)data;
+			
+			if (utsp == NULL || len < sizeof(struct utun_stats_param)) {
+				result = EINVAL;
+				break;
+			}
+			if (!pcb->utun_ext_ifdata_stats) {
+				result = EINVAL;
+				break;
+			}
+			if (opt == UTUN_OPT_INC_IFDATA_STATS_IN)
+				ifnet_stat_increment_in(pcb->utun_ifp, utsp->utsp_packets, 
+					utsp->utsp_bytes, utsp->utsp_errors);
+			else
+				ifnet_stat_increment_out(pcb->utun_ifp, utsp->utsp_packets, 
+					utsp->utsp_bytes, utsp->utsp_errors);
+			break;
+		}
+		
+		default:
+>>>>>>> origin/10.6
 			result = ENOPROTOOPT;
 			break;
 		}
@@ -633,6 +741,7 @@ utun_ctl_getopt(
 		
 		case UTUN_OPT_IFNAME:
 			*len = snprintf(data, *len, "%s%d", ifnet_name(pcb->utun_ifp), ifnet_unit(pcb->utun_ifp)) + 1;
+<<<<<<< HEAD
 			break;
 
 		case UTUN_OPT_GENERATE_CRYPTO_KEYS_IDX:
@@ -643,6 +752,10 @@ utun_ctl_getopt(
 			*((u_int32_t *)data) = pcb->utun_max_pending_packets;
 			break;
 		}
+=======
+			break;
+
+>>>>>>> origin/10.6
 		default:
 			result = ENOPROTOOPT;
 			break;
@@ -734,9 +847,13 @@ utun_output(
 	struct utun_pcb	*pcb = ifnet_softc(interface);
 	errno_t			result;
 	
+<<<<<<< HEAD
 	if (m_pktlen(data) >= 4) {
 		bpf_tap_out(pcb->utun_ifp, DLT_NULL, data, 0, 0);
 	}
+=======
+	bpf_tap_out(pcb->utun_ifp, DLT_NULL, data, 0, 0);
+>>>>>>> origin/10.6
 	
 	if (pcb->utun_flags & UTUN_FLAGS_NO_OUTPUT) {
 		/* flush data */
@@ -744,6 +861,7 @@ utun_output(
 		return 0;
 	}
 
+<<<<<<< HEAD
 	// otherwise, fall thru to ctl_enqueumbuf
 	if (pcb->utun_ctlref) {
 		int	length;
@@ -762,6 +880,10 @@ utun_output(
 			*(u_int32_t *)mbuf_data(data) = htonl(*(u_int32_t *)mbuf_data(data));
 
 		length = mbuf_pkthdr_len(data);
+=======
+	if (pcb->utun_ctlref) {
+		int	length = mbuf_pkthdr_len(data);
+>>>>>>> origin/10.6
 		result = ctl_enqueuembuf(pcb->utun_ctlref, pcb->utun_unit, data, CTL_DATA_EOR);
 		if (result != 0) {
 			mbuf_freem(data);
@@ -871,6 +993,16 @@ utun_ioctl(
 		case SIOCSIFFLAGS:
 			/* ifioctl() takes care of it */
 			break;
+<<<<<<< HEAD
+=======
+			
+		case SIOCSIFADDR:
+		case SIOCAIFADDR:
+			/* This will be called for called for IPv6 Address additions */
+			if (ifa->ifa_addr->sa_family == AF_INET6) 
+				break;
+			/* Fall though for other families like IPv4 */
+>>>>>>> origin/10.6
 			
 		default:
 			result = EOPNOTSUPP;

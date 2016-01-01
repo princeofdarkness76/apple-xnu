@@ -155,6 +155,10 @@ struct label;		/* MAC label dummy struct */
 struct uthread {
 	/* syscall parameters, results and catches */
 	u_int64_t uu_arg[8]; /* arguments to current system call */
+<<<<<<< HEAD
+=======
+	int	*uu_ap;			/* pointer to arglist */
+>>>>>>> origin/10.6
     int uu_rval[2];
 	unsigned int syscall_code; /* current syscall code */
 
@@ -337,8 +341,13 @@ typedef struct uthread * uthread_t;
 #define UT_PASSIVE_IO	0x00000100	/* this thread issues passive I/O */
 #define UT_PROCEXIT	0x00000200	/* this thread completed the  proc exit */
 #define UT_RAGE_VNODES	0x00000400	/* rapid age any vnodes created by this thread */	
+<<<<<<< HEAD
 /* 0x00000800 unused, used to be UT_BACKGROUND */
 /* 0x00001000 unused, used to be UT_BACKGROUND_TRAFFIC_MGT */
+=======
+#define UT_BACKGROUND	0x00000800	/* this thread is in background state */	
+#define UT_BACKGROUND_TRAFFIC_MGT	0x00001000 /* background traffic is regulated */
+>>>>>>> origin/10.6
 
 #define	UT_VFORK	0x02000000	/* thread has vfork children */
 #define	UT_SETUID	0x04000000	/* thread is settugid() */

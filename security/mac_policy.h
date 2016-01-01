@@ -2603,6 +2603,7 @@ typedef int mpo_proc_check_fork_t(
 	struct proc *proc
 );
 /**
+<<<<<<< HEAD
   @brief Access control check for setting host special ports.
   @param cred Subject credential
   @param id The host special port to set
@@ -2629,6 +2630,8 @@ typedef int mpo_proc_check_set_host_exception_port_t(
 	unsigned int exception
 );
 /**
+=======
+>>>>>>> origin/10.6
   @brief Access control over pid_suspend and pid_resume
   @param cred Subject credential
   @param proc Subject process trying to run pid_suspend or pid_resume 
@@ -5794,6 +5797,7 @@ typedef int mpo_iokit_check_nvram_delete_t(
  */
 typedef void mpo_reserved_hook_t(void);
 
+<<<<<<< HEAD
 /*
  * Policy module operations.
  *
@@ -5801,6 +5805,12 @@ typedef void mpo_reserved_hook_t(void);
  * policy in bsd/kern/policy_check.c (policy_ops struct).
  */
 #define MAC_POLICY_OPS_VERSION 37 /* inc when new reserved slots are taken */
+=======
+/*!
+  \struct mac_policy_ops
+*/
+#define MAC_POLICY_OPS_VERSION 2 /* inc when new reserved slots are taken */
+>>>>>>> origin/10.6
 struct mac_policy_ops {
 	mpo_audit_check_postselect_t		*mpo_audit_check_postselect;
 	mpo_audit_check_preselect_t		*mpo_audit_check_preselect;
@@ -6134,6 +6144,7 @@ struct mac_policy_ops {
 <<<<<<< HEAD
 	mpo_vnode_check_uipc_bind_t		*mpo_vnode_check_uipc_bind;
 	mpo_vnode_check_uipc_connect_t		*mpo_vnode_check_uipc_connect;
+<<<<<<< HEAD
 
 	mpo_proc_check_run_cs_invalid_t		*mpo_proc_check_run_cs_invalid;
 	mpo_proc_check_suspend_resume_t		*mpo_proc_check_suspend_resume;
@@ -6187,6 +6198,10 @@ struct mac_policy_ops {
 	mpo_reserved_hook_t			*mpo_reserved2;
 	mpo_reserved_hook_t			*mpo_reserved3;
 	mpo_reserved_hook_t			*mpo_reserved4;
+=======
+	mac_proc_check_run_cs_invalid_t		*mpo_proc_check_run_cs_invalid;
+	mpo_proc_check_suspend_resume_t		*mpo_proc_check_suspend_resume;
+>>>>>>> origin/10.6
 	mpo_reserved_hook_t			*mpo_reserved5;
 	mpo_reserved_hook_t			*mpo_reserved6;
 	mpo_reserved_hook_t			*mpo_reserved7;

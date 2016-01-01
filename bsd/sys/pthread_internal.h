@@ -32,12 +32,44 @@
 #include <sys/user.h>
 #include <kern/thread_call.h>
 
+<<<<<<< HEAD
 struct ksyn_waitq_element {
 #if __LP64__
 	char opaque[48];
 #else
 	char opaque[32];
 #endif
+=======
+#define WORKITEM_SIZE 64
+#define WORKQUEUE_NUMPRIOS 3
+
+#define WORKQUEUE_OVERCOMMIT	0x10000
+
+struct threadlist {
+	TAILQ_ENTRY(threadlist) th_entry;
+	thread_t th_thread;
+	int	 th_flags;
+	uint16_t th_affinity_tag;
+	uint8_t	 th_priority;
+	uint8_t  th_policy;
+	struct workqueue *th_workq;
+	mach_vm_size_t th_stacksize;
+	mach_vm_size_t th_allocsize;
+	mach_vm_offset_t th_stackaddr;
+	mach_port_name_t th_thport;
+};
+#define TH_LIST_INITED 		0x01
+#define TH_LIST_RUNNING 	0x02
+#define TH_LIST_BLOCKED 	0x04
+#define TH_LIST_SUSPENDED 	0x08
+#define TH_LIST_BUSY		0x10
+#define TH_LIST_NEED_WAKEUP	0x20
+
+struct workitem {
+	TAILQ_ENTRY(workitem) wi_entry;
+	user_addr_t wi_item;
+	uint32_t wi_affinity;
+>>>>>>> origin/10.6
 };
 
 void workqueue_mark_exiting(struct proc *);

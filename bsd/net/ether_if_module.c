@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -158,11 +162,16 @@ extern struct ifqueue atalkintrq;
 #endif
 
 
+<<<<<<< HEAD
 #if BRIDGE
 #include <net/bridge.h>
 #endif
 
 static u_long lo_dlt = 0;
+=======
+#define memcpy(x,y,z)	bcopy(y, x, z)
+
+>>>>>>> origin/10.6
 
 #define IFP2AC(IFP) ((struct arpcom *)IFP)
 >>>>>>> origin/10.3

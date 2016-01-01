@@ -639,6 +639,7 @@ IOReturn IOCatalogue::_removeDrivers(OSDictionary * matching)
 
     // remove configs from catalog.
 
+<<<<<<< HEAD
     iter = OSCollectionIterator::withCollection(personalities);
     if (!iter) return (kIOReturnNoMemory);
 
@@ -661,6 +662,34 @@ IOReturn IOCatalogue::_removeDrivers(OSDictionary * matching)
         }
     }
     iter->release();
+=======
+    arrayCopy = OSArray::withCapacity(100);
+    if ( !arrayCopy )
+        return kIOReturnNoMemory;
+
+    tables = OSCollectionIterator::withCollection(arrayCopy);
+    arrayCopy->release();
+    if ( !tables )
+        return kIOReturnNoMemory;
+
+    arrayCopy->merge(array);
+    array->flushCollection();
+    tables->reset();
+    while ( (dict = (OSDictionary *)tables->getNextObject()) ) {
+
+       /* Remove from the catalogue's array any personalities
+        * that match the matching dictionary.
+        * This comparison must be done with only the keys in the
+        * "matching" dict to enable general matching.
+        */
+        if ( dict->isEqualTo(matching, matching) )
+            continue;
+
+        array->setObject(dict);
+    }
+
+    tables->release();
+>>>>>>> origin/10.6
 
     return ret;
 }

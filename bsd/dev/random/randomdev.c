@@ -100,7 +100,22 @@ static struct cdevsw random_cdevsw =
 };
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
+=======
+
+/*
+	WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!
+
+	ANY CODE PROTECTED UNDER "#ifdef __arm__" IS SERIOUSLY SUPPOSED TO BE THERE!
+	IF YOU REMOVE ARM CODE, RANDOM WILL NOT MEAN ANYTHING FOR iPHONES ALL OVER.
+	PLEASE DON'T TOUCH __arm__ CODE IN THIS FILE!
+
+	WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING! WARNING!
+*/
+
+
+>>>>>>> origin/10.6
 /* Used to detect whether we've already been initialized */
 static int gRandomInstalled = 0;
 static PrngRef gPrngRef;
@@ -506,7 +521,11 @@ random_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
    /* lock down the mutex */
     lck_mtx_lock(gYarrowMutex);
 
+<<<<<<< HEAD
     CheckReseed();
+=======
+
+>>>>>>> origin/10.6
 	int bytes_remaining = uio_resid(uio);
     while (bytes_remaining > 0 && retCode == 0) {
         /* get the user's data */
@@ -536,8 +555,11 @@ random_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 	return retCode;
 =======
     lck_mtx_lock(gYarrowMutex);
+<<<<<<< HEAD
     CheckReseed();
 
+=======
+>>>>>>> origin/10.6
 	int bytes_read = 0;
 
 	int bytes_remaining = numbytes;

@@ -57,6 +57,10 @@
 #include <kdp/kdp_internal.h>
 #include <kdp/kdp_private.h>
 #include <kdp/kdp_core.h>
+<<<<<<< HEAD
+=======
+#include <kdp/kdp_dyld.h>
+>>>>>>> origin/10.6
 
 #include <libsa/types.h>
 #include <libkern/version.h>
@@ -143,6 +147,27 @@ int reattach_wait = 0;
 int noresume_on_disconnect = 0;
 extern unsigned int return_on_panic;
 
+<<<<<<< HEAD
+=======
+typedef struct thread_snapshot *thread_snapshot_t;
+typedef struct task_snapshot *task_snapshot_t;
+
+extern int
+machine_trace_thread(thread_t thread, char *tracepos, char *tracebound, int nframes, boolean_t user_p);
+extern int
+machine_trace_thread64(thread_t thread, char *tracepos, char *tracebound, int nframes, boolean_t user_p);
+extern int
+proc_pid(void *p);
+extern void
+proc_name_kdp(task_t  task, char *buf, int size);
+
+extern void
+kdp_snapshot_postflight(void);
+
+static int
+pid_from_task(task_t task);
+
+>>>>>>> origin/10.6
 kdp_error_t
 kdp_set_breakpoint_internal(
 							   mach_vm_address_t	address
@@ -153,6 +178,18 @@ kdp_remove_breakpoint_internal(
 							   mach_vm_address_t	address
 							   );
 
+<<<<<<< HEAD
+=======
+
+int
+kdp_stackshot(int pid, void *tracebuf, uint32_t tracebuf_size, uint32_t trace_flags, uint32_t dispatch_offset, uint32_t *pbytesTraced);
+
+boolean_t kdp_copyin(pmap_t, uint64_t, void *, size_t);
+extern void bcopy_phys(addr64_t, addr64_t, vm_size_t);
+
+extern char version[];
+
+>>>>>>> origin/10.6
 boolean_t
 kdp_packet(
     unsigned char	*pkt,
@@ -1017,6 +1054,213 @@ kdp_reboot(
 	return (TRUE); // no, not really, we won't return
 }
 
+<<<<<<< HEAD
+=======
+#define MAX_FRAMES 1000
+
+static int pid_from_task(task_t task)
+{
+	int pid = -1;
+
+	if (task->bsd_info)
+		pid = proc_pid(task->bsd_info);
+
+	return pid;
+}
+
+boolean_t
+kdp_copyin(pmap_t p, uint64_t uaddr, void *dest, size_t size) {
+	size_t rem = size;
+	char *kvaddr = dest;
+
+	while (rem) {
+		ppnum_t upn = pmap_find_phys(p, uaddr);
+		uint64_t phys_src = ptoa_64(upn) | (uaddr & PAGE_MASK);
+		uint64_t phys_dest = kvtophys((vm_offset_t)kvaddr);
+		uint64_t src_rem = PAGE_SIZE - (phys_src & PAGE_MASK);
+		uint64_t dst_rem = PAGE_SIZE - (phys_dest & PAGE_MASK);
+		size_t cur_size = (uint32_t) MIN(src_rem, dst_rem);
+		cur_size = MIN(cur_size, rem);
+
+		if (upn && pmap_valid_page(upn) && phys_dest) {
+			bcopy_phys(phys_src, phys_dest, cur_size);
+		}
+		else
+			break;
+		uaddr += cur_size;
+		kvaddr += cur_size;
+		rem -= cur_size;	
+	}
+	return (rem == 0);
+}
+
+int
+kdp_stackshot(int pid, void *tracebuf, uint32_t tracebuf_size, uint32_t trace_flags, uint32_t dispatch_offset, uint32_t *pbytesTraced)
+{
+	char *tracepos = (char *) tracebuf;
+	char *tracebound = tracepos + tracebuf_size;
+	uint32_t tracebytes = 0;
+	int error = 0;
+
+	task_t task = TASK_NULL;
+	thread_t thread = THREAD_NULL;
+	thread_snapshot_t tsnap = NULL;
+	unsigned framesize = 2 * sizeof(vm_offset_t);
+	struct task ctask;
+	struct thread cthread;
+	
+	boolean_t dispatch_p = ((trace_flags & STACKSHOT_GET_DQ) != 0);
+	boolean_t save_loadinfo_p = ((trace_flags & STACKSHOT_SAVE_LOADINFO) != 0);
+
+	queue_iterate(&tasks, task, task_t, tasks) {
+		if ((task == NULL) || (ml_nofault_copy((vm_offset_t) task, (vm_offset_t) &ctask, sizeof(struct task)) != sizeof(struct task)))
+			goto error_exit;
+
+		int task_pid = pid_from_task(task);
+		boolean_t task64 = task_has_64BitAddr(task);
+
+		/* Trace everything, unless a process was specified */
+		if ((pid == -1) || (pid == task_pid)) {
+			task_snapshot_t task_snap;
+			uint32_t uuid_info_count;
+			mach_vm_address_t uuid_info_addr;
+
+			if (save_loadinfo_p && task_pid > 0) {
+				// Read the dyld_all_image_infos struct from the task memory to get UUID array count and location
+				if (task64) {
+					struct dyld_all_image_infos64 task_image_infos;
+					if (!kdp_copyin(task->map->pmap, task->all_image_info_addr, &task_image_infos, sizeof(struct dyld_all_image_infos64)))
+						goto error_exit;
+					uuid_info_count = (uint32_t)task_image_infos.uuidArrayCount;
+					uuid_info_addr = task_image_infos.uuidArray;
+				} else {
+					struct dyld_all_image_infos task_image_infos;
+					if (!kdp_copyin(task->map->pmap, task->all_image_info_addr, &task_image_infos, sizeof(struct dyld_all_image_infos)))
+						goto error_exit;
+					uuid_info_count = task_image_infos.uuidArrayCount;
+					uuid_info_addr = task_image_infos.uuidArray;
+				}
+			} else {
+				uuid_info_count = 0;
+				uuid_info_addr = 0;
+			}
+
+			if (tracepos + sizeof(struct task_snapshot) > tracebound) {
+				error = -1;
+				goto error_exit;
+			}
+
+			task_snap = (task_snapshot_t) tracepos;
+			task_snap->snapshot_magic = STACKSHOT_TASK_SNAPSHOT_MAGIC;
+			task_snap->pid = task_pid;
+			task_snap->nloadinfos = uuid_info_count;
+			/* Add the BSD process identifiers */
+			if (task_pid != -1)
+				proc_name_kdp(task, task_snap->p_comm, sizeof(task_snap->p_comm));
+			else
+				task_snap->p_comm[0] = '\0';
+			task_snap->ss_flags = 0;
+			if (task64)
+				task_snap->ss_flags |= kUser64_p;
+			
+			tracepos += sizeof(struct task_snapshot);
+
+			if (task_pid > 0 && uuid_info_count > 0) {
+				uint32_t uuid_info_size = (uint32_t)(task64 ? sizeof(struct dyld_uuid_info64) : sizeof(struct dyld_uuid_info));
+				uint32_t uuid_info_array_size = uuid_info_count * uuid_info_size;
+
+				if (tracepos + uuid_info_array_size > tracebound) {
+					error = -1;
+					goto error_exit;
+				}
+
+				// Copy in the UUID info array
+				if (!kdp_copyin(task->map->pmap, uuid_info_addr, tracepos, uuid_info_array_size))
+					goto error_exit;
+
+				tracepos += uuid_info_array_size;
+			}
+
+			queue_iterate(&task->threads, thread, thread_t, task_threads){
+				if ((thread == NULL) || (ml_nofault_copy((vm_offset_t) thread, (vm_offset_t) &cthread, sizeof(struct thread)) != sizeof(struct thread)))
+					goto error_exit;
+
+				if (((tracepos + 4 * sizeof(struct thread_snapshot)) > tracebound)) {
+					error = -1;
+					goto error_exit;
+				}
+				/* Populate the thread snapshot header */
+				tsnap = (thread_snapshot_t) tracepos;
+				tsnap->thread_id = thread_tid(thread);
+				tsnap->state = thread->state;
+				tsnap->wait_event = thread->wait_event;
+				tsnap->continuation = (uint64_t) (uintptr_t) thread->continuation;
+
+				tsnap->snapshot_magic = STACKSHOT_THREAD_SNAPSHOT_MAGIC;
+				tracepos += sizeof(struct thread_snapshot);
+				tsnap->ss_flags = 0;
+
+				if (dispatch_p && (task != kernel_task) && (task->active) && (task->map)) {
+					uint64_t dqkeyaddr = thread_dispatchqaddr(thread);
+					if (dqkeyaddr != 0) {
+						uint64_t dqaddr = 0;
+						if (kdp_copyin(task->map->pmap, dqkeyaddr, &dqaddr, (task64 ? 8 : 4)) && (dqaddr != 0)) {
+							uint64_t dqserialnumaddr = dqaddr + dispatch_offset;
+							uint64_t dqserialnum = 0;
+							if (kdp_copyin(task->map->pmap, dqserialnumaddr, &dqserialnum, (task64 ? 8 : 4))) {
+								tsnap->ss_flags |= kHasDispatchSerial;
+								*(uint64_t *)tracepos = dqserialnum;
+								tracepos += 8;
+							}
+						}
+					}
+				}
+/* Call through to the machine specific trace routines
+ * Frames are added past the snapshot header.
+ */
+				if (thread->kernel_stack != 0) {
+#if defined(__LP64__)					
+					tracebytes = machine_trace_thread64(thread, tracepos, tracebound, MAX_FRAMES, FALSE);
+					tsnap->ss_flags |= kKernel64_p;
+					framesize = 16;
+#else
+					tracebytes = machine_trace_thread(thread, tracepos, tracebound, MAX_FRAMES, FALSE);
+					framesize = 8;
+#endif
+				}
+				tsnap->nkern_frames = tracebytes/framesize;
+				tracepos += tracebytes;
+				tracebytes = 0;
+				/* Trace user stack, if any */
+				if (thread->task->map != kernel_map) {
+					/* 64-bit task? */
+					if (task_has_64BitAddr(thread->task)) {
+						tracebytes = machine_trace_thread64(thread, tracepos, tracebound, MAX_FRAMES, TRUE);
+						tsnap->ss_flags |= kUser64_p;
+						framesize = 16;
+					}
+					else {
+						tracebytes = machine_trace_thread(thread, tracepos, tracebound, MAX_FRAMES, TRUE);
+						framesize = 8;
+					}
+				}
+				tsnap->nuser_frames = tracebytes/framesize;
+				tracepos += tracebytes;
+				tracebytes = 0;
+			}
+		}
+	}
+
+error_exit:
+	/* Release stack snapshot wait indicator */
+	kdp_snapshot_postflight();
+
+	*pbytesTraced = (uint32_t)(tracepos - (char *) tracebuf);
+
+	return error;
+}
+
+>>>>>>> origin/10.6
 static boolean_t
 kdp_readioport(
     kdp_pkt_t		*pkt,
@@ -1172,4 +1416,7 @@ kdp_dumpinfo(
     
 	return (TRUE);
 }
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.6

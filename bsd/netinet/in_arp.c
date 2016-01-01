@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2004-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2004-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2004-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -81,7 +85,10 @@
 #include <net/if_dl.h>
 #include <net/dlil.h>
 #include <net/if_types.h>
+<<<<<<< HEAD
 #include <net/if_llreach.h>
+=======
+>>>>>>> origin/10.6
 #include <net/route.h>
 
 #include <netinet/if_ether.h>
@@ -632,11 +639,16 @@ in_arpdrain(void *arg)
 	lck_mtx_unlock(rnh_lock);
 }
 
+<<<<<<< HEAD
 /*
  * Timeout routine.  Age arp_tab entries periodically.
  */
 static void
 arp_timeout(void *arg)
+=======
+void
+in_arpdrain(void *ignored_arg)
+>>>>>>> origin/10.6
 {
 #pragma unused(arg)
 	struct llinfo_arp *la, *ola;
@@ -665,6 +677,7 @@ arp_timeout(void *arg)
 	lck_mtx_unlock(rnh_lock);
 }
 
+<<<<<<< HEAD
 static void
 arp_sched_timeout(struct timeval *atv)
 {
@@ -686,6 +699,18 @@ arp_sched_timeout(struct timeval *atv)
 		arp_timeout_run = 1;
 		timeout(arp_timeout, NULL, tvtohz(atv));
 	}
+=======
+/*
+ * Timeout routine.  Age arp_tab entries periodically.
+ */
+/* ARGSUSED */
+static void
+arptimer(void *ignored_arg)
+{
+#pragma unused (ignored_arg)
+	in_arpdrain(NULL);
+	timeout(arptimer, (caddr_t)0, arpt_prune * hz);
+>>>>>>> origin/10.6
 }
 
 /*
@@ -842,6 +867,7 @@ arp_rtrequest(int req, struct rtentry *rt, struct sockaddr *sa)
 		IFA_LOCK_SPIN(rt->rt_ifa);
 		if (SIN(rt_key(rt))->sin_addr.s_addr ==
 		    (IA_SIN(rt->rt_ifa))->sin_addr.s_addr) {
+<<<<<<< HEAD
 			IFA_UNLOCK(rt->rt_ifa);
 			/*
 			 * This test used to be
@@ -864,6 +890,31 @@ arp_rtrequest(int req, struct rtentry *rt, struct sockaddr *sa)
 					 */
 					if (rt->rt_llinfo_purge != NULL)
 						rt->rt_llinfo_purge(rt);
+=======
+		    /*
+		     * This test used to be
+		     *	if (loif.if_flags & IFF_UP)
+		     * It allowed local traffic to be forced
+		     * through the hardware by configuring the loopback down.
+		     * However, it causes problems during network configuration
+		     * for boards that can't receive packets they send.
+		     * It is now necessary to clear "useloopback" and remove
+		     * the route to force traffic out to the hardware.
+		     */
+			rt->rt_expire = 0;
+			ifnet_lladdr_copy_bytes(rt->rt_ifp, LLADDR(SDL(gate)), SDL(gate)->sdl_alen = 6);
+			if (useloopback) {
+#if IFNET_ROUTE_REFCNT
+				/* Adjust route ref count for the interfaces */
+				if (rt->rt_if_ref_fn != NULL &&
+				    rt->rt_ifp != lo_ifp) {
+					rt->rt_if_ref_fn(lo_ifp, 1);
+					rt->rt_if_ref_fn(rt->rt_ifp, -1);
+				}
+#endif /* IFNET_ROUTE_REFCNT */
+				rt->rt_ifp = lo_ifp;
+			}
+>>>>>>> origin/10.6
 
 					/*
 					 * Adjust route ref count for the
@@ -1384,8 +1435,13 @@ arp_lookup_ip(ifnet_t ifp, const struct sockaddr_in *net_dest,
 				goto release;
 			} else {
 				route->rt_flags |= RTF_REJECT;
+<<<<<<< HEAD
 				rt_setexpire(route,
 				    route->rt_expire + arpt_down);
+=======
+				route->rt_rmx.rmx_expire = rt_expiry(route,
+				    route->rt_rmx.rmx_expire, arpt_down);
+>>>>>>> origin/10.6
 				llinfo->la_asked = 0;
 				/*
 				 * Clear la_hold; don't free the packet since
@@ -1436,12 +1492,21 @@ arp_ip_handle_input(ifnet_t ifp, u_short arpop,
 	errno_t	error;
 	int created_announcement = 0;
 	int bridged = 0, is_bridge = 0;
+<<<<<<< HEAD
 
 	arpstat.received++;
 
+=======
+	
+>>>>>>> origin/10.6
 	/* Do not respond to requests for 0.0.0.0 */
 	if (target_ip->sin_addr.s_addr == INADDR_ANY && arpop == ARPOP_REQUEST)
 		goto done;
+	
+ 	if (ifp->if_bridge)
+		bridged = 1;
+	if (ifp->if_type == IFT_BRIDGE)
+		is_bridge = 1;
 
 	if (ifp->if_bridge)
 		bridged = 1;
@@ -1453,11 +1518,16 @@ arp_ip_handle_input(ifnet_t ifp, u_short arpop,
 
 	/*
 	 * Determine if this ARP is for us
+<<<<<<< HEAD
 	 * For a bridge, we want to check the address irrespective
+=======
+	 * For a bridge, we want to check the address irrespective 
+>>>>>>> origin/10.6
 	 * of the receive interface.
 	 */
 	lck_rw_lock_shared(in_ifaddr_rwlock);
 	TAILQ_FOREACH(ia, INADDR_HASH(target_ip->sin_addr.s_addr), ia_hash) {
+<<<<<<< HEAD
 		IFA_LOCK_SPIN(&ia->ia_ifa);
 		if (((bridged && ia->ia_ifp->if_bridge != NULL) ||
 		    (ia->ia_ifp == ifp)) &&
@@ -1468,11 +1538,21 @@ arp_ip_handle_input(ifnet_t ifp, u_short arpop,
 			IFA_UNLOCK(&ia->ia_ifa);
 			lck_rw_done(in_ifaddr_rwlock);
 			goto match;
+=======
+		if (((bridged && ia->ia_ifp->if_bridge != NULL) ||
+			(ia->ia_ifp == ifp)) &&
+		    ia->ia_addr.sin_addr.s_addr == target_ip->sin_addr.s_addr) {
+				best_ia = ia;
+				ifaref(&best_ia->ia_ifa);
+				lck_rw_done(in_ifaddr_rwlock);
+				goto match;
+>>>>>>> origin/10.6
 		}
 		IFA_UNLOCK(&ia->ia_ifa);
 	}
 
 	TAILQ_FOREACH(ia, INADDR_HASH(sender_ip->sin_addr.s_addr), ia_hash) {
+<<<<<<< HEAD
 		IFA_LOCK_SPIN(&ia->ia_ifa);
 		if (((bridged && ia->ia_ifp->if_bridge != NULL) ||
 		    (ia->ia_ifp == ifp)) &&
@@ -1483,6 +1563,37 @@ arp_ip_handle_input(ifnet_t ifp, u_short arpop,
 			IFA_UNLOCK(&ia->ia_ifa);
 			lck_rw_done(in_ifaddr_rwlock);
 			goto match;
+=======
+		if (((bridged && ia->ia_ifp->if_bridge != NULL) ||
+			(ia->ia_ifp == ifp)) &&
+		    ia->ia_addr.sin_addr.s_addr == sender_ip->sin_addr.s_addr) {
+				best_ia = ia;
+				ifaref(&best_ia->ia_ifa);
+				lck_rw_done(in_ifaddr_rwlock);
+				goto match;
+		}
+	}
+
+#define BDG_MEMBER_MATCHES_ARP(addr, ifp, ia)								\
+	(ia->ia_ifp->if_bridge == ifp->if_softc &&								\
+	!bcmp(ifnet_lladdr(ia->ia_ifp), ifnet_lladdr(ifp), ifp->if_addrlen) &&	\
+	addr == ia->ia_addr.sin_addr.s_addr)
+	/*
+	 * Check the case when bridge shares its MAC address with
+	 * some of its children, so packets are claimed by bridge
+	 * itself (bridge_input() does it first), but they are really
+	 * meant to be destined to the bridge member.
+	 */
+	if (is_bridge) {
+		TAILQ_FOREACH(ia, INADDR_HASH(target_ip->sin_addr.s_addr), ia_hash) {
+			if (BDG_MEMBER_MATCHES_ARP(target_ip->sin_addr.s_addr, ifp, ia)) {
+				ifp = ia->ia_ifp;
+				best_ia = ia;
+				ifaref(&best_ia->ia_ifa);
+				lck_rw_done(in_ifaddr_rwlock);
+				goto match;
+			}
+>>>>>>> origin/10.6
 		}
 		IFA_UNLOCK(&ia->ia_ifa);
 	}
@@ -1530,9 +1641,13 @@ arp_ip_handle_input(ifnet_t ifp, u_short arpop,
 			continue;
 		}
 		best_ia = (struct in_ifaddr *)ifa;
+<<<<<<< HEAD
 		best_ia_sin = best_ia->ia_addr;
 		IFA_ADDREF_LOCKED(ifa);
 		IFA_UNLOCK(ifa);
+=======
+		ifaref(&best_ia->ia_ifa);
+>>>>>>> origin/10.6
 		ifnet_lock_done(ifp);
 		goto match;
 	}
@@ -1552,9 +1667,14 @@ match:
 		goto done;
 
 	/* Check for a conflict */
+<<<<<<< HEAD
 	if (!bridged &&
 	    sender_ip->sin_addr.s_addr == best_ia_sin.sin_addr.s_addr) {
 		struct kev_msg ev_msg;
+=======
+	if (!bridged && sender_ip->sin_addr.s_addr == best_ia->ia_addr.sin_addr.s_addr) {
+		struct kev_msg        ev_msg;
+>>>>>>> origin/10.6
 		struct kev_in_collision	*in_collision;
 		u_char storage[sizeof (struct kev_in_collision) + MAX_HW_LEN];
 
@@ -1792,6 +1912,7 @@ match:
 
 	gateway = SDL(route->rt_gateway);
 	if (!bridged && route->rt_ifp != ifp) {
+<<<<<<< HEAD
 		if (!IN_LINKLOCAL(ntohl(sender_ip->sin_addr.s_addr)) ||
 		    !(ifp->if_eflags & IFEF_ARPLL)) {
 			if (arp_verbose || log_arp_warnings)
@@ -1802,6 +1923,17 @@ match:
 				    if_name(route->rt_ifp),
 				    sdl_addr_to_hex(sender_hw, buf,
 				    sizeof (buf)), if_name(ifp));
+=======
+		if (!IN_LINKLOCAL(ntohl(sender_ip->sin_addr.s_addr)) || (ifp->if_eflags & IFEF_ARPLL) == 0) {
+			if (log_arp_warnings)
+				log(LOG_ERR, "arp: %s is on %s%d but got reply from %s on %s%d\n",
+					inet_ntop(AF_INET, &sender_ip->sin_addr, ipv4str,
+							  sizeof(ipv4str)),
+					route->rt_ifp->if_name,
+					route->rt_ifp->if_unit,
+					sdl_addr_to_hex(sender_hw, buf, sizeof(buf)),
+					ifp->if_name, ifp->if_unit);
+>>>>>>> origin/10.6
 			goto respond;
 		} else {
 			/* Don't change a permanent address */
@@ -1836,6 +1968,7 @@ match:
 				lck_mtx_unlock(rnh_lock);
 				goto respond;
 			}
+<<<<<<< HEAD
 			if (route->rt_ifp != ifp) {
 				/*
 				 * Purge any link-layer info caching.
@@ -1849,6 +1982,16 @@ match:
 					route->rt_if_ref_fn(route->rt_ifp, -1);
 				}
 			}
+=======
+#if IFNET_ROUTE_REFCNT
+			/* Adjust route ref count for the interfaces */
+			if (route->rt_if_ref_fn != NULL &&
+			    route->rt_ifp != ifp) {
+				route->rt_if_ref_fn(ifp, 1);
+				route->rt_if_ref_fn(route->rt_ifp, -1);
+			}
+#endif /* IFNET_ROUTE_REFCNT */
+>>>>>>> origin/10.6
 			/* Change the interface when the existing route is on */
 			route->rt_ifp = ifp;
 			/*
@@ -1902,8 +2045,18 @@ match:
 	bcopy(CONST_LLADDR(sender_hw), LLADDR(gateway), gateway->sdl_alen);
 
 	/* Update the expire time for the route and clear the reject flag */
+<<<<<<< HEAD
 	if (route->rt_expire != 0)
 		rt_setexpire(route, net_uptime() + arpt_keep);
+=======
+	if (route->rt_rmx.rmx_expire) {
+		struct timeval timenow;
+
+		getmicrotime(&timenow);
+		route->rt_rmx.rmx_expire =
+		    rt_expiry(route, timenow.tv_sec, arpt_keep);
+	}
+>>>>>>> origin/10.6
 	route->rt_flags &= ~RTF_REJECT;
 
 	/* cache the gateway (sender HW) address */
@@ -1982,6 +2135,7 @@ respond:
 			 * proxying for.
 			 */
 			if (route->rt_ifp != ifp &&
+<<<<<<< HEAD
 			    (route->rt_ifp->if_bridge != ifp->if_bridge ||
 			    ifp->if_bridge == NULL)) {
 				RT_REMREF_LOCKED(route);
@@ -2011,6 +2165,14 @@ respond:
 				return 0;
 >>>>>>> origin/10.5
 			}
+=======
+				(route->rt_ifp->if_bridge != ifp->if_bridge ||
+				 ifp->if_bridge == NULL)) {
+					RT_REMREF_LOCKED(route);
+					RT_UNLOCK(route);
+					goto done;
+				}
+>>>>>>> origin/10.6
 			proxied = *SDL(route->rt_gateway);
 			target_hw = &proxied;
 		} else {

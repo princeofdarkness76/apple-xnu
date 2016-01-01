@@ -259,7 +259,11 @@ i386_set_ldt(
 		    case 0:
 		    case ACC_P:
 			/* valid empty descriptor, clear Present preemptively */
+<<<<<<< HEAD
 			dp->access &= (~ACC_P & 0xff);
+=======
+			dp->access &= ~ACC_P;
+>>>>>>> origin/10.6
 			break;
 		    case ACC_P | ACC_PL_U | ACC_DATA:
 		    case ACC_P | ACC_PL_U | ACC_DATA_W:

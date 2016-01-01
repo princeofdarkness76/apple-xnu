@@ -148,9 +148,13 @@ static void	buf_reassign(buf_t bp, vnode_t newvp);
 static errno_t	buf_acquire_locked(buf_t bp, int flags, int slpflag, int slptimeo);
 static int	buf_iterprepare(vnode_t vp, struct buflists *, int flags);
 static void	buf_itercomplete(vnode_t vp, struct buflists *, int flags);
+<<<<<<< HEAD
 static boolean_t buffer_cache_gc(int);
 static buf_t	buf_brelse_shadow(buf_t bp);
 static void	buf_free_meta_store(buf_t bp);
+=======
+boolean_t buffer_cache_gc(int);
+>>>>>>> origin/10.6
 
 static buf_t	buf_create_shadow_internal(buf_t bp, boolean_t force_copy,
 					   uintptr_t external_storage, void (*iodone)(buf_t, void *), void *arg, int priv);
@@ -712,6 +716,29 @@ bufattr_quickcomplete(bufattr_t bap) {
         return 1;
     return 0;
 }
+
+#ifdef CONFIG_PROTECT
+void *
+buf_getcpaddr(buf_t bp) {
+	return bp->b_cpentry;
+}
+
+void 
+buf_setcpaddr(buf_t bp, void *cp_entry_addr) {
+	bp->b_cpentry = (struct cprotect *) cp_entry_addr;
+}
+
+#else
+void *
+buf_getcpaddr(buf_t bp __unused) {
+	return NULL;
+}
+
+void 
+buf_setcpaddr(buf_t bp __unused, void *cp_entry_addr __unused) {
+	return;
+}
+#endif /* CONFIG_PROTECT */
 
 errno_t
 buf_error(buf_t bp) {
@@ -4141,7 +4168,13 @@ bcleanbuf(buf_t bp, boolean_t discard)
 		bp->b_bcount = 0;
 		bp->b_dirtyoff = bp->b_dirtyend = 0;
 		bp->b_validoff = bp->b_validend = 0;
+<<<<<<< HEAD
 		bzero(&bp->b_attr, sizeof(struct bufattr));
+=======
+#ifdef CONFIG_PROTECT
+		bp->b_cpentry = 0;
+#endif
+>>>>>>> origin/10.6
 
 		lck_mtx_lock_spin(buf_mtxp);
 	}
@@ -4682,7 +4715,13 @@ alloc_io_buf(vnode_t vp, int priv)
 	bp->b_upl = NULL;
 	bp->b_fsprivate = (void *)NULL;
 	bp->b_vp = vp;
+<<<<<<< HEAD
 	bzero(&bp->b_attr, sizeof(struct bufattr));
+=======
+#ifdef CONFIG_PROTECT
+	bp->b_cpentry = 0;
+#endif
+>>>>>>> origin/10.6
 
 	if (vp && (vp->v_type == VBLK || vp->v_type == VCHR))
 		bp->b_dev = vp->v_rdev;
@@ -4948,9 +4987,17 @@ buffer_cache_gc(int all)
 	boolean_t did_large_zfree = FALSE;
 	boolean_t need_wakeup = FALSE;
 	int now = buf_timestamp();
+<<<<<<< HEAD
 	uint32_t found = 0;
 	struct bqueues privq;
 	int thresh_hold = BUF_STALE_THRESHHOLD;
+=======
+	uint32_t count = 0;
+	int thresh_hold = BUF_STALE_THRESHHOLD;
+
+	if (all)
+		thresh_hold = 0;
+>>>>>>> origin/10.6
 
 	if (all)
 		thresh_hold = 0;
@@ -5038,7 +5085,14 @@ buffer_cache_gc(int all)
 				did_large_zfree = TRUE;
 			}    
 
+<<<<<<< HEAD
 			trace(TR_BRELSE, pack(bp->b_vp, bp->b_bufsize), bp->b_lblkno);
+=======
+	/* Only collect buffers unused in the last N seconds. Note: ordered by timestamp. */
+	while ((bp != NULL) && ((now - bp->b_timestamp) > thresh_hold) && (all || (count < BUF_MAX_GC_COUNT))) {
+		int result, size;
+		boolean_t is_zalloc;
+>>>>>>> origin/10.6
 
 			/* Free Storage */
 			buf_free_meta_store(bp);
@@ -5068,11 +5122,17 @@ buffer_cache_gc(int all)
 			bp->b_tag   = 13;
 #endif
 		}
+<<<<<<< HEAD
 
 		/* And do a big bulk move to the empty queue */
 		TAILQ_CONCAT(&bufqueues[BQ_EMPTY], &privq, b_freelist);
 
 	} while (all && (found == BUF_MAX_GC_BATCH_SIZE));
+=======
+		bp = TAILQ_FIRST(&bufqueues[BQ_META]);
+		count++;
+	} 
+>>>>>>> origin/10.6
 
 	lck_mtx_unlock(buf_mtxp);
 

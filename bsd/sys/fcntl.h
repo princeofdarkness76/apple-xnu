@@ -311,6 +311,7 @@
 
 #define F_ADDFILESIGS	61		/* add signature from same file (used by dyld for shared libs) */
 
+<<<<<<< HEAD
 #define F_NODIRECT	62		/* used in conjunction with F_NOCACHE to indicate that DIRECT, synchonous writes */
                                         /* should not be used (i.e. its ok to temporaily create cached pages) */
 
@@ -385,6 +386,10 @@
 
 #define F_ADDFILESIGS_RETURN	97	/* Add signature from same file, return end offset in structure on sucess */
 
+=======
+#define F_GETPROTECTIONCLASS	62		/* Get the protection class of a file from the EA, returns int */
+#define F_SETPROTECTIONCLASS	63		/* Set the protection class of a file for the EA, requires int */
+>>>>>>> origin/10.6
 
 // FS-specific fcntl()'s numbers begin at 0x00010000 and go up
 #define FCNTL_FS_SPECIFIC_BASE  0x00010000
@@ -723,6 +728,7 @@ int	fcntl(int, int, ...) __DARWIN_ALIAS_C(fcntl);
 #if !defined(_POSIX_C_SOURCE) || defined(_DARWIN_C_SOURCE)
 
 #ifdef PRIVATE
+<<<<<<< HEAD
 /*
  * These definitions are retained temporarily for compatibility.
  * If you want to use fileports, please use
@@ -730,6 +736,8 @@ int	fcntl(int, int, ...) __DARWIN_ALIAS_C(fcntl);
  * or
  *	#include <System/sys/fileport.h>
  */
+=======
+>>>>>>> origin/10.6
 #ifndef _FILEPORT_T
 #define _FILEPORT_T
 typedef __darwin_mach_port_t fileport_t;

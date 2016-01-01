@@ -193,8 +193,11 @@ IOReturn IOCommandGate::runAction(Action inAction,
 
     if (!inAction)
         return kIOReturnBadArgument;
+<<<<<<< HEAD
     if (!(wl = workLoop))
         return kIOReturnNotReady;
+=======
+>>>>>>> origin/10.6
 
     // closeGate is recursive needn't worry if we already hold the lock.
     wl->closeGate();
@@ -228,16 +231,31 @@ IOReturn IOCommandGate::runAction(Action inAction,
 
     bool trace = ( gIOKitTrace & kIOTraceCommandGates ) ? true : false;
 	
+<<<<<<< HEAD
     if (trace) IOTimeStampStartConstant(IODBG_CMDQ(IOCMDQ_ACTION),
 					 VM_KERNEL_UNSLIDE(inAction), (uintptr_t) owner);
 	
     IOStatisticsActionCall();
+=======
+	if (trace)
+		IOTimeStampStartConstant(IODBG_CMDQ(IOCMDQ_ACTION),
+								 (uintptr_t) inAction, (uintptr_t) owner);
+>>>>>>> origin/10.6
 	
     // Must be gated and on the work loop or enabled
 
     *sleepersP += kSleepersActions;
     res = (*inAction)(owner, arg0, arg1, arg2, arg3);
+<<<<<<< HEAD
     *sleepersP -= kSleepersActions;
+=======
+	
+	if (trace)
+		IOTimeStampEndConstant(IODBG_CMDQ(IOCMDQ_ACTION),
+							   (uintptr_t) inAction, (uintptr_t) owner);
+    
+    openGate();
+>>>>>>> origin/10.6
 
     if (trace) IOTimeStampEndConstant(IODBG_CMDQ(IOCMDQ_ACTION),
 				       VM_KERNEL_UNSLIDE(inAction), (uintptr_t) owner);
@@ -279,6 +297,7 @@ IOReturn IOCommandGate::attemptAction(Action inAction,
 		
         if (trace)
             IOTimeStampStartConstant(IODBG_CMDQ(IOCMDQ_ACTION),
+<<<<<<< HEAD
 				     VM_KERNEL_UNSLIDE(inAction), (uintptr_t) owner);
         
         IOStatisticsActionCall();
@@ -288,6 +307,15 @@ IOReturn IOCommandGate::attemptAction(Action inAction,
         if (trace)
             IOTimeStampEndConstant(IODBG_CMDQ(IOCMDQ_ACTION),
 				   VM_KERNEL_UNSLIDE(inAction), (uintptr_t) owner);
+=======
+			    (uintptr_t) inAction, (uintptr_t) owner);
+
+	res = (*inAction)(owner, arg0, arg1, arg2, arg3);
+		
+        if (trace)
+            IOTimeStampEndConstant(IODBG_CMDQ(IOCMDQ_ACTION),
+								   (uintptr_t) inAction, (uintptr_t) owner);
+>>>>>>> origin/10.6
     }
 
     wl->openGate();

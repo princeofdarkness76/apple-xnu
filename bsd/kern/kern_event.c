@@ -2023,7 +2023,10 @@ restart:
 			error = fops->f_attach(kn);
 
 			kqlock(kq);
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.6
 			if (error != 0) {
 				/*
 				 * Failed to attach correctly, so drop.
@@ -2115,6 +2118,17 @@ restart:
 		}
 
 		/*
+		 * The user may change some filter values after the
+		 * initial EV_ADD, but doing so will not reset any 
+		 * filter which have already been triggered.
+		 */
+		kn->kn_kevent.udata = kev->udata;
+		if (fops->f_isfd || fops->f_touch == NULL) {
+	        	kn->kn_sfflags = kev->fflags;
+        		kn->kn_sdata = kev->data;
+		}
+
+		/*
 		 * If somebody is in the middle of dropping this
 		 * knote - go find/insert a new one.  But we have
 		 * wait for this one to go away first. Attaches
@@ -2132,7 +2146,16 @@ restart:
 		 * in filter values.
 		 */
 		if (!fops->f_isfd && fops->f_touch != NULL)
+<<<<<<< HEAD
 			fops->f_touch(kn, kev, EVENT_REGISTER);
+=======
+		        fops->f_touch(kn, kev, EVENT_REGISTER);
+
+		/* We may need to push some info down to a networked filesystem */
+		if (kn->kn_filter == EVFILT_VNODE) {
+			vnode_knoteupdate(kn);
+		}
+>>>>>>> origin/10.6
 	}
 	/* still have use ref on knote */
 
@@ -2225,6 +2248,7 @@ knote_process(struct knote *kn,
 					result = kn->kn_fop->f_event(kn, 0);
 				}
 
+<<<<<<< HEAD
 				/*
 				 * capture the kevent data - using touch if
 				 * specified
@@ -2241,6 +2265,14 @@ knote_process(struct knote *kn,
 				 * convert back to a kqlock - bail if the knote
 				 * went away
 				 */
+=======
+				/* capture the kevent data - using touch if specified */
+				if (result && touch) {
+					kn->kn_fop->f_touch(kn, &kev, EVENT_PROCESS);
+				}
+
+				/* convert back to a kqlock - bail if the knote went away */
+>>>>>>> origin/10.6
 				if (!knoteuse2kqlock(kq, kn)) {
 					return (EJUSTRETURN);
 				} else if (result) {
@@ -2258,6 +2290,14 @@ knote_process(struct knote *kn,
 						kev = kn->kn_kevent;
 					}
 
+<<<<<<< HEAD
+=======
+					/* capture all events that occurred during filter */
+					if (!touch) {
+						kev = kn->kn_kevent;
+					}
+
+>>>>>>> origin/10.6
 				} else if ((kn->kn_status & KN_STAYQUEUED) == 0) {
 					/*
 					 * was already dequeued, so just bail on
@@ -2291,7 +2331,11 @@ knote_process(struct knote *kn,
 	 */
 
 	if (result == 0) {
+<<<<<<< HEAD
 		return (EJUSTRETURN);
+=======
+		return EJUSTRETURN;
+>>>>>>> origin/10.6
 	} else if ((kn->kn_flags & EV_ONESHOT) != 0) {
 		knote_deactivate(kn);
 		if ((kn->kn_flags & (EV_DISPATCH2|EV_DELETE)) == EV_DISPATCH2) {

@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2003-2014 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
 >>>>>>> origin/10.3
+=======
+ * Copyright (c) 2003-2010 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -1429,12 +1433,19 @@ vlan_clone_destroy(struct ifnet *ifp)
     }
     if (vlan_remove(ifv, TRUE) == 0) {
 	vlan_unlock();
+<<<<<<< HEAD
 	ifvlan_release(ifv);
+=======
+>>>>>>> origin/10.6
 	return 0;
     }
     vlan_unlock();
+<<<<<<< HEAD
     ifvlan_release(ifv);
     ifnet_detach(ifp);
+=======
+    vlan_if_detach(ifp);
+>>>>>>> origin/10.6
 
     return 0;
 }

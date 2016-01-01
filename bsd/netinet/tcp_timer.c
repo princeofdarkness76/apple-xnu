@@ -584,7 +584,82 @@ tcp_gc(struct inpcbinfo *ipi)
 	static int tws_checked = 0;
 #endif
 
+<<<<<<< HEAD
 	KERNEL_DEBUG(DBG_FNC_TCP_SLOW | DBG_FUNC_START, 0, 0, 0, 0, 0);
+=======
+	struct inpcbinfo *pcbinfo		= &tcbinfo;
+
+	KERNEL_DEBUG(DBG_FNC_TCP_SLOW | DBG_FUNC_START, 0,0,0,0,0);
+
+	tcp_maxidle = tcp_keepcnt * tcp_keepintvl;
+
+	lck_rw_lock_shared(pcbinfo->mtx);
+
+	bg_cnt++;
+
+    	LIST_FOREACH(inp, &tcb, inp_list) {
+
+		so = inp->inp_socket;
+
+		if (in_pcb_checkstate(inp, WNT_ACQUIRE, 0) == WNT_STOPUSING) 
+			continue;
+
+		tcp_lock(so, 1, 0);
+
+		if ((in_pcb_checkstate(inp, WNT_RELEASE,1) == WNT_STOPUSING)  && so->so_usecount == 1) {
+			tcp_unlock(so, 1, 0);
+			continue;
+		}
+		tp = intotcpcb(inp);
+		if (tp == 0 || tp->t_state == TCPS_LISTEN) {
+			tcp_unlock(so, 1, 0);
+			continue; 
+		}
+
+		tp = intotcpcb(inp);
+
+		if (tp == 0 || tp->t_state == TCPS_LISTEN) 
+			goto tpgone;
+
+#if TRAFFIC_MGT
+	        if (so->so_traffic_mgt_flags & TRAFFIC_MGT_SO_BG_REGULATE && 
+	        	bg_cnt > BG_COUNTER_MAX) {
+			u_int32_t	curr_recvtotal = tcpstat.tcps_rcvtotal;
+			u_int32_t	curr_bg_recvtotal = tcpstat.tcps_bg_rcvtotal;
+			u_int32_t	bg_recvdiff = curr_bg_recvtotal - tp->bg_recv_snapshot;
+			u_int32_t	tot_recvdiff = curr_recvtotal - tp->tot_recv_snapshot;
+			u_int32_t	fg_recv_change = tot_recvdiff - bg_recvdiff;
+			u_int32_t	recv_change;
+			
+			if (!(so->so_traffic_mgt_flags & TRAFFIC_MGT_SO_BG_SUPPRESSED)) {
+				if (tot_recvdiff) 
+					recv_change = (fg_recv_change * 100) / tot_recvdiff;
+				else 
+					recv_change = 0;
+
+				if (recv_change > background_io_trigger) {
+					socket_set_traffic_mgt_flags(so, TRAFFIC_MGT_SO_BG_SUPPRESSED);
+				}
+				
+				tp->tot_recv_snapshot = curr_recvtotal;
+				tp->bg_recv_snapshot = curr_bg_recvtotal;
+			}
+			else {	// SUPPRESSED
+				// this allows for bg traffic to subside before we start measuring total traffic change
+				if (tot_recvdiff)
+					recv_change = (bg_recvdiff * 100) / tot_recvdiff;
+				else
+					recv_change = 0;
+					
+				if (recv_change < background_io_trigger) {
+					// Draconian for now: if there is any change at all, keep suppressed
+					if (!tot_recvdiff) {
+						socket_clear_traffic_mgt_flags(so, TRAFFIC_MGT_SO_BG_SUPPRESSED);
+						tp->t_unacksegs = 0;
+						(void) tcp_output(tp);	// open window
+					}
+				}
+>>>>>>> origin/10.6
 
 	/*
 	 * Update tcp_now here as it may get used while

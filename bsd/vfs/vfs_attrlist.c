@@ -3331,6 +3331,7 @@ readdirattr(vnode_t dvp, struct fd_vn_data *fvd, uio_t auio,
 		if (new_resid) {
 			uio_setresid(auio, (user_ssize_t)new_resid);
 		}
+<<<<<<< HEAD
 
 		/*
 		 * At this point, the directory entry has been consumed, proceed
@@ -3342,6 +3343,10 @@ readdirattr(vnode_t dvp, struct fd_vn_data *fvd, uio_t auio,
 
 	if (max_path_name_buf) {
 		FREE(max_path_name_buf, M_TEMP);
+=======
+		if (al.fileattr & ATTR_FILE_PROTECTION_CLASS) {
+		}
+>>>>>>> origin/10.6
 	}
 
 	/*
@@ -3854,6 +3859,8 @@ setattrlist_internal(vnode_t vp, struct setattrlist_args *uap, proc_t p, vfs_con
 		error = EINVAL;
 		VFS_DEBUG(ctx, vp, "ATTRLIST - XXX device type change not implemented");
 		goto out;
+	}
+	if (al.fileattr & ATTR_FILE_PROTECTION_CLASS) {
 	}
 
 	/*

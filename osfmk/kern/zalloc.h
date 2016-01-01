@@ -171,7 +171,8 @@ struct zone {
 	/* boolean_t */	doing_alloc :1,	/* is zone expanding now? */
 	/* boolean_t */	waiting :1,	/* is thread waiting for expansion? */
 	/* boolean_t */	async_pending :1,	/* asynchronous allocation pending? */
-	/* boolean_t */	doing_gc :1;	/* garbage collect in progress? */
+	/* boolean_t */	doing_gc :1,	/* garbage collect in progress? */
+	/* boolean_t */ noencrypt :1;
 	struct zone *	next_zone;	/* Link for all-zones list */
 	call_entry_data_t	call_async_alloc;	/* callout for asynchronous alloc */
 >>>>>>> origin/10.3
@@ -311,6 +312,7 @@ extern void		zone_prio_refill_configure(zone_t, vm_size_t);
 #define Z_COLLECT	2	/* Make zone collectable	*/
 #define Z_EXPAND	3	/* Make zone expandable		*/
 #define	Z_FOREIGN	4	/* Allow collectable zone to contain foreign elements */
+<<<<<<< HEAD
 #define Z_CALLERACCT	5	/* Account alloc/free against the caller */
 #define Z_NOENCRYPT	6	/* Don't encrypt zone during hibernation */
 #define Z_NOCALLOUT 	7	/* Don't asynchronously replenish the zone via
@@ -318,6 +320,9 @@ extern void		zone_prio_refill_configure(zone_t, vm_size_t);
 				 */
 #define Z_ALIGNMENT_REQUIRED 8
 #define Z_GZALLOC_EXEMPT 9	/* Not tracked in guard allocation mode */
+=======
+#define Z_NOENCRYPT	6	/* Don't encrypt zone during hibernation */
+>>>>>>> origin/10.6
 
 /* Preallocate space for zone from zone map */
 extern void		zprealloc(

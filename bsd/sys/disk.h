@@ -78,10 +78,14 @@
  *
  * DKIOCREQUESTIDLE                      idle media
 <<<<<<< HEAD
+<<<<<<< HEAD
  * DKIOCUNMAP                            delete unused data
 =======
  * DKIOCDISCARD                          delete unused data
 >>>>>>> origin/10.5
+=======
+ * DKIOCUNMAP                            delete unused data
+>>>>>>> origin/10.6
  *
  * DKIOCGETMAXBLOCKCOUNTREAD             get maximum block count for reads
  * DKIOCGETMAXBLOCKCOUNTWRITE            get maximum block count for writes
@@ -97,6 +101,9 @@
  * DKIOCGETMAXSEGMENTADDRESSABLEBITCOUNT get maximum segment width in bits
  *
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
  * DKIOCGETFEATURES                      get device's feature set
  * DKIOCGETPHYSICALBLOCKSIZE             get device's block size
  * DKIOCGETCOMMANDPOOLSIZE               get device's queue depth
@@ -105,16 +112,22 @@
 >>>>>>> origin/10.5
  */
 
+<<<<<<< HEAD
 #define DK_FEATURE_BARRIER                    0x00000002
 #define DK_FEATURE_PRIORITY                   0x00000004
 #define DK_FEATURE_UNMAP                      0x00000010
 
 #define DK_SYNCHRONIZE_OPTION_BARRIER         0x00000002
 
+=======
+#define DK_FEATURE_UNMAP                      0x00000010
+
+>>>>>>> origin/10.6
 typedef struct
 {
     uint64_t               offset;
     uint64_t               length;
+<<<<<<< HEAD
 <<<<<<< HEAD
 } dk_extent_t;
 =======
@@ -122,6 +135,9 @@ typedef struct
     uint8_t                reserved0128[16];       /* reserved, clear to zero */
 } dk_discard_t;
 >>>>>>> origin/10.5
+=======
+} dk_extent_t;
+>>>>>>> origin/10.6
 
 typedef struct
 {
@@ -150,6 +166,7 @@ typedef struct
 
 typedef struct
 {
+<<<<<<< HEAD
     uint64_t               offset;
     uint64_t               length;
 
@@ -206,6 +223,18 @@ typedef struct
 #endif /* PRIVATE */
 #endif /* KERNEL */
 
+=======
+    dk_extent_t *          extents;
+    uint32_t               extentsCount;
+
+#ifdef __LP64__
+    uint8_t                reserved0096[4];        /* reserved, clear to zero */
+#else /* !__LP64__ */
+    uint8_t                reserved0064[8];        /* reserved, clear to zero */
+#endif /* !__LP64__ */
+} dk_unmap_t;
+
+>>>>>>> origin/10.6
 #define DKIOCEJECT                            _IO('d', 21)
 #define DKIOCSYNCHRONIZE                      _IOW('d', 22, dk_synchronize_t)
 
@@ -221,11 +250,15 @@ typedef struct
 
 #define DKIOCREQUESTIDLE                      _IO('d', 30)
 <<<<<<< HEAD
+<<<<<<< HEAD
 #define DKIOCUNMAP                            _IOW('d', 31, dk_unmap_t)
 #define DKIOCCORESTORAGE                      _IOR('d', 32, dk_corestorage_info_t)
 =======
 #define DKIOCDISCARD                          _IOW('d', 31, dk_discard_t)
 >>>>>>> origin/10.5
+=======
+#define DKIOCUNMAP                            _IOW('d', 31, dk_unmap_t)
+>>>>>>> origin/10.6
 
 #define DKIOCGETMAXBLOCKCOUNTREAD             _IOR('d', 64, uint64_t)
 #define DKIOCGETMAXBLOCKCOUNTWRITE            _IOR('d', 65, uint64_t)
@@ -241,17 +274,31 @@ typedef struct
 #define DKIOCGETMAXSEGMENTADDRESSABLEBITCOUNT _IOR('d', 75, uint64_t)
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
 #define DKIOCGETFEATURES                      _IOR('d', 76, uint32_t)
 #define DKIOCGETPHYSICALBLOCKSIZE             _IOR('d', 77, uint32_t)
 #define DKIOCGETCOMMANDPOOLSIZE               _IOR('d', 78, uint32_t)
 
+<<<<<<< HEAD
 #define DKIOCSYNCHRONIZECACHE                 _IO('d', 22)
 =======
 #define DKIOCGETPHYSICALBLOCKSIZE             _IOR('d', 77, uint32_t)
 >>>>>>> origin/10.5
+=======
+typedef struct
+{
+    uint64_t               offset;
+    uint64_t               length;
+
+    uint8_t                reserved0128[16];       /* reserved, clear to zero */
+} dk_discard_t __attribute__ ((deprecated));
+
+#define DKIOCDISCARD                          _IOW('d', 31, dk_discard_t)
+>>>>>>> origin/10.6
 
 #ifdef KERNEL
-#define DK_FEATURE_DISCARD                    0x00000010
 #define DK_FEATURE_FORCE_UNIT_ACCESS          0x00000001
 
 #define DK_ENCRYPTION_TYPE_AES_CBC            1
@@ -290,6 +337,7 @@ typedef struct
 
 #define DKIOCSETBLOCKSIZE                     _IOW('d', 24, uint32_t)
 #define DKIOCGETBSDUNIT                       _IOR('d', 27, uint32_t)
+<<<<<<< HEAD
 #define DKIOCISSOLIDSTATE                     _IOR('d', 79, uint32_t)
 #define DKIOCISVIRTUAL                        _IOR('d', 72, uint32_t)
 #define DKIOCGETBASE                          _IOR('d', 73, uint64_t)
@@ -348,6 +396,11 @@ typedef struct _dk_cs_unmap {
 // No longer used: _DKIOCCSSETFSVNODE (203) & _DKIOCCSGETFREEBYTES (204)
 #define	_DKIOCCSUNMAP			      _IOWR('d', 205, _dk_cs_unmap_t)
 #endif /* PRIVATE */
+=======
+#define DKIOCISSOLIDSTATE		      _IOR('d', 79, uint32_t)
+#define DKIOCISVIRTUAL                        _IOR('d', 72, uint32_t)
+#define DKIOCGETBASE                          _IOR('d', 73, uint64_t)
+>>>>>>> origin/10.6
 #endif /* KERNEL */
 
 #ifdef PRIVATE

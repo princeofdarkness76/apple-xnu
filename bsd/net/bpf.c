@@ -512,6 +512,7 @@ bpf_attachd(struct bpf_d *d, struct bpf_if *bp)
 	d->bd_bif = bp;
 	d->bd_next = bp->bif_dlist;
 	bp->bif_dlist = d;
+<<<<<<< HEAD
 
 	/*
 	 * Take a reference on the device even if an error is returned
@@ -519,6 +520,9 @@ bpf_attachd(struct bpf_d *d, struct bpf_if *bp)
 	 */
 	bpf_acquire_d(d);
 
+=======
+	
+>>>>>>> origin/10.6
 	if (first) {
 		/* Find the default bpf entry for this ifp */
 		if (bp->bif_ifp->if_bpf == NULL) {

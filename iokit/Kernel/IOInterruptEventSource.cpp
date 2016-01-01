@@ -64,6 +64,7 @@ do { \
 	IOStatistics::setCounterType(IOEventSource::reserved->counter, kIOStatisticsInterruptEventSourceCounter); \
 } while (0)
 
+<<<<<<< HEAD
 #define IOStatisticsCheckForWork() \
 do { \
 	IOStatistics::countInterruptCheckForWork(IOEventSource::reserved->counter); \
@@ -82,6 +83,8 @@ do { \
 
 #endif // IOKITSTATS
 
+=======
+>>>>>>> origin/10.6
 #define super IOEventSource
 
 OSDefineMetaClassAndStructors(IOInterruptEventSource, IOEventSource)
@@ -119,6 +122,7 @@ bool IOInterruptEventSource::init(OSObject *inOwner,
 
     // Assumes inOwner holds a reference(retain) on the provider
     if (inProvider) {
+<<<<<<< HEAD
         if (IA_ANY_STATISTICS_ENABLED) {
             /*
              * We only treat this as an "interrupt" if it has a provider; if it does,
@@ -149,6 +153,11 @@ bool IOInterruptEventSource::init(OSObject *inOwner,
 	if (res) {
 	    intIndex = inIntIndex;
         }
+=======
+        res = (kIOReturnSuccess == registerInterruptHandler(inProvider, inIntIndex));
+	if (res)
+	    intIndex = inIntIndex;
+>>>>>>> origin/10.6
     }
 
     IOStatisticsInitializeCounter();
@@ -178,6 +187,7 @@ IOReturn IOInterruptEventSource::registerInterruptHandler(IOService *inProvider,
 
     ret = provider->registerInterrupt(inIntIndex, this, intHandler);
 
+<<<<<<< HEAD
     /*
      * Add statistics to the provider.  The setWorkLoop convention should ensure
      * that we always go down the unregister path before we register (outside of
@@ -226,6 +236,11 @@ IOInterruptEventSource::unregisterInterruptHandler(IOService *inProvider,
 }
 
 
+=======
+    return (ret);
+}
+
+>>>>>>> origin/10.6
 IOInterruptEventSource *
 IOInterruptEventSource::interruptEventSource(OSObject *inOwner,
 					     Action inAction,
@@ -245,6 +260,7 @@ IOInterruptEventSource::interruptEventSource(OSObject *inOwner,
 void IOInterruptEventSource::free()
 {
     if (provider && intIndex >= 0)
+<<<<<<< HEAD
         unregisterInterruptHandler(provider, intIndex);
 
     if (reserved) {
@@ -254,6 +270,9 @@ void IOInterruptEventSource::free()
 
         IODelete(reserved, ExpansionData, 1);
     }
+=======
+        provider->unregisterInterrupt(intIndex);
+>>>>>>> origin/10.6
 
     super::free();
 }
@@ -278,6 +297,7 @@ void IOInterruptEventSource::disable()
 
 void IOInterruptEventSource::setWorkLoop(IOWorkLoop *inWorkLoop)
 {
+<<<<<<< HEAD
     if (inWorkLoop) super::setWorkLoop(inWorkLoop);
 
     if (provider) {
@@ -296,6 +316,21 @@ void IOInterruptEventSource::setWorkLoop(IOWorkLoop *inWorkLoop)
     }
 
     if (!inWorkLoop) super::setWorkLoop(inWorkLoop);
+=======
+    super::setWorkLoop(inWorkLoop);
+
+    if (!provider)
+    	return;
+
+    if ( !inWorkLoop ) {
+	if (intIndex >= 0) {
+	    provider->unregisterInterrupt(intIndex);
+	    intIndex = ~intIndex;
+	}
+    } else if ((intIndex < 0) && (kIOReturnSuccess == registerInterruptHandler(provider, ~intIndex))) {
+	intIndex = ~intIndex;
+    }
+>>>>>>> origin/10.6
 }
 
 const IOService *IOInterruptEventSource::getProvider() const
@@ -323,13 +358,18 @@ bool IOInterruptEventSource::checkForWork()
     int numInts = cacheProdCount - consumerCount;
     IOInterruptEventAction intAction = (IOInterruptEventAction) action;
 	bool trace = (gIOKitTrace & kIOTraceIntEventSource) ? true : false;
+<<<<<<< HEAD
 	
     IOStatisticsCheckForWork();
 	
+=======
+
+>>>>>>> origin/10.6
 	if ( numInts > 0 )
 	{
 		if (trace)
 			IOTimeStampStartConstant(IODBG_INTES(IOINTES_ACTION),
+<<<<<<< HEAD
 						 VM_KERNEL_UNSLIDE(intAction), (uintptr_t) owner, (uintptr_t) this, (uintptr_t) workLoop);
 
 		if (reserved->statistics) {
@@ -369,11 +409,27 @@ bool IOInterruptEventSource::checkForWork()
 		if (autoDisable && !explicitDisable)
 			enable();
 	}
+=======
+									 (uintptr_t) intAction, (uintptr_t) owner, (uintptr_t) this, (uintptr_t) workLoop);
+
+		// Call the handler
+        (*intAction)(owner, this,  numInts);
+		
+		if (trace)
+			IOTimeStampEndConstant(IODBG_INTES(IOINTES_ACTION),
+								   (uintptr_t) intAction, (uintptr_t) owner, (uintptr_t) this, (uintptr_t) workLoop);
+
+        consumerCount = cacheProdCount;
+        if (autoDisable && !explicitDisable)
+            enable();
+    }
+>>>>>>> origin/10.6
 	
 	else if ( numInts < 0 )
 	{
 		if (trace)
 			IOTimeStampStartConstant(IODBG_INTES(IOINTES_ACTION),
+<<<<<<< HEAD
 						 VM_KERNEL_UNSLIDE(intAction), (uintptr_t) owner, (uintptr_t) this, (uintptr_t) workLoop);
 
 		if (reserved->statistics) {
@@ -414,6 +470,22 @@ bool IOInterruptEventSource::checkForWork()
 			enable();
 	}
 	
+=======
+									 (uintptr_t) intAction, (uintptr_t) owner, (uintptr_t) this, (uintptr_t) workLoop);
+		
+		// Call the handler
+    	(*intAction)(owner, this, -numInts);
+		
+		if (trace)
+			IOTimeStampEndConstant(IODBG_INTES(IOINTES_ACTION),
+								   (uintptr_t) intAction, (uintptr_t) owner, (uintptr_t) this, (uintptr_t) workLoop);
+    
+        consumerCount = cacheProdCount;
+        if (autoDisable && !explicitDisable)
+            enable();
+    }
+
+>>>>>>> origin/10.6
     return false;
 }
 
@@ -421,13 +493,18 @@ void IOInterruptEventSource::normalInterruptOccurred
     (void */*refcon*/, IOService */*prov*/, int /*source*/)
 {
 	bool trace = (gIOKitTrace & kIOTraceIntEventSource) ? true : false;
+<<<<<<< HEAD
 	
     IOStatisticsInterrupt();
+=======
+
+>>>>>>> origin/10.6
     producerCount++;
 	
 	if (trace)
 	    IOTimeStampStartConstant(IODBG_INTES(IOINTES_SEMA), (uintptr_t) this, (uintptr_t) owner);
 
+<<<<<<< HEAD
     if (reserved->statistics) {
         if (IA_GET_STATISTIC_ENABLED(kInterruptAccountingFirstLevelCountIndex)) {
             IA_ADD_VALUE(&reserved->statistics->interruptStatistics[kInterruptAccountingFirstLevelCountIndex], 1);
@@ -436,6 +513,13 @@ void IOInterruptEventSource::normalInterruptOccurred
 	
     signalWorkAvailable();
 	
+=======
+	if (trace)
+	    IOTimeStampStartConstant(IODBG_INTES(IOINTES_SEMA), (uintptr_t) this, (uintptr_t) owner);
+	
+    signalWorkAvailable();
+
+>>>>>>> origin/10.6
 	if (trace)
 	    IOTimeStampEndConstant(IODBG_INTES(IOINTES_SEMA), (uintptr_t) this, (uintptr_t) owner);
 }
@@ -444,7 +528,11 @@ void IOInterruptEventSource::disableInterruptOccurred
     (void */*refcon*/, IOService *prov, int source)
 {
 	bool trace = (gIOKitTrace & kIOTraceIntEventSource) ? true : false;
+<<<<<<< HEAD
 	
+=======
+
+>>>>>>> origin/10.6
     prov->disableInterrupt(source);	/* disable the interrupt */
 	
     IOStatisticsInterrupt();
@@ -453,6 +541,7 @@ void IOInterruptEventSource::disableInterruptOccurred
 	if (trace)
 	    IOTimeStampStartConstant(IODBG_INTES(IOINTES_SEMA), (uintptr_t) this, (uintptr_t) owner);
 
+<<<<<<< HEAD
     if (reserved->statistics) {
         if (IA_GET_STATISTIC_ENABLED(kInterruptAccountingFirstLevelCountIndex)) {
             IA_ADD_VALUE(&reserved->statistics->interruptStatistics[kInterruptAccountingFirstLevelCountIndex], 1);
@@ -461,6 +550,13 @@ void IOInterruptEventSource::disableInterruptOccurred
     
     signalWorkAvailable();
 	
+=======
+	if (trace)
+	    IOTimeStampStartConstant(IODBG_INTES(IOINTES_SEMA), (uintptr_t) this, (uintptr_t) owner);
+    
+    signalWorkAvailable();
+
+>>>>>>> origin/10.6
 	if (trace)
 	    IOTimeStampEndConstant(IODBG_INTES(IOINTES_SEMA), (uintptr_t) this, (uintptr_t) owner);
 }

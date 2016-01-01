@@ -3508,7 +3508,20 @@ EXT(killresv):
 			.long	0								; 5470 reserved			
 			.long	0								; 5474 reserved			
 			.long	0								; 5478 reserved			
+<<<<<<< HEAD
 			.long	0								; 547C reserved	
+=======
+			.long	0								; 547C reserved
+			.long	EXT(kmod)						; 5480 Pointer to kmod, debugging aid
+			.long	EXT(kdp_trans_off)				; 5484 Pointer to kdp_trans_off, debugging aid
+			.long	EXT(kdp_read_io)				; 5488 Pointer to kdp_read_io, debugging aid
+			.long	0								; 548C Reserved for developer use
+			.long	0								; 5490 Reserved for developer use
+			.long	EXT(osversion)					; 5494	Pointer to osversion string, debugging aid
+			.long	EXT(flag_kdp_trigger_reboot)					; 5498	Pointer to KDP reboot trigger, debugging aid
+			.long	EXT(manual_pkt)					; 549C	Pointer to KDP manual packet, debugging aid
+
+>>>>>>> origin/10.6
 ;
 ;	The "shared page" is used for low-level debugging
 ;

@@ -43,8 +43,11 @@
 #include <AssertMacros.h>
 
 #include "kxld_demangle.h"
+<<<<<<< HEAD
 #include "kxld_dict.h"
 #include "kxld_object.h"
+=======
+>>>>>>> origin/10.6
 #include "kxld_reloc.h"
 #include "kxld_sect.h"
 #include "kxld_sym.h"
@@ -60,6 +63,7 @@
 #define VTABLE_HEADER_LEN_64 2
 #define VTABLE_HEADER_SIZE_64 (VTABLE_HEADER_LEN_64 * VTABLE_ENTRY_SIZE_64)
 
+<<<<<<< HEAD
 static void  get_vtable_base_sizes(boolean_t is_32_bit, u_int *vtable_entry_size,
     u_int *vtable_header_size);
 
@@ -69,6 +73,138 @@ static kern_return_t init_by_relocs(KXLDVTable *vtable, const KXLDSym *vtable_sy
 static kern_return_t init_by_entries_and_relocs(KXLDVTable *vtable, 
     const KXLDSym *vtable_sym, const KXLDRelocator *relocator, 
     const KXLDArray *relocs, const KXLDDict *defined_cxx_symbols);
+=======
+static kern_return_t init_by_relocs(KXLDVTable *vtable, const KXLDSym *sym,
+    const KXLDSect *sect, const KXLDSymtab *symtab, 
+    const KXLDRelocator *relocator);
+
+static kern_return_t init_by_entries_and_relocs(KXLDVTable *vtable, 
+    const KXLDSym *sym, const KXLDSymtab *symtab, 
+    const KXLDRelocator *relocator, const KXLDArray *relocs);
+
+static kxld_addr_t get_entry_value(u_char *entry, const KXLDRelocator *relocator)
+    __attribute__((pure));
+#if !KERNEL
+static kxld_addr_t swap_entry_value(kxld_addr_t entry_value, 
+    const KXLDRelocator *relocator) __attribute__((const));
+#endif /* !KERNEL */
+static kern_return_t init_by_entries(KXLDVTable *vtable, const KXLDSymtab *symtab,
+    const KXLDRelocator *relocator);
+
+/*******************************************************************************
+*******************************************************************************/
+kern_return_t
+kxld_vtable_init_from_kernel_macho(KXLDVTable *vtable, const KXLDSym *sym, 
+    const KXLDSect *sect, const KXLDSymtab *symtab, 
+    const KXLDRelocator *relocator)
+{
+    kern_return_t rval = KERN_FAILURE;
+    char *demangled_name = NULL;
+    size_t demangled_length = 0;
+
+    check(vtable);
+    check(sym);
+    check(sect);
+    check(symtab);
+
+    vtable->name = sym->name;
+    vtable->vtable = sect->data + kxld_sym_get_section_offset(sym, sect);
+    vtable->is_patched = FALSE;
+
+    require_action(kxld_sect_get_num_relocs(sect) == 0, finish,
+        rval=KERN_FAILURE;
+        kxld_log(kKxldLogPatching, kKxldLogErr, 
+            kKxldLogMalformedVTable,
+            kxld_demangle(vtable->name, &demangled_name, &demangled_length)));
+
+    rval = init_by_entries(vtable, symtab, relocator);
+    require_noerr(rval, finish);
+
+    vtable->is_patched = TRUE;
+
+    rval = KERN_SUCCESS;
+
+finish:
+    if (rval) kxld_vtable_deinit(vtable);
+    if (demangled_name) kxld_free(demangled_name, demangled_length);
+
+    return rval;
+}
+
+/*******************************************************************************
+*******************************************************************************/
+kern_return_t
+kxld_vtable_init_from_object_macho(KXLDVTable *vtable, const KXLDSym *sym, 
+    const KXLDSect *sect, const KXLDSymtab *symtab, 
+    const KXLDRelocator *relocator)
+{
+    kern_return_t rval = KERN_FAILURE;
+    char *demangled_name = NULL;
+    size_t demangled_length = 0;
+
+    check(vtable);
+    check(sym);
+    check(sect);
+    check(symtab);
+
+    vtable->name = sym->name;
+    vtable->vtable = sect->data + kxld_sym_get_section_offset(sym, sect);
+    vtable->is_patched = FALSE;
+
+    require_action(kxld_sect_get_num_relocs(sect) > 0, finish,
+        rval=KERN_FAILURE;
+        kxld_log(kKxldLogPatching, kKxldLogErr, 
+            kKxldLogMalformedVTable, 
+            kxld_demangle(vtable->name, &demangled_name, &demangled_length)));
+
+    rval = init_by_relocs(vtable, sym, sect, symtab, relocator);
+    require_noerr(rval, finish);
+
+    rval = KERN_SUCCESS;
+
+finish:
+    if (rval) kxld_vtable_deinit(vtable);
+    if (demangled_name) kxld_free(demangled_name, demangled_length);
+
+    return rval;
+}
+
+/*******************************************************************************
+*******************************************************************************/
+kern_return_t
+kxld_vtable_init_from_final_macho(KXLDVTable *vtable, const KXLDSym *sym, 
+    const KXLDSect *sect, const KXLDSymtab *symtab, 
+    const KXLDRelocator *relocator, const KXLDArray *relocs)
+{
+    kern_return_t rval = KERN_FAILURE;
+    char *demangled_name = NULL;
+    size_t demangled_length = 0;
+
+    check(vtable);
+    check(sym);
+    check(sect);
+    check(symtab);
+
+    vtable->name = sym->name;
+    vtable->vtable = sect->data + kxld_sym_get_section_offset(sym, sect);
+    vtable->is_patched = FALSE;
+
+    require_action(kxld_sect_get_num_relocs(sect) == 0, finish,
+        rval=KERN_FAILURE;
+        kxld_log(kKxldLogPatching, kKxldLogErr, 
+            kKxldLogMalformedVTable, 
+            kxld_demangle(vtable->name, &demangled_name, &demangled_length)));
+
+    rval = init_by_entries_and_relocs(vtable, sym, symtab,
+        relocator, relocs);
+    require_noerr(rval, finish);
+
+    rval = KERN_SUCCESS;
+
+finish:
+    if (rval) kxld_vtable_deinit(vtable);
+    if (demangled_name) kxld_free(demangled_name, demangled_length);
+>>>>>>> origin/10.6
 
 static kern_return_t init_by_entries(KXLDVTable *vtable,
     const KXLDRelocator *relocator, const KXLDDict *defined_cxx_symbols);
@@ -487,7 +623,10 @@ kxld_vtable_patch(KXLDVTable *vtable, const KXLDVTable *super_vtable,
     size_t demangled_length1 = 0;
     size_t demangled_length2 = 0;
     size_t demangled_length3 = 0;
+<<<<<<< HEAD
     boolean_t failure = FALSE;
+=======
+>>>>>>> origin/10.6
 
     check(vtable);
     check(super_vtable);
@@ -627,9 +766,12 @@ kxld_vtable_patch(KXLDVTable *vtable, const KXLDVTable *super_vtable,
             kxld_demangle(child_entry->unpatched.sym->name, 
                 &demangled_name2, &demangled_length2), 
             kxld_demangle(sym->name, &demangled_name3, &demangled_length3));
+<<<<<<< HEAD
 
         rval = kxld_object_patch_symbol(object, child_entry->unpatched.sym);
         require_noerr(rval, finish);
+=======
+>>>>>>> origin/10.6
 
         child_entry->unpatched.sym = sym;
 

@@ -5888,7 +5888,11 @@ kerbauth:
 
 <<<<<<< HEAD
 	/* mask off thread and process blocked signals. */
+<<<<<<< HEAD
 	if (NMFLAG(nmp, INTR) && ((p = get_bsdthreadtask_info(thd))) &&
+=======
+	if ((nmp->nm_flag & NFSMNT_INT) && ((p = get_bsdthreadtask_info(thd))) &&
+>>>>>>> origin/10.6
 	    proc_pendingsignals(p, NFSINT_SIGMASK))
 		return (EINTR);
 	return (0);

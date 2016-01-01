@@ -418,7 +418,15 @@ host_statistics(host_t host, host_flavor_t flavor, host_info_t info, mach_msg_ty
 			}
 		}
 		stat32->inactive_count = VM_STATISTICS_TRUNCATE_TO_32_BIT(vm_page_inactive_count);
+<<<<<<< HEAD
 		stat32->wire_count = VM_STATISTICS_TRUNCATE_TO_32_BIT(vm_page_wire_count + vm_page_throttled_count + vm_lopage_free_count);
+=======
+#if CONFIG_EMBEDDED
+		stat32->wire_count = VM_STATISTICS_TRUNCATE_TO_32_BIT(vm_page_wire_count);
+#else
+		stat32->wire_count = VM_STATISTICS_TRUNCATE_TO_32_BIT(vm_page_wire_count + vm_page_throttled_count + vm_lopage_free_count);
+#endif
+>>>>>>> origin/10.6
 		stat32->zero_fill_count = VM_STATISTICS_TRUNCATE_TO_32_BIT(host_vm_stat.zero_fill_count);
 		stat32->reactivations = VM_STATISTICS_TRUNCATE_TO_32_BIT(host_vm_stat.reactivations);
 		stat32->pageins = VM_STATISTICS_TRUNCATE_TO_32_BIT(host_vm_stat.pageins);
@@ -587,6 +595,30 @@ host_statistics64(host_t host, host_flavor_t flavor, host_info64_t info, mach_ms
 				host_vm_stat.swapins += stat->swapins;
 				host_vm_stat.swapouts += stat->swapouts;
 			}
+<<<<<<< HEAD
+=======
+			stat->inactive_count = vm_page_inactive_count;
+#if CONFIG_EMBEDDED
+			stat->wire_count = vm_page_wire_count;
+#else
+			stat->wire_count = vm_page_wire_count + vm_page_throttled_count + vm_lopage_free_count;
+#endif
+			stat->zero_fill_count = host_vm_stat.zero_fill_count;
+			stat->reactivations = host_vm_stat.reactivations;
+			stat->pageins = host_vm_stat.pageins;
+			stat->pageouts = host_vm_stat.pageouts;
+			stat->faults = host_vm_stat.faults;
+			stat->cow_faults = host_vm_stat.cow_faults;
+			stat->lookups = host_vm_stat.lookups;
+			stat->hits = host_vm_stat.hits;
+		
+			/* rev1 added "purgable" info */
+			stat->purgeable_count = vm_page_purgeable_count;
+			stat->purges = vm_page_purged_count;
+		
+			/* rev2 added "speculative" info */
+			stat->speculative_count = vm_page_speculative_count;
+>>>>>>> origin/10.6
 
 			simple_unlock(&processor_list_lock);
 		}

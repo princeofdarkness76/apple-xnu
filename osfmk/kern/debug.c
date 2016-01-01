@@ -616,12 +616,20 @@ extern char osversion[];
 static volatile uint32_t config_displayed = 0;
 
 __private_extern__ void panic_display_system_configuration(void) {
+<<<<<<< HEAD
 
 	panic_display_process_name();
 	if (OSCompareAndSwap(0, 1, &config_displayed)) {
 		char buf[256];
 		if (strlcpy(buf, PE_boot_args(), sizeof(buf)))
 			kdb_printf("Boot args: %s\n", buf);
+=======
+	static volatile boolean_t config_displayed = FALSE;
+
+	panic_display_process_name();
+	if (config_displayed == FALSE) {
+		config_displayed = TRUE;
+>>>>>>> origin/10.6
 		kdb_printf("\nMac OS version:\n%s\n",
 		    (osversion[0] != 0) ? osversion : "Not yet set");
 		kdb_printf("\nKernel version:\n%s\n",version);
@@ -632,6 +640,12 @@ __private_extern__ void panic_display_system_configuration(void) {
 		panic_display_model_name();
 		panic_display_uptime();
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+#if	defined(__i386__) || defined(__x86_64__)
+		pmap_pagetable_corruption_msg_log(&kdb_printf);
+#endif /* i386 || x86_64 */
+>>>>>>> origin/10.6
 		panic_display_zprint();
 #if CONFIG_ZLEAKS
 		panic_display_ztrace();

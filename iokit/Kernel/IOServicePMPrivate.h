@@ -205,6 +205,9 @@ private:
     // Power flags supplied by domain accounting for parent changes.
     IOPMPowerFlags          HeadNoteDomainTargetFlags;
 
+    // Power flags supplied by domain accounting for parent changes.
+    IOPMPowerFlags          HeadNoteDomainTargetFlags;
+
     // Connection attached to the changing parent.
     IOPowerConnection *     HeadNoteParentConnection;
 
@@ -446,8 +449,16 @@ private:
 #define fPMDriverCallQueue          pwrMgt->PMDriverCallQueue
 #define fInsertInterestSet          pwrMgt->InsertInterestSet
 #define fRemoveInterestSet          pwrMgt->RemoveInterestSet
+<<<<<<< HEAD
 #define fReportClientCnt            pwrMgt->ReportClientCnt
 #define fReportBuf                  pwrMgt->ReportBuf
+=======
+#define fStrictTreeOrder            pwrMgt->StrictTreeOrder
+#define fNotifyChildArray           pwrMgt->NotifyChildArray
+#define fIdleTimerStopped           pwrMgt->IdleTimerStopped
+#define fAdjustPowerScheduled       pwrMgt->AdjustPowerScheduled
+#define fActivityTicklePowerState   pwrMgt->ActivityTicklePowerState
+>>>>>>> origin/10.6
 #define fPMVars                     pwrMgt->PMVars
 #define fPMActions                  pwrMgt->PMActions
 
@@ -597,6 +608,7 @@ class IOPMRequest : public IOCommand
     OSDeclareDefaultStructors( IOPMRequest )
 
 protected:
+<<<<<<< HEAD
     IOService *          fTarget;           // request target
     IOPMRequest *        fRequestNext;      // the next request in the chain
     IOPMRequest *        fRequestRoot;      // the root request in the call tree
@@ -604,6 +616,14 @@ protected:
     IOItemCount          fFreeWaitCount;    // completion blocked if non-zero
     uint32_t             fRequestType;      // request type
     bool                 fIsQuiesceBlocker;
+=======
+    IOService *          fTarget;        // request target
+    IOPMRequest *        fRequestNext;   // the next request in the chain
+    IOPMRequest *        fRequestRoot;   // the root request in the issue tree
+    IOItemCount          fWorkWaitCount; // execution blocked if non-zero
+    IOItemCount          fFreeWaitCount; // completion blocked if non-zero
+    uint32_t             fType;          // request type
+>>>>>>> origin/10.6
 
     IOPMCompletionAction fCompletionAction;
     void *               fCompletionTarget;
@@ -635,7 +655,10 @@ public:
         if (fRequestRoot) return fRequestRoot;
 #if NOT_READY
         if (fCompletionAction) return (IOPMRequest *) this;
+<<<<<<< HEAD
 #endif
+=======
+>>>>>>> origin/10.6
         return 0;
     }
 
@@ -747,12 +770,22 @@ protected:
     bool    checkRequestQueue( queue_head_t * queue, bool * empty );
 
 public:
+<<<<<<< HEAD
     static  IOPMWorkQueue * create( IOService * inOwner, Action invoke, Action retire );
     bool    queuePMRequest( IOPMRequest * request, IOServicePM * pwrMgt );
     void    signalWorkAvailable( void );
     void    incrementProducerCount( void );
     void    attachQuiesceRequest( IOPMRequest * quiesceRequest );
     void    finishQuiesceRequest( IOPMRequest * quiesceRequest );
+=======
+    static  IOPMWorkQueue * create( IOService * inOwner, Action work, Action retire );
+    void    queuePMRequest( IOPMRequest * request );
+
+    inline boolean_t isEmpty( void )
+    {
+        return queue_empty(&fWorkQueue);
+    }
+>>>>>>> origin/10.6
 };
 
 //******************************************************************************

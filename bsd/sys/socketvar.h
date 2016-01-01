@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -176,7 +180,11 @@ struct socket {
 	u_int32_t so_options;		/* from socket call, see socket.h */
 	short	so_linger;		/* time to linger while closing */
 	short	so_state;		/* internal state flags SS_*, below */
+<<<<<<< HEAD
 	void	*so_pcb;		/* protocol control block */
+=======
+	void	*so_pcb;			/* protocol control block */
+>>>>>>> origin/10.6
 	struct	protosw *so_proto;	/* protocol handle */
 	/*
 	 * Variables for connection queueing.
@@ -352,6 +360,7 @@ struct socket {
 
 	u_int16_t	so_pktheadroom;	/* headroom before packet payload */
 
+<<<<<<< HEAD
 	u_int32_t	so_ifdenied_notifies; /* # of notifications generated */
 
 	struct label	*so_label;	/* MAC label for socket */
@@ -390,6 +399,14 @@ struct socket {
 						      tcpcb */
 
 	u_int64_t	so_extended_bk_start;
+=======
+	struct	label *so_label;	/* MAC label for socket */
+	struct	label *so_peerlabel;	/* cached MAC label for socket peer */
+	thread_t	so_background_thread;	/* thread that marked this socket background */
+#if PKT_PRIORITY
+	int		so_traffic_class;
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 };
 
 /* Control message accessor in mbufs */
@@ -910,18 +927,27 @@ extern void resume_proc_sockets(proc_t);
 extern int so_check_extended_bk_idle_time(struct socket *);
 extern void so_drain_extended_bk_idle(struct socket *);
 extern void sohasoutofband(struct socket *so);
+<<<<<<< HEAD
 extern void sodisconnectwakeup(struct socket *so);
 extern int soisthrottled(struct socket *so);
 extern int soisprivilegedtraffic(struct socket *so);
 extern int soissrcbackground(struct socket *so);
 extern int soissrcrealtime(struct socket *so);
 extern int soissrcbesteffort(struct socket *so);
+=======
+extern void soisconnected(struct socket *so);
+extern void soisconnecting(struct socket *so);
+extern void soisdisconnected(struct socket *so);
+extern void soisdisconnecting(struct socket *so);
+extern int soisbackground(struct socket *so);
+>>>>>>> origin/10.6
 extern int solisten(struct socket *so, int backlog);
 extern struct socket *sodropablereq(struct socket *head);
 extern int socket_lock(struct socket *so, int refcount);
 extern int socket_unlock(struct socket *so, int refcount);
 extern int sogetaddr_locked(struct socket *, struct sockaddr **, int);
 extern const char *solockhistory_nr(struct socket *);
+<<<<<<< HEAD
 extern void soevent(struct socket *so, long hint);
 extern void sorflush(struct socket *so);
 extern void sowflush(struct socket *so);
@@ -962,6 +988,10 @@ extern struct sockaddr_list *sockaddrlist_dup(const struct sockaddr_list *,
 /* Service class flags used for setting service class on a packet */
 #define PKT_SCF_IPV6		0x00000001	/* IPv6 packet */
 #define PKT_SCF_TCP_ACK		0x00000002	/* Pure TCP ACK */
+=======
+extern void set_traffic_class(struct mbuf *, struct socket *, int);
+extern int mbuf_traffic_class_from_control(struct mbuf *);
+>>>>>>> origin/10.6
 
 /*
  * Flags for connectx(2) user-protocol request routine.

@@ -971,6 +971,35 @@ enum {
     kIOPMStateConsoleShutdownCertain = 4
 };
 
-#endif /* ! _IOKIT_IOPMPRIVATE_H */
+/******************************************************************************/
+/* System sleep policy
+ * Shared between PM root domain and platform driver.
+ */
 
+// Platform specific property added by the platform driver.
+// An OSData that describes the system sleep policy.
+#define kIOPlatformSystemSleepPolicyKey     "IOPlatformSystemSleepPolicy"
+
+// Root domain property updated before platform sleep.
+// An OSData that describes the system sleep parameters.
+#define kIOPMSystemSleepParametersKey       "IOPMSystemSleepParameters"
+
+struct IOPMSystemSleepParameters
+{
+    uint32_t    version;
+    uint32_t    sleepFlags;
+    uint32_t    sleepTimer;
+    uint32_t    wakeEvents;
+};
+
+<<<<<<< HEAD
 >>>>>>> origin/10.1
+=======
+// Sleep flags
+enum {
+    kIOPMSleepFlagHibernate         = 0x00000001,
+    kIOPMSleepFlagSleepTimerEnable  = 0x00000002
+};
+
+#endif /* ! _IOKIT_IOPMPRIVATE_H */
+>>>>>>> origin/10.6

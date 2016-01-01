@@ -46,6 +46,7 @@
 #include <i386/cpuid.h>
 #include <i386/tsc.h>
 <<<<<<< HEAD
+<<<<<<< HEAD
 #include <i386/rtclock_protos.h>
 #include <i386/machine_routines.h>
 #include <i386/pal_routines.h>
@@ -56,6 +57,9 @@
 
 =======
 >>>>>>> origin/10.5
+=======
+#include <i386/machine_routines.h>
+>>>>>>> origin/10.6
 
 static int
 _i386_cpu_info SYSCTL_HANDLER_ARGS
@@ -127,6 +131,7 @@ cpu_arch_perf SYSCTL_HANDLER_ARGS
     if (cpu_info->cpuid_arch_perf_leafp == NULL)
         return ENOENT;
     return _i386_cpu_info(oidp, ptr, arg2, req);
+<<<<<<< HEAD
 }
 
 static int
@@ -137,10 +142,25 @@ cpu_xsave SYSCTL_HANDLER_ARGS
     if (cpu_info->cpuid_xsave_leafp == NULL)
         return ENOENT;
     return _i386_cpu_info(oidp, ptr, arg2, req);
+=======
+>>>>>>> origin/10.6
 }
 
 
 static int
+<<<<<<< HEAD
+=======
+cpu_xsave SYSCTL_HANDLER_ARGS
+{
+    i386_cpu_info_t *cpu_info = cpuid_info();
+    void *ptr = (uint8_t *)cpu_info->cpuid_xsave_leafp + (uintptr_t)arg1;
+    if (cpu_info->cpuid_xsave_leafp == NULL)
+        return ENOENT;
+    return _i386_cpu_info(oidp, ptr, arg2, req);
+}
+
+static int
+>>>>>>> origin/10.6
 cpu_features SYSCTL_HANDLER_ARGS
 {
     __unused struct sysctl_oid *unused_oidp = oidp;
@@ -169,6 +189,7 @@ cpu_extfeatures SYSCTL_HANDLER_ARGS
 }
 
 static int
+<<<<<<< HEAD
 cpu_leaf7_features SYSCTL_HANDLER_ARGS
 {
     __unused struct sysctl_oid *unused_oidp = oidp;
@@ -187,6 +208,8 @@ cpu_leaf7_features SYSCTL_HANDLER_ARGS
 }
 
 static int
+=======
+>>>>>>> origin/10.6
 cpu_logical_per_package SYSCTL_HANDLER_ARGS
 {
 	__unused struct sysctl_oid *unused_oidp = oidp;
@@ -202,6 +225,7 @@ cpu_logical_per_package SYSCTL_HANDLER_ARGS
 }
 
 static int
+<<<<<<< HEAD
 <<<<<<< HEAD
 cpu_flex_ratio_desired SYSCTL_HANDLER_ARGS
 {
@@ -230,6 +254,9 @@ cpu_flex_ratio_min SYSCTL_HANDLER_ARGS
 static int
 hw_cpu_flex_ratio_desired SYSCTL_HANDLER_ARGS
 >>>>>>> origin/10.5
+=======
+cpu_flex_ratio_desired SYSCTL_HANDLER_ARGS
+>>>>>>> origin/10.6
 {
 	__unused struct sysctl_oid *unused_oidp = oidp;
 	__unused void *unused_arg1 = arg1;
@@ -250,8 +277,12 @@ cpu_flex_ratio_max SYSCTL_HANDLER_ARGS
 }
 
 static int
+<<<<<<< HEAD
 hw_cpu_flex_ratio_min SYSCTL_HANDLER_ARGS
 >>>>>>> origin/10.5
+=======
+cpu_flex_ratio_min SYSCTL_HANDLER_ARGS
+>>>>>>> origin/10.6
 {
 	__unused struct sysctl_oid *unused_oidp = oidp;
 	__unused void *unused_arg1 = arg1;
@@ -272,8 +303,12 @@ cpu_ucode_update SYSCTL_HANDLER_ARGS
 }
 
 static int
+<<<<<<< HEAD
 hw_cpu_flex_ratio_max SYSCTL_HANDLER_ARGS
 >>>>>>> origin/10.5
+=======
+cpu_flex_ratio_max SYSCTL_HANDLER_ARGS
+>>>>>>> origin/10.6
 {
 	__unused struct sysctl_oid *unused_oidp = oidp;
 	__unused void *unused_arg1 = arg1;
@@ -360,7 +395,32 @@ misc_machine_check_panic(__unused struct sysctl_oid *oidp, __unused void *arg1, 
 	return SYSCTL_OUT(req, &flex_ratio_max, sizeof(flex_ratio_max));
 }
 
+<<<<<<< HEAD
 >>>>>>> origin/10.5
+=======
+/*
+ * Populates the {CPU, vector, latency} triple for the maximum observed primary
+ * interrupt latency
+ */
+static int
+misc_interrupt_latency_max(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
+{
+	int changed = 0, error;
+	char buf[128];
+	buf[0] = '\0';
+
+	interrupt_populate_latency_stats(buf, sizeof(buf));
+
+	error = sysctl_io_string(req, buf, sizeof(buf), 0, &changed);
+
+	if (error == 0 && changed) {
+		interrupt_reset_latency_stats();
+	}
+
+	return error;
+}
+
+>>>>>>> origin/10.6
 SYSCTL_NODE(_machdep, OID_AUTO, cpu, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
 	"CPU info");
 
@@ -421,15 +481,22 @@ SYSCTL_PROC(_machdep_cpu, OID_AUTO, signature, CTLTYPE_INT | CTLFLAG_RD | CTLFLA
 SYSCTL_PROC(_machdep_cpu, OID_AUTO, brand, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
 	    (void *)offsetof(i386_cpu_info_t, cpuid_brand), sizeof(uint8_t),
 	    i386_cpu_info, "I", "CPU brand");
+<<<<<<< HEAD
 
 SYSCTL_PROC(_machdep_cpu, OID_AUTO, features, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_LOCKED, 
 	    0, 0,
 	    cpu_features, "A", "CPU feature names");
+=======
+>>>>>>> origin/10.6
 
 SYSCTL_PROC(_machdep_cpu, OID_AUTO, leaf7_features,
 	    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_LOCKED, 
 	    0, 0,
+<<<<<<< HEAD
 	    cpu_leaf7_features, "A", "CPU Leaf7 feature names");
+=======
+	    cpu_features, "A", "CPU feature names");
+>>>>>>> origin/10.6
 
 SYSCTL_PROC(_machdep_cpu, OID_AUTO, extfeatures, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_LOCKED, 
 	    0, 0,
@@ -445,6 +512,7 @@ SYSCTL_PROC(_machdep_cpu, OID_AUTO, cores_per_package,
 	    (void *)offsetof(i386_cpu_info_t, cpuid_cores_per_package),
 	    sizeof(uint32_t),
 	    i386_cpu_info, "I", "CPU cores per package");
+<<<<<<< HEAD
 
 SYSCTL_PROC(_machdep_cpu, OID_AUTO, microcode_version,
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
@@ -457,37 +525,55 @@ SYSCTL_PROC(_machdep_cpu, OID_AUTO, processor_flag,
 	    (void *)offsetof(i386_cpu_info_t, cpuid_processor_flag),
 	    sizeof(uint32_t),
 	    i386_cpu_info, "I", "CPU processor flag");
+=======
+>>>>>>> origin/10.6
 
 SYSCTL_PROC(_machdep_cpu, OID_AUTO, microcode_version,
 	    CTLTYPE_INT | CTLFLAG_RD, 
 	    (void *)offsetof(i386_cpu_info_t, cpuid_microcode_version),
 	    sizeof(uint32_t),
-	    hw_cpu_sysctl, "I", "Microcode version number");
+	    i386_cpu_info, "I", "Microcode version number");
 
 
 SYSCTL_NODE(_machdep_cpu, OID_AUTO, mwait, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
 	"mwait");
 
 SYSCTL_PROC(_machdep_cpu_mwait, OID_AUTO, linesize_min,
+<<<<<<< HEAD
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+=======
+	    CTLTYPE_INT | CTLFLAG_RD, 
+>>>>>>> origin/10.6
 	    (void *)offsetof(cpuid_mwait_leaf_t, linesize_min),
 	    sizeof(uint32_t),
 	    cpu_mwait, "I", "Monitor/mwait minimum line size");
 
 SYSCTL_PROC(_machdep_cpu_mwait, OID_AUTO, linesize_max,
+<<<<<<< HEAD
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+=======
+	    CTLTYPE_INT | CTLFLAG_RD, 
+>>>>>>> origin/10.6
 	    (void *)offsetof(cpuid_mwait_leaf_t, linesize_max),
 	    sizeof(uint32_t),
 	    cpu_mwait, "I", "Monitor/mwait maximum line size");
 
 SYSCTL_PROC(_machdep_cpu_mwait, OID_AUTO, extensions,
+<<<<<<< HEAD
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+=======
+	    CTLTYPE_INT | CTLFLAG_RD, 
+>>>>>>> origin/10.6
 	    (void *)offsetof(cpuid_mwait_leaf_t, extensions),
 	    sizeof(uint32_t),
 	    cpu_mwait, "I", "Monitor/mwait extensions");
 
 SYSCTL_PROC(_machdep_cpu_mwait, OID_AUTO, sub_Cstates,
+<<<<<<< HEAD
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+=======
+	    CTLTYPE_INT | CTLFLAG_RD, 
+>>>>>>> origin/10.6
 	    (void *)offsetof(cpuid_mwait_leaf_t, sub_Cstates),
 	    sizeof(uint32_t),
 	    cpu_mwait, "I", "Monitor/mwait sub C-states");
@@ -497,30 +583,47 @@ SYSCTL_NODE(_machdep_cpu, OID_AUTO, thermal, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
 	"thermal");
 
 SYSCTL_PROC(_machdep_cpu_thermal, OID_AUTO, sensor,
+<<<<<<< HEAD
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+=======
+	    CTLTYPE_INT | CTLFLAG_RD, 
+>>>>>>> origin/10.6
 	    (void *)offsetof(cpuid_thermal_leaf_t, sensor),
 	    sizeof(boolean_t),
 	    cpu_thermal, "I", "Thermal sensor present");
 
 SYSCTL_PROC(_machdep_cpu_thermal, OID_AUTO, dynamic_acceleration,
+<<<<<<< HEAD
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+=======
+	    CTLTYPE_INT | CTLFLAG_RD, 
+>>>>>>> origin/10.6
 	    (void *)offsetof(cpuid_thermal_leaf_t, dynamic_acceleration),
 	    sizeof(boolean_t),
 	    cpu_thermal, "I", "Dynamic Acceleration Technology (Turbo Mode)");
 
 SYSCTL_PROC(_machdep_cpu_thermal, OID_AUTO, invariant_APIC_timer,
+<<<<<<< HEAD
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+=======
+	    CTLTYPE_INT | CTLFLAG_RD, 
+>>>>>>> origin/10.6
 	    (void *)offsetof(cpuid_thermal_leaf_t, invariant_APIC_timer),
 	    sizeof(boolean_t),
 	    cpu_thermal, "I", "Invariant APIC Timer");
 
 SYSCTL_PROC(_machdep_cpu_thermal, OID_AUTO, thresholds,
+<<<<<<< HEAD
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+=======
+	    CTLTYPE_INT | CTLFLAG_RD, 
+>>>>>>> origin/10.6
 	    (void *)offsetof(cpuid_thermal_leaf_t, thresholds),
 	    sizeof(uint32_t),
 	    cpu_thermal, "I", "Number of interrupt thresholds");
 
 SYSCTL_PROC(_machdep_cpu_thermal, OID_AUTO, ACNT_MCNT,
+<<<<<<< HEAD
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
 	    (void *)offsetof(cpuid_thermal_leaf_t, ACNT_MCNT),
 	    sizeof(boolean_t),
@@ -556,11 +659,50 @@ SYSCTL_PROC(_machdep_cpu_thermal, OID_AUTO, energy_policy,
 	    sizeof(boolean_t),
 	    cpu_thermal, "I", "Energy Efficient Policy Support");
 
+=======
+	    CTLTYPE_INT | CTLFLAG_RD, 
+	    (void *)offsetof(cpuid_thermal_leaf_t, ACNT_MCNT),
+	    sizeof(boolean_t),
+	    cpu_thermal, "I", "ACNT_MCNT capability");
+
+SYSCTL_PROC(_machdep_cpu_thermal, OID_AUTO, core_power_limits,
+	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+	    (void *)offsetof(cpuid_thermal_leaf_t, core_power_limits),
+	    sizeof(boolean_t),
+	    cpu_thermal, "I", "Power Limit Notifications at a Core Level");
+
+SYSCTL_PROC(_machdep_cpu_thermal, OID_AUTO, fine_grain_clock_mod,
+	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+	    (void *)offsetof(cpuid_thermal_leaf_t, fine_grain_clock_mod),
+	    sizeof(boolean_t),
+	    cpu_thermal, "I", "Fine Grain Clock Modulation");
+
+SYSCTL_PROC(_machdep_cpu_thermal, OID_AUTO, package_thermal_intr,
+	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+	    (void *)offsetof(cpuid_thermal_leaf_t, package_thermal_intr),
+	    sizeof(boolean_t),
+	    cpu_thermal, "I", "Packge Thermal interrupt and Status");
+
+SYSCTL_PROC(_machdep_cpu_thermal, OID_AUTO, hardware_feedback,
+	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+	    (void *)offsetof(cpuid_thermal_leaf_t, hardware_feedback),
+	    sizeof(boolean_t),
+	    cpu_thermal, "I", "Hardware Coordination Feedback");
+
+SYSCTL_PROC(_machdep_cpu_thermal, OID_AUTO, energy_policy,
+	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+	    (void *)offsetof(cpuid_thermal_leaf_t, energy_policy),
+	    sizeof(boolean_t),
+	    cpu_thermal, "I", "Energy Efficient Policy Support");
+
+
+>>>>>>> origin/10.6
 SYSCTL_NODE(_machdep_cpu, OID_AUTO, xsave, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
 	"xsave");
 
 SYSCTL_PROC(_machdep_cpu_xsave, OID_AUTO, extended_state,
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+<<<<<<< HEAD
 	    (void *) 0,
 	    sizeof(cpuid_xsave_leaf_t),
 	    cpu_xsave, "IU", "XSAVE Extended State Main Leaf");
@@ -570,49 +712,82 @@ SYSCTL_PROC(_machdep_cpu_xsave, OID_AUTO, extended_state1,
 	    (void *) sizeof(cpuid_xsave_leaf_t),
 	    sizeof(cpuid_xsave_leaf_t),
 	    cpu_xsave, "IU", "XSAVE Extended State Sub-leaf 1");
+=======
+	    (void *)offsetof(cpuid_xsave_leaf_t, extended_state),
+	    sizeof(cpuid_xsave_leaf_t),
+	    cpu_xsave, "IU", "XSAVE Extended State");
+>>>>>>> origin/10.6
 
 
 SYSCTL_NODE(_machdep_cpu, OID_AUTO, arch_perf, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
 	"arch_perf");
 
 SYSCTL_PROC(_machdep_cpu_arch_perf, OID_AUTO, version,
+<<<<<<< HEAD
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+=======
+	    CTLTYPE_INT | CTLFLAG_RD, 
+>>>>>>> origin/10.6
 	    (void *)offsetof(cpuid_arch_perf_leaf_t, version),
 	    sizeof(uint8_t),
 	    cpu_arch_perf, "I", "Architectural Performance Version Number");
 
 SYSCTL_PROC(_machdep_cpu_arch_perf, OID_AUTO, number,
+<<<<<<< HEAD
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+=======
+	    CTLTYPE_INT | CTLFLAG_RD, 
+>>>>>>> origin/10.6
 	    (void *)offsetof(cpuid_arch_perf_leaf_t, number),
 	    sizeof(uint8_t),
 	    cpu_arch_perf, "I", "Number of counters per logical cpu");
 
 SYSCTL_PROC(_machdep_cpu_arch_perf, OID_AUTO, width,
+<<<<<<< HEAD
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+=======
+	    CTLTYPE_INT | CTLFLAG_RD, 
+>>>>>>> origin/10.6
 	    (void *)offsetof(cpuid_arch_perf_leaf_t, width),
 	    sizeof(uint8_t),
 	    cpu_arch_perf, "I", "Bit width of counters");
 
 SYSCTL_PROC(_machdep_cpu_arch_perf, OID_AUTO, events_number,
+<<<<<<< HEAD
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+=======
+	    CTLTYPE_INT | CTLFLAG_RD, 
+>>>>>>> origin/10.6
 	    (void *)offsetof(cpuid_arch_perf_leaf_t, events_number),
 	    sizeof(uint8_t),
 	    cpu_arch_perf, "I", "Number of monitoring events");
 
 SYSCTL_PROC(_machdep_cpu_arch_perf, OID_AUTO, events,
+<<<<<<< HEAD
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+=======
+	    CTLTYPE_INT | CTLFLAG_RD, 
+>>>>>>> origin/10.6
 	    (void *)offsetof(cpuid_arch_perf_leaf_t, events),
 	    sizeof(uint32_t),
 	    cpu_arch_perf, "I", "Bit vector of events");
 
 SYSCTL_PROC(_machdep_cpu_arch_perf, OID_AUTO, fixed_number,
+<<<<<<< HEAD
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+=======
+	    CTLTYPE_INT | CTLFLAG_RD, 
+>>>>>>> origin/10.6
 	    (void *)offsetof(cpuid_arch_perf_leaf_t, fixed_number),
 	    sizeof(uint8_t),
 	    cpu_arch_perf, "I", "Number of fixed-function counters");
 
 SYSCTL_PROC(_machdep_cpu_arch_perf, OID_AUTO, fixed_width,
+<<<<<<< HEAD
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
+=======
+	    CTLTYPE_INT | CTLFLAG_RD, 
+>>>>>>> origin/10.6
 	    (void *)offsetof(cpuid_arch_perf_leaf_t, fixed_width),
 	    sizeof(uint8_t),
 	    cpu_arch_perf, "I", "Bit-width of fixed-function counters");
@@ -745,6 +920,7 @@ SYSCTL_PROC(_machdep_cpu_address_bits, OID_AUTO, virtual,
 	    (void *)offsetof(i386_cpu_info_t, cpuid_address_bits_virtual),
 	    sizeof(uint32_t),
 	    i386_cpu_info, "I", "Number of virtual address bits");
+<<<<<<< HEAD
 
 
 SYSCTL_PROC(_machdep_cpu, OID_AUTO, core_count,
@@ -798,6 +974,8 @@ SYSCTL_PROC(_machdep_cpu_tsc_ccc, OID_AUTO, denominator,
 
 static const uint32_t apic_timer_vector = (LAPIC_DEFAULT_INTERRUPT_BASE + LAPIC_TIMER_INTERRUPT);
 static const uint32_t apic_IPI_vector = (LAPIC_DEFAULT_INTERRUPT_BASE + LAPIC_INTERPROCESSOR_INTERRUPT);
+=======
+>>>>>>> origin/10.6
 
 SYSCTL_NODE(_machdep, OID_AUTO, vectors, CTLFLAG_RD | CTLFLAG_LOCKED, 0,
 	"Interrupt vector assignments");
@@ -809,13 +987,13 @@ SYSCTL_PROC(_machdep_cpu, OID_AUTO, core_count,
 	    CTLTYPE_INT | CTLFLAG_RD, 
 	    (void *)offsetof(i386_cpu_info_t, core_count),
 	    sizeof(uint32_t),
-	    hw_cpu_sysctl, "I", "Number of enabled cores per package");
+	    i386_cpu_info, "I", "Number of enabled cores per package");
 
 SYSCTL_PROC(_machdep_cpu, OID_AUTO, thread_count,
 	    CTLTYPE_INT | CTLFLAG_RD, 
 	    (void *)offsetof(i386_cpu_info_t, thread_count),
 	    sizeof(uint32_t),
-	    hw_cpu_sysctl, "I", "Number of enabled threads per package");
+	    i386_cpu_info, "I", "Number of enabled threads per package");
 
 SYSCTL_NODE(_machdep_cpu, OID_AUTO, flex_ratio, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
 	"Flex ratio");
@@ -823,17 +1001,17 @@ SYSCTL_NODE(_machdep_cpu, OID_AUTO, flex_ratio, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
 SYSCTL_PROC(_machdep_cpu_flex_ratio, OID_AUTO, desired,
 	    CTLTYPE_INT | CTLFLAG_RD, 
 	    0, 0,
-	    hw_cpu_flex_ratio_desired, "I", "Flex ratio desired (0 disabled)");
+	    cpu_flex_ratio_desired, "I", "Flex ratio desired (0 disabled)");
 
 SYSCTL_PROC(_machdep_cpu_flex_ratio, OID_AUTO, min,
 	    CTLTYPE_INT | CTLFLAG_RD, 
 	    0, 0,
-	    hw_cpu_flex_ratio_min, "I", "Flex ratio min (efficiency)");
+	    cpu_flex_ratio_min, "I", "Flex ratio min (efficiency)");
 
 SYSCTL_PROC(_machdep_cpu_flex_ratio, OID_AUTO, max,
 	    CTLTYPE_INT | CTLFLAG_RD, 
 	    0, 0,
-	    hw_cpu_flex_ratio_max, "I", "Flex ratio max (non-turbo)");
+	    cpu_flex_ratio_max, "I", "Flex ratio max (non-turbo)");
 
 uint64_t pmap_pv_hashlist_walks;
 uint64_t pmap_pv_hashlist_cnts;
@@ -874,6 +1052,7 @@ SYSCTL_QUAD(_machdep_memmap, OID_AUTO, Other, CTLFLAG_RD|CTLFLAG_LOCKED, &firmwa
 
 SYSCTL_NODE(_machdep, OID_AUTO, tsc, CTLFLAG_RD|CTLFLAG_LOCKED, NULL, "Timestamp counter parameters");
 
+<<<<<<< HEAD
 SYSCTL_QUAD(_machdep_tsc, OID_AUTO, frequency,
 	CTLFLAG_RD|CTLFLAG_LOCKED, &tscFreq, "");
 
@@ -1005,3 +1184,12 @@ extern uint64_t x86_isr_fp_simd_use;
 SYSCTL_QUAD(_machdep, OID_AUTO, x86_fp_simd_isr_uses,
 		CTLFLAG_KERN | CTLFLAG_RW | CTLFLAG_LOCKED,
 		&x86_isr_fp_simd_use, "");
+=======
+SYSCTL_QUAD(_machdep_tsc, OID_AUTO, frequency, CTLFLAG_RD|CTLFLAG_LOCKED, &tscFreq, "");
+SYSCTL_NODE(_machdep, OID_AUTO, misc, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
+	"Miscellaneous x86 kernel parameters");
+
+SYSCTL_PROC(_machdep_misc, OID_AUTO, interrupt_latency_max, CTLTYPE_STRING | CTLFLAG_RW | CTLFLAG_LOCKED, 
+	    0, 0,
+	    misc_interrupt_latency_max, "A", "Maximum Interrupt latency");
+>>>>>>> origin/10.6

@@ -168,7 +168,11 @@ void IOCommandQueue::free()
 
 bool IOCommandQueue::checkForWork()
 {
+<<<<<<< HEAD
     void	*field0, *field1, *field2, *field3;
+=======
+    void *field0, *field1, *field2, *field3;
+>>>>>>> origin/10.6
 	bool	trace = ( gIOKitTrace & kIOTraceCommandGates ) ? true : false;
 
     if (!enabled || consumerIndex == producerIndex)
@@ -188,11 +192,18 @@ bool IOCommandQueue::checkForWork()
 
 	if (trace)
 		IOTimeStampStartConstant(IODBG_CMDQ(IOCMDQ_ACTION),
+<<<<<<< HEAD
 								 (uintptr_t) action, (uintptr_t) owner);
 	
     IOStatisticsActionCall();
     (*(IOCommandQueueAction) action)(owner, field0, field1, field2, field3);
 	
+=======
+			(uintptr_t) action, (uintptr_t) owner);
+
+    (*(IOCommandQueueAction) action)(owner, field0, field1, field2, field3);
+
+>>>>>>> origin/10.6
 	if (trace)
 		IOTimeStampEndConstant(IODBG_CMDQ(IOCMDQ_ACTION),
 							   (uintptr_t) action, (uintptr_t) owner);

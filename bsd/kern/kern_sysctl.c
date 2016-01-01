@@ -2680,10 +2680,14 @@ SYSCTL_PROC(_kern, KERN_NETBOOT, netboot,
 #endif
 
 #ifdef CONFIG_IMGSRC_ACCESS
+<<<<<<< HEAD
 /*
  * Legacy--act as if only one layer of nesting is possible.
  */
 STATIC int
+=======
+static int
+>>>>>>> origin/10.6
 sysctl_imgsrcdev 
 (__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
 {
@@ -2695,16 +2699,28 @@ sysctl_imgsrcdev
 		return EPERM;
 	}    
 
+<<<<<<< HEAD
 	if (imgsrc_rootvnodes[0] == NULL) {
 		return ENOENT;
 	}    
 
 	result = vnode_getwithref(imgsrc_rootvnodes[0]);
+=======
+	if (imgsrc_rootvnode == NULL) {
+		return ENOENT;
+	}    
+
+	result = vnode_getwithref(imgsrc_rootvnode);
+>>>>>>> origin/10.6
 	if (result != 0) {
 		return result;
 	}
 	
+<<<<<<< HEAD
 	devvp = vnode_mount(imgsrc_rootvnodes[0])->mnt_devvp;
+=======
+	devvp = vnode_mount(imgsrc_rootvnode)->mnt_devvp;
+>>>>>>> origin/10.6
 	result = vnode_getwithref(devvp);
 	if (result != 0) {
 		goto out;
@@ -2714,11 +2730,16 @@ sysctl_imgsrcdev
 
 	vnode_put(devvp);
 out:
+<<<<<<< HEAD
 	vnode_put(imgsrc_rootvnodes[0]);
+=======
+	vnode_put(imgsrc_rootvnode);
+>>>>>>> origin/10.6
 	return result;
 }
 
 SYSCTL_PROC(_kern, OID_AUTO, imgsrcdev,
+<<<<<<< HEAD
 		CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED,
 		0, 0, sysctl_imgsrcdev, "I", ""); 
 
@@ -2865,6 +2886,13 @@ SYSCTL_PROC(_kern_timer_longterm, OID_AUTO, latency_max,
 #endif /* DEBUG */
 
 STATIC int
+=======
+		CTLTYPE_INT | CTLFLAG_RD,
+		0, 0, sysctl_imgsrcdev, "I", ""); 
+#endif /* CONFIG_IMGSRC_ACCESS */
+
+static int
+>>>>>>> origin/10.6
 sysctl_usrstack
 (__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
 {
@@ -3699,4 +3727,13 @@ SYSCTL_INT(_kern, OID_AUTO, hv_support,
 		&hv_support_available, 0, "");
 #endif
 
+
+/*
+ * enable back trace for port allocations
+ */
+extern int ipc_portbt;
+
+SYSCTL_INT(_kern, OID_AUTO, ipc_portbt, 
+		CTLFLAG_RW | CTLFLAG_KERN, 
+		&ipc_portbt, 0, "");
 

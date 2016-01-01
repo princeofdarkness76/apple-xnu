@@ -390,9 +390,13 @@ apple_protect_pager_data_request(
 <<<<<<< HEAD
 	fault_info = *((struct vm_object_fault_info *) mo_fault_info);
 	fault_info.stealth = TRUE;
+<<<<<<< HEAD
 	fault_info.io_sync = FALSE;
 	fault_info.mark_zf_absent = FALSE;
 	fault_info.batch_pmap_op = FALSE;
+=======
+	fault_info.mark_zf_absent = FALSE;
+>>>>>>> origin/10.6
 	interruptible = fault_info.interruptible;
 =======
 	fault_info = (vm_object_fault_info_t) mo_fault_info;

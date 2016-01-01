@@ -132,6 +132,11 @@ static int workqueue_removeitem(struct workqueue *wq, int prio, user_addr_t item
 static void workqueue_run_nextitem(proc_t p, thread_t th);
 static void wq_runitem(proc_t p, user_addr_t item, thread_t th, struct threadlist *tl,
 		       int reuse_thread, int wake_thread, int return_directly);
+<<<<<<< HEAD
+=======
+static void wq_unpark_continue(void);
+static void wq_unsuspend_continue(void);
+>>>>>>> origin/10.6
 static int setup_wqthread(proc_t p, thread_t th, user_addr_t item, int reuse_thread, struct threadlist *tl);
 static int  workqueue_addnewthread(struct workqueue *wq);
 static void workqueue_removethread(struct workqueue *wq);
@@ -1041,7 +1046,16 @@ bsdthread_register(struct proc *p, struct bsdthread_register_args  *uap, __unuse
 	return(0);
 }
 
+<<<<<<< HEAD
 
+=======
+uint32_t wq_yielded_threshold		= WQ_YIELDED_THRESHOLD;
+uint32_t wq_yielded_window_usecs	= WQ_YIELDED_WINDOW_USECS;
+uint32_t wq_stalled_window_usecs	= WQ_STALLED_WINDOW_USECS;
+uint32_t wq_reduce_pool_window_usecs	= WQ_REDUCE_POOL_WINDOW_USECS;
+uint32_t wq_max_timer_interval_usecs	= WQ_MAX_TIMER_INTERVAL_USECS;
+uint32_t wq_max_threads			= WORKQUEUE_MAXTHREADS;
+>>>>>>> origin/10.6
 
 
 int wq_stalled_window_usecs	= WQ_STALLED_WINDOW_USECS;
@@ -1267,6 +1281,7 @@ workqueue_callback(
 		 * the thread lock for the thread being UNBLOCKED
 		 * is also held
 		 */
+<<<<<<< HEAD
 		if (tl->th_unparked)
 		        OSAddAtomic(-1, (SInt32 *)&tl->th_unparked);
 		else
@@ -1274,6 +1289,13 @@ workqueue_callback(
 
 		KERNEL_DEBUG(0xefffd024, (int)thread, wq->wq_threads_scheduled, tl->th_affinity_tag, 0, 0);
 		break;
+=======
+		 OSAddAtomic(1, &wq->wq_thactive_count[tl->th_priority][tl->th_affinity_tag]);
+
+		 KERNEL_DEBUG1(0xefffd020 | DBG_FUNC_END, wq, wq->wq_threads_scheduled, tl->th_priority, tl->th_affinity_tag, thread_tid(thread));
+
+		 break;
+>>>>>>> origin/10.6
 	}
 }
 
@@ -1355,7 +1377,11 @@ workqueue_addnewthread(struct workqueue *wq)
 
 	p = wq->wq_proc;
 
+<<<<<<< HEAD
 	kret = thread_create(wq->wq_task, &th);
+=======
+	kret = thread_create_workq(wq->wq_task, (thread_continue_t)wq_unsuspend_continue, &th);
+>>>>>>> origin/10.6
 
  	if (kret != KERN_SUCCESS)
 	        return(EINVAL);
@@ -1420,7 +1446,13 @@ workqueue_addnewthread(struct workqueue *wq)
 	tl->th_thread = th;
 	tl->th_workq = wq;
 	tl->th_stackaddr = stackaddr;
+<<<<<<< HEAD
 	tl->th_affinity_tag = affinity_tag;
+=======
+	tl->th_affinity_tag = -1;
+	tl->th_priority = WORKQUEUE_NUMPRIOS;
+	tl->th_policy = -1;
+>>>>>>> origin/10.6
 
 #if defined(__ppc__)
 	//ml_fp_setvalid(FALSE);
@@ -1440,10 +1472,19 @@ workqueue_addnewthread(struct workqueue *wq)
 	uth->uu_threadlist = (void *)tl;
 
         workqueue_lock_spin(p);
+<<<<<<< HEAD
 
 	TAILQ_INSERT_TAIL(&wq->wq_thidlelist[tl->th_affinity_tag], tl, th_entry);
 	wq->wq_nthreads++;
 	wq->wq_thcount[affinity_tag]++;
+=======
+	
+	TAILQ_INSERT_TAIL(&wq->wq_thidlelist, tl, th_entry);
+
+	wq->wq_thidlecount++;
+
+	KERNEL_DEBUG1(0xefffd014 | DBG_FUNC_START, wq, wq->wq_nthreads, 0, thread_tid(current_thread()), thread_tid(tl->th_thread));
+>>>>>>> origin/10.6
 
 	KERNEL_DEBUG1(0xefffd014 | DBG_FUNC_START, (int)current_thread(), affinity_tag, wq->wq_nthreads, 0, (int)tl->th_thread);
 
@@ -1710,6 +1751,20 @@ workqueue_removeitem(struct workqueue *wq, int prio, user_addr_t item)
 	return (error);
 }
 
+<<<<<<< HEAD
+=======
+static int workqueue_importance[WORKQUEUE_NUMPRIOS] = 
+{
+	2, 0, -2,
+};
+
+static int workqueue_policy[WORKQUEUE_NUMPRIOS] = 
+{
+	1, 1, 1,
+};
+
+
+>>>>>>> origin/10.6
 /*
  * workqueue_run_nextitem:
  *   called with the workqueue lock held...
@@ -1833,11 +1888,17 @@ workqueue_run_nextitem(proc_t p, thread_t thread)
 	if ((tl->th_flags & TH_LIST_SUSPENDED) == TH_LIST_SUSPENDED) {
 	        tl->th_flags &= ~TH_LIST_SUSPENDED;
 		reuse_thread = 0;
+<<<<<<< HEAD
 	} else if ((tl->th_flags & TH_LIST_BLOCKED) == TH_LIST_BLOCKED) {
 	        tl->th_flags &= ~TH_LIST_BLOCKED;
+=======
+
+	} else if ((tl->th_flags & TH_LIST_BLOCKED) == TH_LIST_BLOCKED) {
+		tl->th_flags &= ~TH_LIST_BLOCKED;
+>>>>>>> origin/10.6
 		wake_thread = 1;
 	}
-	tl->th_flags |= TH_LIST_RUNNING;
+	tl->th_flags |= TH_LIST_RUNNING | TH_LIST_BUSY;
 
         wq->wq_threads_scheduled++;
 
@@ -1941,7 +2002,137 @@ parkit:
 
 	KERNEL_DEBUG1(0xefffd018 | DBG_FUNC_START, (int)current_thread(), wq->wq_threads_scheduled, 0, 0, (int)th_to_park);
 
+<<<<<<< HEAD
 	thread_block((thread_continue_t)thread_exception_return);
+=======
+	return (FALSE);
+}
+
+
+static void
+wq_unsuspend_continue(void)
+{
+	struct uthread *uth = NULL;
+	thread_t th_to_unsuspend;
+	struct threadlist *tl;
+	proc_t	p;
+
+	th_to_unsuspend = current_thread();
+	uth = get_bsdthread_info(th_to_unsuspend);
+
+	if (uth != NULL && (tl = uth->uu_threadlist) != NULL) {
+		
+		if ((tl->th_flags & (TH_LIST_RUNNING | TH_LIST_BUSY)) == TH_LIST_RUNNING) {
+			/*
+			 * most likely a normal resume of this thread occurred...
+			 * it's also possible that the thread was aborted after we
+			 * finished setting it up so that it could be dispatched... if
+			 * so, thread_bootstrap_return will notice the abort and put
+			 * the thread on the path to self-destruction
+			 */
+normal_resume_to_user:
+			thread_sched_call(th_to_unsuspend, workqueue_callback);
+
+			thread_bootstrap_return();
+		}
+		/*
+		 * if we get here, it's because we've been resumed due to
+		 * an abort of this thread (process is crashing)
+		 */
+		p = current_proc();
+
+		workqueue_lock_spin(p);
+
+		if (tl->th_flags & TH_LIST_SUSPENDED) {
+			/*
+			 * thread has been aborted while still on our idle
+			 * queue... remove it from our domain...
+			 * workqueue_removethread consumes the lock
+			 */
+			workqueue_removethread(tl);
+
+			thread_bootstrap_return();
+		}
+		while ((tl->th_flags & TH_LIST_BUSY)) {
+			/*
+			 * this thread was aborted after we started making
+			 * it runnable, but before we finished dispatching it...
+			 * we need to wait for that process to finish,
+			 * and we need to ask for a wakeup instead of a
+			 * thread_resume since the abort has already resumed us
+			 */
+			tl->th_flags |= TH_LIST_NEED_WAKEUP;
+
+			assert_wait((caddr_t)tl, (THREAD_UNINT));
+
+			workqueue_unlock(p);
+
+			thread_block(THREAD_CONTINUE_NULL);
+
+			workqueue_lock_spin(p);
+		}
+		workqueue_unlock(p);
+		/*
+		 * we have finished setting up the thread's context...
+		 * thread_bootstrap_return will take us through the abort path
+		 * where the thread will self destruct
+		 */
+		goto normal_resume_to_user;
+	}
+	thread_bootstrap_return();
+}
+
+
+static void
+wq_unpark_continue(void)
+{
+	struct uthread *uth = NULL;
+	struct threadlist *tl;
+	thread_t th_to_unpark;
+	proc_t 	p;
+				
+	th_to_unpark = current_thread();
+	uth = get_bsdthread_info(th_to_unpark);
+
+	if (uth != NULL) {
+		if ((tl = uth->uu_threadlist) != NULL) {
+
+			if ((tl->th_flags & (TH_LIST_RUNNING | TH_LIST_BUSY)) == TH_LIST_RUNNING) {
+				/*
+				 * a normal wakeup of this thread occurred... no need 
+				 * for any synchronization with the timer and wq_runitem
+				 */
+normal_return_to_user:			
+				thread_sched_call(th_to_unpark, workqueue_callback);
+
+				KERNEL_DEBUG(0xefffd018 | DBG_FUNC_END, tl->th_workq, 0, 0, 0, 0);
+	
+				thread_exception_return();
+			}
+			p = current_proc();
+
+			workqueue_lock_spin(p);
+
+			if ( !(tl->th_flags & TH_LIST_RUNNING)) {
+				/*
+				 * the timer popped us out and we've not
+				 * been moved off of the idle list
+				 * so we should now self-destruct
+				 *
+				 * workqueue_removethread consumes the lock
+				 */
+				workqueue_removethread(tl);
+					
+				thread_exception_return();
+			}
+			/*
+			 * the timer woke us up, but we have already
+			 * started to make this a runnable thread,
+			 * but have not yet finished that process...
+			 * so wait for the normal wakeup
+			 */
+			while ((tl->th_flags & TH_LIST_BUSY)) {
+>>>>>>> origin/10.6
 
 	panic("unexpected return from thread_block");
 
@@ -1961,6 +2152,7 @@ wq_runitem(proc_t p, user_addr_t item, thread_t th, struct threadlist *tl,
 	   int reuse_thread, int wake_thread, int return_directly)
 {
 	int ret = 0;
+	boolean_t need_resume = FALSE;
 
 	KERNEL_DEBUG1(0xefffd004 | DBG_FUNC_START, (int)current_thread(), (int)item, wake_thread, tl->th_affinity_tag, (int)th);
 
@@ -1981,10 +2173,26 @@ wq_runitem(proc_t p, user_addr_t item, thread_t th, struct threadlist *tl,
 	} else {
 	        KERNEL_DEBUG1(0xefffd014 | DBG_FUNC_END, (int)current_thread(), 0, 0, 0, (int)th);
 
-		thread_resume(th);
+		workqueue_lock_spin(p);
+
+		if (tl->th_flags & TH_LIST_NEED_WAKEUP)
+			wakeup(tl);
+		else
+			need_resume = TRUE;
+
+		tl->th_flags &= ~(TH_LIST_BUSY | TH_LIST_NEED_WAKEUP);
+		
+		workqueue_unlock(p);
+
+		if (need_resume) {
+			/*
+			 * need to do this outside of the workqueue spin lock
+			 * since thread_resume locks the thread via a full mutex
+			 */
+			thread_resume(th);
+		}
 	}
 }
-
 
 int
 setup_wqthread(proc_t p, thread_t th, user_addr_t item, int reuse_thread, struct threadlist *tl)
@@ -2061,3 +2269,155 @@ setup_wqthread(proc_t p, thread_t th, user_addr_t item, int reuse_thread, struct
 	return(0);
 }
 
+<<<<<<< HEAD
+=======
+int 
+fill_procworkqueue(proc_t p, struct proc_workqueueinfo * pwqinfo)
+{
+	struct workqueue * wq;
+	int error = 0;
+	int	activecount;
+	uint32_t pri, affinity;
+
+	workqueue_lock_spin(p);
+	if ((wq = p->p_wqptr) == NULL) {
+		error = EINVAL;
+		goto out;
+	}
+	activecount = 0;
+
+	for (pri = 0; pri < WORKQUEUE_NUMPRIOS; pri++) {
+		for (affinity = 0; affinity < wq->wq_affinity_max; affinity++)
+			activecount += wq->wq_thactive_count[pri][affinity];
+	}
+	pwqinfo->pwq_nthreads = wq->wq_nthreads;
+	pwqinfo->pwq_runthreads = activecount;
+	pwqinfo->pwq_blockedthreads = wq->wq_threads_scheduled - activecount;
+out:
+	workqueue_unlock(p);
+	return(error);
+}
+
+/* Set target concurrency of one of the  queue(0,1,2) with specified value */
+int
+proc_settargetconc(pid_t pid, int queuenum, int32_t targetconc)
+{
+	proc_t p, self;
+	uint64_t addr;
+	int32_t conc = targetconc;
+	int error = 0;
+	vm_map_t oldmap = VM_MAP_NULL;
+	int gotref = 0;
+
+	self = current_proc();
+	if (self->p_pid != pid) {
+		/* if not on self, hold a refernce on the process */
+		
+		if (pid == 0)
+			return(EINVAL);
+
+		p = proc_find(pid);
+
+		if (p == PROC_NULL)
+			return(ESRCH);
+		gotref = 1;
+
+	} else
+		p = self;
+
+	if ((addr = p->p_targconc) == (uint64_t)0) {
+		error = EINVAL;
+		goto out;
+	}
+
+
+	if ((queuenum >= WQ_MAXPRI_MIN) && (queuenum <= WQ_MAXPRI_MAX)) {
+		addr += (queuenum * sizeof(int32_t));
+		if (gotref == 1)
+			oldmap = vm_map_switch(get_task_map(p->task));
+		error = copyout(&conc, addr, sizeof(int32_t));
+		if (gotref == 1)
+			(void)vm_map_switch(oldmap);
+
+	} else  {
+		error = EINVAL;
+	}
+out:
+	if (gotref == 1)
+		proc_rele(p);
+	return(error);
+}
+
+
+/* Set target concurrency on all the prio queues with specified value */
+int 
+proc_setalltargetconc(pid_t pid, int32_t * targetconcp)
+{
+	proc_t p, self;
+	uint64_t addr;
+	int error = 0;
+	vm_map_t oldmap = VM_MAP_NULL;
+	int gotref = 0;
+
+	self = current_proc();
+	if (self->p_pid != pid) {
+		/* if not on self, hold a refernce on the process */
+		
+		if (pid == 0)
+			return(EINVAL);
+
+		p = proc_find(pid);
+
+		if (p == PROC_NULL)
+			return(ESRCH);
+		gotref = 1;
+
+	} else
+		p = self;
+
+	if ((addr = (uint64_t)p->p_targconc) == (uint64_t)0) {
+		error = EINVAL;
+		goto out;
+	}
+
+
+	if (gotref == 1)
+		oldmap = vm_map_switch(get_task_map(p->task));
+
+	error = copyout(targetconcp, addr, WQ_PRI_NUM * sizeof(int32_t));
+	if (gotref == 1)
+		(void)vm_map_switch(oldmap);
+
+out:
+	if (gotref == 1)
+		proc_rele(p);
+	return(error);
+}
+
+int thread_selfid(__unused struct proc *p, __unused struct thread_selfid_args *uap, uint64_t *retval)
+{
+	thread_t thread = current_thread();
+	*retval = thread_tid(thread);
+	return KERN_SUCCESS;
+}
+
+void
+pthread_init(void)
+{
+	pthread_lck_grp_attr = lck_grp_attr_alloc_init();
+	pthread_lck_grp = lck_grp_alloc_init("pthread", pthread_lck_grp_attr);
+	
+	/*
+	 * allocate the lock attribute for pthread synchronizers
+	 */
+	pthread_lck_attr = lck_attr_alloc_init();
+
+	workqueue_init_lock((proc_t) get_bsdtask_info(kernel_task));
+#if PSYNCH
+	pthread_list_mlock = lck_mtx_alloc_init(pthread_lck_grp, pthread_lck_attr);
+	
+	pth_global_hashinit();
+	psynch_thcall = thread_call_allocate(psynch_wq_cleanup, NULL);
+#endif /* PSYNCH */
+}
+>>>>>>> origin/10.6

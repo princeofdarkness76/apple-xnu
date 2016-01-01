@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 /*
  * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
@@ -26,6 +27,8 @@
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 
+=======
+>>>>>>> origin/10.6
 #ifndef _KXLD_DEMANGLE_H_
 #define _KXLD_DEMANGLE_H_
 
@@ -47,6 +50,10 @@
  * 
  */
 const char * kxld_demangle(const char *str, char **buffer, size_t *length)
+<<<<<<< HEAD
     __attribute__((pure, nonnull(1), visibility("hidden")));
+=======
+    __attribute__((pure, nonnull, visibility("hidden")));
+>>>>>>> origin/10.6
 
 #endif /* !_KXLD_DEMANGLE_H_ */

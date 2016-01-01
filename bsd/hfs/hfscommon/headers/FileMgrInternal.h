@@ -234,6 +234,7 @@ ReplaceBTreeRecord				(FileReference 				refNum,
 /*	Prototypes for exported routines in VolumeAllocation.c*/
 
 /* 
+<<<<<<< HEAD
  * Flags for BlockAllocate(), BlockDeallocate() and hfs_block_alloc.
  * Some of these are for internal use only.  See the comment at the
  * top of hfs_alloc_int for more details on the semantics of these
@@ -315,6 +316,34 @@ BlockDeallocate					(ExtendedVCB *			 vcb,
 
 EXTERN_API_C ( void )
 ResetVCBFreeExtCache(struct hfsmount *hfsmp);
+=======
+ * Flags for BlockAllocate() and BlockDeallocate()
+ */ 
+/* Force contiguous block allocation and to force minBlocks to actually be allocated */
+#define HFS_ALLOC_FORCECONTIG	0x1	
+/* Can use metadata zone blocks */
+#define HFS_ALLOC_METAZONE	0x2	
+/* Skip checking and updating of free blocks during allocation and deallocation */
+#define HFS_ALLOC_SKIPFREEBLKS	0x4	
+
+EXTERN_API_C( OSErr )
+BlockAllocate					(ExtendedVCB *			vcb,
+								 u_int32_t 				startingBlock,
+								 u_int32_t 				minBlocks,
+								 u_int32_t 				maxBlocks,
+								 u_int32_t				flags,
+								 u_int32_t *			startBlock,
+								 u_int32_t *			actualBlocks);
+
+EXTERN_API_C( OSErr )
+BlockDeallocate					(ExtendedVCB *			vcb,
+								 u_int32_t 				firstBlock,
+								 u_int32_t 				numBlocks,
+								 u_int32_t				flags);
+
+EXTERN_API_C ( void )
+invalidate_free_extent_cache	(ExtendedVCB *			vcb);
+>>>>>>> origin/10.6
 
 EXTERN_API_C( OSErr )
 BlockMarkAllocated(ExtendedVCB *vcb, u_int32_t startingBlock, u_int32_t numBlocks);

@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2008-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -735,6 +739,7 @@ skip1:
 	return (0);
 }
 
+<<<<<<< HEAD
 struct nd6svc_arg {
 	int draining;
 	uint32_t killed;
@@ -749,6 +754,10 @@ struct nd6svc_arg {
  */
 static void
 nd6_service(void *arg)
+=======
+void
+nd6_drain(__unused void	*ignored_arg)
+>>>>>>> origin/10.6
 {
 	struct nd6svc_arg *ap = arg;
 	struct llinfo_nd6 *ln;
@@ -1018,8 +1027,13 @@ again:
 		case ND6_LLINFO_REACHABLE:
 			if (ln->ln_expire != 0) {
 				ln->ln_state = ND6_LLINFO_STALE;
+<<<<<<< HEAD
 				ln_setexpire(ln, timenow + nd6_gctimer);
 				ap->aging_lazy++;
+=======
+				ln->ln_expire = rt_expiry(rt, timenow.tv_sec,
+				    nd6_gctimer);
+>>>>>>> origin/10.6
 			}
 			RT_UNLOCK(rt);
 			break;
@@ -1064,7 +1078,12 @@ again:
 				goto again;
 			}
 			ln->ln_state = ND6_LLINFO_STALE; /* XXX */
+<<<<<<< HEAD
 			ln_setexpire(ln, timenow + nd6_gctimer);
+=======
+			ln->ln_expire = rt_expiry(rt, timenow.tv_sec,
+			    nd6_gctimer);
+>>>>>>> origin/10.6
 			RT_UNLOCK(rt);
 			ap->aging_lazy++;
 			break;
@@ -1309,6 +1328,7 @@ addrloop:
 		NDPR_UNLOCK(pr);
 	}
 	lck_mtx_unlock(nd6_mutex);
+<<<<<<< HEAD
 
 	lck_mtx_lock(rnh_lock);
 	/* We're done; let others enter */
@@ -1335,6 +1355,18 @@ nd6_drain(void *arg)
 	    "sticky %u, killed %u\n", __func__, sarg.found, sarg.aging_lazy,
 	    sarg.aging, sarg.sticky, sarg.killed));
 	lck_mtx_unlock(rnh_lock);
+=======
+}
+
+/*
+ * ND6 timer routine to expire default route list and prefix list
+ */
+void
+nd6_timer(__unused void	*ignored_arg)
+{
+	nd6_drain(NULL);
+	timeout(nd6_timer, (caddr_t)0, nd6_prune * hz);
+>>>>>>> origin/10.6
 }
 
 /*
@@ -1841,10 +1873,18 @@ nd6_lookup(struct in6_addr *addr6, int create, struct ifnet *ifp, int rt_locked)
 	 * of the route to point to the interface where the NA arrived on,
 	 * hence the test for RTF_PROXY.
 	 */
+<<<<<<< HEAD
 	if ((rt->rt_flags & RTF_GATEWAY) || (rt->rt_flags & RTF_LLINFO) == 0 ||
 	    rt->rt_gateway->sa_family != AF_LINK || rt->rt_llinfo == NULL ||
 	    (ifp && rt->rt_ifa->ifa_ifp != ifp &&
 	    !(rt->rt_flags & RTF_PROXY))) {
+=======
+	if (ifp == NULL || (ifp->if_type == IFT_PPP) ||
+	    (ifp->if_eflags & IFEF_NOAUTOIPV6LL) ||
+	    (rt->rt_flags & RTF_GATEWAY) || (rt->rt_flags & RTF_LLINFO) == 0 ||
+	    rt->rt_gateway->sa_family != AF_LINK ||  rt->rt_llinfo == NULL ||
+	    (ifp && rt->rt_ifa->ifa_ifp != ifp)) {
+>>>>>>> origin/10.6
 		RT_REMREF_LOCKED(rt);
 		RT_UNLOCK(rt);
 		if (create) {
@@ -2023,6 +2063,14 @@ nd6_free(struct rtentry *rt)
 	if (ip6_doscopedroute || !ip6_forwarding) {
 		dr = defrouter_lookup(&SIN6(rt_key(rt))->sin6_addr, rt->rt_ifp);
 
+<<<<<<< HEAD
+=======
+	if (!ip6_forwarding && (ip6_accept_rtadv ||
+	    (rt->rt_ifp->if_eflags & IFEF_ACCEPT_RTADVD))) {
+		dr = defrouter_lookup(&((struct sockaddr_in6 *)rt_key(rt))->
+		    sin6_addr, rt->rt_ifp);
+
+>>>>>>> origin/10.6
 		if ((ln && ln->ln_router) || dr) {
 			/*
 			 * rt6_flush must be called whether or not the neighbor
@@ -2086,6 +2134,75 @@ nd6_free(struct rtentry *rt)
 	rtfree(rt);
 }
 
+<<<<<<< HEAD
+=======
+/*
+ * Upper-layer reachability hint for Neighbor Unreachability Detection.
+ *
+ * XXX cost-effective metods?
+ */
+void
+nd6_nud_hint(
+	struct rtentry *rt,
+	struct in6_addr *dst6,
+	int force)
+{
+	struct llinfo_nd6 *ln;
+	struct timeval timenow;
+
+	getmicrotime(&timenow);
+
+	/*
+	 * If the caller specified "rt", use that.  Otherwise, resolve the
+	 * routing table by supplied "dst6".
+	 */
+	if (!rt) {
+		if (!dst6)
+			return;
+		/* Callee returns a locked route upon success */
+		if ((rt = nd6_lookup(dst6, 0, NULL, 0)) == NULL)
+			return;
+		RT_LOCK_ASSERT_HELD(rt);
+	} else {
+		RT_LOCK(rt);
+		RT_ADDREF_LOCKED(rt);
+	}
+
+	if ((rt->rt_flags & RTF_GATEWAY) != 0 ||
+	    (rt->rt_flags & RTF_LLINFO) == 0 ||
+	    !rt->rt_llinfo || !rt->rt_gateway ||
+	    rt->rt_gateway->sa_family != AF_LINK) {
+		/* This is not a host route. */
+		goto done;
+	}
+
+	ln = rt->rt_llinfo;
+	if (ln->ln_state < ND6_LLINFO_REACHABLE)
+		goto done;
+
+	/*
+	 * if we get upper-layer reachability confirmation many times,
+	 * it is possible we have false information.
+	 */
+	if (!force) {
+		ln->ln_byhint++;
+		if (ln->ln_byhint > nd6_maxnudhint)
+			goto done;
+	}
+
+	ln->ln_state = ND6_LLINFO_REACHABLE;
+	if (ln->ln_expire) {
+		lck_rw_lock_shared(nd_if_rwlock);
+		ln->ln_expire = rt_expiry(rt, timenow.tv_sec,
+			nd_ifinfo[rt->rt_ifp->if_index].reachable);
+		lck_rw_done(nd_if_rwlock);
+	}
+done:
+	RT_REMREF_LOCKED(rt);
+	RT_UNLOCK(rt);
+}
+
+>>>>>>> origin/10.6
 void
 nd6_rtrequest(int req, struct rtentry *rt, struct sockaddr *sa)
 {
@@ -2335,6 +2452,7 @@ nd6_rtrequest(int req, struct rtentry *rt, struct sockaddr *sa)
 				SDL(gate)->sdl_alen = ifp->if_addrlen;
 			}
 			if (nd6_useloopback) {
+<<<<<<< HEAD
 				if (rt->rt_ifp != lo_ifp) {
 					/*
 					 * Purge any link-layer info caching.
@@ -2359,6 +2477,17 @@ nd6_rtrequest(int req, struct rtentry *rt, struct sockaddr *sa)
 				 */
 				if (!(rt->rt_rmx.rmx_locks & RTV_MTU))
 					rt->rt_rmx.rmx_mtu = rt->rt_ifp->if_mtu;
+=======
+#if IFNET_ROUTE_REFCNT
+				/* Adjust route ref count for the interfaces */
+				if (rt->rt_if_ref_fn != NULL &&
+				    rt->rt_ifp != lo_ifp) {
+					rt->rt_if_ref_fn(lo_ifp, 1);
+					rt->rt_if_ref_fn(rt->rt_ifp, -1);
+				}
+#endif /* IFNET_ROUTE_REFCNT */
+				rt->rt_ifp = lo_ifp;	/* XXX */
+>>>>>>> origin/10.6
 				/*
 				 * Make sure rt_ifa be equal to the ifaddr
 				 * corresponding to the address.
@@ -3107,7 +3236,12 @@ fail:
 			 * we must set the timer now, although it is actually
 			 * meaningless.
 			 */
+<<<<<<< HEAD
 			ln_setexpire(ln, timenow + nd6_gctimer);
+=======
+			ln->ln_expire = rt_expiry(rt, timenow.tv_sec,
+			    nd6_gctimer);
+>>>>>>> origin/10.6
 			ln->ln_hold = NULL;
 
 			if (m != NULL) {
@@ -3553,7 +3687,11 @@ lookup:
 	if ((ifp->if_flags & IFF_POINTOPOINT) != 0 &&
 	    ln->ln_state < ND6_LLINFO_REACHABLE) {
 		ln->ln_state = ND6_LLINFO_STALE;
+<<<<<<< HEAD
 		ln_setexpire(ln, timenow + nd6_gctimer);
+=======
+		ln->ln_expire = rt_expiry(rt, timenow.tv_sec, nd6_gctimer);
+>>>>>>> origin/10.6
 	}
 
 	/*
@@ -3566,9 +3704,13 @@ lookup:
 	if (ln->ln_state == ND6_LLINFO_STALE) {
 		ln->ln_asked = 0;
 		ln->ln_state = ND6_LLINFO_DELAY;
+<<<<<<< HEAD
 		ln_setexpire(ln, timenow + nd6_delay);
 		/* N.B.: we will re-arm the timer below. */
 		_CASSERT(ND6_LLINFO_DELAY > ND6_LLINFO_INCOMPLETE);
+=======
+		ln->ln_expire = rt_expiry(rt, timenow.tv_sec, nd6_delay);
+>>>>>>> origin/10.6
 	}
 
 	/*
@@ -3816,6 +3958,7 @@ nd6_need_cache(struct ifnet *ifp)
 #if IFT_IEEE80211
 	case IFT_IEEE80211:
 #endif
+	case IFT_BRIDGE:
 	case IFT_GIF:		/* XXX need more cases? */
 	case IFT_PPP:
 #if IFT_TUNNEL
@@ -3846,8 +3989,14 @@ nd6_storelladdr(struct ifnet *ifp, struct rtentry *rt, struct mbuf *m,
 		case IFT_IEEE80211:
 #endif
 		case IFT_BRIDGE:
+<<<<<<< HEAD
 			ETHER_MAP_IPV6_MULTICAST(&SIN6(dst)->sin6_addr, desten);
 			return (1);
+=======
+			ETHER_MAP_IPV6_MULTICAST(&SIN6(dst)->sin6_addr,
+						 desten);
+			return(1);
+>>>>>>> origin/10.6
 		case IFT_IEEE1394:
 			for (i = 0; i < ifp->if_addrlen; i++)
 				desten[i] = ~0;

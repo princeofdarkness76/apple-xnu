@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 1999-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 1999-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -440,12 +444,28 @@ struct	pkthdr {
 	struct mbuf *aux;		/* extra data buffer; ipsec/others */
 #ifdef KERNEL_PRIVATE
 	u_short	vlan_tag;		/* VLAN tag, host byte order */
+<<<<<<< HEAD
 	u_short reserved_1;		/* for future use */
 #else KERNEL_PRIVATE
 	void	*reserved1;		/* for future use */
 #endif KERNEL_PRIVATE
 	void	*reserved2;		/* for future use */
 >>>>>>> origin/10.3
+=======
+	u_short socket_id;		/* socket id */
+        SLIST_HEAD(packet_tags, m_tag) tags; /* list of packet tags */
+#if PF_PKTHDR
+	/*
+	 * Be careful; {en,dis}abling PF_PKTHDR will require xnu recompile;
+	 * private code outside of xnu must use mbuf_get_mhlen() instead
+	 * of MHLEN.
+	 */
+	struct pf_mtag pf_mtag;
+#endif /* PF_PKTHDR */
+#if PKT_PRIORITY
+	u_int32_t prio;			/* packet priority */
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 };
 
 /*
@@ -1529,7 +1549,14 @@ __BEGIN_DECLS
 __private_extern__ void m_scratch_init(struct mbuf *);
 __private_extern__ u_int32_t m_scratch_get(struct mbuf *, u_int8_t **);
 
+<<<<<<< HEAD
 __private_extern__ void m_classifier_init(struct mbuf *, uint32_t);
+=======
+extern void m_prio_init(struct mbuf *);
+extern void m_prio_background(struct mbuf *);
+
+__END_DECLS
+>>>>>>> origin/10.6
 
 __private_extern__ int m_set_service_class(struct mbuf *, mbuf_svc_class_t);
 __private_extern__ mbuf_svc_class_t m_get_service_class(struct mbuf *);

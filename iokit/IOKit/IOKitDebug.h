@@ -129,6 +129,11 @@ enum {
 
 extern SInt64    gIOKitDebug;
 extern SInt64    gIOKitTrace;
+<<<<<<< HEAD
+=======
+extern UInt64	 gIOInterruptThresholdNS;
+
+>>>>>>> origin/10.6
 
 #ifdef __cplusplus
 extern "C" {

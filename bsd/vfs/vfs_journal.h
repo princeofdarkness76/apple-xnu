@@ -1,7 +1,11 @@
 
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
 =======
@@ -76,7 +80,10 @@
 <<<<<<< HEAD
 #include <kern/locks.h>
 #include <sys/disk.h>
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.6
 
 typedef struct _blk_info {
     int32_t    bsize;
@@ -124,6 +131,7 @@ struct jnl_trim_list {
 	dk_extent_t *extents;
 };
 
+<<<<<<< HEAD
 typedef void (*jnl_trim_callback_t)(void *arg, uint32_t extent_count, const dk_extent_t *extents);
 
 =======
@@ -136,6 +144,8 @@ typedef void (*jnl_trim_callback_t)(void *arg, uint32_t extent_count, const dk_e
 struct journal;
 
 >>>>>>> origin/10.2
+=======
+>>>>>>> origin/10.6
 typedef struct transaction {
     int                 tbuffer_size;  // in bytes
     char               *tbuffer;       // memory copy of the transaction
@@ -150,11 +160,15 @@ typedef struct transaction {
     struct transaction *next;          // list of tr's (either completed or to be free'd)
 <<<<<<< HEAD
     uint32_t            sequence_num;
+<<<<<<< HEAD
 	struct jnl_trim_list trim;
     boolean_t		delayed_header_write;
 	boolean_t       flush_on_completion; //flush transaction immediately upon txn end.
 =======
 >>>>>>> origin/10.2
+=======
+    struct jnl_trim_list	trim;
+>>>>>>> origin/10.6
 } transaction;
 
 
@@ -282,11 +296,15 @@ typedef struct journal {
 #define JOURNAL_FLUSHCACHE_ERR    0x00040000   // means we already printed this err
 #define JOURNAL_NEED_SWAP         0x00080000   // swap any data read from disk
 #define JOURNAL_DO_FUA_WRITES     0x00100000   // do force-unit-access writes
+<<<<<<< HEAD
 #define JOURNAL_USE_UNMAP         0x00200000   // device supports UNMAP (TRIM)
 #define JOURNAL_FEATURE_BARRIER   0x00400000   // device supports barrier-only flush
 
 =======
 >>>>>>> origin/10.2
+=======
+#define JOURNAL_TRIM_ERR          0x00200000   // a previous trim failed
+>>>>>>> origin/10.6
 
 /* journal_open/create options are always in the low-16 bits */
 #define JOURNAL_OPTION_FLAGS_MASK 0x0000ffff
@@ -425,13 +443,19 @@ void      journal_close(journal *journal);
  * that the journal does not play it back (effectively
  * dropping it).
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
  *
  * journal_trim_add_extent() marks a range of bytes on the device which should
  * be trimmed (invalidated, unmapped).  journal_trim_remove_extent() marks a
  * range of bytes which should no longer be trimmed.  Accumulated extents
  * will be trimmed when the transaction is flushed to the on-disk journal.
+<<<<<<< HEAD
 =======
 >>>>>>> origin/10.2
+=======
+>>>>>>> origin/10.6
  */
 int   journal_start_transaction(journal *jnl);
 int   journal_modify_block_start(journal *jnl, struct buf *bp);
@@ -442,10 +466,13 @@ int   journal_kill_block(journal *jnl, struct buf *bp);
 #ifdef BSD_KERNEL_PRIVATE
 int   journal_trim_add_extent(journal *jnl, uint64_t offset, uint64_t length);
 int   journal_trim_remove_extent(journal *jnl, uint64_t offset, uint64_t length);
+<<<<<<< HEAD
 void  journal_trim_set_callback(journal *jnl, jnl_trim_callback_t callback, void *arg);
 int   journal_trim_extent_overlap (journal *jnl, uint64_t offset, uint64_t length, uint64_t *end);
 /* Mark state in the journal that requests an immediate journal flush upon txn completion */
 int   journal_request_immediate_flush (journal *jnl);
+=======
+>>>>>>> origin/10.6
 #endif
 int   journal_end_transaction(journal *jnl);
 

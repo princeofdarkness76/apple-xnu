@@ -2721,12 +2721,15 @@ cat_makealias(struct hfsmount *hfsmp, u_int32_t inode_num, struct HFSPlusCatalog
 	/* Allocate some disk space for the alias content. */
 	result = BlockAllocate(hfsmp, 0, blkcount, blkcount, 
 			       HFS_ALLOC_FORCECONTIG | HFS_ALLOC_METAZONE, 
+<<<<<<< HEAD
 	                       &rsrcforkp->extents[0].startBlock,
 	                       &rsrcforkp->extents[0].blockCount);
 	/* Did it fail with an out of space error? If so, re-try and allow journal flushing. */
 	if (result == dskFulErr ) {	
 		result = BlockAllocate(hfsmp, 0, blkcount, blkcount, 
 			       HFS_ALLOC_FORCECONTIG | HFS_ALLOC_METAZONE | HFS_ALLOC_FLUSHTXN, 
+=======
+>>>>>>> origin/10.6
 	                       &rsrcforkp->extents[0].startBlock,
 	                       &rsrcforkp->extents[0].blockCount);
 	}
@@ -3228,8 +3231,13 @@ getdirentries_callback(const CatalogKey *ckp, const CatalogRecord *crp,
 		 * regardless, so it's slightly safer to let that logic mark the boolean,
 		 * especially since it's closer to the return of this function.
 		 */		 
+<<<<<<< HEAD
 			
 		if (state->cbs_flags & VNODE_READDIR_EXTENDED) {
+=======
+
+		if (state->cbs_extended) {
+>>>>>>> origin/10.6
 			/* The last record has not been returned yet, so we 
 			 * want to stop after packing the last item 
 			 */
@@ -3659,7 +3667,11 @@ cat_getdirentries(struct hfsmount *hfsmp, u_int32_t entrycnt, directoryhint_t *d
 	 * field to track whether or not we've returned EOF from the iterator function.
 	 */
 	state.cbs_eof = false;
+<<<<<<< HEAD
 	
+=======
+
+>>>>>>> origin/10.6
 	iterator = (BTreeIterator *) ((char *)state.cbs_linkinfo + (maxlinks * sizeof(linkinfo_t)));
 	key = (CatalogKey *)&iterator->key;
 	have_key = 0;
@@ -3801,13 +3813,20 @@ cat_getdirentries(struct hfsmount *hfsmp, u_int32_t entrycnt, directoryhint_t *d
 	/* Note that state.cbs_index is still valid on errors */
 	*items = state.cbs_index - index;
 	index = state.cbs_index;
+<<<<<<< HEAD
 
+=======
+	
+>>>>>>> origin/10.6
 	/*
 	 * Also note that cbs_eof is set in all cases if we ever hit EOF
 	 * during the enumeration by the catalog callback.  Mark the directory's hint
 	 * descriptor as having hit EOF.
 	 */
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.6
 	if (state.cbs_eof) {
 		dirhint->dh_desc.cd_flags |= CD_EOF;
 		*eofflag = 1;

@@ -629,6 +629,7 @@ typedef uint64_t upl_control_flags_t;
 #define UPL_COMMIT_CLEAR_PRECIOUS	0x80
 #define UPL_COMMIT_SPECULATE		0x100
 #define UPL_COMMIT_FREE_ABSENT		0x200
+<<<<<<< HEAD
 #define UPL_COMMIT_WRITTEN_BY_KERNEL	0x400
 
 #define UPL_COMMIT_KERNEL_ONLY_FLAGS	(UPL_COMMIT_CS_VALIDATED | UPL_COMMIT_FREE_ABSENT)
@@ -638,6 +639,10 @@ typedef uint64_t upl_control_flags_t;
 
 #define UPL_COMMIT_KERNEL_ONLY_FLAGS	(UPL_COMMIT_CS_VALIDATED)
 >>>>>>> origin/10.5
+=======
+
+#define UPL_COMMIT_KERNEL_ONLY_FLAGS	(UPL_COMMIT_CS_VALIDATED | UPL_COMMIT_FREE_ABSENT)
+>>>>>>> origin/10.6
 
 /* flags for return of state from vm_map_get_upl,  vm_upl address space */
 /* based call */

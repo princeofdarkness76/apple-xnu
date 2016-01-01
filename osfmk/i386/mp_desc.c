@@ -88,6 +88,7 @@
 #include <kern/cpu_data.h>
 #include <mach/mach_types.h>
 #include <mach/machine.h>
+#include <kern/etimer.h>
 #include <mach/vm_map.h>
 #include <mach/machine/vm_param.h>
 #include <vm/vm_kern.h>
@@ -558,6 +559,17 @@ cpu_desc_load64(cpu_data_t *cdp)
 	 * for the case of reloading descriptors at wake to avoid
 	 * their complete re-initialization.
 	 */
+<<<<<<< HEAD
+=======
+	gdtptr64.length = GDTSZ * sizeof(struct real_descriptor) - 1;
+	gdtptr64.offset[0] = (uint32_t) cdi->cdi_gdt.ptr;
+	gdtptr64.offset[1] = KERNEL_UBER_BASE_HI32;
+	idtptr64.length = 0x1000 + cdp->cpu_number;
+	idtptr64.offset[0] = (uint32_t) cdi->cdi_idt.ptr;
+	idtptr64.offset[1] = KERNEL_UBER_BASE_HI32;
+
+	/* Make sure busy bit is cleared in the TSS */
+>>>>>>> origin/10.6
 	gdt_desc_p(KERNEL_TSS)->access &= ~ACC_TSS_BUSY;
 
 	/* Load the GDT, LDT, IDT and TSS */

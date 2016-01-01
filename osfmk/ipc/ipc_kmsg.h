@@ -298,9 +298,12 @@ extern void ipc_kmsg_destroy(
 extern boolean_t ipc_kmsg_delayed_destroy(
 	ipc_kmsg_t kmsg);
 
+<<<<<<< HEAD
 /* Process all the delayed message destroys */
 extern void ipc_kmsg_reap_delayed(void);
 
+=======
+>>>>>>> origin/10.6
 /* Preallocate a kernel message buffer */
 extern ipc_kmsg_t ipc_kmsg_prealloc(
 	mach_msg_size_t	size);

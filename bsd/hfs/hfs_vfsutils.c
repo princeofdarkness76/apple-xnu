@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2001 Apple Computer, Inc. All rights reserved.
 >>>>>>> origin/10.0
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -190,6 +194,7 @@ OSErr hfs_MountHFSVolume(struct hfsmount *hfsmp, HFSMasterDirectoryBlock *mdb,
 	 * volume encoding we use MacRoman as a fallback.
 	 */
 <<<<<<< HEAD
+<<<<<<< HEAD
 	if (error || (utf8chars == 0)) {
 		error = mac_roman_to_utf8(mdb->drVN, NAME_MAX, &utf8chars, vcb->vcbVN);
 		/* If we fail to encode to UTF8 from Mac Roman, the name is bad.  Deny the mount */
@@ -217,6 +222,15 @@ OSErr hfs_MountHFSVolume(struct hfsmount *hfsmp, HFSMasterDirectoryBlock *mdb,
 	/* HFS standard is read-only, so just stuff the FS location in here, too */
 	hfsmp->hfs_fs_avh_sector = hfsmp->hfs_partition_avh_sector;	
 =======
+=======
+	if (error || (utf8chars == 0)) {
+		(void) mac_roman_to_utf8(mdb->drVN, NAME_MAX, &utf8chars, vcb->vcbVN);
+		/* If we fail to encode to UTF8 from Mac Roman, the name is bad. Deny mount */
+		if (error) {
+			goto MtVolErr;
+		}
+	}
+>>>>>>> origin/10.6
 	hfsmp->hfs_logBlockSize = BestBlockSizeFit(vcb->blockSize, MAXBSIZE, hfsmp->hfs_logical_block_size);
 	vcb->vcbVBMIOSize = kHFSBlockSize;
 
@@ -329,7 +343,7 @@ OSErr hfs_MountHFSVolume(struct hfsmount *hfsmp, HFSMasterDirectoryBlock *mdb,
 	}
 	hfsmp->hfs_allocation_cp = VTOC(hfsmp->hfs_allocation_vp);
 
-      	/* mark the volume dirty (clear clean unmount bit) */
+    /* mark the volume dirty (clear clean unmount bit) */
 	vcb->vcbAtrb &=	~kHFSVolumeUnmountedMask;
 
 <<<<<<< HEAD
@@ -376,12 +390,25 @@ OSErr hfs_MountHFSVolume(struct hfsmount *hfsmp, HFSMasterDirectoryBlock *mdb,
 	}
 =======
 
+<<<<<<< HEAD
     goto	CmdDone;
 >>>>>>> origin/10.5
 
     //--	Release any resources allocated so far before exiting with an error:
 MtVolErr:
 	hfsUnmount(hfsmp, NULL);
+=======
+	if (error == noErr) {
+		/* If successful, then we can just return once we've unlocked the cnodes */
+		return error;
+	}
+
+    //--	Release any resources allocated so far before exiting with an error:
+MtVolErr:
+	ReleaseMetaFileVNode(hfsmp->hfs_catalog_vp);
+	ReleaseMetaFileVNode(hfsmp->hfs_extents_vp);
+	ReleaseMetaFileVNode(hfsmp->hfs_allocation_vp);
+>>>>>>> origin/10.6
 
     return (error);
 }
@@ -1320,6 +1347,7 @@ void hfs_resolvelink(ExtendedVCB *vcb, CatalogNodeData *cndp)
 	/*
 	 * Allow hot file clustering if conditions allow.
 	 */
+<<<<<<< HEAD
 	if ((hfsmp->hfs_flags & HFS_METADATA_ZONE)  && !(hfsmp->hfs_flags & HFS_READ_ONLY) &&
 	    ((hfsmp->hfs_flags & HFS_SSD) == 0 || (hfsmp->hfs_flags & HFS_CS_HOTFILE_PIN))) {
 		//
@@ -1344,6 +1372,11 @@ void hfs_resolvelink(ExtendedVCB *vcb, CatalogNodeData *cndp)
 		 *       clean that up at this point.  Since HotFiles are
 		 *       optional, this is not a big deal.
 		 */
+=======
+	if ((hfsmp->hfs_flags & HFS_METADATA_ZONE)  &&
+	    ((hfsmp->hfs_flags & HFS_READ_ONLY) == 0) &&
+	    ((hfsmp->hfs_mp->mnt_kern_flag & MNTK_SSD) == 0)) {
+>>>>>>> origin/10.6
 		(void) hfs_recording_init(hfsmp);
 	}
 
@@ -3955,6 +3988,7 @@ hfs_late_journal_init(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp, void *_a
 #define HOTBAND_MINIMUM_SIZE  (10*1024*1024)
 #define HOTBAND_MAXIMUM_SIZE  (512*1024*1024)
 
+<<<<<<< HEAD
 /* Initialize the metadata zone.
  *
  * If the size of  the volume is less than the minimum size for
@@ -3964,6 +3998,10 @@ hfs_late_journal_init(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp, void *_a
  */
 void
 hfs_metadatazone_init(struct hfsmount *hfsmp, int disable)
+=======
+void
+hfs_metadatazone_init(struct hfsmount *hfsmp)
+>>>>>>> origin/10.6
 {
 	ExtendedVCB  *vcb;
 	u_int64_t  fs_size;
@@ -4587,6 +4625,7 @@ hfs_end_transaction(struct hfsmount *hfsmp)
 void 
 hfs_journal_lock(struct hfsmount *hfsmp) 
 {
+<<<<<<< HEAD
 	/* Only peek at hfsmp->jnl while holding the global lock */
 	hfs_lock_global (hfsmp, HFS_SHARED_LOCK);
 	if (hfsmp->jnl) {
@@ -4604,6 +4643,20 @@ hfs_journal_unlock(struct hfsmount *hfsmp)
 		journal_unlock(hfsmp->jnl);
 	}
 	hfs_unlock_global (hfsmp);
+=======
+	int ret;
+	
+	/* Only peek at hfsmp->jnl while holding the global lock */
+	lck_rw_lock_shared(&hfsmp->hfs_global_lock);
+	if (hfsmp->jnl) {
+		ret = journal_flush(hfsmp->jnl);
+	} else {
+		ret = 0;
+	}
+	lck_rw_unlock_shared(&hfsmp->hfs_global_lock);
+	
+	return ret;
+>>>>>>> origin/10.6
 }
 
 /*

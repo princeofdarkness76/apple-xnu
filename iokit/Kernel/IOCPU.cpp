@@ -113,7 +113,20 @@ const OSSymbol *		gIOPlatformPanicActionKey;
 static queue_head_t     	gActionQueues[kQueueCount];
 static const OSSymbol *		gActionSymbols[kQueueCount];
 
+<<<<<<< HEAD
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+=======
+queue_head_t * iocpu_get_platform_active_queue(void)
+{
+    if (!iocpu_active_queue.next)
+    {
+	queue_init(&iocpu_quiesce_queue);
+	queue_init(&iocpu_active_queue);
+	iocpu_platform_cpu_action_init(&iocpu_quiesce_queue, &iocpu_active_queue);
+    }
+    return (&iocpu_active_queue);
+}
+>>>>>>> origin/10.6
 
 static void
 iocpu_add_platform_action(queue_head_t * queue, iocpu_platform_action_entry_t * entry)

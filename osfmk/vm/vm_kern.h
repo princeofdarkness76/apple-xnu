@@ -113,9 +113,12 @@ extern kern_return_t	kernel_memory_allocate(
 #define KMA_GUARD_LAST	0x20
 #define KMA_PERMANENT	0x40
 #define KMA_NOENCRYPT	0x80
+<<<<<<< HEAD
 #define KMA_KSTACK	0x100
 #define KMA_VAONLY	0x200
 #define KMA_COMPRESSOR	0x400   /* Pages belonging to the compressor are not on the paging queues, nor are they counted as wired. */
+=======
+>>>>>>> origin/10.6
 
 extern kern_return_t kmem_alloc_contig(
 				vm_map_t	map,

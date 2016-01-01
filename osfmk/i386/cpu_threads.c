@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2003-2010 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2003-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2003-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -31,7 +35,11 @@
  */
 #include <vm/vm_kern.h>
 #include <kern/kalloc.h>
+<<<<<<< HEAD
 #include <kern/timer_queue.h>
+=======
+#include <kern/etimer.h>
+>>>>>>> origin/10.6
 #include <mach/machine.h>
 #include <i386/cpu_threads.h>
 #include <i386/cpuid.h>
@@ -232,11 +240,16 @@ x86_LLC_info(void)
     topoParms.maxSharingLLC = nCPUsSharing;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
     topoParms.nCoresSharingLLC = nCPUsSharing / (cpuinfo->thread_count /
 						 cpuinfo->core_count);
 =======
     topoParms.nCoresSharingLLC = nCPUsSharing;
 >>>>>>> origin/10.5
+=======
+    topoParms.nCoresSharingLLC = nCPUsSharing / (cpuinfo->thread_count /
+						 cpuinfo->core_count);
+>>>>>>> origin/10.6
     topoParms.nLCPUsSharingLLC = nCPUsSharing;
 
     /*
@@ -255,6 +268,7 @@ initTopoParms(void)
     i386_cpu_info_t	*cpuinfo;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
     topoParms.stable = FALSE;
 
     cpuinfo = cpuid_info();
@@ -262,6 +276,10 @@ initTopoParms(void)
     PE_parse_boot_argn("-topo", &topo_dbg, sizeof(topo_dbg));
 
 =======
+=======
+    topoParms.stable = FALSE;
+
+>>>>>>> origin/10.6
     cpuinfo = cpuid_info();
 
 >>>>>>> origin/10.5
@@ -323,6 +341,7 @@ initTopoParms(void)
     topoParms.nPThreadsPerPackage = topoParms.nPThreadsPerCore * topoParms.nPCoresPerPackage;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
     TOPO_DBG("\nCache Topology Parameters:\n");
     TOPO_DBG("\tLLC Depth:           %d\n", topoParms.LLCDepth);
     TOPO_DBG("\tCores Sharing LLC:   %d\n", topoParms.nCoresSharingLLC);
@@ -345,6 +364,14 @@ initTopoParms(void)
     TOPO_DBG("\tCores per Package: %d\n", topoParms.nPCoresPerPackage);
     TOPO_DBG("\tThreads per Package: %d\n", topoParms.nPThreadsPerPackage);
 =======
+=======
+    DBG("\nCache Topology Parameters:\n");
+    DBG("\tLLC Depth:           %d\n", topoParms.LLCDepth);
+    DBG("\tCores Sharing LLC:   %d\n", topoParms.nCoresSharingLLC);
+    DBG("\tThreads Sharing LLC: %d\n", topoParms.nLCPUsSharingLLC);
+    DBG("\tmax Sharing of LLC:  %d\n", topoParms.maxSharingLLC);
+
+>>>>>>> origin/10.6
     DBG("\nLogical Topology Parameters:\n");
     DBG("\tThreads per Core:  %d\n", topoParms.nLThreadsPerCore);
     DBG("\tCores per Die:     %d\n", topoParms.nLCoresPerDie);
@@ -1249,10 +1276,14 @@ validate_topology(void)
 	     * Make sure that the die has the correct number of cores.
 	     */
 <<<<<<< HEAD
+<<<<<<< HEAD
 	    TOPO_DBG("Die(%d)->cores: ", die->pdie_num);
 =======
 	    DBG("Die(%d)->cores: ");
 >>>>>>> origin/10.5
+=======
+	    DBG("Die(%d)->cores: ", die->pdie_num);
+>>>>>>> origin/10.6
 	    nCores = 0;
 	    core = die->cores;
 	    while (core != NULL) {
@@ -1346,10 +1377,14 @@ validate_topology(void)
 	    nCPUs = 0;
 	    lcpu = core->lcpus;
 <<<<<<< HEAD
+<<<<<<< HEAD
 	    TOPO_DBG("Core(%d)->lcpus: ", core->pcore_num);
 =======
 	    DBG("Core(%d)->lcpus: ");
 >>>>>>> origin/10.5
+=======
+	    DBG("Core(%d)->lcpus: ", core->pcore_num);
+>>>>>>> origin/10.6
 	    while (lcpu != NULL) {
 		if (lcpu->core == NULL)
 		    panic("CPU(%d)->core is NULL",

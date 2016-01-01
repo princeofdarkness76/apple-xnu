@@ -284,7 +284,10 @@ extern int PE_initialize_console(
 #define kPEEnableScreen	 	6
 #define kPEDisableScreen	7
 #define kPEBaseAddressChange	8
+<<<<<<< HEAD
 #define kPERefreshBootGraphics	9
+=======
+>>>>>>> origin/10.6
 
 extern void PE_display_icon( unsigned int flags,
 			     const char * name );

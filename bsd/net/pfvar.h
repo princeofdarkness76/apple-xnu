@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2007-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2007-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -147,11 +151,19 @@ union sockaddr_union {
 struct ip;
 struct ip6_hdr;
 struct tcphdr;
+<<<<<<< HEAD
 struct pf_grev1_hdr;
 struct pf_esp_hdr;
 #endif /* KERNEL */
 
 #define PF_GRE_PPTP_VARIANT	0x01
+=======
+#ifndef NO_APPLE_EXTENSIONS
+struct pf_grev1_hdr;
+struct pf_esp_hdr;
+#endif /* !NO_APPLE_EXTENSIONS */
+#endif /* KERNEL */
+>>>>>>> origin/10.6
 
 enum	{ PF_INOUT, PF_IN, PF_OUT };
 enum	{ PF_PASS, PF_DROP, PF_SCRUB, PF_NOSCRUB, PF_NAT, PF_NONAT,
@@ -176,9 +188,17 @@ enum	{ PFTM_TCP_FIRST_PACKET, PFTM_TCP_OPENING, PFTM_TCP_ESTABLISHED,
 	  PFTM_TCP_CLOSING, PFTM_TCP_FIN_WAIT, PFTM_TCP_CLOSED,
 	  PFTM_UDP_FIRST_PACKET, PFTM_UDP_SINGLE, PFTM_UDP_MULTIPLE,
 	  PFTM_ICMP_FIRST_PACKET, PFTM_ICMP_ERROR_REPLY,
+<<<<<<< HEAD
 	  PFTM_GREv1_FIRST_PACKET, PFTM_GREv1_INITIATING,
 	  PFTM_GREv1_ESTABLISHED, PFTM_ESP_FIRST_PACKET, PFTM_ESP_INITIATING,
 	  PFTM_ESP_ESTABLISHED, PFTM_OTHER_FIRST_PACKET, PFTM_OTHER_SINGLE,
+=======
+#ifndef NO_APPLE_EXTENSIONS
+	  PFTM_GREv1_FIRST_PACKET, PFTM_GREv1_INITIATING, PFTM_GREv1_ESTABLISHED,
+	  PFTM_ESP_FIRST_PACKET, PFTM_ESP_INITIATING, PFTM_ESP_ESTABLISHED,
+#endif /* !NO_APPLE_EXTENSIONS */
+	  PFTM_OTHER_FIRST_PACKET, PFTM_OTHER_SINGLE,
+>>>>>>> origin/10.6
 	  PFTM_OTHER_MULTIPLE, PFTM_FRAG, PFTM_INTERVAL,
 	  PFTM_ADAPTIVE_START, PFTM_ADAPTIVE_END, PFTM_SRC_NODE,
 	  PFTM_TS_DIFF, PFTM_MAX, PFTM_PURGE, PFTM_UNLINKED };
@@ -201,6 +221,10 @@ enum	{ PFTM_TCP_FIRST_PACKET, PFTM_TCP_OPENING, PFTM_TCP_ESTABLISHED,
 #define PFTM_ESP_FIRST_PACKET_VAL	120
 #define PFTM_ESP_INITIATING_VAL		30
 #define PFTM_ESP_ESTABLISHED_VAL	900
+<<<<<<< HEAD
+=======
+#endif /* !NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 #define PFTM_OTHER_FIRST_PACKET_VAL	60	/* First packet */
 #define PFTM_OTHER_SINGLE_VAL		30	/* Unidirectional */
 #define PFTM_OTHER_MULTIPLE_VAL		60	/* Bidirectional */
@@ -212,6 +236,10 @@ enum	{ PFTM_TCP_FIRST_PACKET, PFTM_TCP_OPENING, PFTM_TCP_ESTABLISHED,
 enum	{ PF_NOPFROUTE, PF_FASTROUTE, PF_ROUTETO, PF_DUPTO, PF_REPLYTO };
 enum	{ PF_LIMIT_STATES,
 	  PF_LIMIT_APP_STATES,
+<<<<<<< HEAD
+=======
+#endif /* !NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 	  PF_LIMIT_SRC_NODES, PF_LIMIT_FRAGS,
 	  PF_LIMIT_TABLES, PF_LIMIT_TABLE_ENTRIES, PF_LIMIT_MAX };
 #define PF_POOL_IDMASK		0x0f
@@ -292,6 +320,10 @@ union pf_rule_xport {
 	u_int16_t		call_id;
 	u_int32_t		spi;
 };
+<<<<<<< HEAD
+=======
+#endif /* !NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 
 #ifdef KERNEL
 struct pfi_dynaddr {
@@ -499,6 +531,14 @@ struct pf_rule_addr {
 	struct pf_addr_wrap	 addr;
 	union pf_rule_xport	 xport;
 	u_int8_t		 neg;
+<<<<<<< HEAD
+=======
+#else /* NO_APPLE_EXTENSIONS */
+	u_int16_t		 port[2];
+	u_int8_t		 neg;
+	u_int8_t		 port_op;
+#endif /* NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 };
 
 struct pf_pooladdr {
@@ -695,11 +735,14 @@ struct pf_rule {
 	u_int64_t		 packets[2];
 	u_int64_t		 bytes[2];
 
+<<<<<<< HEAD
 	u_int64_t		 ticket;
 #define PF_OWNER_NAME_SIZE	 64
 	char			 owner[PF_OWNER_NAME_SIZE];
 	u_int32_t		 priority;
 
+=======
+>>>>>>> origin/10.6
 #ifdef KERNEL
 	struct pfi_kif		*kif		__attribute__((aligned(8)));
 #else /* !KERNEL */
@@ -809,9 +852,14 @@ struct pf_rule {
 
 	u_int8_t		proto_variant;
 	u_int8_t		extfilter; /* Filter mode [PF_EXTFILTER_xxx] */
+<<<<<<< HEAD
 	u_int8_t		extmap;    /* Mapping mode [PF_EXTMAP_xxx] */
 	u_int32_t               dnpipe;
 	u_int32_t               dntype;
+=======
+	u_int8_t		extmap; /* Mapping mode [PF_EXTMAP_xxx] */
+#endif /* !NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 };
 
 /* pf device identifiers */
@@ -862,6 +910,10 @@ enum pf_extfilter {
 	PF_EXTFILTER_AD,	/* Address-dependent filtering */
 	PF_EXTFILTER_EI		/* Endpoint-independent filtering */
 };
+<<<<<<< HEAD
+=======
+#endif /* !NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 
 struct pf_threshold {
 	u_int32_t	limit;
@@ -923,6 +975,16 @@ struct pf_state_host {
 	struct pf_addr		addr;
 	union pf_state_xport	xport;
 };
+<<<<<<< HEAD
+=======
+#else /* NO_APPLE_EXTENSIONS */
+struct pf_state_host {
+	struct pf_addr	addr;
+	u_int16_t	port;
+	u_int16_t	pad;
+};
+#endif /* NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 
 #ifdef KERNEL
 struct pf_state_peer {
@@ -939,6 +1001,7 @@ struct pf_state_peer {
 };
 
 TAILQ_HEAD(pf_state_queue, pf_state);
+#endif /* KERNEL */
 
 struct pf_state;
 struct pf_pdesc;
@@ -971,7 +1034,14 @@ struct pf_app_state {
 		struct pf_ike_state ike;
 	} u;
 };
+<<<<<<< HEAD
+=======
+#endif /* KERNEL */
+#define PF_GRE_PPTP_VARIANT	0x01
+#endif /* !NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 
+#ifdef KERNEL
 /* keep synced with struct pf_state, used in RB_FIND */
 struct pf_state_key_cmp {
 	struct pf_state_host lan;
@@ -984,6 +1054,12 @@ struct pf_state_key_cmp {
 	u_int8_t	 direction;
 	u_int8_t	 proto_variant;
 	struct pf_app_state	*app_state;
+<<<<<<< HEAD
+=======
+#else /* NO_APPLE_EXTENSIONS */
+	u_int8_t	 pad;
+#endif /* NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 };
 
 TAILQ_HEAD(pf_statelist, pf_state);
@@ -999,8 +1075,14 @@ struct pf_state_key {
 	u_int8_t	 direction;
 	u_int8_t	 proto_variant;
 	struct pf_app_state	*app_state;
+<<<<<<< HEAD
 	u_int32_t	 flowsrc;
 	u_int32_t	 flowhash;
+=======
+#else /* NO_APPLE_EXTENSIONS */
+	u_int8_t	 pad;
+#endif /* NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 
 	RB_ENTRY(pf_state_key)	 entry_lan_ext;
 	RB_ENTRY(pf_state_key)	 entry_ext_gwy;
@@ -1015,6 +1097,7 @@ struct pf_state_cmp {
 	u_int32_t	 creatorid;
 	u_int32_t	 pad;
 };
+#endif /* KERNEL */
 
 /* flowhash key (12-bytes multiple for performance) */
 struct pf_flowhash_key {
@@ -1043,7 +1126,13 @@ struct pf_state {
 	union pf_rule_ptr	 anchor;
 	union pf_rule_ptr	 nat_rule;
 	struct pf_addr		 rt_addr;
+<<<<<<< HEAD
 	struct hook_desc_head	 unlink_hooks;
+=======
+#ifndef NO_APPLE_EXTENSIONS
+	struct hook_desc_head unlink_hooks;
+#endif /* !NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 	struct pf_state_key	*state_key;
 	struct pfi_kif		*kif;
 	struct pfi_kif		*rt_kif;
@@ -1083,7 +1172,15 @@ struct pfsync_state_scrub {
 struct pfsync_state_host {
 	struct pf_addr		addr;
 	union pf_state_xport	xport;
+<<<<<<< HEAD
 	u_int16_t		pad[2];
+=======
+	u_int16_t	pad[2];
+#else /* NO_APPLE_EXTENSIONS */
+	u_int16_t	port;
+	u_int16_t	pad[3];
+#endif /* NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 } __packed;
 
 struct pfsync_state_peer {
@@ -1112,6 +1209,10 @@ struct pfsync_state {
 #if !defined(__LP64__)
 	u_int32_t	_pad[2];
 #endif /* !__LP64__ */
+<<<<<<< HEAD
+=======
+#endif /* !NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 	u_int32_t	 rule;
 	u_int32_t	 anchor;
 	u_int32_t	 nat_rule;
@@ -1120,9 +1221,16 @@ struct pfsync_state {
 	u_int32_t	 packets[2][2];
 	u_int32_t	 bytes[2][2];
 	u_int32_t	 creatorid;
+<<<<<<< HEAD
 	u_int16_t	 tag;
 	sa_family_t	 af_lan;
 	sa_family_t	 af_gwy;
+=======
+#ifndef NO_APPLE_EXTENSIONS
+    u_int16_t    tag;
+#endif /* !NO_APPLE_EXTENSIONS */
+	sa_family_t	 af;
+>>>>>>> origin/10.6
 	u_int8_t	 proto;
 	u_int8_t	 direction;
 	u_int8_t	 log;
@@ -1131,8 +1239,12 @@ struct pfsync_state {
 	u_int8_t	 sync_flags;
 	u_int8_t	 updates;
 	u_int8_t	 proto_variant;
+<<<<<<< HEAD
 	u_int8_t	 __pad;
 	u_int32_t	 flowhash;
+=======
+#endif /* !NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 } __packed;
 
 #define PFSYNC_FLAG_COMPRESS	0x01
@@ -1354,8 +1466,13 @@ RB_PROTOTYPE_SC(__private_extern__, pf_state_tree_ext_gwy, pf_state_key,
 RB_HEAD(pfi_ifhead, pfi_kif);
 
 /* state tables */
+<<<<<<< HEAD
 extern struct pf_state_tree_lan_ext	 pf_statetbl_lan_ext;
 extern struct pf_state_tree_ext_gwy	 pf_statetbl_ext_gwy;
+=======
+__private_extern__ struct pf_state_tree_lan_ext	 pf_statetbl_lan_ext;
+__private_extern__ struct pf_state_tree_ext_gwy	 pf_statetbl_ext_gwy;
+>>>>>>> origin/10.6
 
 /* keep synced with pfi_kif, used in RB_FIND */
 struct pfi_kif_cmp {
@@ -1416,8 +1533,15 @@ struct pf_pdesc {
 #if INET6
 		struct icmp6_hdr	*icmp6;
 #endif /* INET6 */
+<<<<<<< HEAD
 		struct pf_grev1_hdr	*grev1;
 		struct pf_esp_hdr	*esp;
+=======
+#ifndef NO_APPLE_EXTENSIONS
+		struct pf_grev1_hdr *grev1;
+		struct pf_esp_hdr *esp;
+#endif /* !NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 		void			*any;
 	} hdr;
 
@@ -1432,7 +1556,12 @@ struct pf_pdesc {
 	struct ether_header
 			*eh;
 	struct mbuf	*mp;
+<<<<<<< HEAD
 	int		lmw;		/* lazy writable offset */
+=======
+	int				lmw;	/* lazy writable offset */
+#endif /* !NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 	struct pf_mtag	*pf_mtag;
 	u_int16_t	*ip_sum;
 	u_int32_t	 off;		/* protocol header offset */
@@ -1449,10 +1578,14 @@ struct pf_pdesc {
 	u_int8_t	 tos;
 	u_int8_t	 ttl;
 	u_int8_t	 proto_variant;
+<<<<<<< HEAD
 	mbuf_svc_class_t sc;		/* mbuf service class (MBUF_SVC) */
 	u_int32_t	 pktflags;	/* mbuf packet flags (PKTF) */
 	u_int32_t	 flowsrc;	/* flow source (FLOWSRC) */
 	u_int32_t	 flowhash;	/* flow hash to identify the sender */
+=======
+#endif /* !NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 };
 #endif /* KERNEL */
 
@@ -1555,6 +1688,10 @@ struct pf_pdesc {
 #define PFESPS_NSTATES		3	/* number of state levels */
 
 #define PFESPS_NAMES { "NO_TRAFFIC", "INITIATING", "ESTABLISHED", NULL }
+<<<<<<< HEAD
+=======
+#endif /* !NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 
 /* Other protocol state enumeration */
 #define PFOTHERS_NO_TRAFFIC	0
@@ -1780,6 +1917,18 @@ struct pfioc_natlook {
 	u_int8_t	 proto;
 	u_int8_t	 proto_variant;
 	u_int8_t	 direction;
+<<<<<<< HEAD
+=======
+#else /* NO_APPLE_EXTENSIONS */
+	u_int16_t	 sport;
+	u_int16_t	 dport;
+	u_int16_t	 rsport;
+	u_int16_t	 rdport;
+	sa_family_t	 af;
+	u_int8_t	 proto;
+	u_int8_t	 direction;
+#endif /* NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 };
 
 struct pfioc_state {
@@ -1799,6 +1948,10 @@ struct pfioc_state_addr_kill {
 	u_int8_t			neg;
 	union pf_rule_xport		xport;
 };
+<<<<<<< HEAD
+=======
+#endif /* !NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 
 struct pfioc_state_kill {
 	/* XXX returns the number of states killed in psk_af */
@@ -1808,6 +1961,14 @@ struct pfioc_state_kill {
 	u_int8_t		_pad;
 	struct pfioc_state_addr_kill	psk_src;
 	struct pfioc_state_addr_kill	psk_dst;
+<<<<<<< HEAD
+=======
+#else /* NO_APPLE_EXTENSIONS */
+	int			psk_proto;
+	struct pf_rule_addr	psk_src;
+	struct pf_rule_addr	psk_dst;
+#endif /* NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 	char			psk_ifname[IFNAMSIZ];
 	char			psk_ownername[PF_OWNER_NAME_SIZE];
 };
@@ -1840,6 +2001,7 @@ struct pfioc_states_64 {
 };
 #endif /* KERNEL */
 
+<<<<<<< HEAD
 #define PFTOK_PROCNAME_LEN    64
 #pragma pack(1)
 struct pfioc_token {
@@ -1889,6 +2051,8 @@ struct pfioc_tokens_64 {
 #endif /* KERNEL */
 
 
+=======
+>>>>>>> origin/10.6
 struct pfioc_src_nodes {
 	int	psn_len;
 	union {
@@ -1962,7 +2126,24 @@ struct pfioc_trans {
 		char		anchor[MAXPATHLEN];
 		u_int32_t	ticket;
 	} *array __attribute__((aligned(8)));
+<<<<<<< HEAD
+=======
 };
+
+#ifdef KERNEL
+struct pfioc_trans_32 {
+	int		 size;	/* number of elements */
+	int		 esize; /* size of each element in bytes */
+	user32_addr_t	 array __attribute__((aligned(8)));
+};
+
+struct pfioc_trans_64 {
+	int		 size;	/* number of elements */
+	int		 esize; /* size of each element in bytes */
+	user64_addr_t	 array __attribute__((aligned(8)));
+>>>>>>> origin/10.6
+};
+#endif /* KERNEL */
 
 #ifdef KERNEL
 struct pfioc_trans_32 {
@@ -2066,11 +2247,14 @@ struct pfioc_iface_64 {
 	int	 pfiio_flags;
 };
 #endif /* KERNEL */
+<<<<<<< HEAD
 
 struct pf_ifspeed {
 	char			ifname[IFNAMSIZ];
 	u_int64_t		baudrate;
 };
+=======
+>>>>>>> origin/10.6
 
 /*
  * ioctl operations
@@ -2184,6 +2368,7 @@ __private_extern__ void pf_tbladdr_copyout(struct pf_addr_wrap *);
 __private_extern__ void pf_calc_skip_steps(struct pf_rulequeue *);
 __private_extern__ u_int32_t pf_calc_state_key_flowhash(struct pf_state_key *);
 
+<<<<<<< HEAD
 extern struct pool pf_src_tree_pl, pf_rule_pl;
 extern struct pool pf_state_pl, pf_state_key_pl, pf_pooladdr_pl;
 extern struct pool pf_state_scrub_pl;
@@ -2191,6 +2376,17 @@ extern struct pool pf_state_scrub_pl;
 extern struct pool pf_altq_pl;
 #endif /* PF_ALTQ */
 extern struct pool pf_app_state_pl;
+=======
+__private_extern__ struct pool pf_src_tree_pl, pf_rule_pl;
+__private_extern__ struct pool pf_state_pl, pf_state_key_pl, pf_pooladdr_pl;
+__private_extern__ struct pool pf_state_scrub_pl;
+#if ALTQ
+__private_extern__ struct pool pf_altq_pl;
+#endif /* ALTQ */
+#ifndef NO_APPLE_EXTENSIONS
+__private_extern__ struct pool pf_app_state_pl;
+#endif /* !NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 
 extern struct thread *pf_purge_thread;
 
@@ -2234,6 +2430,10 @@ __private_extern__ void pf_addr_inc(struct pf_addr *, sa_family_t);
 
 __private_extern__ struct mbuf *pf_lazy_makewritable(struct pf_pdesc *,
     struct mbuf *, int);
+<<<<<<< HEAD
+=======
+#endif /* !NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 __private_extern__ void *pf_pull_hdr(struct mbuf *, int, void *, int,
     u_short *, u_short *, sa_family_t);
 __private_extern__ void pf_change_a(void *, u_int16_t *, u_int32_t, u_int8_t);
@@ -2248,6 +2448,10 @@ __private_extern__ int pf_match(u_int8_t, u_int32_t, u_int32_t, u_int32_t);
 __private_extern__ int pf_match_port(u_int8_t, u_int16_t, u_int16_t, u_int16_t);
 __private_extern__ int pf_match_xport(u_int8_t, u_int8_t, union pf_rule_xport *,
     union pf_state_xport *);
+<<<<<<< HEAD
+=======
+#endif /* !NO_APPLE_EXTENSIONS */
+>>>>>>> origin/10.6
 __private_extern__ int pf_match_uid(u_int8_t, uid_t, uid_t, uid_t);
 __private_extern__ int pf_match_gid(u_int8_t, gid_t, gid_t, gid_t);
 

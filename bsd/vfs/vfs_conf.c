@@ -101,8 +101,13 @@ struct mount *rootfs;
 struct vnode *rootvnode;
 
 #ifdef CONFIG_IMGSRC_ACCESS
+<<<<<<< HEAD
 struct vnode *imgsrc_rootvnodes[MAX_IMAGEBOOT_NESTING];	/* [0] -> source volume, [1] -> first disk image */
 #endif /* CONFIG_IMGSRC_ACCESS */
+=======
+struct vnode *imgsrc_rootvnode;
+#endif /* IMGSRC_ACESS */
+>>>>>>> origin/10.6
 
 int (*mountroot)(void) = NULL;
 

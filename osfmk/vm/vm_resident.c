@@ -128,9 +128,15 @@
 boolean_t	hibernate_cleaning_in_progress = FALSE;
 boolean_t	vm_page_free_verify = TRUE;
 
+<<<<<<< HEAD
 uint32_t	vm_lopage_free_count = 0;
 uint32_t	vm_lopage_free_limit = 0;
 uint32_t	vm_lopage_lowater    = 0;
+=======
+uint_t		vm_lopage_free_count = 0;
+uint_t		vm_lopage_free_limit = 0;
+uint_t		vm_lopage_lowater    = 0;
+>>>>>>> origin/10.6
 boolean_t	vm_lopage_refill = FALSE;
 boolean_t	vm_lopage_needed = FALSE;
 
@@ -356,9 +362,13 @@ unsigned int	vm_page_throttled_count;
 unsigned int	vm_page_speculative_count;
 
 unsigned int	vm_page_wire_count;
+<<<<<<< HEAD
 unsigned int	vm_page_stolen_count;
 unsigned int	vm_page_wire_count_initial;
 unsigned int	vm_page_pages_initial;
+=======
+unsigned int	vm_page_wire_count_initial;
+>>>>>>> origin/10.6
 unsigned int	vm_page_gobble_count = 0;
 
 #define	VM_PAGE_WIRE_COUNT_WARNING	0
@@ -380,11 +390,14 @@ unsigned int	vm_page_speculative_created = 0;
 unsigned int	vm_page_speculative_used = 0;
 #endif
 
+<<<<<<< HEAD
 queue_head_t    vm_page_queue_cleaned;
 
 unsigned int	vm_page_cleaned_count = 0;
 unsigned int	vm_pageout_enqueued_cleaned = 0;
 
+=======
+>>>>>>> origin/10.6
 uint64_t	max_valid_dma_address = 0xffffffffffffffffULL;
 ppnum_t		max_valid_low_ppnum = 0xffffffff;
 
@@ -533,6 +546,11 @@ vm_page_init_local_q()
 	}
 }
 
+
+uint64_t initial_max_mem;
+int initial_wire_count;
+int initial_free_count;
+int initial_lopage_count;
 
 /*
  *	vm_page_bootstrap:
@@ -806,7 +824,16 @@ vm_page_bootstrap(
 	assert((unsigned int) atop_64(max_mem) == atop_64(max_mem));
 	vm_page_wire_count = ((unsigned int) atop_64(max_mem)) - vm_page_free_count - vm_lopage_free_count;	/* initial value */
 	vm_page_wire_count_initial = vm_page_wire_count;
+<<<<<<< HEAD
 	vm_page_pages_initial = vm_page_pages;
+=======
+	vm_page_free_count_minimum = vm_page_free_count;
+>>>>>>> origin/10.6
+
+	initial_max_mem = max_mem;
+	initial_wire_count = vm_page_wire_count;
+	initial_free_count = vm_page_free_count;
+	initial_lopage_count = vm_lopage_free_count;
 
 	printf("vm_page_bootstrap: %d free pages and %d wired pages\n",
 	       vm_page_free_count, vm_page_wire_count);
@@ -901,6 +928,7 @@ pmap_startup(
 	unsigned int i, npages, pages_initialized, fill, fillval;
 	ppnum_t		phys_page;
 	addr64_t	tmpaddr;
+<<<<<<< HEAD
 
 
 #if    defined(__LP64__)
@@ -917,6 +945,8 @@ pmap_startup(
 	if (virtual_space_start != virtual_space_end)
 		virtual_space_start = round_page(virtual_space_start);
 #endif
+=======
+>>>>>>> origin/10.6
 
 	/*
 	 *	We calculate how many page frames we will have
@@ -966,6 +996,7 @@ pmap_startup(
 	 * trapping uninitialized memory usage.
 =======
 	
+<<<<<<< HEAD
 
 	/*
 	 * if vm_lopage_poolsize is non-zero, than we need to reserve
@@ -983,6 +1014,8 @@ pmap_startup(
 #endif
 	if (fill)
 		kprintf("Filling vm_pages with pattern: 0x%x\n", fillval);
+=======
+>>>>>>> origin/10.6
 	// -debug code remove
 	if (2 == vm_himemory_mode) {
 		// free low -> high so high is preferred
@@ -1121,9 +1154,14 @@ vm_page_create(
 			== VM_PAGE_NULL)
 			vm_page_more_fictitious();
 
+<<<<<<< HEAD
 		m->fictitious = FALSE;
 		pmap_clear_noencrypt(phys_page);
 
+=======
+		vm_page_init(m, phys_page, FALSE);
+		pmap_clear_noencrypt(phys_page);
+>>>>>>> origin/10.6
 		vm_page_pages++;
 		vm_page_release(m);
 	}
@@ -2025,6 +2063,7 @@ vm_page_init(
 {
 	assert(phys_page);
 
+<<<<<<< HEAD
 #if	DEBUG
 	if ((phys_page != vm_page_fictitious_addr) && (phys_page != vm_page_guard_addr)) {
 		if (!(pmap_valid_page(phys_page))) {
@@ -2053,6 +2092,10 @@ vm_page_init(
 	 */
 	pmap_clear_refmod(phys_page, VM_MEM_MODIFIED | VM_MEM_REFERENCED);
 #endif
+=======
+	*mem = vm_page_template;
+	mem->phys_page = phys_page;
+>>>>>>> origin/10.6
 	mem->lopage = lopage;
 }
 
@@ -2081,7 +2124,11 @@ vm_page_grab_fictitious_common(
 =======
 	m = (vm_page_t)zget(vm_page_zone);
 	if (m) {
+<<<<<<< HEAD
 		vm_page_init(m, vm_page_fictitious_addr);
+=======
+		vm_page_init(m, phys_addr, FALSE);
+>>>>>>> origin/10.6
 		m->fictitious = TRUE;
 	}
 >>>>>>> origin/10.0
@@ -2195,6 +2242,7 @@ void vm_page_more_fictitious(void)
 		vm_page_wait(THREAD_UNINT);
 		return;
 	}
+<<<<<<< HEAD
 
 <<<<<<< HEAD
 	zcram(vm_page_zone, addr, PAGE_SIZE);
@@ -2222,6 +2270,20 @@ void vm_page_more_fictitious(void)
 	real_m->fictitious = TRUE;
 >>>>>>> origin/10.1
 
+=======
+	/*
+	 * Initialize as many vm_page_t's as will fit on this page. This
+	 * depends on the zone code disturbing ONLY the first item of
+	 * each zone element.
+	 */
+	m = (vm_page_t)addr;
+	for (i = PAGE_SIZE/sizeof(struct vm_page); i > 0; i--) {
+		vm_page_init(m, vm_page_fictitious_addr, FALSE);
+		m->fictitious = TRUE;
+		m++;
+	}
+	zcram(vm_page_zone, (void *) addr, PAGE_SIZE);
+>>>>>>> origin/10.6
 	lck_mtx_unlock(&vm_page_alloc_lock);
 }
 
@@ -2270,12 +2332,16 @@ vm_page_grablo(void)
 	lck_mtx_lock_spin(&vm_page_queue_free_lock);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
         if ( !queue_empty(&vm_lopage_queue_free)) {
                 queue_remove_first(&vm_lopage_queue_free,
                                    mem,
                                    vm_page_t,
                                    pageq);
 		assert(vm_lopage_free_count);
+<<<<<<< HEAD
 =======
 	if (! queue_empty(&vm_lopage_queue_free)) {
 		queue_remove_first(&vm_lopage_queue_free,
@@ -2294,6 +2360,15 @@ vm_page_grablo(void)
 		if (vm_lopage_free_count < vm_lopage_lowater)
 			vm_lopage_refill = TRUE;
 
+=======
+
+                vm_lopage_free_count--;
+		vm_lopages_allocated_q++;
+
+		if (vm_lopage_free_count < vm_lopage_lowater)
+			vm_lopage_refill = TRUE;
+
+>>>>>>> origin/10.6
 		lck_mtx_unlock(&vm_page_queue_free_lock);
 	} else {
 		lck_mtx_unlock(&vm_page_queue_free_lock);
@@ -2321,14 +2396,16 @@ vm_page_grablo(void)
 	assert(!mem->free);
 	assert(!mem->pmapped);
 	assert(!mem->wpmapped);
+<<<<<<< HEAD
 	assert(!pmap_is_noencrypt(mem->phys_page));
+=======
+>>>>>>> origin/10.6
 
 	mem->pageq.next = NULL;
 	mem->pageq.prev = NULL;
 
 	return (mem);
 }
-
 
 /*
  *	vm_page_grab:
@@ -2594,7 +2671,10 @@ vm_page_release(
 	if (mem->free)
 		panic("vm_page_release");
 #endif
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.6
 	assert(mem->busy);
 	assert(!mem->laundry);
 	assert(mem->object == VM_OBJECT_NULL);
@@ -2603,7 +2683,11 @@ vm_page_release(
 	assert(mem->listq.next == NULL &&
 	       mem->listq.prev == NULL);
 	
+<<<<<<< HEAD
 	if ((mem->lopage == TRUE || vm_lopage_refill == TRUE) &&
+=======
+	if ((mem->lopage || vm_lopage_refill == TRUE) &&
+>>>>>>> origin/10.6
 	    vm_lopage_free_count < vm_lopage_free_limit &&
 	    mem->phys_page < max_valid_low_ppnum) {
 	        /*
@@ -2622,7 +2706,11 @@ vm_page_release(
 
 		mem->lopage = TRUE;
 	} else {	  
+<<<<<<< HEAD
 		mem->lopage = FALSE;
+=======
+	        mem->lopage = FALSE;
+>>>>>>> origin/10.6
 		mem->free = TRUE;
 
 	        color = mem->phys_page & vm_color_mask;
@@ -2960,7 +3048,27 @@ vm_page_free_prepare_object(
 		mem->fictitious = TRUE;
 		mem->phys_page = vm_page_fictitious_addr;
 	}
+<<<<<<< HEAD
 	if ( !mem->fictitious) {
+=======
+	if (mem->fictitious) {
+		/* Some of these may be unnecessary */
+		mem->gobbled = FALSE;
+		mem->busy = TRUE;
+		mem->absent = FALSE;
+		mem->error = FALSE;
+		mem->dirty = FALSE;
+		mem->precious = FALSE;
+		mem->reference = FALSE;
+		mem->encrypted = FALSE;
+		mem->encrypted_cleaning = FALSE;
+		mem->pmapped = FALSE;
+		mem->wpmapped = FALSE;
+		mem->reusable = FALSE;
+	} else {
+		if (mem->zero_fill == TRUE)
+		        VM_ZF_COUNT_DECR();
+>>>>>>> origin/10.6
 		vm_page_init(mem, mem->phys_page, mem->lopage);
 	}
 }
@@ -3025,9 +3133,29 @@ vm_page_free_list(
 
 	while (freeq) {
 
+<<<<<<< HEAD
 		pg_count = 0;
 		local_freeq = VM_PAGE_NULL;
 		mem = freeq;
+=======
+	for (color = 0; color < (signed) vm_colors; color++) {
+		queue_init(&free_list[color]);
+	}
+	
+	while (mem) {
+		assert(!mem->inactive);
+		assert(!mem->active);
+		assert(!mem->throttled);
+		assert(!mem->free);
+		assert(!mem->speculative);
+		assert(!VM_PAGE_WIRED(mem));
+		assert(mem->pageq.prev == NULL);
+
+		nxt = (vm_page_t)(mem->pageq.next);
+		
+		if (prepare_object == TRUE)
+			vm_page_free_prepare_object(mem, TRUE);
+>>>>>>> origin/10.6
 
 <<<<<<< HEAD
 		/*
@@ -3047,7 +3175,9 @@ vm_page_free_list(
 			assert(mem->pageq.prev == NULL);
 =======
 		if (!mem->fictitious) {
-			if (mem->phys_page <= vm_lopage_poolend && mem->phys_page >= vm_lopage_poolstart) {
+			if ((mem->lopage == TRUE || vm_lopage_refill == TRUE) &&
+			    vm_lopage_free_count < vm_lopage_free_limit &&
+			    mem->phys_page < max_valid_low_ppnum) {
 				mem->pageq.next = NULL;
 				vm_page_release(mem);
 			} else {
@@ -3422,6 +3552,9 @@ vm_page_unwire(
 		assert(mem->object != kernel_object);
 		assert(mem->pageq.next == NULL && mem->pageq.prev == NULL);
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
 
 		if (queueit == TRUE) {
 			if (mem->object->purgable == VM_PURGABLE_EMPTY) {
@@ -3429,6 +3562,7 @@ vm_page_unwire(
 			} else {
 				vm_page_activate(mem);
 			}
+<<<<<<< HEAD
 		}
 
 		VM_CHECK_MEMORYSTATUS;
@@ -3438,6 +3572,8 @@ vm_page_unwire(
 			vm_page_deactivate(mem);
 		} else {
 			vm_page_activate(mem);
+=======
+>>>>>>> origin/10.6
 		}
 #if CONFIG_EMBEDDED
 		{
@@ -3500,7 +3636,13 @@ vm_page_deactivate_internal(
 	 *	inactive queue.  Note wired pages should not have
 	 *	their reference bit cleared.
 	 */
+<<<<<<< HEAD
 	assert ( !(m->absent && !m->unusual));
+=======
+
+	if (m->absent && !m->unusual)
+		panic("vm_page_deactivate: %p absent", m);
+>>>>>>> origin/10.6
 
 	if (m->gobbled) {		/* can this happen? */
 		assert( !VM_PAGE_WIRED(m));
@@ -3544,11 +3686,18 @@ vm_page_deactivate_internal(
 		assert(m->pageq.next == NULL && m->pageq.prev == NULL);
 
 		if (!IP_VALID(memory_manager_default) &&
+<<<<<<< HEAD
 			m->dirty && m->object->internal &&
 			(m->object->purgable == VM_PURGABLE_DENY ||
 			 m->object->purgable == VM_PURGABLE_NONVOLATILE ||
 			 m->object->purgable == VM_PURGABLE_VOLATILE )) {
 >>>>>>> origin/10.5
+=======
+		    m->dirty && m->object->internal &&
+		    (m->object->purgable == VM_PURGABLE_DENY ||
+		     m->object->purgable == VM_PURGABLE_NONVOLATILE ||
+		     m->object->purgable == VM_PURGABLE_VOLATILE)) {
+>>>>>>> origin/10.6
 			queue_enter(&vm_page_queue_throttled, m, vm_page_t, pageq);
 			m->throttled = TRUE;
 			vm_page_throttled_count++;
@@ -3639,7 +3788,13 @@ vm_page_activate(
 #if DEBUG
 	lck_mtx_assert(&vm_page_queue_lock, LCK_MTX_ASSERT_OWNED);
 #endif
+<<<<<<< HEAD
 	assert( !(m->absent && !m->unusual));
+=======
+
+	if (m->absent && !m->unusual)
+		panic("vm_page_activate: %p absent", m);
+>>>>>>> origin/10.6
 
 	if (m->gobbled) {
 		assert( !VM_PAGE_WIRED(m));
@@ -3687,11 +3842,18 @@ vm_page_activate(
 		assert(!m->laundry);
 		assert(m->pageq.next == NULL && m->pageq.prev == NULL);
 		if (!IP_VALID(memory_manager_default) && 
+<<<<<<< HEAD
 			!m->fictitious && m->dirty && m->object->internal && 
 			(m->object->purgable == VM_PURGABLE_DENY ||
 			 m->object->purgable == VM_PURGABLE_NONVOLATILE ||
 			 m->object->purgable == VM_PURGABLE_VOLATILE )) {
 >>>>>>> origin/10.5
+=======
+		    !m->fictitious && m->dirty && m->object->internal && 
+		    (m->object->purgable == VM_PURGABLE_DENY ||
+		     m->object->purgable == VM_PURGABLE_NONVOLATILE ||
+		     m->object->purgable == VM_PURGABLE_VOLATILE)) {
+>>>>>>> origin/10.6
 			queue_enter(&vm_page_queue_throttled, m, vm_page_t, pageq);
 			m->throttled = TRUE;
 			vm_page_throttled_count++;
@@ -3746,7 +3908,14 @@ vm_page_speculate(
 	if (m->laundry || m->pageout_queue || m->private || m->fictitious || m->compressor)
 		return;
 
+<<<<<<< HEAD
 	vm_page_queues_remove(m);
+=======
+	if (m->absent && !m->unusual)
+		panic("vm_page_speculate: %p absent", m);
+
+	VM_PAGE_QUEUES_REMOVE(m);		
+>>>>>>> origin/10.6
 
 	if ( !VM_PAGE_WIRED(m)) {
 	        mach_timespec_t		ts;
@@ -4400,6 +4569,7 @@ vm_page_verify_free_list(
 		if ( ! m->busy )
 			panic("vm_page_verify_free_list(color=%u, npages=%u): page %p not busy\n",
 			      color, npages, m);
+<<<<<<< HEAD
 		if (color != (unsigned int) -1) {
 			if ((m->phys_page & vm_color_mask) != color)
 				panic("vm_page_verify_free_list(color=%u, npages=%u): page %p wrong color %u instead of %u\n",
@@ -4408,6 +4578,11 @@ vm_page_verify_free_list(
 				panic("vm_page_verify_free_list(color=%u, npages=%u): page %p not free\n",
 				      color, npages, m);
 		}
+=======
+		if ( color != (unsigned int) -1 && (m->phys_page & vm_color_mask) != color)
+			panic("vm_page_verify_free_list(color=%u, npages=%u): page %p wrong color %u instead of %u\n",
+			      color, npages, m, m->phys_page & vm_color_mask, color);
+>>>>>>> origin/10.6
 		++npages;
 		prev_m = m;
 	}
@@ -4424,12 +4599,19 @@ vm_page_verify_free_list(
 				if (other_color == color)
 					continue;
 				vm_page_verify_free_list(&vm_page_queue_free[other_color],
+<<<<<<< HEAD
 							 other_color, look_for_page, FALSE);
 			}
 			if (color == (unsigned int) -1) {
+=======
+							other_color, look_for_page, FALSE);
+			}
+			if (color != (unsigned int) -1) {
+>>>>>>> origin/10.6
 				vm_page_verify_free_list(&vm_lopage_queue_free,
 							 (unsigned int) -1, look_for_page, FALSE);
 			}
+
 			panic("vm_page_verify_free_list(color=%u)\n", color);
 		}
 		if (!expect_page && found_page) {
@@ -4445,7 +4627,10 @@ static void
 vm_page_verify_free_lists( void )
 {
 	unsigned int	color, npages, nlopages;
+<<<<<<< HEAD
 	boolean_t	toggle = TRUE;
+=======
+>>>>>>> origin/10.6
 
 	if (! vm_page_verify_all_free_lists_enabled)
 		return;
@@ -4469,6 +4654,7 @@ vm_page_verify_free_lists( void )
 
 	for( color = 0; color < vm_colors; color++ ) {
 		npages += vm_page_verify_free_list(&vm_page_queue_free[color],
+<<<<<<< HEAD
 						   color, VM_PAGE_NULL, FALSE);
 	}
 	nlopages = vm_page_verify_free_list(&vm_lopage_queue_free,
@@ -4481,8 +4667,18 @@ vm_page_verify_free_lists( void )
 
 	if (toggle == TRUE) {
 		vm_page_verify_this_free_list_enabled = FALSE;
+=======
+						color, VM_PAGE_NULL, FALSE);
+>>>>>>> origin/10.6
 	}
 
+	nlopages = vm_page_verify_free_list(&vm_lopage_queue_free,
+					    (unsigned int) -1,
+					    VM_PAGE_NULL, FALSE);
+	if (npages != vm_page_free_count || nlopages != vm_lopage_free_count)
+		panic("vm_page_verify_free_lists:  "
+		      "npages %u free_count %d nlopages %u lo_free_count %u",
+		      npages, vm_page_free_count, nlopages, vm_lopage_free_count);
 	lck_mtx_unlock(&vm_page_queue_free_lock);
 }
 
@@ -4685,7 +4881,11 @@ retry:
 			/* no more low pages... */
 			break;
 		}
+<<<<<<< HEAD
 		if (!npages & ((m->phys_page & pnum_mask) != 0)) {
+=======
+		if (!npages && ((m->phys_page & pnum_mask) != 0)) {
+>>>>>>> origin/10.6
 			/*
 			 * not aligned
 			 */
@@ -4873,7 +5073,12 @@ did_consider:
 
 				color = m1->phys_page & vm_color_mask;
 #if MACH_ASSERT
+<<<<<<< HEAD
 				vm_page_verify_free_list(&vm_page_queue_free[color], color, m1, TRUE);
+=======
+				vm_page_verify_free_list(&vm_page_queue_free[color],
+							 color, m1, TRUE);
+>>>>>>> origin/10.6
 #endif
 				queue_remove(&vm_page_queue_free[color],
 					     m1,
@@ -4882,7 +5087,12 @@ did_consider:
 				m1->pageq.next = NULL;
 				m1->pageq.prev = NULL;
 #if MACH_ASSERT
+<<<<<<< HEAD
 				vm_page_verify_free_list(&vm_page_queue_free[color], color, VM_PAGE_NULL, FALSE);
+=======
+				vm_page_verify_free_list(&vm_page_queue_free[color],
+							 color, VM_PAGE_NULL, FALSE);
+>>>>>>> origin/10.6
 #endif
 				/*
 				 * Clear the "free" bit so that this page
@@ -5319,6 +5529,7 @@ cpm_allocate(
 	*list = pages;
 	return KERN_SUCCESS;
 }
+<<<<<<< HEAD
 
 
 unsigned int vm_max_delayed_work_limit = DEFAULT_DELAYED_WORK_LIMIT;
@@ -5348,6 +5559,489 @@ vm_page_do_delayed_work(
 	vm_tag_t        tag,
 	struct vm_page_delayed_work *dwp,
 	int		dw_count)
+=======
+	
+
+kern_return_t
+vm_page_alloc_list(
+	int	page_count,
+	int	flags,
+	vm_page_t *list)
+{
+	vm_page_t	lo_page_list = VM_PAGE_NULL;
+	vm_page_t	mem;
+	int		i;
+
+	if ( !(flags & KMA_LOMEM))
+		panic("vm_page_alloc_list: called w/o KMA_LOMEM");
+
+	for (i = 0; i < page_count; i++) {
+
+		mem = vm_page_grablo();
+
+		if (mem == VM_PAGE_NULL) {
+			if (lo_page_list)
+				vm_page_free_list(lo_page_list, FALSE);
+
+			*list = VM_PAGE_NULL;
+
+			return (KERN_RESOURCE_SHORTAGE);
+		}
+		mem->pageq.next = (queue_entry_t) lo_page_list;
+		lo_page_list = mem;
+	}
+	*list = lo_page_list;
+
+	return (KERN_SUCCESS);
+}
+
+void
+vm_page_set_offset(vm_page_t page, vm_object_offset_t offset)
+{
+	page->offset = offset;
+}
+
+vm_page_t
+vm_page_get_next(vm_page_t page)
+{
+	return ((vm_page_t) page->pageq.next);
+}
+
+vm_object_offset_t
+vm_page_get_offset(vm_page_t page)
+{
+	return (page->offset);
+}
+
+ppnum_t
+vm_page_get_phys_page(vm_page_t page)
+{
+	return (page->phys_page);
+}
+	
+	
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+#if HIBERNATION
+
+static vm_page_t hibernate_gobble_queue;
+
+extern boolean_t (* volatile consider_buffer_cache_collect)(int);
+
+static int  hibernate_drain_pageout_queue(struct vm_pageout_queue *);
+static int  hibernate_flush_dirty_pages(void);
+static int  hibernate_flush_queue(queue_head_t *, int);
+static void hibernate_dirty_page(vm_page_t);
+
+void hibernate_flush_wait(void);
+void hibernate_mark_in_progress(void);
+void hibernate_clear_in_progress(void);
+
+
+struct hibernate_statistics {
+	int hibernate_considered;
+	int hibernate_reentered_on_q;
+	int hibernate_found_dirty;
+	int hibernate_skipped_cleaning;
+	int hibernate_skipped_transient;
+	int hibernate_skipped_precious;
+	int hibernate_queue_nolock;
+	int hibernate_queue_paused;
+	int hibernate_throttled;
+	int hibernate_throttle_timeout;
+	int hibernate_drained;
+	int hibernate_drain_timeout;
+	int cd_lock_failed;
+	int cd_found_precious;
+	int cd_found_wired;
+	int cd_found_busy;
+	int cd_found_unusual;
+	int cd_found_cleaning;
+	int cd_found_laundry;
+	int cd_found_dirty;
+	int cd_local_free;
+	int cd_total_free;
+	int cd_vm_page_wire_count;
+	int cd_pages;
+	int cd_discarded;
+	int cd_count_wire;
+} hibernate_stats;
+
+
+
+static int
+hibernate_drain_pageout_queue(struct vm_pageout_queue *q)
+{
+	wait_result_t	wait_result;
+
+	vm_page_lock_queues();
+
+	while (q->pgo_laundry) {
+
+		q->pgo_draining = TRUE;
+
+		assert_wait_timeout((event_t) (&q->pgo_laundry+1), THREAD_INTERRUPTIBLE, 5000, 1000*NSEC_PER_USEC);
+
+		vm_page_unlock_queues();
+
+		wait_result = thread_block(THREAD_CONTINUE_NULL);
+
+		if (wait_result == THREAD_TIMED_OUT) {
+			hibernate_stats.hibernate_drain_timeout++;
+			return (1);
+		}
+		vm_page_lock_queues();
+
+		hibernate_stats.hibernate_drained++;
+	}
+	vm_page_unlock_queues();
+
+	return (0);
+}
+
+static void
+hibernate_dirty_page(vm_page_t m)
+{
+	vm_object_t	object = m->object;
+        struct		vm_pageout_queue *q;
+
+#if DEBUG
+	lck_mtx_assert(&vm_page_queue_lock, LCK_MTX_ASSERT_OWNED);
+#endif
+	vm_object_lock_assert_exclusive(object);
+
+	/*
+	 * protect the object from collapse - 
+	 * locking in the object's paging_offset.
+	 */
+	vm_object_paging_begin(object);
+
+	m->list_req_pending = TRUE;
+	m->cleaning = TRUE;
+	m->busy = TRUE;
+
+	if (object->internal == TRUE)
+	        q = &vm_pageout_queue_internal;
+	else
+	        q = &vm_pageout_queue_external;
+
+        /* 
+	 * pgo_laundry count is tied to the laundry bit
+	 */
+	m->laundry = TRUE;
+	q->pgo_laundry++;
+
+	m->pageout_queue = TRUE;
+	queue_enter(&q->pgo_pending, m, vm_page_t, pageq);
+	
+	if (q->pgo_idle == TRUE) {
+	        q->pgo_idle = FALSE;
+	        thread_wakeup((event_t) &q->pgo_pending);
+	}
+}
+
+static int
+hibernate_flush_queue(queue_head_t *q, int qcount)
+{
+	vm_page_t	m;
+	vm_object_t	l_object = NULL;
+	vm_object_t	m_object = NULL;
+	int		refmod_state = 0;
+	int		try_failed_count = 0;
+	int		retval = 0;
+	int		current_run = 0;
+	struct	vm_pageout_queue *iq;
+	struct	vm_pageout_queue *eq;
+	struct	vm_pageout_queue *tq;
+
+
+	KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 4) | DBG_FUNC_START, q, qcount, 0, 0, 0);
+	
+	iq = &vm_pageout_queue_internal;
+	eq = &vm_pageout_queue_external;
+
+	vm_page_lock_queues();
+
+	while (qcount && !queue_empty(q)) {
+
+		if (current_run++ == 1000) {
+			if (hibernate_should_abort()) {
+				retval = 1;
+				break;
+			}
+			current_run = 0;
+		}
+
+		m = (vm_page_t) queue_first(q);
+		m_object = m->object;
+
+		/*
+		 * check to see if we currently are working
+		 * with the same object... if so, we've
+		 * already got the lock
+		 */
+		if (m_object != l_object) {
+		        /*
+			 * the object associated with candidate page is 
+			 * different from the one we were just working
+			 * with... dump the lock if we still own it
+			 */
+		        if (l_object != NULL) {
+			        vm_object_unlock(l_object);
+				l_object = NULL;
+			}
+			/*
+			 * Try to lock object; since we've alread got the
+			 * page queues lock, we can only 'try' for this one.
+			 * if the 'try' fails, we need to do a mutex_pause
+			 * to allow the owner of the object lock a chance to
+			 * run... 
+			 */
+			if ( !vm_object_lock_try_scan(m_object)) {
+
+				if (try_failed_count > 20) {
+					hibernate_stats.hibernate_queue_nolock++;
+
+					goto reenter_pg_on_q;
+				}
+				vm_pageout_scan_wants_object = m_object;
+
+				vm_page_unlock_queues();
+				mutex_pause(try_failed_count++);
+				vm_page_lock_queues();
+
+				hibernate_stats.hibernate_queue_paused++;
+				continue;
+			} else {
+				l_object = m_object;
+				vm_pageout_scan_wants_object = VM_OBJECT_NULL;
+			}
+		}
+		if ( !m_object->alive || m->encrypted_cleaning || m->cleaning || m->busy || m->absent || m->error) {
+			/*
+			 * page is not to be cleaned
+			 * put it back on the head of its queue
+			 */
+			if (m->cleaning)
+				hibernate_stats.hibernate_skipped_cleaning++;
+			else
+				hibernate_stats.hibernate_skipped_transient++;
+
+			goto reenter_pg_on_q;
+		}
+		if ( !m_object->pager_initialized && m_object->pager_created)
+			goto reenter_pg_on_q;
+			
+		if (m_object->copy == VM_OBJECT_NULL) {
+			if (m_object->purgable == VM_PURGABLE_VOLATILE || m_object->purgable == VM_PURGABLE_EMPTY) {
+				/*
+				 * let the normal hibernate image path
+				 * deal with these
+				 */
+				goto reenter_pg_on_q;
+			}
+		}
+		if ( !m->dirty && m->pmapped) {
+		        refmod_state = pmap_get_refmod(m->phys_page);
+
+			if ((refmod_state & VM_MEM_MODIFIED))
+				m->dirty = TRUE;
+		} else
+			refmod_state = 0;
+
+		if ( !m->dirty) {
+			/*
+			 * page is not to be cleaned
+			 * put it back on the head of its queue
+			 */
+			if (m->precious)
+				hibernate_stats.hibernate_skipped_precious++;
+
+			goto reenter_pg_on_q;
+		}
+		tq = NULL;
+
+		if (m_object->internal) {
+			if (VM_PAGE_Q_THROTTLED(iq))
+				tq = iq;
+		} else if (VM_PAGE_Q_THROTTLED(eq))
+			tq = eq;
+
+		if (tq != NULL) {
+			wait_result_t	wait_result;
+			int		wait_count = 5;
+
+		        if (l_object != NULL) {
+			        vm_object_unlock(l_object);
+				l_object = NULL;
+			}
+			vm_pageout_scan_wants_object = VM_OBJECT_NULL;
+
+			tq->pgo_throttled = TRUE;
+
+			while (retval == 0) {
+
+				assert_wait_timeout((event_t) &tq->pgo_laundry, THREAD_INTERRUPTIBLE, 1000, 1000*NSEC_PER_USEC);
+
+			vm_page_unlock_queues();
+
+			wait_result = thread_block(THREAD_CONTINUE_NULL);
+
+				vm_page_lock_queues();
+
+				if (hibernate_should_abort())
+					retval = 1;
+
+				if (wait_result != THREAD_TIMED_OUT)
+					break;
+				
+				if (--wait_count == 0) {
+				hibernate_stats.hibernate_throttle_timeout++;
+				retval = 1;
+			}
+			}
+			if (retval)
+				break;
+
+			hibernate_stats.hibernate_throttled++;
+
+			continue;
+		}
+		VM_PAGE_QUEUES_REMOVE(m);
+
+		hibernate_dirty_page(m);
+
+		hibernate_stats.hibernate_found_dirty++;
+
+		goto next_pg;
+
+reenter_pg_on_q:
+		queue_remove(q, m, vm_page_t, pageq);
+		queue_enter(q, m, vm_page_t, pageq);
+
+		hibernate_stats.hibernate_reentered_on_q++;
+next_pg:
+		hibernate_stats.hibernate_considered++;
+
+		qcount--;
+		try_failed_count = 0;
+	}
+	if (l_object != NULL) {
+		vm_object_unlock(l_object);
+		l_object = NULL;
+	}
+    vm_pageout_scan_wants_object = VM_OBJECT_NULL;
+
+	vm_page_unlock_queues();
+
+	KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 4) | DBG_FUNC_END, hibernate_stats.hibernate_found_dirty, retval, 0, 0, 0);
+
+	return (retval);
+}
+
+
+static int
+hibernate_flush_dirty_pages()
+{
+	struct vm_speculative_age_q	*aq;
+	uint32_t	i;
+
+	bzero(&hibernate_stats, sizeof(struct hibernate_statistics));
+
+	if (vm_page_local_q) {
+		for (i = 0; i < vm_page_local_q_count; i++)
+			vm_page_reactivate_local(i, TRUE, FALSE);
+	}
+
+	for (i = 0; i <= VM_PAGE_MAX_SPECULATIVE_AGE_Q; i++) {
+		int		qcount;
+		vm_page_t	m;
+
+		aq = &vm_page_queue_speculative[i];
+
+		if (queue_empty(&aq->age_q))
+			continue;
+		qcount = 0;
+
+		vm_page_lockspin_queues();
+
+		queue_iterate(&aq->age_q,
+			      m,
+			      vm_page_t,
+			      pageq)
+		{
+			qcount++;
+		}
+		vm_page_unlock_queues();
+
+		if (qcount) {
+			if (hibernate_flush_queue(&aq->age_q, qcount))
+				return (1);
+		}
+	}
+	if (hibernate_flush_queue(&vm_page_queue_active, vm_page_active_count))
+		return (1);
+	if (hibernate_flush_queue(&vm_page_queue_inactive, vm_page_inactive_count - vm_zf_queue_count))
+		return (1);
+	if (hibernate_flush_queue(&vm_page_queue_zf, vm_zf_queue_count))
+		return (1);
+
+	if (hibernate_drain_pageout_queue(&vm_pageout_queue_internal))
+		return (1);
+	return (hibernate_drain_pageout_queue(&vm_pageout_queue_external));
+}
+
+
+extern void IOSleep(unsigned int);
+extern int sync_internal(void);
+
+int
+hibernate_flush_memory()
+{
+	int	retval;
+
+	KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 3) | DBG_FUNC_START, vm_page_free_count, 0, 0, 0, 0);
+
+	IOSleep(2 * 1000);
+
+	KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 3) | DBG_FUNC_NONE, vm_page_free_count, 0, 0, 0, 0);
+
+	if ((retval = hibernate_flush_dirty_pages()) == 0) {
+		if (consider_buffer_cache_collect != NULL) {
+
+			KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 7) | DBG_FUNC_START, vm_page_wire_count, 0, 0, 0, 0);
+			
+			sync_internal();
+			(void)(*consider_buffer_cache_collect)(1);
+			consider_zone_gc(1);
+
+			KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 7) | DBG_FUNC_END, vm_page_wire_count, 0, 0, 0, 0);
+		}
+	}
+	KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 3) | DBG_FUNC_END, vm_page_free_count, hibernate_stats.hibernate_found_dirty, retval, 0, 0);
+
+    HIBPRINT("hibernate_flush_memory() considered(%d) reentered_on_q(%d) found_dirty(%d)\n",
+                hibernate_stats.hibernate_considered,
+                hibernate_stats.hibernate_reentered_on_q,
+                hibernate_stats.hibernate_found_dirty);
+    HIBPRINT("   skipped_cleaning(%d) skipped_transient(%d) skipped_precious(%d) queue_nolock(%d)\n",
+                hibernate_stats.hibernate_skipped_cleaning,
+                hibernate_stats.hibernate_skipped_transient,
+                hibernate_stats.hibernate_skipped_precious,
+                hibernate_stats.hibernate_queue_nolock);
+    HIBPRINT("   queue_paused(%d) throttled(%d) throttle_timeout(%d) drained(%d) drain_timeout(%d)\n",
+                hibernate_stats.hibernate_queue_paused,
+                hibernate_stats.hibernate_throttled,
+                hibernate_stats.hibernate_throttle_timeout,
+                hibernate_stats.hibernate_drained,
+                hibernate_stats.hibernate_drain_timeout);
+
+	return (retval);
+}
+
+static void
+hibernate_page_list_zero(hibernate_page_list_t *list)
+>>>>>>> origin/10.6
 {
 	int		j;
 	vm_page_t	m;
@@ -5532,6 +6226,7 @@ vm_page_get_offset(vm_page_t page)
 	return (page->offset);
 }
 
+<<<<<<< HEAD
 ppnum_t
 vm_page_get_phys_page(vm_page_t page)
 {
@@ -5606,6 +6301,70 @@ static int
 hibernate_drain_pageout_queue(struct vm_pageout_queue *q)
 {
 	wait_result_t	wait_result;
+=======
+    do
+    {
+        if (m->private)
+            panic("hibernate_consider_discard: private");
+
+        if (!vm_object_lock_try(m->object)) {
+	    hibernate_stats.cd_lock_failed++;
+            break;
+	}
+        object = m->object;
+
+	if (VM_PAGE_WIRED(m)) {
+	    hibernate_stats.cd_found_wired++;
+            break;
+	}
+        if (m->precious) {
+	    hibernate_stats.cd_found_precious++;
+            break;
+	}
+        if (m->busy || !object->alive) {
+           /*
+            *	Somebody is playing with this page.
+            */
+   	    hibernate_stats.cd_found_busy++;
+	    break;
+	}
+        if (m->absent || m->unusual || m->error) {
+           /*
+            * If it's unusual in anyway, ignore it
+            */
+	    hibernate_stats.cd_found_unusual++;
+            break;
+	}
+        if (m->cleaning) {
+	    hibernate_stats.cd_found_cleaning++;
+            break;
+	}
+	if (m->laundry || m->list_req_pending) {
+	    hibernate_stats.cd_found_laundry++;
+            break;
+	}
+        if (!m->dirty)
+        {
+            refmod_state = pmap_get_refmod(m->phys_page);
+        
+            if (refmod_state & VM_MEM_REFERENCED)
+                m->reference = TRUE;
+            if (refmod_state & VM_MEM_MODIFIED)
+                m->dirty = TRUE;
+        }
+   
+        /*
+         * If it's clean or purgeable we can discard the page on wakeup.
+         */
+        discard = (!m->dirty) 
+		    || (VM_PURGABLE_VOLATILE == object->purgable)
+		    || (VM_PURGABLE_EMPTY    == object->purgable);
+
+	if (discard == FALSE)
+	    hibernate_stats.cd_found_dirty++;
+    }
+    while (FALSE);
+>>>>>>> origin/10.6
 
 	vm_page_lock_queues();
 
@@ -5661,7 +6420,13 @@ hibernate_flush_queue(queue_head_t *q, int qcount)
 
 	vm_page_lock_queues();
 
+<<<<<<< HEAD
 	while (qcount && !queue_empty(q)) {
+=======
+    HIBLOG("hibernate_page_list_setall start %p, %p\n", page_list, page_list_wired);
+
+    KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 8) | DBG_FUNC_START, count_wire, 0, 0, 0, 0);
+>>>>>>> origin/10.6
 
 		if (current_run++ == 1000) {
 			if (hibernate_should_abort()) {
@@ -5674,6 +6439,7 @@ hibernate_flush_queue(queue_head_t *q, int qcount)
 		m = (vm_page_t) queue_first(q);
 		m_object = m->object;
 
+<<<<<<< HEAD
 		/*
 		 * check to see if we currently are working
 		 * with the same object... if so, we've
@@ -5707,6 +6473,71 @@ hibernate_flush_queue(queue_head_t *q, int qcount)
 				vm_page_unlock_queues();
 				mutex_pause(try_failed_count++);
 				vm_page_lock_queues();
+=======
+    hibernate_stats.cd_vm_page_wire_count = vm_page_wire_count;
+    hibernate_stats.cd_pages = pages;
+
+    if (vm_page_local_q) {
+	    for (i = 0; i < vm_page_local_q_count; i++)
+		    vm_page_reactivate_local(i, TRUE, TRUE);
+    }
+
+    m = (vm_page_t) hibernate_gobble_queue;
+    while(m)
+    {
+	pages--;
+	count_wire--;
+	hibernate_page_bitset(page_list,       TRUE, m->phys_page);
+	hibernate_page_bitset(page_list_wired, TRUE, m->phys_page);
+	m = (vm_page_t) m->pageq.next;
+    }
+#ifndef PPC
+    for( i = 0; i < real_ncpus; i++ )
+    {
+	if (cpu_data_ptr[i] && cpu_data_ptr[i]->cpu_processor)
+	{
+	    for (m = PROCESSOR_DATA(cpu_data_ptr[i]->cpu_processor, free_pages); m; m = (vm_page_t)m->pageq.next)
+	    {
+		pages--;
+		count_wire--;
+		hibernate_page_bitset(page_list,       TRUE, m->phys_page);
+		hibernate_page_bitset(page_list_wired, TRUE, m->phys_page);
+
+		hibernate_stats.cd_local_free++;
+		hibernate_stats.cd_total_free++;
+	    }
+	}
+    }
+#endif
+    for( i = 0; i < vm_colors; i++ )
+    {
+	queue_iterate(&vm_page_queue_free[i],
+		      m,
+		      vm_page_t,
+		      pageq)
+	{
+	    pages--;
+	    count_wire--;
+	    hibernate_page_bitset(page_list,       TRUE, m->phys_page);
+	    hibernate_page_bitset(page_list_wired, TRUE, m->phys_page);
+
+	    hibernate_stats.cd_total_free++;
+	}
+    }
+
+    queue_iterate(&vm_lopage_queue_free,
+		  m,
+		  vm_page_t,
+		  pageq)
+    {
+	pages--;
+	count_wire--;
+	hibernate_page_bitset(page_list,       TRUE, m->phys_page);
+	hibernate_page_bitset(page_list_wired, TRUE, m->phys_page);
+
+	hibernate_stats.cd_total_free++;
+    }
+>>>>>>> origin/10.6
 
 				hibernate_stats.hibernate_queue_paused++;
 				continue;
@@ -6705,6 +7536,9 @@ hibernate_page_list_discard(hibernate_page_list_t * page_list)
         vm_page_unlock_queues();
 #endif  /* MACH_ASSERT || DEBUG */
 
+    hibernate_stats.cd_count_wire = count_wire;
+    hibernate_stats.cd_discarded = count_discard_active + count_discard_inactive + count_discard_purgeable + count_discard_speculative;
+
     clock_get_uptime(&end);
     absolutetime_to_nanoseconds(end - start, &nsec);
     HIBLOG("hibernate_page_list_discard time: %qd ms, discarded act %d inact %d purgeable %d spec %d cleaned %d\n",
@@ -6818,6 +7652,7 @@ hibernate_mark_as_unneeded(addr64_t saddr, addr64_t eaddr, hibernate_page_list_t
 
 		paddr = pmap_find_phys(kernel_pmap, addr);
 
+<<<<<<< HEAD
 		assert(paddr);
 
 		hibernate_page_bitset(page_list,       TRUE, paddr);
@@ -6826,6 +7661,11 @@ hibernate_mark_as_unneeded(addr64_t saddr, addr64_t eaddr, hibernate_page_list_t
 		mark_as_unneeded_pages++;
 	}
 	return (mark_as_unneeded_pages);
+=======
+    *pagesOut = pages - count_discard_active - count_discard_inactive - count_discard_purgeable - count_discard_speculative;
+
+    KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 8) | DBG_FUNC_END, count_wire, *pagesOut, 0, 0, 0);
+>>>>>>> origin/10.6
 }
 
 
@@ -7306,7 +8146,10 @@ hibernate_teardown_vm_structs(hibernate_page_list_t *page_list, hibernate_page_l
 	return (mark_as_unneeded_pages);
 }
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.6
 #endif /* HIBERNATION */
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */

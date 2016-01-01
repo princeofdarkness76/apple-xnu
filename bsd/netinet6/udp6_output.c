@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2008-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -158,6 +162,7 @@ udp6_output(struct in6pcb *in6p, struct mbuf *m, struct sockaddr *addr6,
 	int flags;
 	struct sockaddr_in6 tmp;
 	struct	in6_addr storage;
+<<<<<<< HEAD
 	mbuf_svc_class_t msc = MBUF_SC_UNSPEC;
 	struct ip6_out_args ip6oa =
 	    { IFSCOPE_NONE, { 0 }, IP6OAF_SELECT_SRCIF, 0 };
@@ -173,6 +178,11 @@ udp6_output(struct in6pcb *in6p, struct mbuf *m, struct sockaddr *addr6,
 		error = ENOBUFS;
 		goto release;
 	}
+=======
+#if PKT_PRIORITY
+	mbuf_traffic_class_t mtc = MBUF_TC_NONE;
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 
 	if (in6p->inp_flags & INP_BOUND_IF) {
 		ip6oa.ip6oa_boundif = in6p->inp_boundifp->if_index;
@@ -186,9 +196,17 @@ udp6_output(struct in6pcb *in6p, struct mbuf *m, struct sockaddr *addr6,
 		ip6oa.ip6oa_flags |= IP6OAF_AWDL_UNRESTRICTED;
 
 	if (control) {
+<<<<<<< HEAD
 		msc = mbuf_service_class_from_control(control);
 		if ((error = ip6_setpktopts(control, &opt,
 		    NULL, IPPROTO_UDP)) != 0)
+=======
+#if PKT_PRIORITY
+		mtc = mbuf_traffic_class_from_control(control);
+#endif /* PKT_PRIORITY */
+
+		if ((error = ip6_setpktoptions(control, &opt, priv, 0)) != 0)
+>>>>>>> origin/10.6
 			goto release;
 		optp = &opt;
 	} else
@@ -371,6 +389,7 @@ udp6_output(struct in6pcb *in6p, struct mbuf *m, struct sockaddr *addr6,
 			goto release;
 		}
 #endif /*IPSEC*/
+<<<<<<< HEAD
 
 		/* In case of IPv4-mapped address used in previous send */
 		if (ROUTE_UNUSABLE(&in6p->in6p_route) ||
@@ -497,6 +516,29 @@ udp6_output(struct in6pcb *in6p, struct mbuf *m, struct sockaddr *addr6,
 		    (INP_NO_CELLULAR(in6p) || INP_NO_EXPENSIVE(in6p)))
 			soevent(in6p->inp_socket, (SO_FILT_HINT_LOCKED|
 			    SO_FILT_HINT_IFDENIED));
+=======
+		m->m_pkthdr.socket_id = get_socket_id(in6p->in6p_socket);
+		
+#if PKT_PRIORITY
+		set_traffic_class(m, in6p->in6p_socket, mtc);
+#endif /* PKT_PRIORITY */
+		error = ip6_output(m, in6p->in6p_outputopts, &in6p->in6p_route,
+		    flags, in6p->in6p_moptions, NULL, 0);
+
+#if IFNET_ROUTE_REFCNT
+		/*
+		 * Always discard the cached route for unconnected socket
+		 * or if it is a multicast route.
+		 */
+		if (in6p->in6p_route.ro_rt != NULL &&
+		    ((in6p->in6p_route.ro_rt->rt_flags & RTF_MULTICAST) ||
+		    in6p->in6p_socket == NULL ||
+		    in6p->in6p_socket->so_state != SS_ISCONNECTED)) {
+			rtfree(in6p->in6p_route.ro_rt);
+			in6p->in6p_route.ro_rt = NULL;
+		}
+#endif /* IFNET_ROUTE_REFCNT */
+>>>>>>> origin/10.6
 		break;
 	case AF_INET:
 		error = EAFNOSUPPORT;

@@ -42,8 +42,11 @@
 #include <IOKit/IOMapper.h>
 #include <IOKit/IODMACommand.h>
 #include <libkern/c++/OSData.h>
+<<<<<<< HEAD
 #include <libkern/OSDebug.h>
 #include "IOKitKernelInternal.h"
+=======
+>>>>>>> origin/10.6
 
 __BEGIN_DECLS
 extern ppnum_t pmap_find_phys(pmap_t pmap, addr64_t va);

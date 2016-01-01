@@ -139,6 +139,7 @@ enum {
 #endif
     kIOMemoryThreadSafe		= 0x00100000,	// Shared with Buffer MD
 <<<<<<< HEAD
+<<<<<<< HEAD
     kIOMemoryClearEncrypt	= 0x00200000,	// Shared with Buffer MD
 
 #ifdef XNU_KERNEL_PRIVATE
@@ -148,6 +149,9 @@ enum {
 #endif
 =======
 >>>>>>> origin/10.5
+=======
+    kIOMemoryClearEncrypt	= 0x00200000,	// Shared with Buffer MD
+>>>>>>> origin/10.6
 };
 
 #define kIOMapperSystem	((IOMapper *) 0)

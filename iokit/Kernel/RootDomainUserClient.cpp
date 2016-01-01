@@ -227,6 +227,23 @@ IOReturn RootDomainUserClient::secureGetSystemSleepType(
     return ret;
 }
 
+IOReturn RootDomainUserClient::secureSetUserAssertionLevels(
+    uint32_t assertBits )
+{
+    int                     admin_priv = 0;
+    IOReturn                ret = kIOReturnNotPrivileged;
+    
+    ret = clientHasPrivilege(fOwningTask, kIOClientPrivilegeAdministrator);
+    admin_priv = (kIOReturnSuccess == ret);
+
+    if (admin_priv && fOwner) {
+        ret = fOwner->setPMAssertionUserLevels(assertBits);
+    } else {
+        ret = kIOReturnNotPrivileged;
+    }
+    return kIOReturnSuccess;
+}
+
 IOReturn RootDomainUserClient::clientClose( void )
 {
     detach(fOwner);
@@ -246,6 +263,7 @@ IOReturn RootDomainUserClient::externalMethod(
     OSObject * target __unused,
     void * reference __unused )
 {
+<<<<<<< HEAD
     IOReturn    ret = kIOReturnBadArgument;
 
     switch (selector)
@@ -372,6 +390,53 @@ IOReturn RootDomainUserClient::externalMethod(
         default:
             // bad selector
             return kIOReturnBadArgument;
+=======
+    static const IOExternalMethod sMethods[] = {
+        {   // kPMSetAggressiveness, 0
+            (IOService *)1, (IOMethod)&RootDomainUserClient::secureSetAggressiveness, kIOUCScalarIScalarO, 2, 1
+        },
+        {   // kPMGetAggressiveness, 1
+            0, (IOMethod)&IOPMrootDomain::getAggressiveness, kIOUCScalarIScalarO, 1, 1
+        },
+        {   // kPMSleepSystem, 2
+            (IOService *)1, (IOMethod)&RootDomainUserClient::secureSleepSystem, kIOUCScalarIScalarO, 0, 1
+        },
+        {   // kPMAllowPowerChange, 3
+            0, (IOMethod)&IOPMrootDomain::allowPowerChange, kIOUCScalarIScalarO, 1, 0
+        },
+        {   // kPMCancelPowerChange, 4
+            0, (IOMethod)&IOPMrootDomain::cancelPowerChange, kIOUCScalarIScalarO, 1, 0
+        },
+        {   // kPMShutdownSystem, 5
+            0, (IOMethod)&IOPMrootDomain::shutdownSystem, kIOUCScalarIScalarO, 0, 0
+        },
+        {   // kPMRestartSystem, 6
+            0, (IOMethod)&IOPMrootDomain::restartSystem, kIOUCScalarIScalarO, 0, 0
+        },
+        {   // kPMSleepSystemOptions, 7
+            (IOService *)1, (IOMethod)&RootDomainUserClient::secureSleepSystemOptions, 
+            kIOUCStructIStructO, kIOUCVariableStructureSize, sizeof(uint32_t)
+        },
+        {   // kPMSetMaintenanceWakeCalendar, 8
+            (IOService *)1, (IOMethod)&RootDomainUserClient::secureSetMaintenanceWakeCalendar,
+            kIOUCStructIStructO, sizeof(IOPMCalendarStruct), sizeof(uint32_t)
+        },
+        {   // kPMSetUserAssertionLevels, 9
+            (IOService *)1, (IOMethod)&RootDomainUserClient::secureSetUserAssertionLevels,
+            kIOUCScalarIScalarO, 1, 0
+        }
+    };
+    
+    if(index >= kNumPMMethods)
+    	return NULL;
+    else {
+        if (sMethods[index].object)
+            *targetP = this;
+        else
+            *targetP = fOwner;
+
+        return (IOExternalMethod *)&sMethods[index];
+>>>>>>> origin/10.6
     }
 
     return ret;

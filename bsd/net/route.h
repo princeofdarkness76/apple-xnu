@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -158,6 +162,7 @@ struct rt_metrics {
  */
 #define	RTM_RTTUNIT	1000000	/* units for rtt, rttvar, as units per sec */
 
+<<<<<<< HEAD
 #ifdef PRIVATE
 struct route_old {
 	void		*ro_rt;
@@ -225,6 +230,17 @@ struct route {
 
 #define	ROUTE_RELEASE_LOCKED(_ro)	_ROUTE_RELEASE_COMMON(_ro, TRUE)
 #define	ROUTE_RELEASE(_ro)		_ROUTE_RELEASE_COMMON(_ro, FALSE)
+=======
+#ifdef KERNEL_PRIVATE
+/*
+ * New expiry value (in seconds) when dealing with interfaces which implement
+ * the if_want_aggressive_drain behavior.  Otherwise the event mechanism wouldn't
+ * fire quick enough to cause any sort of significant gains in performance.
+ */
+#define RT_IF_IDLE_EXPIRE_TIMEOUT	30
+#define RT_IF_IDLE_DRAIN_INTERVAL	10
+#endif /* KERNEL_PRIVATE */
+>>>>>>> origin/10.6
 
 /*
  * We distinguish between routes to hosts and routes to networks,
@@ -246,6 +262,7 @@ struct rtentry {
 	 * See bsd/net/route.c for synchronization notes.
 	 */
 	decl_lck_mtx_data(, rt_lock);	/* lock for routing entry */
+<<<<<<< HEAD
 	uint32_t rt_refcnt;		/* # held references */
 	uint32_t rt_flags;		/* up/down?, host/net */
 	uint32_t rt_genid;		/* route generation id */
@@ -272,6 +289,11 @@ struct rtentry {
 	uint64_t rt_expire;		/* expiration time in uptime seconds */
 	uint64_t base_calendartime;	/* calendar time upon entry creation */
 	uint64_t base_uptime;		/* uptime upon entry creation */
+=======
+#if IFNET_ROUTE_REFCNT
+	void	(*rt_if_ref_fn)(struct ifnet *, int); /* interface ref func */
+#endif /* IFNET_ROUTE_REFCNT */
+>>>>>>> origin/10.6
 };
 
 /*
@@ -332,8 +354,14 @@ struct rtentry {
 	"\33IFREF\34PROXY\35ROUTER"
 =======
 #define RTF_IFSCOPE	0x1000000	/* has valid interface scope */
+<<<<<<< HEAD
 					/* 0x2000000 and up unassigned */
 >>>>>>> origin/10.5
+=======
+#define RTF_CONDEMNED	0x2000000	/* defunct; no longer modifiable */
+#define RTF_IFREF	0x4000000	/* route holds a ref to interface */
+					/* 0x8000000 and up unassigned */
+>>>>>>> origin/10.6
 
 /*
  * Routing statistics.
@@ -671,6 +699,7 @@ extern unsigned int sin_get_ifscope(struct sockaddr *);
 extern unsigned int sin6_get_ifscope(struct sockaddr *);
 extern void rt_lock(struct rtentry *, boolean_t);
 extern void rt_unlock(struct rtentry *);
+<<<<<<< HEAD
 extern struct sockaddr *rtm_scrub(int, int, struct sockaddr *,
     struct sockaddr *, void *, uint32_t, kauth_cred_t *);
 extern boolean_t rt_validate(struct rtentry *);
@@ -695,6 +724,15 @@ extern struct rtentry *rte_alloc(void);
 extern void rte_free(struct rtentry *);
 extern unsigned int sa_get_ifscope(struct sockaddr *);
 #endif KERNEL_PRIVATE
+=======
+extern struct sockaddr *rtm_scrub_ifscope(int, struct sockaddr *,
+    struct sockaddr *, struct sockaddr_storage *);
+extern u_int64_t rt_expiry(struct rtentry *, u_int64_t, u_int32_t);
+#if IFNET_ROUTE_REFCNT
+extern void rt_aggdrain(int);
+#endif /* IFNET_ROUTE_REFCNT */
+#endif /* KERNEL_PRIVATE */
+>>>>>>> origin/10.6
 
 #endif
 >>>>>>> origin/10.5

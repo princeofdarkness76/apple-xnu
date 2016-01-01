@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -342,9 +346,13 @@ extern u_int32_t kipf_count;
 extern int tcp_recv_bg;
 
 static int tcp_ip_output(struct socket *, struct tcpcb *, struct mbuf *, int,
+<<<<<<< HEAD
     struct mbuf *, int, int, int32_t, boolean_t);
 static struct mbuf* tcp_send_lroacks(struct tcpcb *tp, struct mbuf *m, struct tcphdr *th);
 static int tcp_recv_throttle(struct tcpcb *tp);
+=======
+    struct mbuf *, int, int, int32_t);
+>>>>>>> origin/10.6
 
 static int32_t tcp_tfo_check(struct tcpcb *tp, int32_t len)
 {
@@ -1056,6 +1064,7 @@ after_sack_rexmit:
 
 				error = tcp_ip_output(so, tp, packetlist,
 				    packchain_listadd, tp_inp_options,
+<<<<<<< HEAD
 				    (so_options & SO_DONTROUTE),
 				    (sack_rxmit | (sack_bytes_rxmt != 0)), 0,
 #if INET6
@@ -1064,6 +1073,9 @@ after_sack_rexmit:
 				    0);
 #endif /* !INET6 */
 
+=======
+				    (so_options & SO_DONTROUTE), (sack_rxmit | (sack_bytes_rxmt != 0)), 0);
+>>>>>>> origin/10.6
 
 			}
 
@@ -1502,6 +1514,7 @@ just_return:
 		packchain_sent++;
 		TCP_PKTLIST_CLEAR(tp);
 
+<<<<<<< HEAD
 		error = tcp_ip_output(so, tp, packetlist,
 		    packchain_listadd,
 		    tp_inp_options, (so_options & SO_DONTROUTE),
@@ -1511,6 +1524,12 @@ just_return:
 #else /* INET6 */
 		    0);
 #endif /* !INET6 */
+=======
+		error = tcp_ip_output(so, tp, packetlist, packchain_listadd,
+		    tp_inp_options, (so_options & SO_DONTROUTE), (sack_rxmit | (sack_bytes_rxmt != 0)), recwin);
+
+		tp->t_flags &= ~TF_SENDINPROG;
+>>>>>>> origin/10.6
 	}
 	/* tcp was closed while we were in ip; resume close */
 	if (inp->inp_sndinprog_cnt == 0 &&
@@ -2546,11 +2565,30 @@ timer:
 		    inp->in6p_route.ro_rt->rt_ifp : NULL);
 
 		/* TODO: IPv6 IP6TOS_ECT bit on */
+<<<<<<< HEAD
 		KERNEL_DEBUG(DBG_LAYER_BEG,
 		    ((inp->inp_fport << 16) | inp->inp_lport),
 		    (((inp->in6p_laddr.s6_addr16[0] & 0xffff) << 16) |
 		    (inp->in6p_faddr.s6_addr16[0] & 0xffff)),
 		    sendalot,0,0);
+=======
+#if IPSEC
+		if (ipsec_bypass == 0 && ipsec_setsocket(m, so) != 0) {
+			m_freem(m);
+			error = ENOBUFS;
+			goto out;
+		}
+#endif /*IPSEC*/
+		m->m_pkthdr.socket_id = socket_id;
+
+#if PKT_PRIORITY
+		set_traffic_class(m, so, MBUF_TC_NONE);
+#endif /* PKT_PRIORITY */
+		error = ip6_output(m,
+			    inp6_pktopts,
+			    &tp->t_inpcb->in6p_route,
+			    (so_options & SO_DONTROUTE), NULL, NULL, 0);
+>>>>>>> origin/10.6
 	} else
 #endif /* INET6 */
 	{
@@ -2624,6 +2662,7 @@ timer:
 	m->m_pkthdr.pkt_proto = IPPROTO_TCP;
 
 	m->m_nextpkt = NULL;
+<<<<<<< HEAD
 
 	if (inp->inp_last_outifp != NULL &&
 	    !(inp->inp_last_outifp->if_flags & IFF_LOOPBACK)) {
@@ -2644,6 +2683,11 @@ timer:
 		set_packet_service_class(m, so, MBUF_SC_UNSPEC, svc_flags);
 	}
 
+=======
+#if PKT_PRIORITY
+	set_traffic_class(m, so, MBUF_TC_NONE);
+#endif /* PKT_PRIORITY */
+>>>>>>> origin/10.6
 	tp->t_pktlist_sentlen += len;
 	tp->t_lastchain++;
 
@@ -2707,6 +2751,7 @@ timer:
 
 			error = tcp_ip_output(so, tp, packetlist,
 			    packchain_listadd, tp_inp_options,
+<<<<<<< HEAD
 			    (so_options & SO_DONTROUTE),
 			    (sack_rxmit | (sack_bytes_rxmt != 0)), recwin,
 #if INET6
@@ -2714,6 +2759,11 @@ timer:
 #else /* INET6 */
 			    0);
 #endif /* !INET6 */
+=======
+			    (so_options & SO_DONTROUTE), (sack_rxmit | (sack_bytes_rxmt != 0)), recwin);
+
+			tp->t_flags &= ~TF_SENDINPROG;
+>>>>>>> origin/10.6
 			if (error) {
 				/*
 				 * Take into account the rest of unsent
@@ -2831,6 +2881,26 @@ out:
 
 	tcpstat.tcps_sndtotal++;
 
+<<<<<<< HEAD
+=======
+	/*
+	 * Data sent (as far as we can tell).
+	 * If this advertises a larger window than any other segment,
+	 * then remember the size of the advertised window.
+	 * Make sure ACK/DELACK conditions are cleared before
+	 * we unlock the socket.
+	 *  NOTE: for now, this is done in tcp_ip_output for IPv4
+	 */
+#if INET6
+	if (isipv6) {
+		if (recwin > 0 && SEQ_GT(tp->rcv_nxt + recwin, tp->rcv_adv))
+			tp->rcv_adv = tp->rcv_nxt + recwin;
+		tp->last_ack_sent = tp->rcv_nxt;
+		tp->t_flags &= ~(TF_ACKNOW | TF_DELACK);
+	}
+#endif
+
+>>>>>>> origin/10.6
 	KERNEL_DEBUG(DBG_FNC_TCP_OUTPUT | DBG_FUNC_END,0,0,0,0,0);
 	if (sendalot)
 		goto again;
@@ -2841,8 +2911,12 @@ out:
 
 static int
 tcp_ip_output(struct socket *so, struct tcpcb *tp, struct mbuf *pkt,
+<<<<<<< HEAD
     int cnt, struct mbuf *opt, int flags, int sack_in_progress, int recwin,
     boolean_t isipv6)
+=======
+    int cnt, struct mbuf *opt, int flags, int sack_in_progress, int recwin)
+>>>>>>> origin/10.6
 {
 	int error = 0;
 	boolean_t chain;
@@ -2853,6 +2927,7 @@ tcp_ip_output(struct socket *so, struct tcpcb *tp, struct mbuf *pkt,
 	struct ip_out_args ipoa =
 	    { IFSCOPE_NONE, { 0 }, IPOAF_SELECT_SRCIF|IPOAF_BOUND_SRCADDR, 0 };
 	struct route ro;
+<<<<<<< HEAD
 	struct ifnet *outif = NULL;
 #if INET6
 	struct ip6_out_args ip6oa =
@@ -2863,6 +2938,11 @@ tcp_ip_output(struct socket *so, struct tcpcb *tp, struct mbuf *pkt,
 #else /* INET6 */
 	struct flowadv *adv = &ipoa.ipoa_flowadv;
 #endif /* !INET6 */
+=======
+#if CONFIG_OUT_IF
+	unsigned int outif;
+#endif /* CONFIG_OUT_IF */
+>>>>>>> origin/10.6
 
 	/* If socket was bound to an ifindex, tell ip_output about it */
 	if (inp->inp_flags & INP_BOUND_IF) {
@@ -3003,6 +3083,7 @@ tcp_ip_output(struct socket *so, struct tcpcb *tp, struct mbuf *pkt,
 			cnt = 0;
 		}
 <<<<<<< HEAD
+<<<<<<< HEAD
 #if INET6
 		if (isipv6) {
 			error = ip6_output_list(pkt, cnt,
@@ -3020,6 +3101,10 @@ tcp_ip_output(struct socket *so, struct tcpcb *tp, struct mbuf *pkt,
 		error = ip_output_list(pkt, cnt, opt, &inp->inp_route,
 		    flags, 0, &ipoa);
 >>>>>>> origin/10.5
+=======
+	
+		error = ip_output_list(pkt, cnt, opt, &ro, flags, 0, &ipoa);
+>>>>>>> origin/10.6
 		if (chain || error) {
 			/*
 			 * If we sent down a chain then we are done since

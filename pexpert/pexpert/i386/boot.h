@@ -132,6 +132,7 @@ typedef struct boot_icon_element boot_icon_element;
 /* Boot argument structure - passed into Mach kernel at boot time.
  * "Revision" can be incremented for compatible changes
  */
+<<<<<<< HEAD
 #define kBootArgsRevision		0
 #define kBootArgsVersion		2
 
@@ -139,6 +140,16 @@ typedef struct boot_icon_element boot_icon_element;
 #define kBootArgsVersion1		1
 #define kBootArgsVersion2		2
 #define kBootArgsRevision2_0		0
+=======
+#define kBootArgsRevision		6
+#define kBootArgsVersion		1
+
+/* Snapshot constants of previous revisions that are supported */
+#define kBootArgsVersion1		1
+#define kBootArgsRevision1_4		4
+#define kBootArgsRevision1_5		5
+#define kBootArgsRevision1_6		6
+>>>>>>> origin/10.6
 
 #define kBootArgsEfiMode32              32
 #define kBootArgsEfiMode64              64
@@ -179,6 +190,16 @@ typedef struct boot_args {
 
     uint32_t    efiRuntimeServicesPageStart; /* physical address of defragmented runtime pages */
     uint32_t    efiRuntimeServicesPageCount;
+<<<<<<< HEAD
+=======
+    uint32_t    efiSystemTable;   /* physical address of system table in runtime area */
+
+    uint8_t     efiMode;       /* 32 = 32-bit, 64 = 64-bit */
+    uint8_t     __reserved1[3];
+    uint32_t    __reserved2[1];
+    uint32_t    performanceDataStart; /* physical address of log */
+    uint32_t    performanceDataSize;
+>>>>>>> origin/10.6
     uint64_t    efiRuntimeServicesVirtualPageStart; /* virtual address of defragmented runtime pages */
 
     uint32_t    efiSystemTable;   /* physical address of system table in runtime area */

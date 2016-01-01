@@ -619,7 +619,31 @@ machine_run_count(__unused uint32_t count)
 }
 
 boolean_t
-machine_cpu_is_inactive(__unused int num)
+machine_processor_is_inactive(__unused processor_t processor)
 {
     return(FALSE);
 }
+<<<<<<< HEAD
+=======
+
+processor_t
+machine_choose_processor(__unused processor_set_t pset, processor_t processor)
+{
+    return (processor);
+}
+
+vm_offset_t ml_stack_remaining(void)
+{
+	uintptr_t local = (uintptr_t) &local;
+
+	if (ml_at_interrupt_context()) {
+	    return (local - (getPerProc()->intstack_top_ss - INTSTACK_SIZE));
+	} else {
+	    return (local - current_thread()->kernel_stack);
+	}
+}
+
+boolean_t machine_timeout_suspended(void) {
+	return FALSE;
+}
+>>>>>>> origin/10.6

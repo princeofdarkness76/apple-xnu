@@ -82,6 +82,9 @@ private:
 
     IOReturn            secureGetSystemSleepType( uint32_t *sleepType );
 
+    IOReturn            secureSetUserAssertionLevels(
+                                uint32_t assertBits );
+
 public:
 
     virtual IOReturn clientClose( void ) APPLE_KEXT_OVERRIDE;

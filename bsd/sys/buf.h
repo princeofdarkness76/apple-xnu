@@ -1134,6 +1134,7 @@ bufattr_t buf_attr(buf_t);
 int	buf_static(buf_t);
 
 #ifdef KERNEL_PRIVATE
+<<<<<<< HEAD
 void	buf_setfilter(buf_t, void (*)(buf_t, void *), void *, void (**)(buf_t, void *), void **);
 
 /* bufattr allocation/duplication/deallocation functions */
@@ -1156,6 +1157,26 @@ struct cpx *bufattr_cpx(bufattr_t);
  @return void
  */
 void bufattr_setcpx(bufattr_t, struct cpx *cpx);
+=======
+void	buf_setfilter(buf_t, void (*)(buf_t, void *), void *, void **, void **);
+
+/*!
+ @function buf_getcpaddr
+ @abstract Set the address of cp_entry on a buffer.
+ @param bp Buffer whose cp entry value has to be set
+ @return void.
+ */
+void buf_setcpaddr(buf_t, void *);
+
+/*!
+ @function buf_getcpaddr
+ @abstract Get the address of cp_entry on a buffer.
+ @param bp Buffer whose error value to set.
+ @return int.
+ */
+void *buf_getcpaddr(buf_t);
+#endif /* KERNEL_PRIVATE */
+>>>>>>> origin/10.6
 
 /*!
  @function bufattr_cpoff

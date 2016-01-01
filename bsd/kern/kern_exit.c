@@ -152,6 +152,7 @@
 #include <kern/sched_prim.h>
 #include <kern/assert.h>
 <<<<<<< HEAD
+<<<<<<< HEAD
 #include <sys/codesign.h>
 
 #if VM_PRESSURE_EVENTS
@@ -162,6 +163,10 @@
 #include <sys/kern_memorystatus.h>
 #endif
 
+=======
+#include <sys/codesign.h>
+
+>>>>>>> origin/10.6
 #if CONFIG_DTRACE
 /* Do not include dtrace.h, it redefines kmem_[alloc/free] */
 extern void (*dtrace_fasttrap_exit_ptr)(proc_t);
@@ -1288,9 +1293,14 @@ proc_exit(proc_t p)
 		 *  keyed off of list lock for reaping
 		 */
 		proc_list_lock();
+<<<<<<< HEAD
 		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_COMMON,
 			BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_EXIT) | DBG_FUNC_END,
 			pid, exitval, 0, 0, 0);
+=======
+		KERNEL_DEBUG_CONSTANT(BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_EXIT) | DBG_FUNC_END,
+					      pid, exitval, 0, 0, 0);
+>>>>>>> origin/10.6
 		/* check for sysctl zomb lookup */
 		while ((p->p_listflag & P_LIST_WAITING) == P_LIST_WAITING) {
 			msleep(&p->p_stat, proc_list_mlock, PWAIT, "waitcoll", 0);
@@ -2761,6 +2771,9 @@ vproc_exit(proc_t p)
 		p->p_listflag |= P_LIST_WAITING;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
 		/*
 		 * This is a named reference and it is not granted
 		 * if the reap is already in progress. So we get

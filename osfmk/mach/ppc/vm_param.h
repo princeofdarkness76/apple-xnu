@@ -44,6 +44,20 @@
 					~(PPC_PGBYTES-1))
 #define ppc_trunc_page(x)	(((unsigned)(x)) & ~(PPC_PGBYTES-1))
 
+<<<<<<< HEAD
+=======
+
+#define PMAP_ENTER_OPTIONS(pmap, virtual_address, page, protection,	\
+				flags, wired, options, result)		\
+	MACRO_BEGIN							\
+		result=KERN_SUCCESS;					\
+		PMAP_ENTER(pmap, virtual_address, page, protection,	\
+				flags, wired);				\
+	MACRO_END
+
+
+#endif	/* MACH_KERNEL_PRIVATE */
+>>>>>>> origin/10.6
 
 #define KERNEL_STACK_SIZE	(4 * PPC_PGBYTES)
 #define INTSTACK_SIZE		(5 * PPC_PGBYTES)

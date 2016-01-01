@@ -1055,6 +1055,7 @@ static OSDictionary * CopyConsoleUser(UInt32 uid)
     return user;
 }
 
+<<<<<<< HEAD
 static OSDictionary * CopyUserOnConsole(void)
 {
     OSArray * array;
@@ -1099,6 +1100,23 @@ IOReturn IOUserClient::clientHasAuthorization( task_t task,
     }
 
     return (kIOReturnNotPermitted);
+=======
+static bool IOUCIsBackgroundTask(task_t task, bool * isBg)
+{
+    kern_return_t               kr;
+    task_category_policy_data_t info;
+    mach_msg_type_number_t      count = TASK_CATEGORY_POLICY_COUNT;
+    boolean_t                   get_default = false;
+
+    kr = task_policy_get(current_task(),
+                         TASK_CATEGORY_POLICY,
+                         (task_policy_t) &info,
+                         &count,
+                         &get_default);
+
+    *isBg = ((KERN_SUCCESS == kr) && (info.role == TASK_THROTTLE_APPLICATION));
+    return (kr);
+>>>>>>> origin/10.6
 }
 
 IOReturn IOUserClient::clientHasPrivilege( void * securityToken,
@@ -1115,6 +1133,7 @@ IOReturn IOUserClient::clientHasPrivilege( void * securityToken,
     if (!strncmp(privilegeName, kIOClientPrivilegeForeground, 
                 sizeof(kIOClientPrivilegeForeground)))
     {
+<<<<<<< HEAD
 	if (task_is_gpu_denied(current_task()))
 		return (kIOReturnNotPrivileged);
 	else
@@ -1149,6 +1168,14 @@ IOReturn IOUserClient::clientHasPrivilege( void * securityToken,
 	    kauth_cred_unref(&cred);
 	}
 	return (kr);
+=======
+        bool isBg;
+        kern_return_t kr = IOUCIsBackgroundTask(current_task(), &isBg);
+
+        if (KERN_SUCCESS != kr)
+            return (kr);
+        return (isBg ? kIOReturnNotPrivileged : kIOReturnSuccess);
+>>>>>>> origin/10.6
     }
 
     if ((secureConsole = !strncmp(privilegeName, kIOClientPrivilegeSecureConsoleProcess,
@@ -5097,7 +5124,14 @@ IOReturn IOUserClient::externalMethod( uint32_t selector, IOExternalMethodArgume
 
     if (kIOUCForegroundOnly & method->flags)
     {
+<<<<<<< HEAD
 	if (task_is_gpu_denied(current_task()))
+=======
+        bool isBg;
+        kern_return_t kr = IOUCIsBackgroundTask(current_task(), &isBg);
+    
+        if ((KERN_SUCCESS == kr) && isBg)
+>>>>>>> origin/10.6
             return (kIOReturnNotPermitted);
     }
 
@@ -5146,7 +5180,14 @@ IOReturn IOUserClient::externalMethod( uint32_t selector, IOExternalMethodArgume
 
     if (kIOUCForegroundOnly & method->flags)
     {
+<<<<<<< HEAD
 	if (task_is_gpu_denied(current_task()))
+=======
+        bool isBg;
+        kern_return_t kr = IOUCIsBackgroundTask(current_task(), &isBg);
+    
+        if ((KERN_SUCCESS == kr) && isBg)
+>>>>>>> origin/10.6
             return (kIOReturnNotPermitted);
     }
 

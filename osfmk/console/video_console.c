@@ -1005,11 +1005,35 @@ gc_reset_tabs(void)
 	unsigned int i;
 	
 	if (!gc_buffer_tab_stops) return;
+<<<<<<< HEAD
+
+	for (i = 0; i < vinfo.v_columns; i++) {
+		gc_buffer_tab_stops[i] = ((i % 8) == 0);
+=======
 
 	for (i = 0; i < vinfo.v_columns; i++) {
 		gc_buffer_tab_stops[i] = ((i % 8) == 0);
 	}
 
+}
+
+static void
+gc_set_tab_stop(unsigned int column, boolean_t enabled)
+{
+	if (gc_buffer_tab_stops && (column < vinfo.v_columns)) {
+		gc_buffer_tab_stops[column] = enabled;
+>>>>>>> origin/10.6
+	}
+}
+
+static boolean_t gc_is_tab_stop(unsigned int column)
+{
+	if (gc_buffer_tab_stops == NULL)
+		return ((column % 8) == 0);
+	if (column < vinfo.v_columns)
+		return gc_buffer_tab_stops[column];
+	else
+		return FALSE;
 }
 
 static void
@@ -1866,7 +1890,10 @@ static const unsigned char *    vc_clut8;
 static unsigned char            vc_revclut8[256];
 static uint32_t            	vc_progress_interval;
 static uint32_t            	vc_progress_count;
+<<<<<<< HEAD
 static uint32_t            	vc_progress_angle;
+=======
+>>>>>>> origin/10.6
 static uint64_t			vc_progress_deadline;
 static thread_call_data_t	vc_progress_call;
 static boolean_t		vc_needsave;
@@ -2529,7 +2556,10 @@ vc_progress_set(boolean_t enable, uint32_t vc_delay)
             saveBuf	          = NULL;
             saveLen 	      = 0;
             vc_progress_count = 0;
+<<<<<<< HEAD
 	    vc_progress_angle = 0;
+=======
+>>>>>>> origin/10.6
 
             clock_interval_to_deadline(vc_delay,
 				       1000 * 1000 * 1000 /*second scale*/,
@@ -2568,10 +2598,18 @@ static uint32_t vc_progressmeter_range(uint32_t pos)
 }
 
 static void
+<<<<<<< HEAD
 vc_progressmeter_task(__unused void *arg0, __unused void *arg)
 {
     spl_t    s;
     uint64_t interval;
+=======
+vc_progress_task(__unused void *arg0, __unused void *arg)
+{
+    spl_t		s;
+    int			x, y, width, height;
+    const unsigned char * data;
+>>>>>>> origin/10.6
 
     s = splhigh();
     simple_lock(&vc_progress_lock);
@@ -2587,6 +2625,7 @@ vc_progressmeter_task(__unused void *arg0, __unused void *arg)
 	    interval = vc_progressmeter_interval;
 	    interval = ((interval * 256) / vc_progressmeter_diskspeed);
 
+<<<<<<< HEAD
 	    clock_deadline_for_periodic_event(interval, mach_absolute_time(), &vc_progressmeter_deadline);
 	    thread_call_enter_delayed(&vc_progressmeter_call, vc_progressmeter_deadline);
 	}
@@ -2646,6 +2685,32 @@ vc_progress_task(__unused void *arg0, __unused void *arg)
 	    clock_deadline_for_periodic_event(vc_progress_interval, mach_absolute_time(), &vc_progress_deadline);
 	    thread_call_enter_delayed(&vc_progress_call, vc_progress_deadline);
 	}
+=======
+	KERNEL_DEBUG_CONSTANT(0x7020008, vc_progress_count, 0, 0, 0, 0);
+
+        vc_progress_count++;
+        if( vc_progress_count >= vc_progress->count)
+            vc_progress_count = 0;
+
+	width = vc_progress->width;
+	height = vc_progress->height;
+	x = vc_progress->dx;
+	y = vc_progress->dy;
+	data = vc_progress_data;
+	data += vc_progress_count * width * height;
+	if( 1 & vc_progress->flags) {
+	    x += ((vinfo.v_width - width) / 2);
+	    y += ((vinfo.v_height - height) / 2);
+	}
+	vc_blit_rect( x, y, 0, 
+		      width, height, width, width,
+		      data, vc_saveunder,
+		      kDataAlpha | (vc_needsave ? kSave : 0) );
+        vc_needsave = FALSE;
+
+        clock_deadline_for_periodic_event(vc_progress_interval, mach_absolute_time(), &vc_progress_deadline);
+        thread_call_enter_delayed(&vc_progress_call, vc_progress_deadline);
+>>>>>>> origin/10.6
     }
     simple_unlock(&vc_progress_lock);
     splx(s);
@@ -2714,6 +2779,29 @@ vc_initialize(__unused struct vc_info * vinfo_p)
 	else if (!vc_uiscale)              vc_uiscale = 1;
 }
 
+static void
+gc_pause( boolean_t pause, boolean_t graphics_now )
+{
+	spl_t s;
+
+	s = splhigh( );
+	VCPUTC_LOCK_LOCK( );
+
+    disableConsoleOutput = (pause && !console_is_serial());
+    gc_enabled           = (!pause && !graphics_now);
+
+    VCPUTC_LOCK_UNLOCK( );
+
+    simple_lock(&vc_progress_lock);
+
+    vc_progress_enable = gc_graphics_boot && !gc_desire_text && !pause;
+	if (vc_progress_enable)
+		thread_call_enter_delayed(&vc_progress_call, vc_progress_deadline);
+
+    simple_unlock(&vc_progress_lock);
+    splx(s);
+}
+
 void
 initialize_screen(PE_Video * boot_vinfo, unsigned int op)
 {
@@ -2735,6 +2823,7 @@ initialize_screen(PE_Video * boot_vinfo, unsigned int op)
 #endif
 		if (kPEBaseAddressChange != op)
 		{
+<<<<<<< HEAD
 		    new_vinfo.v_width    = (unsigned int)boot_vinfo->v_width;
 		    new_vinfo.v_height   = (unsigned int)boot_vinfo->v_height;
 		    new_vinfo.v_depth    = (unsigned int)boot_vinfo->v_depth;
@@ -2752,6 +2841,17 @@ initialize_screen(PE_Video * boot_vinfo, unsigned int op)
             else /* Scale factor not set, default to 1x */
                 new_vinfo.v_scale = kPEScaleFactor1x;
 
+=======
+            new_vinfo.v_width    = (unsigned int)boot_vinfo->v_width;
+            new_vinfo.v_height   = (unsigned int)boot_vinfo->v_height;
+            new_vinfo.v_depth    = (unsigned int)boot_vinfo->v_depth;
+            new_vinfo.v_rowbytes = (unsigned int)boot_vinfo->v_rowBytes;
+#if defined(__i386__) || defined(__x86_64__)
+            new_vinfo.v_type     = (unsigned int)boot_vinfo->v_display;
+#else
+            new_vinfo.v_type = 0;
+#endif
+>>>>>>> origin/10.6
 		}
      
 		if (!lastVideoMapped)
@@ -2779,7 +2879,11 @@ initialize_screen(PE_Video * boot_vinfo, unsigned int op)
 			    {
 				    panic("initialize_screen: Strange framebuffer - addr = %08X\n", (uint32_t)boot_vinfo->v_baseAddr);
 			    }
+<<<<<<< HEAD
 			    new_vinfo.v_physaddr = (((uint64_t)fbppage) << PAGE_SHIFT) | (boot_vinfo->v_baseAddr & PAGE_MASK);			/* Get the physical address */
+=======
+			    new_vinfo.v_physaddr = (((uint64_t)fbppage) << 12) | (boot_vinfo->v_baseAddr & PAGE_MASK);			/* Get the physical address */
+>>>>>>> origin/10.6
 		    }
     
 		    if (boot_vinfo->v_length != 0)
@@ -2858,6 +2962,13 @@ initialize_screen(PE_Video * boot_vinfo, unsigned int op)
 			gc_ops.update_color = vc_update_color;
             gc_initialize(&vinfo);
 		}
+<<<<<<< HEAD
+=======
+
+#ifdef GRATEFULDEBUGGER
+		GratefulDebInit((bootBumbleC *)boot_vinfo);	/* Re-initialize GratefulDeb */
+#endif /* GRATEFULDEBUGGER */
+>>>>>>> origin/10.6
 	}
 
     graphics_now = gc_graphics_boot && !gc_desire_text;
@@ -2875,7 +2986,11 @@ initialize_screen(PE_Video * boot_vinfo, unsigned int op)
 
 		case kPEAcquireScreen:
 			if ( gc_acquired ) break;
+<<<<<<< HEAD
 			vc_progress_set( graphics_now, (kVCDarkReboot & vc_user_options) ? 120 : vc_acquire_delay );
+=======
+			vc_progress_set( graphics_now, kProgressAcquireDelay );
+>>>>>>> origin/10.6
 			gc_enable( !graphics_now );
 			gc_acquired = TRUE;
 			gc_desire_text = FALSE;
@@ -2949,6 +3064,39 @@ initialize_screen(PE_Video * boot_vinfo, unsigned int op)
 
 		    internal_enable_progressmeter(kProgressMeterOff);
 		    vc_progress_white = save;
+		}
+	}
+}
+
+void 
+dim_screen(void)
+{
+	unsigned int *p, *endp, *row;
+	int      col, rowline, rowlongs;
+	register unsigned int mask;
+
+	if(!vinfo.v_depth)
+		return;
+
+	if ( vinfo.v_depth == 32 )
+		mask = 0x007F7F7F;
+	else if ( vinfo.v_depth == 30 )
+		mask = (0x1ff<<20) | (0x1ff<<10) | 0x1ff;
+	else if ( vinfo.v_depth == 16 )
+		mask = 0x3DEF3DEF;
+	else
+		return;
+
+	rowline = (int)(vinfo.v_rowscanbytes / 4);
+	rowlongs = (int)(vinfo.v_rowbytes / 4);
+
+	p = (unsigned int*) vinfo.v_baseaddr;
+	endp = p + (rowlongs * vinfo.v_height);
+
+	for (row = p ; row < endp ; row += rowlongs) {
+		for (p = &row[0], col = 0; col < rowline; col++) {
+			*p = (*p >> 1) & mask;
+			++p;
 		}
 	}
 }

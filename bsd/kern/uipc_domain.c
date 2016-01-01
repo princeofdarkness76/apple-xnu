@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 1998-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 1998-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -1056,6 +1060,7 @@ domain_guard_deploy(void)
 }
 
 void
+<<<<<<< HEAD
 domain_guard_release(domain_guard_t guard)
 {
 	net_thread_marks_t marks = (net_thread_marks_t)(const void*)guard;
@@ -1083,6 +1088,25 @@ domain_unguard_deploy(void)
 		lck_mtx_assert(&domain_proto_mtx, LCK_MTX_ASSERT_NOTOWNED);
 
 	return ((domain_unguard_t)(const void*)marks);
+=======
+pfslowtimo(__unused void *arg)
+{
+	register struct domain *dp;
+	register struct protosw *pr;
+
+	lck_mtx_lock(domain_proto_mtx);
+	for (dp = domains; dp; dp = dp->dom_next) 
+		for (pr = dp->dom_protosw; pr; pr = pr->pr_next) {
+			if (pr->pr_slowtimo)
+				(*pr->pr_slowtimo)();
+			if ((do_reclaim || (pr->pr_flags & PR_AGGDRAIN)) &&
+			    pr->pr_drain)
+				(*pr->pr_drain)();
+		}
+	do_reclaim = 0;
+	lck_mtx_unlock(domain_proto_mtx);
+	timeout(pfslowtimo, NULL, hz/PR_SLOWHZ);
+>>>>>>> origin/10.6
 }
 
 void

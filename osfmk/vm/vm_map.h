@@ -1413,6 +1413,12 @@ extern kern_return_t vm_map_thaw(
                 vm_map_t map);
 #endif
 
+#if CONFIG_DYNAMIC_CODE_SIGNING
+extern kern_return_t vm_map_sign(vm_map_t map, 
+				 vm_map_offset_t start, 
+				 vm_map_offset_t end);
+#endif
+
 __END_DECLS
 
 #endif	/* KERNEL_PRIVATE */

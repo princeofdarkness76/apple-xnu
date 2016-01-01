@@ -142,6 +142,10 @@ protected:
     @abstract Sub-class implementation of setWorkLoop method. */
     virtual void setWorkLoop(IOWorkLoop *inWorkLoop) APPLE_KEXT_OVERRIDE;
 
+/*! @function setWorkLoop
+    @abstract Sub-class implementation of setWorkLoop method. */
+    virtual void setWorkLoop(IOWorkLoop *inWorkLoop);
+
 public:
 
 /*! @function interruptEventSource
@@ -230,6 +234,9 @@ state when checkForWork is called. */
 private:
     IOReturn registerInterruptHandler(IOService *inProvider, int inIntIndex);
     void unregisterInterruptHandler(IOService *inProvider, int inIntIndex);
+
+private:
+    IOReturn registerInterruptHandler(IOService *inProvider, int inIntIndex);
 
 private:
     OSMetaClassDeclareReservedUnused(IOInterruptEventSource, 0);

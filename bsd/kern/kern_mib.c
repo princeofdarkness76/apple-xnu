@@ -615,7 +615,78 @@ SYSCTL_PROC(_hw, HW_EPOCH,        epoch, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASK
 SYSCTL_PROC(_hw, HW_VECTORUNIT,   vectorunit, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED, 0, HW_VECTORUNIT, sysctl_hw_generic, "I", "");
 SYSCTL_PROC(_hw, HW_L2SETTINGS,   l2settings, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED, 0, HW_L2SETTINGS, sysctl_hw_generic, "I", "");
 SYSCTL_PROC(_hw, HW_L3SETTINGS,   l3settings, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED, 0, HW_L3SETTINGS, sysctl_hw_generic, "I", "");
+<<<<<<< HEAD
 >>>>>>> origin/10.2
+=======
+SYSCTL_INT (_hw, OID_AUTO, cputhreadtype, CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, &cputhreadtype, 0, "");
+
+#ifdef __ppc__
+int altivec_flag = -1;
+int graphicsops_flag = -1;
+int x64bitops_flag = -1;
+int fsqrt_flag = -1;
+int stfiwx_flag = -1;
+int dcba_flag = -1;
+int datastreams_flag = -1;
+int dcbtstreams_flag = -1;
+
+SYSCTL_INT(_hw_optional, OID_AUTO, altivec, CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, &altivec_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, graphicsops, CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, &graphicsops_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, 64bitops, CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, &x64bitops_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, fsqrt, CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, &fsqrt_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, stfiwx, CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, &stfiwx_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, dcba, CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, &dcba_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, datastreams, CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, &datastreams_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, dcbtstreams, CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, &dcbtstreams_flag, 0, "");
+#elif defined (__i386__) || defined (__x86_64__)
+int mmx_flag = -1;
+int sse_flag = -1;
+int sse2_flag = -1;
+int sse3_flag = -1;
+int sse4_1_flag = -1;
+int sse4_2_flag = -1;
+int x86_64_flag = -1;
+int supplementalsse3_flag = -1;
+int aes_flag = -1;
+
+SYSCTL_INT(_hw_optional, OID_AUTO, mmx, CTLFLAG_RD | CTLFLAG_KERN, &mmx_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, sse, CTLFLAG_RD | CTLFLAG_KERN, &sse_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, sse2, CTLFLAG_RD | CTLFLAG_KERN, &sse2_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, sse3, CTLFLAG_RD | CTLFLAG_KERN, &sse3_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, supplementalsse3, CTLFLAG_RD | CTLFLAG_KERN, &supplementalsse3_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, sse4_1, CTLFLAG_RD | CTLFLAG_KERN, &sse4_1_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, sse4_2, CTLFLAG_RD | CTLFLAG_KERN, &sse4_2_flag, 0, "");
+/* "x86_64" is actually a preprocessor symbol on the x86_64 kernel, so we have to hack this */
+#undef x86_64
+SYSCTL_INT(_hw_optional, OID_AUTO, x86_64, CTLFLAG_RD | CTLFLAG_KERN, &x86_64_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, aes, CTLFLAG_RD | CTLFLAG_KERN, &aes_flag, 0, "");
+#endif /* __ppc__ */
+
+/*
+ * Debugging interface to the CPU power management code.
+ */
+static int
+pmsSysctl(__unused struct sysctl_oid *oidp, __unused void *arg1,
+	  __unused int arg2, struct sysctl_req *req)
+{
+	pmsctl_t	ctl;
+	int		error;
+	boolean_t	intr;
+
+	if ((error = SYSCTL_IN(req, &ctl, sizeof(ctl))))
+		return(error);
+
+	intr = ml_set_interrupts_enabled(FALSE);		/* No interruptions in here */
+	error = pmsControl(ctl.request, (user_addr_t)(uintptr_t)ctl.reqaddr, ctl.reqsize);
+	(void)ml_set_interrupts_enabled(intr);			/* Restore interruptions */
+
+	return(error);
+}
+
+SYSCTL_PROC(_hw, OID_AUTO, pms, CTLTYPE_STRUCT | CTLFLAG_WR, 0, 0, pmsSysctl, "S", "Processor Power Management");
+
+
+>>>>>>> origin/10.6
 
 /******************************************************************************
  * Generic MIB initialisation.
@@ -682,8 +753,10 @@ sysctl_mib_init(void)
 	sse4_1_flag = ((_get_cpu_capabilities() & kHasSSE4_1) == kHasSSE4_1)? 1 : 0;
 	sse4_2_flag = ((_get_cpu_capabilities() & kHasSSE4_2) == kHasSSE4_2)? 1 : 0;
 	x86_64_flag = ((_get_cpu_capabilities() & k64Bit) == k64Bit)? 1 : 0;
+	aes_flag = ((_get_cpu_capabilities() & kHasAES) == kHasAES)? 1 : 0;
 
 	/* hw.cpufamily */
+<<<<<<< HEAD
 	switch (cpuid_info()->cpuid_family) {
 	case 6:
 		switch (cpuid_info()->cpuid_model) {
@@ -710,6 +783,10 @@ sysctl_mib_init(void)
 		cpufamily = CPUFAMILY_UNKNOWN;
 	}
 >>>>>>> origin/10.5
+=======
+	cpufamily = cpuid_cpufamily();
+
+>>>>>>> origin/10.6
 	/* hw.cacheconfig */
 	cacheconfig[0] = ml_cpu_cache_sharing(0);
 	cacheconfig[1] = ml_cpu_cache_sharing(1);

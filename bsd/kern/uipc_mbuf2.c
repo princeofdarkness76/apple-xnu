@@ -887,3 +887,25 @@ m_sum16(struct mbuf *m, uint32_t off, uint32_t len)
 
 	return (~cpu_in_cksum(m, len, off, 0) & 0xffff);
 }
+
+void
+m_prio_init(struct mbuf *m)
+{
+#if !PKT_PRIORITY
+#pragma unused(m)
+#else /* PKT_PRIORITY */
+	if (m->m_flags & M_PKTHDR)
+		m->m_pkthdr.prio = MBUF_PRIORITY_NORMAL;
+#endif /* PKT_PRIORITY */
+}
+
+void
+m_prio_background(struct mbuf *m)
+{
+#if !PKT_PRIORITY
+#pragma unused(m)
+#else /* PKT_PRIORITY */
+	if (m->m_flags & M_PKTHDR)
+		m->m_pkthdr.prio = MBUF_PRIORITY_BACKGROUND;
+#endif /* PKT_PRIORITY */
+}

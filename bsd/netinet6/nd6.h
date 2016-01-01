@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -815,10 +819,13 @@ extern int nd6_storelladdr(struct ifnet *, struct rtentry *, struct mbuf *,
     struct sockaddr *, u_char *);
 extern int nd6_need_cache(struct ifnet *);
 extern void nd6_drain(void *);
+<<<<<<< HEAD
 extern void nd6_post_msg(u_int32_t, struct nd_prefix_list *, u_int32_t,
     u_int32_t, char *, u_int32_t);
 extern int nd6_setifinfo(struct ifnet *, u_int32_t, u_int32_t);
 extern void ln_setexpire(struct llinfo_nd6 *, uint64_t);
+=======
+>>>>>>> origin/10.6
 
 /* nd6_nbr.c */
 extern void nd6_nbr_init(void);

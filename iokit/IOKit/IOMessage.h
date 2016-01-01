@@ -110,6 +110,7 @@ typedef UInt32 IOMessage;
  */
 #define kIOMessageDeviceHasPoweredOn       iokit_common_msg(0x230)
 
+<<<<<<< HEAD
 /*! @group          In-kernel system shutdown and restart notifications
  */
 
@@ -122,6 +123,15 @@ typedef UInt32 IOMessage;
  *                  and to clients of <code>registerPrioritySleepWakeInterest()</code>.
  *                  Never delivered to user space notification clients.
  */
+=======
+// IOService power mgt does not send
+//   kIOMessageDeviceWillPowerOn
+//   kIOMessageDeviceHasPoweredOff
+#define kIOMessageDeviceWillPowerOn        iokit_common_msg(0x215)
+#define kIOMessageDeviceHasPoweredOff      iokit_common_msg(0x225)
+
+#define kIOMessageCanSystemPowerOff        iokit_common_msg(0x240)
+>>>>>>> origin/10.6
 #define kIOMessageSystemWillPowerOff       iokit_common_msg(0x250)
 
 /*!

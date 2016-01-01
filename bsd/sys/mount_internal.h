@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -220,10 +224,13 @@ struct mount {
  */
 #define MNT_IOFLAGS_FUA_SUPPORTED	0x00000001
 #define MNT_IOFLAGS_UNMAP_SUPPORTED	0x00000002
+<<<<<<< HEAD
 #define MNT_IOFLAGS_IOSCHED_SUPPORTED	0x00000004
 #define MNT_IOFLAGS_CSUNMAP_SUPPORTED	0x00000008
 #define MNT_IOFLAGS_SWAPPIN_SUPPORTED	0x00000010
 #define MNT_IOFLAGS_FUSION_DRIVE	0x00000020
+=======
+>>>>>>> origin/10.6
 
 /*
  * ioqueue depth for devices that don't report one
@@ -249,6 +256,7 @@ extern struct mount * dead_mountp;
  *		because the bits here were broken out from the high bits
  *		of the mount flags.
  */
+<<<<<<< HEAD
 #define MNTK_SWAP_MOUNT		0x00000100	/* we are swapping to this mount */
 #define MNTK_DENY_READDIREXT 0x00000200 /* Deny Extended-style readdir's for this volume */
 #define MNTK_PERMIT_UNMOUNT	0x00000400	/* Allow (non-forced) unmounts by UIDs other than the one that mounted the volume */
@@ -256,6 +264,8 @@ extern struct mount * dead_mountp;
 #define MNTK_TYPENAME_OVERRIDE  0x00000800      /* override the fstypename for statfs() */
 #endif /* NFSCLIENT */
 #define MNTK_KERNEL_MOUNT	0x00001000	/* mount came from kernel side */
+=======
+>>>>>>> origin/10.6
 #ifdef CONFIG_IMGSRC_ACCESS
 #define MNTK_HAS_MOVED		0x00002000
 #define MNTK_BACKS_ROOT		0x00004000

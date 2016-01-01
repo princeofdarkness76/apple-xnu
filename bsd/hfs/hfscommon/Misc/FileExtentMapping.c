@@ -1356,7 +1356,12 @@ OSErr ExtendFileC (
 						  startBlock,
 						  howmany(MIN(bytesToAdd, availbytes), volumeBlockSize),
 						  howmany(MIN(maximumBytes, availbytes), volumeBlockSize),
+<<<<<<< HEAD
 						  ba_flags,
+=======
+						  (wantContig ? HFS_ALLOC_FORCECONTIG : 0) | 
+						  (useMetaZone ? HFS_ALLOC_METAZONE : 0),
+>>>>>>> origin/10.6
 						  &actualStartBlock,
 						  &actualNumBlocks);
 			}

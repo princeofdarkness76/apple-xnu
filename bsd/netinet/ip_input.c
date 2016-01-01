@@ -778,19 +778,25 @@ ip_input(struct mbuf *m)
 	struct ip *ip;
 	struct ipq *fp;
 	struct in_ifaddr *ia = NULL;
-	int    i, hlen, checkif;
+	int    hlen, checkif;
 	u_short sum;
 	struct in_addr pkt_dst;
-	u_int32_t div_info = 0;		/* packet divert/tee info */
 #if IPFIREWALL
+	int i;
+	u_int32_t div_info = 0;		/* packet divert/tee info */
 	struct ip_fw_args args;
+	struct m_tag	*tag;
 #endif
 	ipfilter_t inject_filter_ref = 0;
+<<<<<<< HEAD
 	struct m_tag	*tag;
 	struct route	ipforward_rt;
 	
 	bzero(&ipforward_rt, sizeof(struct route));
 	
+=======
+
+>>>>>>> origin/10.6
 #if IPFIREWALL
 	args.eh = NULL;
 	args.oif = NULL;

@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -275,6 +279,7 @@ struct protosw {
  *	is only relevant if PR_CONNREQUIRED is set (otherwise sendto is allowed
  *	anyhow).
  */
+<<<<<<< HEAD
 #define	PR_ATOMIC	0x01	/* exchange atomic messages only */
 #define	PR_ADDR		0x02	/* addresses given with messages */
 #define	PR_CONNREQUIRED	0x04	/* connection required by protocol */
@@ -345,6 +350,19 @@ char	*prcrequests[] = {
 	"PARAMPROB", "ADMIN-UNREACH"
 };
 #endif /* PRCREQUESTS */
+=======
+#define	PR_ATOMIC			0x01		/* exchange atomic messages only */
+#define	PR_ADDR			0x02		/* addresses given with messages */
+#define	PR_CONNREQUIRED	0x04		/* connection required by protocol */
+#define	PR_WANTRCVD		0x08		/* want PRU_RCVD calls */
+#define	PR_RIGHTS			0x10		/* passes capabilities */
+#define	PR_IMPLOPCL		0x20		/* implied open/close */
+#define	PR_LASTHDR		0x40		/* enforce ipsec policy; last header */
+#define	PR_PROTOLOCK		0x80		/* protocol takes care of it's own locking */
+#define	PR_PCBLOCK		0x100	/* protocol supports per pcb finer grain locking */
+#define	PR_DISPOSE		0x200	/* protocol requires late lists disposal */
+#define	PR_AGGDRAIN		0x400	/* protocol requires aggressive draining */
+>>>>>>> origin/10.6
 
 /*
  * The arguments to ctloutput are:

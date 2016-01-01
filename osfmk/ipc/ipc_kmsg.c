@@ -633,8 +633,11 @@ ipc_kmsg_alloc(
 		mach_msg_size_t max_desc = (mach_msg_size_t)(((size - sizeof(mach_msg_base_t)) /
 				           sizeof(mach_msg_ool_descriptor32_t)) *
 				           DESC_SIZE_ADJUSTMENT);
+<<<<<<< HEAD
 
 		/* make sure expansion won't cause wrap */
+=======
+>>>>>>> origin/10.6
 		if (msg_and_trailer_size > MACH_MSG_SIZE_MAX - max_desc)
 			return IKM_NULL;
 
@@ -1309,7 +1312,11 @@ ipc_kmsg_get_from_kernel(
 	 * clients.  These are set up for those kernel clients
 	 * which cannot afford to wait.
 	 */
+<<<<<<< HEAD
 	if (IP_VALID(dest_port) && IP_PREALLOC(dest_port)) {
+=======
+	if (IP_PREALLOC(dest_port)) {
+>>>>>>> origin/10.6
 		mach_msg_size_t max_desc = 0;
 
 		ip_lock(dest_port);

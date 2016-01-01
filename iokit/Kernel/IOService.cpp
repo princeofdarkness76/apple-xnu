@@ -270,6 +270,18 @@ static IOLock *     gArbitrationLockQueueLock;
 bool IOService::isInactive( void ) const
     { return( 0 != (kIOServiceInactiveState & getState())); }
 
+<<<<<<< HEAD
+=======
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+#define IOServiceTrace(csc, a, b, c, d) {				\
+    if(kIOTraceIOService & gIOKitTrace) {				\
+	KERNEL_DEBUG_CONSTANT(IODBG_IOSERVICE(csc), a, b, c, d, 0);	\
+    }									\
+}
+
+>>>>>>> origin/10.6
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
 <<<<<<< HEAD
@@ -2646,9 +2658,16 @@ void IOService::terminateWorker( IOOptionBits options )
                 } else {
                     // a terminated client is not ready for stop if it has clients, skip it
                     if( (kIOServiceInactiveState & client->__state[0]) && client->getClient()) {
+<<<<<<< HEAD
                         TLOG("%s[0x%qx]::defer stop(%s[0x%qx])\n", 
                         	client->getName(), regID2, 
                         	client->getClient()->getName(), client->getClient()->getRegistryEntryID());
+=======
+                        TLOG("%s::defer stop(%s)\n", client->getName(), provider->getName());
+
+			uint64_t regID1 = provider->getRegistryEntryID();
+			uint64_t regID2 = client->getRegistryEntryID();
+>>>>>>> origin/10.6
 			IOServiceTrace(
 			    IOSERVICE_TERMINATE_STOP_DEFER,
 			    (uintptr_t) regID1, 

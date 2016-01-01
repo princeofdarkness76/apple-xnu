@@ -85,7 +85,11 @@ struct cat_desc {
 	const u_int8_t * cd_nameptr; /* pointer to cnode name */
 };
 
+<<<<<<< HEAD
 /* cd_flags
+=======
+/* cd_flags 
+>>>>>>> origin/10.6
  *
  * CD_EOF is used by hfs_vnop_readdir / cat_getdirentries to indicate EOF was
  * encountered during a directory enumeration.  When this flag is observed

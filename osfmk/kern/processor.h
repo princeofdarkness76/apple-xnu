@@ -123,7 +123,13 @@ struct processor_set {
 	int					cpu_set_low, cpu_set_hi;
 	int					cpu_set_count;
 
+<<<<<<< HEAD
 #if __SMP__
+=======
+	int					cpu_set_low, cpu_set_hi;
+	int					cpu_set_count;
+
+>>>>>>> origin/10.6
 	decl_simple_lock_data(,sched_lock)	/* lock for above */
 #endif
 
@@ -387,6 +393,7 @@ extern kern_return_t	processor_info_count(
 #define pset_reference(x)
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 extern void				machine_run_count(
 							uint32_t	count);
 
@@ -411,6 +418,17 @@ extern void		machine_run_count(
 extern boolean_t	machine_cpu_is_inactive(
 						int				num);
 >>>>>>> origin/10.5
+=======
+extern void				machine_run_count(
+							uint32_t	count);
+
+extern boolean_t		machine_processor_is_inactive(
+							processor_t			processor);
+
+extern processor_t		machine_choose_processor(
+							processor_set_t		pset,
+							processor_t			processor);
+>>>>>>> origin/10.6
 
 #else	/* MACH_KERNEL_PRIVATE */
 

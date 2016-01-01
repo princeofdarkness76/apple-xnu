@@ -1098,6 +1098,7 @@ loopit:
 		 */
 		ifp = ro->ro_rt->rt_ifp;
 		ro->ro_rt->rt_use++;
+<<<<<<< HEAD
 		if (ro->ro_rt->rt_flags & RTF_GATEWAY) {
 			dst = SIN(ro->ro_rt->rt_gateway);
 		}
@@ -1135,6 +1136,16 @@ loopit:
 
 			ip_setsrcifaddr_info(m, srcidx, NULL);
 			ip_setdstifaddr_info(m, 0, ia);
+=======
+		if (ro->ro_rt->rt_flags & RTF_GATEWAY)
+			dst = (struct sockaddr_in *)ro->ro_rt->rt_gateway;
+		if (ro->ro_rt->rt_flags & RTF_HOST) {
+			isbroadcast = (ro->ro_rt->rt_flags & RTF_BROADCAST);
+		} else {
+			/* Become a regular mutex */
+			RT_CONVERT_LOCK(ro->ro_rt);
+			isbroadcast = in_broadcast(dst->sin_addr, ifp);
+>>>>>>> origin/10.6
 		}
 		RT_UNLOCK(ro->ro_rt);
 		if (ia0 != NULL) {
@@ -1994,6 +2005,7 @@ skip_ipsec:
 			ifp = ro_fwd->ro_rt->rt_ifp;
 			ro_fwd->ro_rt->rt_use++;
 			if (ro_fwd->ro_rt->rt_flags & RTF_GATEWAY)
+<<<<<<< HEAD
 				dst = SIN(ro_fwd->ro_rt->rt_gateway);
 			if (ro_fwd->ro_rt->rt_flags & RTF_HOST) {
 				/* double negation needed for bool bit field */
@@ -2004,6 +2016,16 @@ skip_ipsec:
 				RT_CONVERT_LOCK(ro_fwd->ro_rt);
 				ipobf.isbroadcast =
 				    in_broadcast(dst->sin_addr, ifp);
+=======
+				dst = (struct sockaddr_in *)ro_fwd->ro_rt->rt_gateway;
+			if (ro_fwd->ro_rt->rt_flags & RTF_HOST) {
+				isbroadcast =
+				    (ro_fwd->ro_rt->rt_flags & RTF_BROADCAST);
+			} else {
+				/* Become a regular mutex */
+				RT_CONVERT_LOCK(ro_fwd->ro_rt);
+				isbroadcast = in_broadcast(dst->sin_addr, ifp);
+>>>>>>> origin/10.6
 			}
 			RT_UNLOCK(ro_fwd->ro_rt);
 			ROUTE_RELEASE(ro);
@@ -2958,11 +2980,21 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 				break;
 
 			if (background) {
+<<<<<<< HEAD
 				socket_set_traffic_mgt_flags_locked(so,
 				    TRAFFIC_MGT_SO_BACKGROUND);
 			} else {
 				socket_clear_traffic_mgt_flags_locked(so,
 				    TRAFFIC_MGT_SO_BACKGROUND);
+=======
+				socket_set_traffic_mgt_flags(so,
+				    TRAFFIC_MGT_SO_BACKGROUND |
+				    TRAFFIC_MGT_SO_BG_REGULATE);
+			} else {
+				socket_clear_traffic_mgt_flags(so,
+				    TRAFFIC_MGT_SO_BACKGROUND |
+				    TRAFFIC_MGT_SO_BG_REGULATE);
+>>>>>>> origin/10.6
 			}
 
 			break;
@@ -3316,6 +3348,7 @@ imo_addref(struct ip_moptions *imo, int locked)
 void
 imo_remref(struct ip_moptions *imo)
 {
+<<<<<<< HEAD
 	int i;
 
 	IMO_LOCK(imo);
@@ -3325,6 +3358,47 @@ imo_remref(struct ip_moptions *imo)
 	} else if (imo->imo_trace != NULL) {
 		(*imo->imo_trace)(imo, FALSE);
 	}
+=======
+	int error = 0;
+	struct in_addr addr;
+	struct ip_mreq mreq;
+	struct ifnet *ifp = NULL;
+	struct ip_moptions *imo = *imop;
+	int ifindex;
+
+	if (imo == NULL) {
+		/*
+		 * No multicast option buffer attached to the pcb;
+		 * allocate one and initialize to default values.
+		 */
+		error = ip_createmoptions(imop);
+		if (error != 0)
+			return error;
+		imo = *imop;
+	}
+
+	switch (sopt->sopt_name) {
+	/* store an index number for the vif you wanna use in the send */
+#if MROUTING
+	case IP_MULTICAST_VIF: 
+		{
+			int i;
+			if (legal_vif_num == 0) {
+				error = EOPNOTSUPP;
+				break;
+			}
+			error = sooptcopyin(sopt, &i, sizeof i, sizeof i);
+			if (error)
+				break;
+			if (!legal_vif_num(i) && (i != -1)) {
+				error = EINVAL;
+				break;
+			}
+			imo->imo_multicast_vif = i;
+			break;
+		}
+#endif /* MROUTING */
+>>>>>>> origin/10.6
 
 	--imo->imo_refcnt;
 	if (imo->imo_refcnt > 0) {
@@ -3959,7 +4033,11 @@ in_selectsrcif(struct ip *ip, struct route *ro, unsigned int ifscope)
 	struct ifaddr *ifa = NULL;
 	struct sockaddr src = { sizeof (struct sockaddr_in), AF_INET, { 0, } };
 	struct ifnet *rt_ifp;
+<<<<<<< HEAD
 	char ip_src[16], ip_dst[16];
+=======
+	char s_src[MAX_IPv4_STR_LEN], s_dst[MAX_IPv4_STR_LEN];
+>>>>>>> origin/10.6
 
 	if (ip_select_srcif_debug) {
 		(void) inet_ntop(AF_INET, &ip->ip_src.s_addr, ip_src,
@@ -4001,6 +4079,22 @@ in_selectsrcif(struct ip *ip, struct route *ro, unsigned int ifscope)
 
 		ifa = ifa_ifwithaddr_scoped(&src, scope);
 
+		if (ifa == NULL && ip->ip_p != IPPROTO_UDP &&
+		    ip->ip_p != IPPROTO_TCP && ipforwarding) {
+			/*
+			 * If forwarding is enabled, and if the packet isn't
+			 * TCP or UDP, check if the source address belongs
+			 * to one of our own interfaces; if so, demote the
+			 * interface scope and do a route lookup right below.
+			 */
+			ifa = (struct ifaddr *)ifa_foraddr(src.s_addr);
+			if (ifa != NULL) {
+				ifafree(ifa);
+				ifa = NULL;
+				ifscope = IFSCOPE_NONE;
+			}
+		}
+
 		if (ip_select_srcif_debug && ifa != NULL) {
 			if (ro->ro_rt != NULL) {
 				printf("%s->%s ifscope %d->%d ifa_if %s%d "
@@ -4029,6 +4123,103 @@ in_selectsrcif(struct ip *ip, struct route *ro, unsigned int ifscope)
 	 */
 	if (ifa == NULL && ifscope == IFSCOPE_NONE) {
 		ifa = ifa_ifwithaddr(&src);
+
+		/*
+		 * If we have the IP address, but not the route, we don't
+		 * really know whether or not it belongs to the correct
+		 * interface (it could be shared across multiple interfaces.)
+		 * The only way to find out is to do a route lookup.
+		 */
+		if (ifa != NULL && ro->ro_rt == NULL) {
+			struct rtentry *rt;
+			struct sockaddr_in sin;
+			struct ifaddr *oifa = NULL;
+
+			bzero(&sin, sizeof (sin));
+			sin.sin_family = AF_INET;
+			sin.sin_len = sizeof (sin);
+			sin.sin_addr = dst;
+
+			lck_mtx_lock(rnh_lock);
+			if ((rt = rt_lookup(TRUE, (struct sockaddr *)&sin, NULL,
+			    rt_tables[AF_INET], IFSCOPE_NONE)) != NULL) {
+				RT_LOCK(rt);
+				/*
+				 * If the route uses a different interface,
+				 * use that one instead.  The IP address of
+				 * the ifaddr that we pick up here is not
+				 * relevant.
+				 */
+				if (ifa->ifa_ifp != rt->rt_ifp) {
+					oifa = ifa;
+					ifa = rt->rt_ifa;
+					ifaref(ifa);
+					RT_UNLOCK(rt);
+				} else {
+					RT_UNLOCK(rt);
+				}
+				rtfree_locked(rt);
+			}
+			lck_mtx_unlock(rnh_lock);
+
+			if (oifa != NULL) {
+				struct ifaddr *iifa;
+
+				/*
+				 * See if the interface pointed to by the
+				 * route is configured with the source IP
+				 * address of the packet.
+				 */
+				iifa = (struct ifaddr *)ifa_foraddr_scoped(
+				    src.s_addr, ifa->ifa_ifp->if_index);
+
+				if (iifa != NULL) {
+					/*
+					 * Found it; drop the original one
+					 * as well as the route interface
+					 * address, and use this instead.
+					 */
+					ifafree(oifa);
+					ifafree(ifa);
+					ifa = iifa;
+				} else if (!ipforwarding ||
+				    (rt->rt_flags & RTF_GATEWAY)) {
+					/*
+					 * This interface doesn't have that
+					 * source IP address; drop the route
+					 * interface address and just use the
+					 * original one, and let the caller
+					 * do a scoped route lookup.
+					 */
+					ifafree(ifa);
+					ifa = oifa;
+				} else {
+					/*
+					 * Forwarding is enabled and the source
+					 * address belongs to one of our own
+					 * interfaces which isn't the outgoing
+					 * interface, and we have a route, and
+					 * the destination is on a network that
+					 * is directly attached (onlink); drop
+					 * the original one and use the route
+					 * interface address instead.
+					 */
+					ifafree(oifa);
+				}
+			}
+		} else if (ifa != NULL && ro->ro_rt != NULL &&
+		    !(ro->ro_rt->rt_flags & RTF_GATEWAY) &&
+		    ifa->ifa_ifp != ro->ro_rt->rt_ifp && ipforwarding) {
+			/*
+			 * Forwarding is enabled and the source address belongs
+			 * to one of our own interfaces which isn't the same
+			 * as the interface used by the known route; drop the
+			 * original one and use the route interface address.
+			 */
+			ifafree(ifa);
+			ifa = ro->ro_rt->rt_ifa;
+			ifaref(ifa);
+		}
 
 		if (ip_select_srcif_debug && ifa != NULL) {
 			printf("%s->%s ifscope %d ifa_if %s%d\n",

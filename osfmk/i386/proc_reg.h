@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -167,6 +171,7 @@
 /*
  * CR4
  */
+<<<<<<< HEAD
 #define CR4_SEE		0x00008000	/* Secure Enclave Enable XXX */
 #define CR4_SMAP	0x00200000	/* Supervisor-Mode Access Protect */
 #define CR4_SMEP	0x00100000	/* Supervisor-Mode Execute Protect */
@@ -204,7 +209,33 @@
 
 #define	PMAP_PCID_PRESERVE (1ULL << 63)
 #define	PMAP_PCID_MASK (0xFFF)
+=======
+#define CR4_OSXSAVE 0x00040000	/* OS supports XSAVE */
+#define CR4_SMXE    0x00004000	/* Enable SMX operation */
+#define CR4_VMXE    0x00002000	/* Enable VMX operation */
+#define CR4_OSXMM   0x00000400  /* SSE/SSE2 exceptions supported in OS */
+#define CR4_OSFXS   0x00000200  /* SSE/SSE2 OS supports FXSave */
+#define CR4_PCE     0x00000100  /* Performance-Monitor Count Enable */
+#define CR4_PGE     0x00000080  /* Page Global Enable */
+#define	CR4_MCE     0x00000040	/* Machine Check Exceptions */
+#define CR4_PAE     0x00000020  /* Physical Address Extensions */
+#define	CR4_PSE     0x00000010	/* Page Size Extensions */
+#define	CR4_DE      0x00000008	/* Debugging Extensions */
+#define	CR4_TSD     0x00000004	/* Time Stamp Disable */
+#define	CR4_PVI     0x00000002	/* Protected-mode Virtual Interrupts */
+#define	CR4_VME     0x00000001	/* Virtual-8086 Mode Extensions */
+>>>>>>> origin/10.6
 
+/*
+ * XCR0 - XFEATURE_ENABLED_MASK (a.k.a. XFEM) register
+ */
+#define	XCR0_YMM 0x0000000000000004ULL /* YMM state available */
+#define	XFEM_YMM XCR0_YMM
+#define XCR0_SSE 0x0000000000000002ULL	/* SSE supported by XSAVE/XRESTORE */
+#define XCR0_X87 0x0000000000000001ULL	/* x87, FPU/MMX (always set) */
+#define XFEM_SSE XCR0_SSE
+#define XFEM_X87 XCR0_X87
+#define XCR0 (0)
 #ifndef	ASSEMBLER
 
 #include <sys/cdefs.h>
@@ -530,6 +561,7 @@ __END_DECLS
 
 #define MSR_IA32_PERFCTR0			0xc1
 #define MSR_IA32_PERFCTR1			0xc2
+<<<<<<< HEAD
 #define MSR_IA32_PERFCTR3			0xc3
 #define MSR_IA32_PERFCTR4			0xc4
 
@@ -537,6 +569,12 @@ __END_DECLS
 
 #define MSR_IA32_MPERF				0xE7
 #define MSR_IA32_APERF				0xE8
+=======
+
+#define MSR_PLATFORM_INFO			0xce
+
+#define MSR_PMG_CST_CONFIG_CONTROL		0xe2
+>>>>>>> origin/10.6
 
 #define MSR_IA32_BBL_CR_CTL			0x119
 
@@ -550,8 +588,11 @@ __END_DECLS
 
 #define MSR_IA32_EVNTSEL0			0x186
 #define MSR_IA32_EVNTSEL1			0x187
+<<<<<<< HEAD
 #define MSR_IA32_EVNTSEL2			0x188
 #define MSR_IA32_EVNTSEL3			0x189
+=======
+>>>>>>> origin/10.6
 
 #define MSR_FLEX_RATIO				0x194
 #define MSR_IA32_PERF_STS			0x198
@@ -560,7 +601,11 @@ __END_DECLS
 
 #define MSR_IA32_MISC_ENABLE			0x1a0
 
+<<<<<<< HEAD
 
+=======
+#define MSR_IA32_ENERGY_PERFORMANCE_BIAS	0x1b0
+>>>>>>> origin/10.6
 #define MSR_IA32_PACKAGE_THERM_STATUS		0x1b1
 #define MSR_IA32_PACKAGE_THERM_INTERRUPT	0x1b2
 
@@ -588,6 +633,7 @@ __END_DECLS
 #define MSR_IA32_MTRR_FIX4K_F0000		0x26e
 #define MSR_IA32_MTRR_FIX4K_F8000		0x26f
 
+<<<<<<< HEAD
 #define MSR_IA32_PERF_FIXED_CTR0		0x309
 
 #define MSR_IA32_PERF_FIXED_CTR_CTRL		0x38D
@@ -603,11 +649,14 @@ __END_DECLS
 #define MSR_IA32_CORE_C6_RESIDENCY 		0x3FD
 #define MSR_IA32_CORE_C7_RESIDENCY 		0x3FE
 
+=======
+>>>>>>> origin/10.6
 #define MSR_IA32_MC0_CTL			0x400
 #define MSR_IA32_MC0_STATUS			0x401
 #define MSR_IA32_MC0_ADDR			0x402
 #define MSR_IA32_MC0_MISC			0x403
 
+<<<<<<< HEAD
 #define MSR_IA32_VMX_BASE					0x480
 #define MSR_IA32_VMX_BASIC					MSR_IA32_VMX_BASE
 #define MSR_IA32_VMX_PINBASED_CTLS			MSR_IA32_VMX_BASE+1
@@ -649,6 +698,26 @@ __END_DECLS
 #define MSR_IA32_IA_PERF_LIMIT_REASONS		0x690
 #define MSR_IA32_GT_PERF_LIMIT_REASONS		0x6B0
 
+=======
+#define MSR_IA32_VMX_BASE			0x480
+#define MSR_IA32_VMX_BASIC			MSR_IA32_VMX_BASE
+#define MSR_IA32_VMXPINBASED_CTLS		MSR_IA32_VMX_BASE+1
+#define MSR_IA32_PROCBASED_CTLS			MSR_IA32_VMX_BASE+2
+#define MSR_IA32_VMX_EXIT_CTLS			MSR_IA32_VMX_BASE+3
+#define MSR_IA32_VMX_ENTRY_CTLS			MSR_IA32_VMX_BASE+4
+#define MSR_IA32_VMX_MISC			MSR_IA32_VMX_BASE+5
+#define MSR_IA32_VMX_CR0_FIXED0			MSR_IA32_VMX_BASE+6
+#define MSR_IA32_VMX_CR0_FIXED1			MSR_IA32_VMX_BASE+7
+#define MSR_IA32_VMX_CR4_FIXED0			MSR_IA32_VMX_BASE+8
+#define MSR_IA32_VMX_CR4_FIXED1			MSR_IA32_VMX_BASE+9
+
+#define MSR_IA32_DS_AREA			0x600
+
+#define MSR_IA32_PACKAGE_POWER_SKU_UNIT		0x606
+#define MSR_IA32_PACKAGE_ENERY_STATUS		0x611
+#define MSR_IA32_PRIMARY_PLANE_ENERY_STATUS	0x639
+#define MSR_IA32_SECONDARY_PLANE_ENERY_STATUS	0x641
+>>>>>>> origin/10.6
 #define MSR_IA32_TSC_DEADLINE			0x6e0
 
 #define	MSR_IA32_EFER				0xC0000080
@@ -666,11 +735,14 @@ __END_DECLS
 #define MSR_IA32_GS_BASE			0xC0000101
 #define MSR_IA32_KERNEL_GS_BASE			0xC0000102
 #define MSR_IA32_TSC_AUX			0xC0000103
+<<<<<<< HEAD
 
 #define MSR_IA32_BIOS_SIGN_ID	0x08B
 
 #define MSR_FLEX_RATIO		0x194
 #define MSR_PLATFORM_INFO	0x0ce
 #define MSR_CORE_THREAD_COUNT	0x035
+=======
+>>>>>>> origin/10.6
 
 #endif	/* _I386_PROC_REG_H_ */

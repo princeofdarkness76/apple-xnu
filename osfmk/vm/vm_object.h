@@ -141,6 +141,7 @@ struct vm_object_fault_info {
         vm_behavior_t	behavior;
         vm_map_offset_t	lo_offset;
 	vm_map_offset_t	hi_offset;
+<<<<<<< HEAD
 	unsigned int
 	/* boolean_t */	no_cache:1,
 	/* boolean_t */	stealth:1,
@@ -150,6 +151,11 @@ struct vm_object_fault_info {
 	/* boolean_t */ batch_pmap_op:1,
 		__vm_object_fault_info_unused_bits:26;
 	int		pmap_options;
+=======
+	boolean_t	no_cache;
+	boolean_t	stealth;
+	boolean_t	mark_zf_absent;
+>>>>>>> origin/10.6
 };
 
 

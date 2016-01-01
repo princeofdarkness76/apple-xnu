@@ -63,9 +63,12 @@ __END_DECLS
 
 #include <IOKit/IOTimeStamp.h>
 #include <IOKit/IOKitDebug.h>
+<<<<<<< HEAD
 #if CONFIG_DTRACE
 #include <mach/sdt.h>
 #endif
+=======
+>>>>>>> origin/10.6
 
 #define super IOEventSource
 OSDefineMetaClassAndStructors(IOTimerEventSource, IOEventSource)
@@ -139,6 +142,7 @@ void IOTimerEventSource::timeout(void *self)
             	
             	if (trace)
                 	IOTimeStampStartConstant(IODBG_TIMES(IOTIMES_ACTION),
+<<<<<<< HEAD
 											 VM_KERNEL_UNSLIDE(doit), (uintptr_t) me->owner);
 				
                 (*doit)(me->owner, me);
@@ -149,6 +153,15 @@ void IOTimerEventSource::timeout(void *self)
 				if (trace)
                 	IOTimeStampEndConstant(IODBG_TIMES(IOTIMES_ACTION),
 										   VM_KERNEL_UNSLIDE(doit), (uintptr_t) me->owner);
+=======
+                                    (uintptr_t) doit, (uintptr_t) me->owner);
+				
+                (*doit)(me->owner, me);
+                
+				if (trace)
+                	IOTimeStampEndConstant(IODBG_TIMES(IOTIMES_ACTION),
+										   (uintptr_t) doit, (uintptr_t) me->owner);
+>>>>>>> origin/10.6
             }
             IOStatisticsOpenGate();
             wl->openGate();
@@ -181,6 +194,7 @@ void IOTimerEventSource::timeoutAndRelease(void * self, void * c)
             	
             	if (trace)
                 	IOTimeStampStartConstant(IODBG_TIMES(IOTIMES_ACTION),
+<<<<<<< HEAD
 											 VM_KERNEL_UNSLIDE(doit), (uintptr_t) me->owner);
 				
                 (*doit)(me->owner, me);
@@ -191,6 +205,15 @@ void IOTimerEventSource::timeoutAndRelease(void * self, void * c)
 				if (trace)
                 	IOTimeStampEndConstant(IODBG_TIMES(IOTIMES_ACTION),
 										   VM_KERNEL_UNSLIDE(doit), (uintptr_t) me->owner);
+=======
+                                    (uintptr_t) doit, (uintptr_t) me->owner);
+				
+                (*doit)(me->owner, me);
+                
+				if (trace)
+                	IOTimeStampEndConstant(IODBG_TIMES(IOTIMES_ACTION),
+										   (uintptr_t) doit, (uintptr_t) me->owner);
+>>>>>>> origin/10.6
             }
             IOStatisticsOpenGate();
             wl->openGate();

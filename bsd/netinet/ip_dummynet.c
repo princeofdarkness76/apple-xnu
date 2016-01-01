@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -129,11 +133,14 @@
 #include <netinet/ip_dummynet.h>
 #include <netinet/ip_var.h>
 
+<<<<<<< HEAD
 #include <netinet/ip6.h>       /* for ip6_input, ip6_output prototypes */
 #include <netinet6/ip6_var.h>
 
 static struct ip_fw default_rule;
 
+=======
+>>>>>>> origin/10.6
 /*
  * We keep a private variable for the simulation time, but we could
  * probably use an existing one ("softticks" in sys/kern/kern_timer.c)
@@ -1204,6 +1211,7 @@ dummynet_send(struct mbuf *m)
 		case DN_TO_IP_IN :
 			proto_inject(PF_INET, m);
 			break ;
+<<<<<<< HEAD
 #ifdef INET6
 		case DN_TO_IP6_OUT: {
 			/* routes already in the packet's dn_{ro6,pmtu} */
@@ -1214,6 +1222,9 @@ dummynet_send(struct mbuf *m)
 			proto_inject(PF_INET6, m);
 			break;
 #endif /* INET6 */	
+=======
+	
+>>>>>>> origin/10.6
 		default:
 			printf("dummynet: bad switch %d!\n", pkt->dn_dir);
 			m_freem(m);

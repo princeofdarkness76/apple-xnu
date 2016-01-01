@@ -1129,6 +1129,7 @@ trap_from_kernel:
  *	Called as a function, makes the current thread
  *	return from the kernel as if from an exception.
  */
+<<<<<<< HEAD
 
 	.globl	EXT(thread_exception_return)
 	.globl	EXT(thread_bootstrap_return)
@@ -1171,6 +1172,20 @@ imsg_start:
 	String	"interrupt start"
 imsg_end:
 	String	"interrupt end"
+=======
+int_from_intstack:
+	incl	%gs:CPU_PREEMPTION_LEVEL
+	incl	%gs:CPU_INTERRUPT_LEVEL
+	incl	%gs:CPU_NESTED_ISTACK
+
+	movl	%esp, %edx		/* x86_saved_state */
+	CCALL1(interrupt, %edx)
+
+	decl	%gs:CPU_INTERRUPT_LEVEL
+	decl	%gs:CPU_PREEMPTION_LEVEL
+ 	decl	%gs:CPU_NESTED_ISTACK
+	jmp	ret_to_kernel
+>>>>>>> origin/10.6
 
 /*
  * All interrupts enter here.

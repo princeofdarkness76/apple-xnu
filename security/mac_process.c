@@ -626,4 +626,33 @@ mac_proc_check_proc_info(proc_t curp, proc_t target, int callnum, int flavor)
 
 	return (error);
 }
+<<<<<<< HEAD
 
+=======
+#endif	/* LCTX */
+
+void
+mac_thread_userret(int code, int error, struct thread *thread)
+{
+
+	if (mac_late)
+		MAC_PERFORM(thread_userret, code, error, thread);
+}
+
+int
+mac_proc_check_suspend_resume(proc_t curp, int sr)
+{
+	kauth_cred_t cred;
+	int error;
+
+	if (!mac_proc_enforce ||
+	    !mac_proc_check_enforce(curp, MAC_PROC_ENFORCE))
+		return (0);
+
+	cred = kauth_cred_proc_ref(curp);
+	MAC_CHECK(proc_check_suspend_resume, cred, curp, sr);
+	kauth_cred_unref(&cred);
+
+	return (error);
+}
+>>>>>>> origin/10.6

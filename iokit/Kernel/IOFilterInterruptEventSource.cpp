@@ -55,6 +55,7 @@
 #include <IOKit/IOWorkLoop.h>
 #include <IOKit/IOInterruptAccountingPrivate.h>
 
+<<<<<<< HEAD
 #if IOKITSTATS
 
 #define IOStatisticsInitializeCounter() \
@@ -74,6 +75,8 @@ do { \
 
 #endif /* IOKITSTATS */
 
+=======
+>>>>>>> origin/10.6
 #define super IOInterruptEventSource
 
 OSDefineMetaClassAndStructors
@@ -148,10 +151,16 @@ IOFilterInterruptEventSource *IOFilterInterruptEventSource
 void IOFilterInterruptEventSource::signalInterrupt()
 {
 	bool trace = (gIOKitTrace & kIOTraceIntEventSource) ? true : false;
+<<<<<<< HEAD
     
     IOStatisticsInterrupt();
     producerCount++;
 	
+=======
+
+    producerCount++;
+
+>>>>>>> origin/10.6
 	if (trace)
 	    IOTimeStampStartConstant(IODBG_INTES(IOINTES_SEMA), (uintptr_t) this, (uintptr_t) owner);
     
@@ -175,6 +184,7 @@ IOFilterInterruptEventSource::getFilterAction() const
 void IOFilterInterruptEventSource::normalInterruptOccurred
     (void */*refcon*/, IOService */*prov*/, int /*source*/)
 {
+<<<<<<< HEAD
     bool 	filterRes;
     uint64_t	startTime = 0;
     uint64_t	endTime = 0;
@@ -192,6 +202,21 @@ void IOFilterInterruptEventSource::normalInterruptOccurred
     
     // Call the filter.
     filterRes = (*filterAction)(owner, this);
+=======
+    bool filterRes;
+	bool	trace = (gIOKitTrace & kIOTraceIntEventSource) ? true : false;
+
+	if (trace)
+		IOTimeStampStartConstant(IODBG_INTES(IOINTES_FILTER),
+								 (uintptr_t) filterAction, (uintptr_t) owner, (uintptr_t) this, (uintptr_t) workLoop);
+
+    // Call the filter.
+    filterRes = (*filterAction)(owner, this);
+	
+	if (trace)
+		IOTimeStampEndConstant(IODBG_INTES(IOINTES_FILTER),
+							   (uintptr_t) filterAction, (uintptr_t) owner, (uintptr_t) this, (uintptr_t) workLoop);
+>>>>>>> origin/10.6
 
     if (IOInterruptEventSource::reserved->statistics) {
         if (IA_GET_STATISTIC_ENABLED(kInterruptAccountingFirstLevelCountIndex)) {
@@ -215,6 +240,7 @@ void IOFilterInterruptEventSource::normalInterruptOccurred
 void IOFilterInterruptEventSource::disableInterruptOccurred
     (void */*refcon*/, IOService *prov, int source)
 {
+<<<<<<< HEAD
     bool 	filterRes;
     uint64_t	startTime = 0;
     uint64_t	endTime = 0;
@@ -243,6 +269,21 @@ void IOFilterInterruptEventSource::disableInterruptOccurred
             IA_ADD_VALUE(&IOInterruptEventSource::reserved->statistics->interruptStatistics[kInterruptAccountingFirstLevelTimeIndex], endTime - startTime);
         }
     }
+=======
+    bool filterRes;
+	bool	trace = (gIOKitTrace & kIOTraceIntEventSource) ? true : false;
+
+	if (trace)
+		IOTimeStampStartConstant(IODBG_INTES(IOINTES_FILTER),
+								 (uintptr_t) filterAction, (uintptr_t) owner, (uintptr_t) this, (uintptr_t) workLoop);
+
+    // Call the filter.
+    filterRes = (*filterAction)(owner, this);
+	
+	if (trace)
+		IOTimeStampEndConstant(IODBG_INTES(IOINTES_FILTER),
+							   (uintptr_t) filterAction, (uintptr_t) owner, (uintptr_t) this, (uintptr_t) workLoop);
+>>>>>>> origin/10.6
 
 	if (trace)
 		IOTimeStampEndConstant(IODBG_INTES(IOINTES_FILTER),

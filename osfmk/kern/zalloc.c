@@ -448,10 +448,17 @@ zp_init(void)
 	zp_poisoned_cookie &= 0x000000FFFFFFFFFF;
 	zp_poisoned_cookie |= 0x0535210000000000; /* 0xFACADE */
 
+<<<<<<< HEAD
 	zp_nopoison_cookie &= 0x000000FFFFFFFFFF;
 	zp_nopoison_cookie |= 0x3f00110000000000; /* 0xC0FFEE */
 #endif
 }
+=======
+kern_return_t		zget_space(
+	                        zone_t	zone,
+				vm_offset_t size,
+				vm_offset_t *result);
+>>>>>>> origin/10.6
 
 /* zone_map page count for page table structure */
 uint64_t zone_map_table_page_count = 0;
@@ -675,9 +682,20 @@ is_sane_zone_ptr(zone_t		zone,
 	if (__improbable((addr & (sizeof(vm_offset_t) - 1)) != 0))
 		return FALSE;
 
+<<<<<<< HEAD
 	/*  Must be a kernel address */
 	if (__improbable(!pmap_kernel_va(addr)))
 		return FALSE;
+=======
+	if (zone_zone == ZONE_NULL) {
+		if (zget_space(NULL, sizeof(struct zone), (vm_offset_t *)&z)
+		    != KERN_SUCCESS)
+			return(ZONE_NULL);
+	} else
+		z = (zone_t) zalloc(zone_zone);
+	if (z == ZONE_NULL)
+		return(ZONE_NULL);
+>>>>>>> origin/10.6
 
 	/*  Must be from zone map if the zone only uses memory from the zone_map */
 	/*
@@ -738,7 +756,11 @@ is_sane_zone_ptr(zone_t		zone,
 	z->expandable  = TRUE;
 	z->waiting = FALSE;
 	z->async_pending = FALSE;
+<<<<<<< HEAD
 >>>>>>> origin/10.3
+=======
+	z->noencrypt = FALSE;
+>>>>>>> origin/10.6
 
 		return FALSE;
 	}
@@ -886,10 +908,19 @@ backup_ptr_mismatch_panic(zone_t        zone,
  * elem can be NULL.
  * Preserves the poisoning state of the element.
  */
+<<<<<<< HEAD
 static inline void
 append_zone_element(zone_t                    zone,
                     struct zone_free_element *tail,
                     struct zone_free_element *elem)
+=======
+
+kern_return_t
+zget_space(
+	zone_t	zone,
+	vm_offset_t size,
+	vm_offset_t *result)
+>>>>>>> origin/10.6
 {
 	vm_offset_t *backup = get_backup_ptr(zone->elem_size, (vm_offset_t *) tail);
 
@@ -898,6 +929,7 @@ append_zone_element(zone_t                    zone,
 	vm_offset_t old_next = (vm_offset_t) tail->next;
 	vm_offset_t new_next = (vm_offset_t) elem;
 
+<<<<<<< HEAD
 	if      (old_next == (old_backup ^ zp_nopoison_cookie))
 		*backup = new_next ^ zp_nopoison_cookie;
 	else if (old_next == (old_backup ^ zp_poisoned_cookie))
@@ -907,10 +939,46 @@ append_zone_element(zone_t                    zone,
 		                          (vm_offset_t) tail,
 		                          old_next,
 		                          old_backup);
+=======
+		if (new_space == 0) {
+			kern_return_t retval;
+			int	zflags = KMA_KOBJECT|KMA_NOPAGEWAIT;
+
+			/*
+			 *	Memory cannot be wired down while holding
+			 *	any locks that the pageout daemon might
+			 *	need to free up pages.  [Making the zget_space
+			 *	lock a complex lock does not help in this
+			 *	regard.]
+			 *
+			 *	Unlock and allocate memory.  Because several
+			 *	threads might try to do this at once, don't
+			 *	use the memory before checking for available
+			 *	space again.
+			 */
+>>>>>>> origin/10.6
 
 	tail->next = elem;
 }
 
+<<<<<<< HEAD
+=======
+			if (zone == NULL || zone->noencrypt)
+				zflags |= KMA_NOENCRYPT;
+
+			retval = kernel_memory_allocate(zone_map, &new_space, space_to_add, 0, zflags);
+			if (retval != KERN_SUCCESS)
+				return(retval);
+#if	ZONE_ALIAS_ADDR
+		 	if (space_to_add == PAGE_SIZE)
+				new_space = zone_alias_addr(new_space);
+#endif
+			zone_page_init(new_space, space_to_add,
+							ZONE_PAGE_USED);
+			simple_lock(&zget_space_lock);
+			continue;
+		}
+>>>>>>> origin/10.6
 
 /*
  * Insert a linked list of elements (delineated by head and tail) at the head of
@@ -1088,11 +1156,25 @@ try_alloc_from_zone(zone_t zone,
 		element = (vm_offset_t)zone->free_elements;
 	}
 
+<<<<<<< HEAD
 #if MACH_ASSERT
 	if (__improbable(!is_sane_zone_element(zone, element)))
 		panic("zfree: invalid head pointer %p for freelist of zone %s\n",
 		      (void *) element, zone->zone_name);
 #endif
+=======
+	/* assertion: nobody else called zinit before us */
+	assert(zone_zone == ZONE_NULL);
+	zone_zone = zinit(sizeof(struct zone), 128 * sizeof(struct zone),
+			  sizeof(struct zone), "zones");
+	zone_change(zone_zone, Z_COLLECT, FALSE);
+	zone_change(zone_zone, Z_NOENCRYPT, TRUE);
+
+	zone_zone_size = zalloc_end_of_space - zalloc_next_space;
+	zget_space(NULL, zone_zone_size, &zone_zone_space);
+	zcram(zone_zone, (void *)zone_zone_space, zone_zone_size);
+}
+>>>>>>> origin/10.6
 
 	vm_offset_t *primary = (vm_offset_t *) element;
 	vm_offset_t *backup  = get_backup_ptr(zone->elem_size, primary);
@@ -1159,8 +1241,52 @@ zalloc_canblock(
 		/*
 		 * Element was marked as poisoned, so check its integrity before using it.
 		 */
+<<<<<<< HEAD
 		*check_poison = TRUE;
 	}
+=======
+		if (zone->doing_alloc) {
+			/*
+			 *	Someone is allocating memory for this zone.
+			 *	Wait for it to show up, then try again.
+			 */
+			zone->waiting = TRUE;
+			zone_sleep(zone);
+		}
+		else {
+			if ((zone->cur_size + zone->elem_size) >
+			    zone->max_size) {
+				if (zone->exhaustible)
+					break;
+				if (zone->expandable) {
+					/*
+					 * We're willing to overflow certain
+					 * zones, but not without complaining.
+					 *
+					 * This is best used in conjunction
+					 * with the collectable flag. What we
+					 * want is an assurance we can get the
+					 * memory back, assuming there's no
+					 * leak. 
+					 */
+					zone->max_size += (zone->max_size >> 1);
+				} else {
+					unlock_zone(zone);
+
+					panic("zalloc: zone \"%s\" empty.", zone->zone_name);
+				}
+			}
+			zone->doing_alloc = TRUE;
+			unlock_zone(zone);
+
+			if (zone->collectable) {
+				vm_offset_t space;
+                               vm_size_t alloc_size;
+				int retry = 0;
+
+				for (;;) {
+					int	zflags = KMA_KOBJECT|KMA_NOPAGEWAIT;
+>>>>>>> origin/10.6
 
 	if (zone->use_page_list) {
 			
@@ -1177,8 +1303,23 @@ zalloc_canblock(
 		}
 	}
 
+<<<<<<< HEAD
 	/* Remove this element from the free list */
 	if (zone->use_page_list) {
+=======
+					if (zone->noencrypt)
+						zflags |= KMA_NOENCRYPT;
+
+					retval = kernel_memory_allocate(zone_map, &space, alloc_size, 0, zflags);
+					if (retval == KERN_SUCCESS) {
+#if	ZONE_ALIAS_ADDR
+						if (alloc_size == PAGE_SIZE)
+							space = zone_alias_addr(space);
+#endif
+					        zone_page_init(space, alloc_size,
+							       ZONE_PAGE_USED);
+						zcram(zone, (void *)space, alloc_size);
+>>>>>>> origin/10.6
 
 		page_meta->elements = (struct zone_free_element *)next_element;
 		page_meta->free_count--;
@@ -1218,7 +1359,44 @@ zalloc_canblock(
 				}
 >>>>>>> origin/10.5
 			} else {
+<<<<<<< HEAD
 				/* no other list transitions */
+=======
+				vm_offset_t space;
+				retval = zget_space(zone, zone->elem_size, &space);
+
+				lock_zone(zone);
+				zone->doing_alloc = FALSE; 
+				if (zone->waiting) {
+					zone->waiting = FALSE;
+					thread_wakeup((event_t)zone);
+				}
+				if (retval == KERN_SUCCESS) {
+					zone->count++;
+					zone->cur_size += zone->elem_size;
+#if	ZONE_DEBUG
+					if (zone_debug_enabled(zone)) {
+					    enqueue_tail(&zone->active_zones, (queue_entry_t)space);
+					}
+#endif
+					unlock_zone(zone);
+					zone_page_alloc(space, zone->elem_size);
+#if	ZONE_DEBUG
+					if (zone_debug_enabled(zone))
+						space += ZONE_DEBUG_OFFSET;
+#endif
+					addr = space;
+					goto success;
+				}
+				if (retval == KERN_RESOURCE_SHORTAGE) {
+					unlock_zone(zone);
+					
+					VM_PAGE_WAIT();
+					lock_zone(zone);
+				} else {
+					panic("zalloc: \"%s\" (%d elements) zget_space returned %d", zone->zone_name, zone->count, retval);
+				}
+>>>>>>> origin/10.6
 			}
 		} else if (page_meta->free_count == 0) {
 			/* remove from intermediate or free, move to all_used */
@@ -1538,9 +1716,35 @@ vm_size_t	zdata_size;
  */
 #define ZONE_ELEMENT_ALIGNMENT 32
 
+<<<<<<< HEAD
 #define zone_wakeup(zone) thread_wakeup((event_t)(zone))
 #define zone_sleep(zone)				\
 	(void) lck_mtx_sleep(&(zone)->lock, LCK_SLEEP_SPIN, (event_t)(zone), THREAD_UNINT);
+=======
+	switch(item){
+	        case Z_NOENCRYPT:
+			zone->noencrypt = value;
+			break;
+		case Z_EXHAUST:
+			zone->exhaustible = value;
+			break;
+		case Z_COLLECT:
+			zone->collectable = value;
+			break;
+		case Z_EXPAND:
+			zone->expandable = value;
+			break;
+		case Z_FOREIGN:
+			zone->allows_foreign = value;
+			break;
+#if MACH_ASSERT
+		default:
+			panic("Zone_change: Wrong Item Type!");
+			/* break; */
+#endif
+	}
+}
+>>>>>>> origin/10.6
 
 /*
  *	The zone_locks_grp allows for collecting lock statistics.

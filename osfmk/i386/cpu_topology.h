@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2003-2010 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2003-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2003-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -146,12 +150,17 @@ typedef struct x86_lcpu
     volatile lcpu_state_t	state;	/* state of the logical CPU */
     volatile boolean_t	stopped;	/* used to indicate that the CPU has "stopped" */
 <<<<<<< HEAD
+<<<<<<< HEAD
     uint64_t		rtcPop;		/* next timer pop programmed */
     uint64_t		rtcDeadline;	/* next etimer-requested deadline */
     x86_cpu_cache_t	*caches[MAX_CACHE_DEPTH];
 =======
     uint64_t		rtcPop;		/* when etimer wants a timer pop */
     uint64_t		rtcDeadline;
+=======
+    uint64_t		rtcPop;		/* next timer pop programmed */
+    uint64_t		rtcDeadline;	/* next etimer-requested deadline */
+>>>>>>> origin/10.6
     x86_cpu_cache_t	*caches[MAX_CACHE_DEPTH];
     struct pmc		*pmc;		/* Pointer to perfmon data */
 >>>>>>> origin/10.5

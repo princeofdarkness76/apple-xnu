@@ -72,9 +72,21 @@ typedef struct lowglo {
 	unsigned int	lgRsv380[32];			/* 5380 - 5400 reserved  */
 
 	unsigned int	lgRsv400[32];			/* 5400 - 5480 reserved  */
+<<<<<<< HEAD
 
 	uint32_t		lgRsv480[704];			/* 5480 reserved - push to 1 page */
 
+=======
+	uint32_t		lgKmodptr;		/* 0x5480 Pointer to kmod, debugging aid */
+	uint32_t		lgTransOff;		/* 0x5484 Pointer to kdp_trans_off, debugging aid */
+	uint32_t		lgReadIO;		/* 0x5488 Pointer to kdp_read_io, debugging aid */
+	uint32_t		lgDevSlot1;		/* 0x548C For developer use */
+	uint32_t		lgDevSlot2;		/* 0x5490 For developer use */
+	uint32_t		lgOSVersion;		/* 0x5494 Pointer to OS version string */
+	uint32_t		lgRebootFlag;		/* 0x5498 Pointer to debugger reboot trigger */
+	uint32_t                lgManualPktAddr;        /* 0x549C Pointer to manual packet structure */
+	uint32_t		lgRsv49C[728];		/* 0x54A0 Reserved - push to 1 page */
+>>>>>>> origin/10.6
 } lowglo;
 
 extern lowglo lowGlo;

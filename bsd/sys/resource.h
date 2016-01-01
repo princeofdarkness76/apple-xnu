@@ -132,6 +132,7 @@ typedef __uint64_t	rlim_t;
 #if __DARWIN_C_LEVEL >= __DARWIN_C_FULL
 #define	PRIO_DARWIN_THREAD	3		/* Second argument is always 0 (current thread) */
 #define	PRIO_DARWIN_PROCESS	4		/* Second argument is a PID */
+<<<<<<< HEAD
 
 #ifdef PRIVATE
 
@@ -150,6 +151,8 @@ typedef __uint64_t	rlim_t;
 #define PRIO_DARWIN_ROLE_TAL_LAUNCH     0x5     /* Throttled-launch (for OS X TAL resume) */
 
 #endif /* PRIVATE */
+=======
+>>>>>>> origin/10.6
 
 /*
  * Range limitations for the value of the third parameter to setpriority().

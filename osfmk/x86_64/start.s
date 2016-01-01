@@ -479,11 +479,17 @@ Lwake_64:
 
 	/* restore segment registers */
 	movw	saved_es(%rip), %es
-	movw	saved_fs(%rip), %fs
-	movw	saved_gs(%rip), %gs
 	movw	saved_ss(%rip), %ss
 
+<<<<<<< HEAD
 	/* restore the 64bit kernel and user gs base */
+=======
+	/* Program FS/GS with a NULL selector, precautionary */
+	xor	%rax, %rax
+	movw	%ax, %fs
+	movw	%ax, %gs
+	/* restore the 64bit kernel gs base */
+>>>>>>> origin/10.6
 	mov	$MSR_IA32_KERNEL_GS_BASE, %rcx
 	movl	saved_kgs_base(%rip),   %eax 
 	movl	saved_kgs_base+4(%rip), %edx 

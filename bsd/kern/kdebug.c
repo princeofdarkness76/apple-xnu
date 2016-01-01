@@ -52,11 +52,15 @@
 #include <kern/thread.h>
 #include <kern/task.h>
 #include <kern/debug.h>
+<<<<<<< HEAD
 #include <kern/kalloc.h>
 #include <kern/cpu_data.h>
 #include <kern/assert.h>
 #include <kern/telemetry.h>
 #include <kern/sched_prim.h>
+=======
+#include <kern/assert.h>
+>>>>>>> origin/10.6
 #include <vm/vm_kern.h>
 #include <sys/lock.h>
 
@@ -294,9 +298,17 @@ extern kern_return_t stack_snapshot2(int pid, user_addr_t tracebuf, uint32_t tra
 extern kern_return_t stack_microstackshot(user_addr_t tracebuf, uint32_t tracebuf_size, uint32_t flags, int32_t *retval);
 #endif /* CONFIG_TELEMETRY */
 
+<<<<<<< HEAD
 extern kern_return_t kern_stack_snapshot_with_reason(char* reason);
 
 extern kern_return_t kern_stack_snapshot_internal(int stackshot_config_version, void *stackshot_config, size_t stackshot_config_size, boolean_t stackshot_from_user);
+=======
+int
+stack_snapshot2(pid_t pid, user_addr_t tracebuf, uint32_t tracebuf_size, uint32_t flags, uint32_t dispatch_offset, int32_t *retval);
+
+extern void
+kdp_snapshot_preflight(int pid, void  *tracebuf, uint32_t tracebuf_size, uint32_t flags, uint32_t dispatch_offset);
+>>>>>>> origin/10.6
 
 extern kern_return_t stack_snapshot_from_kernel_internal(int pid, void *buf, uint32_t size, uint32_t flags, unsigned *bytes_traced);
 
@@ -3657,8 +3669,25 @@ unsigned char *getProcName(struct proc *proc) {
 
 }
 
+<<<<<<< HEAD
 static int
 stackshot_kern_return_to_bsd_error(kern_return_t kr)
+=======
+#define STACKSHOT_SUBSYS_LOCK() lck_mtx_lock(&stackshot_subsys_mutex)
+#define STACKSHOT_SUBSYS_UNLOCK() lck_mtx_unlock(&stackshot_subsys_mutex)
+#if defined(__i386__) || defined (__x86_64__)
+#define TRAP_DEBUGGER __asm__ volatile("int3");
+#endif
+#ifdef __ppc__
+#define TRAP_DEBUGGER __asm__ volatile("tw 4,r3,r3");
+#endif
+
+#define SANE_TRACEBUF_SIZE (8 * 1024 * 1024)
+
+/* Initialize the mutex governing access to the stack snapshot subsystem */
+__private_extern__ void
+stackshot_lock_init( void )
+>>>>>>> origin/10.6
 {
 	switch (kr) {
 		case KERN_SUCCESS:
@@ -3713,8 +3742,13 @@ stack_snapshot(struct proc *p, register struct stack_snapshot_args *uap, int32_t
 	if ((error = suser(kauth_cred_get(), &p->p_acflag)))
                 return(error);
 
+<<<<<<< HEAD
 	kr = stack_snapshot2(uap->pid, uap->tracebuf, uap->tracebuf_size, uap->flags, retval);
 	return stackshot_kern_return_to_bsd_error(kr);
+=======
+	return stack_snapshot2(uap->pid, uap->tracebuf, uap->tracebuf_size,
+	    uap->flags, uap->dispatch_offset, retval);
+>>>>>>> origin/10.6
 }
 
 /*
@@ -3738,14 +3772,23 @@ stack_snapshot(struct proc *p, register struct stack_snapshot_args *uap, int32_t
  *				returns KERN_SUCCESS on success	
  */
 int
+<<<<<<< HEAD
 stack_snapshot_with_config(struct proc *p, struct stack_snapshot_with_config_args *uap, __unused int *retval)
 {
 	int error = 0;
 	kern_return_t kr;
+=======
+stack_snapshot2(pid_t pid, user_addr_t tracebuf, uint32_t tracebuf_size, uint32_t flags, uint32_t dispatch_offset, int32_t *retval)
+{
+	int error = 0;
+	unsigned bytesTraced = 0;
+	boolean_t istate;
+>>>>>>> origin/10.6
 
 	if ((error = suser(kauth_cred_get(), &p->p_acflag)))
                 return(error);
 
+<<<<<<< HEAD
 	if((void*)uap->stackshot_config == NULL) {
 		return EINVAL;
 	}
@@ -3767,6 +3810,22 @@ stack_snapshot_with_config(struct proc *p, struct stack_snapshot_with_config_arg
 			return ENOTSUP;
 	}
 }
+=======
+	assert(stackshot_snapbuf == NULL);
+	if (kmem_alloc_kobject(kernel_map, (vm_offset_t *)&stackshot_snapbuf, tracebuf_size) != KERN_SUCCESS) {
+		error = ENOMEM;
+		goto error_exit;
+	}
+
+	if (panic_active()) {
+		error = ENOMEM;
+		goto error_exit;
+	}
+
+	istate = ml_set_interrupts_enabled(FALSE);
+/* Preload trace parameters*/	
+	kdp_snapshot_preflight(pid, stackshot_snapbuf, tracebuf_size, flags, dispatch_offset);
+>>>>>>> origin/10.6
 
 #if CONFIG_TELEMETRY
 /*
@@ -3783,19 +3842,40 @@ stack_snapshot_with_config(struct proc *p, struct stack_snapshot_with_config_arg
  *			*retval contains the number of bytes traced, if successful
  *			and -1 otherwise.
  */
+<<<<<<< HEAD
 int
 microstackshot(struct proc *p, struct microstackshot_args *uap, int32_t *retval)
 {
 	int error = 0;
 	kern_return_t kr;
+=======
+>>>>>>> origin/10.6
 
 	if ((error = suser(kauth_cred_get(), &p->p_acflag)))
                 return(error);
 
+<<<<<<< HEAD
 	kr = stack_microstackshot(uap->tracebuf, uap->tracebuf_size, uap->flags, retval);
 	return stackshot_kern_return_to_bsd_error(kr);
 }
 #endif /* CONFIG_TELEMETRY */
+=======
+	ml_set_interrupts_enabled(istate);
+
+	bytesTraced = kdp_stack_snapshot_bytes_traced();
+			
+	if (bytesTraced > 0) {
+		if ((error = copyout(stackshot_snapbuf, tracebuf,
+			((bytesTraced < tracebuf_size) ?
+			    bytesTraced : tracebuf_size))))
+			goto error_exit;
+		*retval = bytesTraced;
+	}
+	else {
+		error = ENOENT;
+		goto error_exit;
+	}
+>>>>>>> origin/10.6
 
 /*
  * kern_stack_snapshot_with_reason:	Obtains a coherent set of stack traces for specified threads on the sysem,
@@ -3848,7 +3928,16 @@ stack_snapshot_from_kernel(pid_t pid, void *buf, uint32_t size, uint32_t flags, 
 		return -1;
 	}
 
+<<<<<<< HEAD
 	return kr;
+=======
+error_exit:
+	if (stackshot_snapbuf != NULL)
+		kmem_free(kernel_map, (vm_offset_t) stackshot_snapbuf, tracebuf_size);
+	stackshot_snapbuf = NULL;
+	STACKSHOT_SUBSYS_UNLOCK();
+	return error;
+>>>>>>> origin/10.6
 }
 
 void

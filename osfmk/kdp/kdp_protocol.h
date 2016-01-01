@@ -201,7 +201,10 @@ typedef enum {
 	KDPERR_ALREADY_CONNECTED,
 	KDPERR_BAD_NBYTES,
 	KDPERR_BADFLAVOR,		/* bad flavor in w/r regs */
+<<<<<<< HEAD
 	KDPERR_BAD_ACCESS,		/* memory reference failure */
+=======
+>>>>>>> origin/10.6
 
 	KDPERR_MAX_BREAKPOINTS = 100,
 	KDPERR_BREAKPOINT_NOT_FOUND = 101,

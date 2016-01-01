@@ -4216,10 +4216,178 @@ ipsec6_output_tunnel(
 			error = EINVAL;
 			goto bad;
 		}
+<<<<<<< HEAD
 		
 		int must_be_last = 0;
 		
 		if ((error = ipsec6_output_tunnel_internal(state, sav, &must_be_last)) != 0) {
+=======
+
+		if (isr->saidx.mode == IPSEC_MODE_TUNNEL) {
+			/*
+			 * build IPsec tunnel.
+			 */
+			state->m = ipsec6_splithdr(state->m);
+			if (!state->m) {
+				IPSEC_STAT_INCREMENT(ipsec6stat.out_nomem);
+				error = ENOMEM;
+				goto bad;
+			}
+
+			if (((struct sockaddr *)&sav->sah->saidx.src)->sa_family == AF_INET6) {			
+				error = ipsec6_encapsulate(state->m, sav);
+				if (error) {
+					state->m = 0;
+					goto bad;
+				}
+				ip6 = mtod(state->m, struct ip6_hdr *);
+			} else if (((struct sockaddr *)&sav->sah->saidx.src)->sa_family == AF_INET) {
+			
+				struct ip *ip;
+				struct sockaddr_in* dst4;
+				struct route *ro4 = NULL;
+				struct ip_out_args ipoa = { IFSCOPE_NONE };
+
+				/*
+				 * must be last isr because encapsulated IPv6 packet
+				 * will be sent by calling ip_output
+				 */
+				if (isr->next) {
+					ipseclog((LOG_ERR, "ipsec6_output_tunnel: "
+				    	"IPv4 must be outer layer, spi=%u\n",
+				    	(u_int32_t)ntohl(sav->spi)));
+					error = EINVAL;
+					goto bad;
+				}
+				*tunneledv4 = 1; /* must not process any further in ip6_output */
+				error = ipsec64_encapsulate(state->m, sav);
+				if (error) {
+					state->m = 0;
+					goto bad;
+				}
+				/* Now we have an IPv4 packet */
+				ip = mtod(state->m, struct ip *);
+
+				ro4 = &sav->sah->sa_route;
+				dst4 = (struct sockaddr_in *)&ro4->ro_dst;
+				if (ro4->ro_rt != NULL &&
+				    (ro4->ro_rt->generation_id != route_generation ||
+				    !(ro4->ro_rt->rt_flags & RTF_UP) ||
+				    dst4->sin_addr.s_addr != ip->ip_dst.s_addr)) {
+					rtfree(ro4->ro_rt);
+					ro4->ro_rt = NULL;
+				}
+				if (ro4->ro_rt == NULL) {
+					dst4->sin_family = AF_INET;
+					dst4->sin_len = sizeof(*dst4);
+					dst4->sin_addr = ip->ip_dst;
+				}
+				state->m = ipsec4_splithdr(state->m);
+				if (!state->m) {
+					error = ENOMEM;
+					goto bad;
+				}
+				switch (isr->saidx.proto) {
+				case IPPROTO_ESP:
+#if IPSEC_ESP
+					if ((error = esp4_output(state->m, sav)) != 0) {
+						state->m = NULL;
+						goto bad;
+					}
+					break;
+
+#else
+					m_freem(state->m);
+					state->m = NULL;
+					error = EINVAL;
+					goto bad;
+#endif
+				case IPPROTO_AH:
+					if ((error = ah4_output(state->m, sav)) != 0) {
+						state->m = NULL;
+						goto bad;
+					}
+					break;
+				case IPPROTO_IPCOMP:
+					if ((error = ipcomp4_output(state->m, sav)) != 0) {
+						state->m = NULL;
+						goto bad;
+					}
+					break;
+				default:
+					ipseclog((LOG_ERR,
+						"ipsec4_output: unknown ipsec protocol %d\n",
+						isr->saidx.proto));
+					m_freem(state->m);
+					state->m = NULL;
+					error = EINVAL;
+					goto bad;
+				}
+		
+				if (state->m == 0) {
+					error = ENOMEM;
+					goto bad;
+				}
+				ip = mtod(state->m, struct ip *);
+				ip->ip_len = ntohs(ip->ip_len);  /* flip len field before calling ip_output */
+				error = ip_output(state->m, NULL, ro4, IP_OUTARGS, NULL, &ipoa);
+				state->m = NULL;
+				if (error != 0)
+					goto bad;
+				goto done;
+			} else {
+				ipseclog((LOG_ERR, "ipsec6_output_tunnel: "
+				    "unsupported inner family, spi=%u\n",
+				    (u_int32_t)ntohl(sav->spi)));
+				IPSEC_STAT_INCREMENT(ipsec6stat.out_inval);
+				error = EAFNOSUPPORT;
+				goto bad;
+			}
+			
+			state->ro = &sav->sah->sa_route;
+			state->dst = (struct sockaddr *)&state->ro->ro_dst;
+			dst6 = (struct sockaddr_in6 *)state->dst;
+			if (state->ro->ro_rt != NULL &&
+			    (state->ro->ro_rt->generation_id != route_generation ||
+			    !(state->ro->ro_rt->rt_flags & RTF_UP) ||
+			    !IN6_ARE_ADDR_EQUAL(&dst6->sin6_addr, &ip6->ip6_dst))) {
+				rtfree(state->ro->ro_rt);
+				state->ro->ro_rt = NULL;
+			}
+			if (state->ro->ro_rt == 0) {
+				bzero(dst6, sizeof(*dst6));
+				dst6->sin6_family = AF_INET6;
+				dst6->sin6_len = sizeof(*dst6);
+				dst6->sin6_addr = ip6->ip6_dst;
+				rtalloc(state->ro);
+			}
+			if (state->ro->ro_rt == 0) {
+				ip6stat.ip6s_noroute++;
+				IPSEC_STAT_INCREMENT(ipsec6stat.out_noroute);
+				error = EHOSTUNREACH;
+				goto bad;
+			}
+
+			/*
+			 * adjust state->dst if tunnel endpoint is offlink
+			 *
+			 * XXX: caching rt_gateway value in the state is
+			 * not really good, since it may point elsewhere
+			 * when the gateway gets modified to a larger
+			 * sockaddr via rt_setgate().  This is currently
+			 * addressed by SA_SIZE roundup in that routine.
+			 */
+			if (state->ro->ro_rt->rt_flags & RTF_GATEWAY) {
+				state->dst = (struct sockaddr *)state->ro->ro_rt->rt_gateway;
+				dst6 = (struct sockaddr_in6 *)state->dst;
+			}
+		}
+
+		state->m = ipsec6_splithdr(state->m);
+		if (!state->m) {
+			IPSEC_STAT_INCREMENT(ipsec6stat.out_nomem);
+			error = ENOMEM;
+>>>>>>> origin/10.6
 			goto bad;
 		}
 		
@@ -4859,6 +5027,7 @@ __private_extern__ int
 ipsec_send_natt_keepalive(
 	struct secasvar *sav)
 {
+<<<<<<< HEAD
 	struct mbuf	       *m;
 	struct ip          *ip;
 	int                 error;
@@ -4866,6 +5035,13 @@ ipsec_send_natt_keepalive(
 	    { IFSCOPE_NONE, { 0 }, IPOAF_SELECT_SRCIF, 0 };
 	struct route        ro;
 	int keepalive_interval = natt_keepalive_interval;
+=======
+	struct mbuf	*m;
+	struct udphdr *uh;
+	struct ip *ip;
+	int error;
+	struct ip_out_args ipoa = { IFSCOPE_NONE };
+>>>>>>> origin/10.6
 
 	lck_mtx_assert(sadb_mutex, LCK_MTX_ASSERT_NOTOWNED);
 
@@ -5013,6 +5189,7 @@ ipsec_fill_offload_frame(ifnet_t ifp,
 	uh->uh_dport = htons(sav->remote_ike_port);
 	uh->uh_ulen = htons(1 + sizeof(*uh));
 	uh->uh_sum = 0;
+<<<<<<< HEAD
 	*(u_int8_t*)(data + frame_data_offset + sizeof(*ip) + sizeof(*uh)) = 0xFF;
 
 	if (sav->natt_offload_interval != 0) {
@@ -5021,6 +5198,14 @@ ipsec_fill_offload_frame(ifnet_t ifp,
 		frame->interval = sav->natt_interval;
 	} else {
 		frame->interval = natt_keepalive_interval;
+=======
+	*(u_int8_t*)((char*)m_mtod(m) + sizeof(struct ip) + sizeof(struct udphdr)) = 0xFF;
+	
+	error = ip_output(m, NULL, &sav->sah->sa_route, IP_OUTARGS | IP_NOIPSEC, NULL, &ipoa);
+	if (error == 0) {
+		sav->natt_last_activity = natt_now;
+		return TRUE;
+>>>>>>> origin/10.6
 	}
 	return (TRUE);
 }

@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD:libsyscall/os/alloc_once.c
  * Copyright (c) 2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2004-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6:osfmk/i386/rtclock.h
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -32,19 +36,24 @@
 =======
 #ifndef ASSEMBLER
 typedef struct rtc_nanotime {
-	uint64_t	tsc_base;		/* timestamp */
-	uint64_t	ns_base;		/* nanoseconds */
-	uint32_t	scale;			/* tsc -> nanosec multiplier */
-	uint32_t	shift;			/* tsc -> nanosec shift/div */
+	volatile uint64_t	tsc_base;	/* timestamp */
+	volatile uint64_t	ns_base;	/* nanoseconds */
+	uint32_t		scale;		/* tsc -> nanosec multiplier */
+	uint32_t		shift;		/* tsc -> nanosec shift/div */
 						/* shift is overloaded with
 						 * lower 32bits of tsc_freq
 						 * on slower machines (SLOW_TSC_THRESHOLD) */
-	uint32_t	generation;		/* 0 == being updated */
-	uint32_t	spare1;
+	volatile uint32_t	generation;	/* 0 == being updated */
+	uint32_t		spare1;
 } rtc_nanotime_t;
 
+#if 0
 #include <kern/etimer.h>
+<<<<<<< HEAD:libsyscall/os/alloc_once.c
 >>>>>>> origin/10.5:osfmk/i386/rtclock.h
+=======
+#endif
+>>>>>>> origin/10.6:osfmk/i386/rtclock.h
 
 struct _os_alloc_once_s {
 	long once;
@@ -61,6 +70,10 @@ extern void	_rtc_nanotime_store(
 			uint64_t	nsec,
 			uint32_t	scale,
 			uint32_t	shift,
+			rtc_nanotime_t	*dst);
+
+extern void	_rtc_nanotime_adjust(
+			uint64_t	tsc_base_delta,
 			rtc_nanotime_t	*dst);
 
 extern uint64_t	_rtc_nanotime_read(

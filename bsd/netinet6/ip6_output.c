@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2008-2011 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -514,6 +518,7 @@ loopit:
 	packets_processed++;
 	m->m_pkthdr.pkt_flags &= ~(PKTF_LOOP|PKTF_IFAINFO);
 	ip6 = mtod(m, struct ip6_hdr *);
+<<<<<<< HEAD
 	nxt0 = ip6->ip6_nxt;
 	finaldst = ip6->ip6_dst;
 	ip6obf.hdrsplit = FALSE;
@@ -523,6 +528,10 @@ loopit:
 		inject_filter_ref = ipf_get_inject_filter(m);
 	else
 		inject_filter_ref = NULL;
+=======
+	inject_filter_ref = ipf_get_inject_filter(m);
+	finaldst = ip6->ip6_dst;
+>>>>>>> origin/10.6
 
 #define	MAKE_EXTHDR(hp, mp) do {					\
 	if (hp != NULL) {						\
@@ -1318,11 +1327,37 @@ routefound:
 			 * on the outgoing interface, and the caller did not
 			 * forbid loopback, loop back a copy.
 			 */
+<<<<<<< HEAD
 			ip6_mloopback(NULL, ifp, m, dst, optlen, nxt0);
 		} else if (im6o != NULL) 
 			IM6O_UNLOCK(im6o);
 		if (in6m != NULL)
 			IN6M_REMREF(in6m);
+=======
+			ip6_mloopback(ifp, m, dst);
+		} else {
+			/*
+			 * If we are acting as a multicast router, perform
+			 * multicast forwarding as if the packet had just
+			 * arrived on the interface to which we are about
+			 * to send.  The multicast forwarding function
+			 * recursively calls this function, using the
+			 * IPV6_FORWARDING flag to prevent infinite recursion.
+			 *
+			 * Multicasts that are looped back by ip6_mloopback(),
+			 * above, will be forwarded by the ip6_input() routine,
+			 * if necessary.
+			 */
+#if MROUTING
+			if (ip6_mrouter && (flags & IPV6_FORWARDING) == 0) {
+				if (ip6_mforward(ip6, ifp, m) != 0) {
+					m_freem(m);
+					goto done;
+				}
+			}
+#endif
+		}
+>>>>>>> origin/10.6
 		/*
 		 * Multicasts with a hoplimit of zero may be looped back,
 		 * above, but must not be transmitted on a network.
@@ -1405,7 +1440,11 @@ routefound:
 			}
 		}
 	}
+<<<<<<< HEAD
 #endif /* IPFW2 */
+=======
+#endif
+>>>>>>> origin/10.6
 
 	/*
 	 * If the outgoing packet contains a hop-by-hop options header,
@@ -2705,12 +2744,18 @@ ip6_ctloutput(struct socket *so, struct sockopt *sopt)
 			case IPV6_FW_ADD:
 			case IPV6_FW_DEL:
 			case IPV6_FW_FLUSH:
+<<<<<<< HEAD
 			case IPV6_FW_ZERO: {
+=======
+			case IPV6_FW_ZERO:
+				{
+>>>>>>> origin/10.6
 				if (ip6_fw_ctl_ptr == NULL)
 					load_ip6fw();
 				if (ip6_fw_ctl_ptr != NULL)
 					error = (*ip6_fw_ctl_ptr)(sopt);
 				else
+<<<<<<< HEAD
 					error = ENOPROTOOPT;
 				break;
 			}
@@ -2752,6 +2797,9 @@ ip6_ctloutput(struct socket *so, struct sockopt *sopt)
 				if (!optval && INP_NO_CELLULAR(in6p)) {
 					error = EINVAL;
 					break;
+=======
+					return ENOPROTOOPT;
+>>>>>>> origin/10.6
 				}
 
 				error = so_set_restrictions(so,
@@ -2991,6 +3039,7 @@ ip6_ctloutput(struct socket *so, struct sockopt *sopt)
 >>>>>>> origin/10.3
 				break;
 
+<<<<<<< HEAD
 			case IPV6_NO_IFT_CELLULAR:
 				optval = INP_NO_CELLULAR(in6p) ? 1 : 0;
 				error = sooptcopyout(sopt, &optval,
@@ -3002,6 +3051,18 @@ ip6_ctloutput(struct socket *so, struct sockopt *sopt)
 				    in6p->in6p_last_outifp->if_index : 0;
 				error = sooptcopyout(sopt, &optval,
 				    sizeof (optval));
+=======
+#if IPFIREWALL
+			case IPV6_FW_GET:
+				{
+				if (ip6_fw_ctl_ptr == NULL)
+					load_ip6fw();
+				if (ip6_fw_ctl_ptr != NULL)
+					error = (*ip6_fw_ctl_ptr)(sopt);
+				else
+					return ENOPROTOOPT;
+				}
+>>>>>>> origin/10.6
 				break;
 
 			default:

@@ -3078,7 +3078,10 @@ ttymalloc(void)
 		lck_mtx_init(&tp->t_lock, tty_lck_grp, tty_lck_attr);
 		klist_init(&tp->t_rsel.si_note);
 		klist_init(&tp->t_wsel.si_note);
+<<<<<<< HEAD
 		tp->t_refcnt = 1;
+=======
+>>>>>>> origin/10.6
 	}
 	return (tp);
 }

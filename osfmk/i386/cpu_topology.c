@@ -174,6 +174,12 @@ cpu_topology_sort(int ncpus)
 >>>>>>> origin/10.5
 
 	/*
+	 * Let the CPU Power Management know that the topology is stable.
+	 */
+	topoParms.stable = TRUE;
+	pmCPUStateInit();
+
+	/*
 	 * Iterate over all logical cpus finding or creating the affinity set
 	 * for their LLC cache. Each affinity set possesses a processor set
 	 * into which each logical processor is added.

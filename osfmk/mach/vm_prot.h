@@ -173,4 +173,12 @@ typedef int		vm_prot_t;
 #define VM_PROT_MEMORY_TAG(x)		(((x) >> VM_PROT_MEMORY_TAG_SHIFT) & 0xFF)
 #define VM_PROT_MEMORY_TAG_MAKE(x)	(((x) & 0xFF) << VM_PROT_MEMORY_TAG_SHIFT)
 
+/*
+ *	The caller wants this memory region treated as if it had a valid
+ *	code signature.
+ */
+
+#define VM_PROT_TRUSTED		((vm_prot_t) 0x20)
+
+
 #endif	/* _MACH_VM_PROT_H_ */

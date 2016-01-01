@@ -180,8 +180,53 @@ unix_syscall(
 			/* set the "pc" to execute cerror routine */
 			regs->save_srr0 -= 4;
 		} else { /* (not error) */
+<<<<<<< HEAD
 			regs->save_r3 = uthread->uu_rval[0];
 			regs->save_r4 = uthread->uu_rval[1];
+=======
+			switch (callp->sy_return_type) {
+			case _SYSCALL_RET_INT_T:
+				regs->save_r3 = uthread->uu_rval[0];
+				regs->save_r4 = uthread->uu_rval[1];
+				break;
+			case _SYSCALL_RET_UINT_T:
+				regs->save_r3 = ((u_int)uthread->uu_rval[0]);
+				regs->save_r4 = ((u_int)uthread->uu_rval[1]);
+				break;
+			case _SYSCALL_RET_OFF_T:
+			case _SYSCALL_RET_UINT64_T:
+				/* return 64 bits split across two registers for 32 bit */
+				/* process and in one register for 64 bit process */
+				if (IS_64BIT_PROCESS(proc)) {
+					u_int64_t 	*retp = (u_int64_t *)&uthread->uu_rval[0];
+					regs->save_r3 = *retp;
+					regs->save_r4 = 0;
+				}
+				else {
+					regs->save_r3 = uthread->uu_rval[0];
+					regs->save_r4 = uthread->uu_rval[1];
+				}
+				break;
+			case _SYSCALL_RET_ADDR_T:
+			case _SYSCALL_RET_SIZE_T:
+			case _SYSCALL_RET_SSIZE_T:
+				/* the variable length return types (user_addr_t, user_ssize_t, 
+				 * and user_size_t) are always the largest possible size in the 
+				 * kernel (we use uu_rval[0] and [1] as one 64 bit value).
+				 */
+				{
+					user_addr_t *retp = (user_addr_t *)&uthread->uu_rval[0];
+					regs->save_r3 = *retp;
+					regs->save_r4 = 0;
+				}
+				break;
+			case _SYSCALL_RET_NONE:
+				break;
+			default:
+				panic("unix_syscall: unknown return type");
+				break;
+			}
+>>>>>>> origin/10.6
 		} 
 	}
 	/* else  (error == EJUSTRETURN) { nothing } */
@@ -243,8 +288,51 @@ unix_syscall_return(error)
 			/* set the "pc" to execute cerror routine */
 			regs->save_srr0 -= 4;
 		} else { /* (not error) */
+<<<<<<< HEAD
 			regs->save_r3 = uthread->uu_rval[0];
 			regs->save_r4 = uthread->uu_rval[1];
+=======
+			switch (callp->sy_return_type) {
+			case _SYSCALL_RET_INT_T:
+				regs->save_r3 = uthread->uu_rval[0];
+				regs->save_r4 = uthread->uu_rval[1];
+				break;
+			case _SYSCALL_RET_UINT_T:
+				regs->save_r3 = ((u_int)uthread->uu_rval[0]);
+				regs->save_r4 = ((u_int)uthread->uu_rval[1]);
+				break;
+			case _SYSCALL_RET_OFF_T:
+			case _SYSCALL_RET_UINT64_T:
+				/* return 64 bits split across two registers for 32 bit */
+				/* process and in one register for 64 bit process */
+				if (IS_64BIT_PROCESS(proc)) {
+					u_int64_t 	*retp = (u_int64_t *)&uthread->uu_rval[0];
+					regs->save_r3 = *retp;
+				}
+				else {
+					regs->save_r3 = uthread->uu_rval[0];
+					regs->save_r4 = uthread->uu_rval[1];
+				}
+				break;
+			case _SYSCALL_RET_ADDR_T:
+			case _SYSCALL_RET_SIZE_T:
+			case _SYSCALL_RET_SSIZE_T:
+				/* the variable length return types (user_addr_t, user_ssize_t, 
+				 * and user_size_t) are always the largest possible size in the 
+				 * kernel (we use uu_rval[0] and [1] as one 64 bit value).
+				 */
+				{
+					u_int64_t 	*retp = (u_int64_t *)&uthread->uu_rval[0];
+					regs->save_r3 = *retp;
+				}
+				break;
+			case _SYSCALL_RET_NONE:
+				break;
+			default:
+				panic("unix_syscall: unknown return type");
+				break;
+			}
+>>>>>>> origin/10.6
 		} 
 	}
 	/* else  (error == EJUSTRETURN) { nothing } */

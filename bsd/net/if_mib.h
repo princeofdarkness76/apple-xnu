@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2011 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2010 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -96,9 +100,12 @@ struct ifmibdata {
 #ifdef PRIVATE
 struct ifmibdata_supplemental {
 	struct if_traffic_class	ifmd_traffic_class;
+<<<<<<< HEAD
 	struct if_data_extended	ifmd_data_extended;
 	struct if_packet_stats	ifmd_packet_stats;
 	struct if_rxpoll_stats	ifmd_rxpoll_stats;
+=======
+>>>>>>> origin/10.6
 };
 #endif /* PRIVATE */
 

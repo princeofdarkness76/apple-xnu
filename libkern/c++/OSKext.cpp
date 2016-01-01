@@ -236,7 +236,10 @@ static IORecursiveLock    * sKextLock                  = NULL;
 static OSDictionary       * sKextsByID                 = NULL;
 static OSDictionary       * sExcludeListByID           = NULL;
 static OSArray            * sLoadedKexts               = NULL;
+<<<<<<< HEAD
 static OSArray            * sUnloadedPrelinkedKexts    = NULL;
+=======
+>>>>>>> origin/10.6
 
 // Requests to kextd waiting to be picked up.
 static OSArray            * sKernelRequests            = NULL;
@@ -1067,7 +1070,11 @@ OSKext::setKextdActive(Boolean active)
     IORecursiveLockLock(sKextLock);
     sKextdActive = active;
     if (sKernelRequests->getCount()) {
+<<<<<<< HEAD
         OSKext::pingKextd();
+=======
+        OSKextPingKextd();
+>>>>>>> origin/10.6
     }
     IORecursiveLockUnlock(sKextLock);
 
@@ -1169,7 +1176,11 @@ OSKext::willShutdown(void)
         goto finish;
     }
 
+<<<<<<< HEAD
     OSKext::pingKextd();
+=======
+    OSKextPingKextd();
+>>>>>>> origin/10.6
 
 finish:
 #endif
@@ -4392,6 +4403,7 @@ OSKext::load(
     Boolean              alreadyLoaded                = false;
     OSKext             * lastLoadedKext               = NULL;
 
+<<<<<<< HEAD
     if (isInExcludeList()) {
         OSKextLog(this,
                   kOSKextLogErrorLevel | kOSKextLogGeneralFlag |
@@ -4403,6 +4415,8 @@ OSKext::load(
         goto finish;
     }
 
+=======
+>>>>>>> origin/10.6
     if (isLoaded()) {
         alreadyLoaded = true;
         result = kOSReturnSuccess;
@@ -4434,6 +4448,16 @@ OSKext::load(
         }
    }
 #endif
+
+    if (!sLoadEnabled) {
+        OSKextLog(this,
+            kOSKextLogErrorLevel |
+            kOSKextLogLoadFlag,
+            "Kext loading is disabled (attempt to load kext %s).",
+            getIdentifierCString());
+        result = kOSKextReturnDisabled;
+        goto finish;
+    }
 
     if (!sLoadEnabled) {
         OSKextLog(this,
@@ -4617,6 +4641,7 @@ OSKext::load(
     */
     OSKext::saveLoadedKextPanicList();
 
+<<<<<<< HEAD
     if (isExecutable()) {
         OSKext::updateLoadedKextSummaries();
         savePanicString(/* isLoading */ true);
@@ -4634,6 +4659,19 @@ OSKext::load(
          */
         jettisonDATASegmentPadding();
 #endif
+=======
+loaded:
+
+    if (declaresExecutable() && (startOpt == kOSKextExcludeNone)) {
+        result = start();
+        if (result != kOSReturnSuccess) {
+            OSKextLog(this,
+                kOSKextLogErrorLevel | kOSKextLogLoadFlag,
+                "Kext %s start failed (result 0x%x).",
+                getIdentifierCString(), result);
+            result = kOSKextReturnStartStopError;
+        }
+>>>>>>> origin/10.6
     }
 
 loaded:
@@ -4658,7 +4696,10 @@ loaded:
     if (result == kOSReturnSuccess && startMatchingOpt == kOSKextExcludeNone) {
         result = sendPersonalitiesToCatalog(true, personalityNames);
     }
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.6
 finish:
 
    /* More hack! If the kext doesn't declare an executable, even if we
@@ -8888,7 +8929,11 @@ OSKext::requestResource(
         goto finish;
     }
 
+<<<<<<< HEAD
     OSKext::pingKextd();
+=======
+    OSKextPingKextd();
+>>>>>>> origin/10.6
 
     result = kOSReturnSuccess;
     if (requestTagOut) {

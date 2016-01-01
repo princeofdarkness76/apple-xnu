@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 1999-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -510,6 +514,7 @@ extern void dlil_node_absent(struct ifnet *, struct sockaddr *);
 extern const void *dlil_ifaddr_bytes(const struct sockaddr_dl *, size_t *,
     kauth_cred_t *);
 
+<<<<<<< HEAD
 extern void dlil_report_issues(struct ifnet *, u_int8_t[DLIL_MODIDLEN],
     u_int8_t[DLIL_MODARGLEN]);
 
@@ -525,6 +530,12 @@ extern errno_t dlil_rxpoll_get_params(struct ifnet *,
     struct ifnet_poll_params *);
 
 #endif /* BSD_KERNEL_PRIVATE */
+=======
+#if IFNET_ROUTE_REFCNT
+extern u_int32_t ifnet_aggressive_drainers;
+#endif /* IFNET_ROUTE_REFCNT */
+
+>>>>>>> origin/10.6
 #endif /* KERNEL_PRIVATE */
 #endif /* KERNEL */
 #endif /* DLIL_H */

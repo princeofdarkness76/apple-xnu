@@ -247,6 +247,7 @@ extern errno_t sock_settclassopt(socket_t so, const void* optval, size_t optlen)
 */
 extern errno_t sock_gettclassopt(socket_t so, void* optval, size_t* optlen);
 
+<<<<<<< HEAD
 #ifdef XNU_KERNEL_PRIVATE
 extern void socket_set_traffic_mgt_flags_locked(socket_t so, u_int8_t flags);
 extern void socket_clear_traffic_mgt_flags_locked(socket_t so, u_int8_t flags);
@@ -259,6 +260,13 @@ extern errno_t sock_receive_internal(socket_t, struct msghdr *, mbuf_t *,
     int, size_t *);
 #endif /* BSD_KERNEL_PRIVATE */
 #endif /* KERNEL_PRIVATE */
+=======
+#ifdef BSD_KERNEL_PRIVATE
+extern void socket_set_traffic_mgt_flags(socket_t so, u_int32_t flags);
+extern void socket_clear_traffic_mgt_flags(socket_t so, u_int32_t flags);
+#endif /* BSD_KERNEL_PRIVATE */
+#endif
+>>>>>>> origin/10.6
 
 /*!
 	@function sock_listen

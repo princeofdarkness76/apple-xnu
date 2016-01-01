@@ -621,10 +621,20 @@ ipc_kobject_notify(
 				audit_session_nosenders(request_header);
 				return TRUE;
 #endif
+<<<<<<< HEAD
 			case IKOT_FILEPORT:
 				fileport_notify(request_header);
 				return TRUE;
 			}
+=======
+#if CONFIG_EMBEDDED
+		   if (ip_kotype(port) == IKOT_FILEPORT) {
+			fileport_notify(request_header);
+			return TRUE;
+		   }
+#endif
+
+>>>>>>> origin/10.6
 	  	   break;
 
 		case MACH_NOTIFY_PORT_DELETED:

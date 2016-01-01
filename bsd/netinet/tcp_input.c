@@ -2388,9 +2388,14 @@ findpcb:
 		goto drop;
 #endif
 
+<<<<<<< HEAD
 	/* Avoid processing packets while closing a listen socket */
 	if (tp->t_state == TCPS_LISTEN && 
 		(so->so_options & SO_ACCEPTCONN) == 0) 
+=======
+	/* Radar 7377561: Avoid processing packets while closing a listen socket */
+	if (tp->t_state == TCPS_LISTEN && (so->so_options & SO_ACCEPTCONN) == 0) 
+>>>>>>> origin/10.6
 		goto drop;
 
 	if (so->so_options & (SO_DEBUG|SO_ACCEPTCONN)) {
@@ -2446,8 +2451,11 @@ findpcb:
 			 * If it is from this socket, drop it, it must be forged.
 			 */
 			if ((thflags & (TH_RST|TH_ACK|TH_SYN)) != TH_SYN) {
+<<<<<<< HEAD
 				IF_TCP_STATINC(ifp, listbadsyn);
 
+=======
+>>>>>>> origin/10.6
 				if (thflags & TH_RST) {
 					goto drop;
 				}
@@ -2585,6 +2593,7 @@ findpcb:
 			 * we're committed to it below in TCPS_LISTEN.
 			 * There are some error conditions in which we
 			 * have to drop the temporary socket.
+<<<<<<< HEAD
 			 */
 			dropsocket++;
 			/*
@@ -2611,6 +2620,8 @@ findpcb:
 				inp_set_awdl_unrestricted(inp);
 			/*
 			 * Inherit {IN,IN6}_RECV_ANYIF from listener.
+=======
+>>>>>>> origin/10.6
 			 */
 			if (head_recvanyif)
 				inp->inp_flags |= INP_RECV_ANYIF;
@@ -2618,8 +2629,11 @@ findpcb:
 				inp->inp_flags &= ~INP_RECV_ANYIF;
 =======
 			dropsocket++;
+<<<<<<< HEAD
 			inp = (struct inpcb *)so->so_pcb;
 
+=======
+>>>>>>> origin/10.6
 			/*
 			 * Inherit INP_BOUND_IF from listener; testing if
 			 * head_ifscope is non-zero is sufficient, since it
@@ -2657,7 +2671,11 @@ findpcb:
 					inp->in6p_laddr = in6addr_any;
 				else
 #endif /* INET6 */
+<<<<<<< HEAD
 					inp->inp_laddr.s_addr = INADDR_ANY;
+=======
+				inp->inp_laddr.s_addr = INADDR_ANY;
+>>>>>>> origin/10.6
 				inp->inp_lport = 0;
 				tcp_lock(oso, 0, 0);	/* release ref on parent */
 				tcp_unlock(oso, 1, 0);
@@ -2726,9 +2744,46 @@ findpcb:
 			KERNEL_DEBUG(DBG_FNC_TCP_NEWCONN | DBG_FUNC_END,0,0,0,0,0);
 		}
 	}
+<<<<<<< HEAD
 	lck_mtx_assert(&((struct inpcb *)so->so_pcb)->inpcb_mtx,
 		LCK_MTX_ASSERT_OWNED);
 
+=======
+#if 1
+	lck_mtx_assert(((struct inpcb *)so->so_pcb)->inpcb_mtx, LCK_MTX_ASSERT_OWNED);
+#endif
+ 	/*
+ 	 * Radar 3529618
+	 * This is the second part of the MSS DoS prevention code (after
+	 * minmss on the sending side) and it deals with too many too small
+	 * tcp packets in a too short timeframe (1 second).
+	 *
+	 * For every full second we count the number of received packets
+	 * and bytes. If we get a lot of packets per second for this connection
+	 * (tcp_minmssoverload) we take a closer look at it and compute the
+	 * average packet size for the past second. If that is less than
+	 * tcp_minmss we get too many packets with very small payload which
+	 * is not good and burdens our system (and every packet generates
+	 * a wakeup to the process connected to our socket). We can reasonable
+	 * expect this to be small packet DoS attack to exhaust our CPU
+	 * cycles.
+	 *
+	 * Care has to be taken for the minimum packet overload value. This
+	 * value defines the minimum number of packets per second before we
+	 * start to worry. This must not be too low to avoid killing for
+	 * example interactive connections with many small packets like
+	 * telnet or SSH.
+	 *
+	 * Setting either tcp_minmssoverload or tcp_minmss to "0" disables
+	 * this check.
+	 *
+	 * Account for packet if payload packet, skip over ACK, etc.
+	 *
+	 * The packet per second count is done all the time and is also used
+	 * by "DELAY_ACK" to detect streaming situations.
+	 *
+	 */
+>>>>>>> origin/10.6
 	if (tp->t_state == TCPS_ESTABLISHED && tlen > 0) {
 		/* 
 		 * Evaluate the rate of arrival of packets to see if the 
@@ -2753,6 +2808,26 @@ findpcb:
 			tp->rcv_by_unackwin = tlen + off;
 		}
 	}
+<<<<<<< HEAD
+=======
+	
+#if TRAFFIC_MGT
+	if (so->so_traffic_mgt_flags & TRAFFIC_MGT_SO_BG_REGULATE) {
+		tcpstat.tcps_bg_rcvtotal++;
+
+		 /* Take snapshots of pkts recv;
+		  * tcpcb should have been initialized to 0 when allocated, 
+		  * so if 0 then this is the first time we're doing this
+		  */
+		if (!tp->tot_recv_snapshot) {
+			 tp->tot_recv_snapshot = tcpstat.tcps_rcvtotal;
+		 }
+		if (!tp->bg_recv_snapshot) {
+			 tp->bg_recv_snapshot = tcpstat.tcps_bg_rcvtotal;
+		 }
+	}
+#endif /* TRAFFIC_MGT */
+>>>>>>> origin/10.6
 
 	/* 
 	 * Keep track of how many bytes were received in the LRO packet
@@ -3296,8 +3371,14 @@ findpcb:
 		register struct sockaddr_in6 *sin6;
 #endif
 
+<<<<<<< HEAD
 		lck_mtx_assert(&((struct inpcb *)so->so_pcb)->inpcb_mtx,
 		    LCK_MTX_ASSERT_OWNED);
+=======
+#if 1
+		lck_mtx_assert(((struct inpcb *)so->so_pcb)->inpcb_mtx, LCK_MTX_ASSERT_OWNED);
+#endif
+>>>>>>> origin/10.6
 #if INET6
 		if (isipv6) {
 			MALLOC(sin6, struct sockaddr_in6 *, sizeof *sin6,

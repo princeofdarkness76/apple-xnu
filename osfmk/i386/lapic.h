@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2008-2010 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2008-2010 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -37,12 +41,18 @@
 #define _I386_LAPIC_H_
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
 /*
  * Legacy mode definitions.
  * The register offsets are no longer used by XNU - see LAPIC_MMIO_OFFSET().
  */
+<<<<<<< HEAD
 =======
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.6
 #define LAPIC_START			0xFEE00000
 #define LAPIC_SIZE			0x00000400
 
@@ -118,11 +128,17 @@
 #define		LAPIC_LVT_MASKED	0x10000
 #define		LAPIC_LVT_PERIODIC	0x20000
 <<<<<<< HEAD
+<<<<<<< HEAD
 #define		LAPIC_LVT_TSC_DEADLINE	0x40000
 #define		LAPIC_LVT_TMR_SHIFT	17
 #define		LAPIC_LVT_TMR_MASK	3
 =======
 >>>>>>> origin/10.5
+=======
+#define		LAPIC_LVT_TSC_DEADLINE	0x40000
+#define		LAPIC_LVT_TMR_SHIFT	17
+#define		LAPIC_LVT_TMR_MASK	3
+>>>>>>> origin/10.6
 #define LAPIC_TIMER_INITIAL_COUNT	0x00000380
 #define LAPIC_TIMER_CURRENT_COUNT	0x00000390
 #define LAPIC_TIMER_DIVIDE_CONFIG	0x000003E0
@@ -142,6 +158,7 @@
 #define CPU_NUMBER(r)				\
 	movl	%gs:CPU_NUMBER_GS,r
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 #ifndef	ASSEMBLER
 typedef enum {
@@ -214,6 +231,60 @@ extern  lapic_ops_table_t *lapic_ops;
 #include <mach/boolean.h>
 #include <mach/kern_return.h>
 >>>>>>> origin/10.5
+=======
+#ifndef	ASSEMBLER
+typedef enum {
+	ID			= 0x02,
+	VERSION			= 0x03,
+	TPR			= 0x08,
+	APR			= 0x09,
+	PPR			= 0x0A,
+	EOI			= 0x0B,
+	REMOTE_READ		= 0x0C,
+	LDR			= 0x0D,
+	DFR			= 0x0E,
+	SVR			= 0x0F,
+	ISR_BASE		= 0x10,
+	TMR_BASE		= 0x18,
+	IRR_BASE		= 0x20,
+	ERROR_STATUS		= 0x28,
+	LVT_CMCI		= 0x2F,
+	ICR			= 0x30,
+	ICRD			= 0x31,
+	LVT_TIMER		= 0x32,
+	LVT_THERMAL		= 0x33,
+	LVT_PERFCNT		= 0x34,
+	LVT_LINT0		= 0x35,
+	LVT_LINT1		= 0x36,
+	LVT_ERROR		= 0x37,
+	TIMER_INITIAL_COUNT	= 0x38,
+	TIMER_CURRENT_COUNT	= 0x39,
+	TIMER_DIVIDE_CONFIG	= 0x3E,
+} lapic_register_t;
+
+#define LAPIC_MMIO_PBASE	0xFEE00000	/* Default physical MMIO addr */
+#define LAPIC_MMIO_VBASE	lapic_vbase	/* Actual virtual mapped addr */
+#define LAPIC_MSR_BASE		0x800
+
+#define	LAPIC_MMIO_OFFSET(reg)	(reg << 4)
+#define	LAPIC_MSR_OFFSET(reg)	(reg)
+
+#define	LAPIC_MMIO(reg)		((volatile uint32_t *) \
+					(LAPIC_MMIO_VBASE + LAPIC_MMIO_OFFSET(reg)))
+#define	LAPIC_MSR(reg)		(LAPIC_MSR_BASE + LAPIC_MSR_OFFSET(reg))
+
+typedef struct {
+	void		(*init)	(void);
+	uint32_t	(*read)	(lapic_register_t);
+	void		(*write)(lapic_register_t, uint32_t);
+} lapic_ops_table_t;
+extern  lapic_ops_table_t *lapic_ops;
+
+#define LAPIC_WRITE(reg,val)		lapic_ops->write(reg, val)
+#define LAPIC_READ(reg)			lapic_ops->read(reg)
+#define LAPIC_READ_OFFSET(reg,off)	LAPIC_READ((reg)+(off))
+
+>>>>>>> origin/10.6
 typedef enum {
 	periodic,
 	one_shot
@@ -276,6 +347,7 @@ typedef uint32_t lapic_timer_count_t;
 =======
 #define LAPIC_FUNC_TABLE_SIZE		LAPIC_PERFCNT_INTERRUPT
 
+<<<<<<< HEAD
 #define LAPIC_WRITE(reg,val) \
 	*((volatile uint32_t *)(lapic_start + LAPIC_##reg)) = (val)
 #define LAPIC_READ(reg) \
@@ -284,10 +356,13 @@ typedef uint32_t lapic_timer_count_t;
 	(*((volatile uint32_t *)(lapic_start + LAPIC_##reg + (off))))
 >>>>>>> origin/10.5
 
+=======
+>>>>>>> origin/10.6
 #define LAPIC_VECTOR(src) \
 	(lapic_interrupt_base + LAPIC_##src##_INTERRUPT)
 
 #define LAPIC_ISR_IS_SET(base,src) \
+<<<<<<< HEAD
 <<<<<<< HEAD
 	(LAPIC_READ_OFFSET(ISR_BASE,(base+LAPIC_##src##_INTERRUPT)/32) \
 		& (1 <<((base + LAPIC_##src##_INTERRUPT)%32)))
@@ -299,6 +374,11 @@ typedef uint32_t lapic_timer_count_t;
 extern vm_offset_t	lapic_start;
 
 >>>>>>> origin/10.5
+=======
+	(LAPIC_READ_OFFSET(ISR_BASE,(base+LAPIC_##src##_INTERRUPT)/32) \
+		& (1 <<((base + LAPIC_##src##_INTERRUPT)%32)))
+
+>>>>>>> origin/10.6
 extern void		lapic_init(void);
 extern void		lapic_configure(void);
 extern void		lapic_shutdown(void);
@@ -329,6 +409,7 @@ extern void		lapic_config_timer(
 
 extern void		lapic_set_timer_fast(
 				lapic_timer_count_t	initial_count);
+<<<<<<< HEAD
 =======
 extern int		lapic_interrupt(
 				int interrupt, x86_saved_state_t *state);
@@ -339,6 +420,8 @@ extern int		lapic_interrupt_base;
 extern void		lapic_cpu_map(int lapic, int cpu_num);
 extern uint32_t		ml_get_apicid(uint32_t cpu);
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.6
 
 extern void		lapic_set_timer(
 				boolean_t		interrupt,
@@ -353,10 +436,14 @@ extern void		lapic_get_timer(
 				lapic_timer_count_t	*current_count);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.6
 extern void		lapic_config_tsc_deadline_timer(void);
 extern void		lapic_set_tsc_deadline_timer(uint64_t deadline);
 extern uint64_t		lapic_get_tsc_deadline_timer(void);
 
+<<<<<<< HEAD
 typedef	int (*i386_intr_func_t)(x86_saved_state_t *state);
 extern void		lapic_set_intr_func(int intr, i386_intr_func_t func);
 
@@ -367,10 +454,18 @@ typedef	int (*i386_intr_func_t)(x86_saved_state_t *state);
 extern void		lapic_set_intr_func(int intr, i386_intr_func_t func);
 
 >>>>>>> origin/10.5
+=======
+typedef	int (*i386_intr_func_t)(x86_saved_state_t *state);
+extern void		lapic_set_intr_func(int intr, i386_intr_func_t func);
+
+extern void		lapic_set_pmi_func(i386_intr_func_t);
+
+>>>>>>> origin/10.6
 static inline void	lapic_set_timer_func(i386_intr_func_t func)
 {
 	lapic_set_intr_func(LAPIC_VECTOR(TIMER), func);
 }
+<<<<<<< HEAD
 <<<<<<< HEAD
 /* We don't support dynamic adjustment of the LAPIC timer base vector here
  * it's effectively incompletely supported elsewhere as well.
@@ -385,6 +480,9 @@ static inline void	lapic_set_pmi_func(i386_intr_func_t func)
 	lapic_set_intr_func(LAPIC_VECTOR(PERFCNT), func);
 }
 >>>>>>> origin/10.5
+=======
+
+>>>>>>> origin/10.6
 static inline void	lapic_set_thermal_func(i386_intr_func_t func)
 {
 	lapic_set_intr_func(LAPIC_VECTOR(THERMAL), func);
@@ -404,13 +502,17 @@ extern boolean_t	lapic_is_interrupting(uint8_t vector);
 extern void		lapic_interrupt_counts(uint64_t intrs[256]);
 extern void		lapic_disable_timer(void);
 
+<<<<<<< HEAD
 extern uint8_t		lapic_get_cmci_vector(void);
 
 #define	MAX_LAPICIDS	(LAPIC_ID_MAX+1)
 =======
 
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.6
 #ifdef MP_DEBUG
+extern	void		lapic_cpu_map_dump(void);
 #define LAPIC_CPU_MAP_DUMP()	lapic_cpu_map_dump()
 #define LAPIC_DUMP()		lapic_dump()
 #else

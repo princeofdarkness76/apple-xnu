@@ -101,6 +101,11 @@ extern "C" {
  * reading and updating of values.
  */
  
+<<<<<<< HEAD
+=======
+#if defined(__i386__) || defined(__x86_64__) || defined(__arm__)
+
+>>>>>>> origin/10.6
 /*!
  * @function OSCompareAndSwap64
  *

@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.6
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -108,6 +112,7 @@
  * events.
  */
 
+<<<<<<< HEAD
 #define	KEV_DL_SUBCLASS 2
 
 #define	KEV_DL_SIFFLAGS				1
@@ -147,6 +152,28 @@
  */
 #include <sys/time.h>
 
+=======
+#define KEV_DL_SUBCLASS 2
+
+#define KEV_DL_SIFFLAGS	    1
+#define KEV_DL_SIFMETRICS   2
+#define KEV_DL_SIFMTU	    3
+#define KEV_DL_SIFPHYS	    4
+#define KEV_DL_SIFMEDIA	    5
+#define KEV_DL_SIFGENERIC   6
+#define KEV_DL_ADDMULTI	    7
+#define KEV_DL_DELMULTI	    8
+#define KEV_DL_IF_ATTACHED  9
+#define KEV_DL_IF_DETACHING 10
+#define KEV_DL_IF_DETACHED  11
+#define KEV_DL_LINK_OFF	    12
+#define KEV_DL_LINK_ON	    13
+#define KEV_DL_PROTO_ATTACHED	14
+#define KEV_DL_PROTO_DETACHED	15
+#define KEV_DL_LINK_ADDRESS_CHANGED	16
+#define KEV_DL_WAKEFLAGS_CHANGED	17
+#define KEV_DL_IF_IDLE_ROUTE_REFCNT	18
+>>>>>>> origin/10.6
 
 #ifdef __APPLE__
 >>>>>>> origin/10.3
@@ -163,7 +190,12 @@
 <<<<<<< HEAD
 =======
 #ifdef KERNEL_PRIVATE
+<<<<<<< HEAD
 >>>>>>> origin/10.3
+=======
+#define         IF_MAXUNIT      0x7fff  /* historical value */
+
+>>>>>>> origin/10.6
 struct if_clonereq {
 	int	ifcr_total;		/* total cloners (out) */
 	int	ifcr_count;		/* room for this many in user buffer */
@@ -291,6 +323,18 @@ struct if_clonereq32 {
  * stack to aggressively purge expired objects (routes, etc.)
  */
 #define	IFRF_IDLE_NOTIFY	0x1	/* Generate notifications on idle */
+
+/*
+ * !!! NOTE !!!
+ *
+ * if_idle_flags definitions: (all bits are reserved for internal/future
+ * use). Setting these flags MUST be done via the ifnet_set_idle_flags()
+ * KPI due to the associated reference counting.  Clearing them may be done by
+ * calling the KPI, otherwise implicitly at interface detach time.  Setting
+ * the if_idle_flags field to a non-zero value will cause the networking
+ * stack to aggressively purge expired objects (routes, etc.)
+ */
+#define IFRF_IDLE_NOTIFY	0x1	/* Generate notifications on idle */
 
 /* flags set internally only: */
 #define	IFF_CANTCHANGE \
@@ -499,6 +543,7 @@ struct	ifreq {
 		struct	ifkpi	ifru_kpi;
 		u_int32_t ifru_wake_flags;
 		u_int32_t ifru_route_refcnt;
+<<<<<<< HEAD
 #ifdef PRIVATE
 		int	ifru_link_quality_metric;
 #endif /* PRIVATE */
@@ -572,6 +617,8 @@ struct	ifreq {
 #define	IFRTYPE_ECN_ENABLE			1
 #define	IFRTYPE_ECN_DISABLE			2
 #endif /* PRIVATE */
+=======
+>>>>>>> origin/10.6
 	} ifr_ifru;
 #define	ifr_addr	ifr_ifru.ifru_addr	/* address */
 #define	ifr_dstaddr	ifr_ifru.ifru_dstaddr	/* other end of p-to-p link */
@@ -592,6 +639,7 @@ struct	ifreq {
 #ifdef KERNEL_PRIVATE
 #define	ifr_data64	ifr_ifru.ifru_data64	/* 64-bit pointer */
 #endif /* KERNEL_PRIVATE */
+<<<<<<< HEAD
 #define	ifr_kpi		ifr_ifru.ifru_kpi
 #define	ifr_wake_flags	ifr_ifru.ifru_wake_flags /* wake capabilities */
 #define	ifr_route_refcnt ifr_ifru.ifru_route_refcnt /* route references count */
@@ -615,6 +663,11 @@ struct	ifreq {
 #define	ifr_probe_connectivity	ifr_ifru.ifru_probe_connectivity
 #define	ifr_ecn_mode	ifr_ifru.ifru_ecn_mode
 #endif /* PRIVATE */
+=======
+#define ifr_kpi		ifr_ifru.ifru_kpi
+#define ifr_wake_flags	ifr_ifru.ifru_wake_flags /* wake capabilities of devive */
+#define ifr_route_refcnt ifr_ifru.ifru_route_refcnt /* route references on interface */
+>>>>>>> origin/10.6
 };
 
 #define	_SIZEOF_ADDR_IFREQ(ifr) \
@@ -677,9 +730,15 @@ struct ifmediareq32 {
 
 #pragma pack(4)
 struct  ifdrv {
+<<<<<<< HEAD
 	char		ifd_name[IFNAMSIZ];	/* if name, e.g. "en0" */
 	unsigned long	ifd_cmd;
 	size_t		ifd_len;		/* length of ifd_data buffer */
+=======
+	char		ifd_name[IFNAMSIZ];     /* if name, e.g. "en0" */
+	unsigned long	ifd_cmd;
+	size_t		ifd_len;
+>>>>>>> origin/10.6
 	void		*ifd_data;
 };
 #pragma pack()
@@ -687,14 +746,22 @@ struct  ifdrv {
 #ifdef KERNEL_PRIVATE
 #pragma pack(4)
 struct ifdrv32 {
+<<<<<<< HEAD
 	char		ifd_name[IFNAMSIZ];	/* if name, e.g. "en0" */
+=======
+	char		ifd_name[IFNAMSIZ];     /* if name, e.g. "en0" */
+>>>>>>> origin/10.6
 	u_int32_t	ifd_cmd;
 	u_int32_t	ifd_len;
 	user32_addr_t	ifd_data;
 };
 
 struct  ifdrv64 {
+<<<<<<< HEAD
 	char		ifd_name[IFNAMSIZ];	/* if name, e.g. "en0" */
+=======
+	char		ifd_name[IFNAMSIZ];     /* if name, e.g. "en0" */
+>>>>>>> origin/10.6
 	u_int64_t	ifd_cmd;
 	u_int64_t	ifd_len;
 	user64_addr_t	ifd_data;
@@ -702,7 +769,11 @@ struct  ifdrv64 {
 #pragma pack()
 #endif /* KERNEL_PRIVATE */
 
+<<<<<<< HEAD
 /*
+=======
+/* 
+>>>>>>> origin/10.6
  * Structure used to retrieve aux status data from interfaces.
  * Kernel suppliers to this interface should respect the formatting
  * needed by ifconfig(8): each line starts with a TAB and ends with
