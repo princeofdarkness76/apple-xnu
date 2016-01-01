@@ -3075,8 +3075,13 @@ IOReturn IOGeneralMemoryDescriptor::wireVirtual(IODirection forDirection)
 	if (dataP->fDMAMapNumAddressBits > 32) dataP->fDMAMapNumAddressBits = 32;
     }
 <<<<<<< HEAD
+<<<<<<< HEAD
     if (kIODirectionPrepareNoFault    & forDirection) uplFlags |= UPL_REQUEST_NO_FAULT;
     if (kIODirectionPrepareNoZeroFill & forDirection) uplFlags |= UPL_NOZEROFILLIO;
+=======
+    if (kIODirectionPrepareNoFault     & forDirection) uplFlags |= UPL_REQUEST_NO_FAULT;
+    if (kIODirectionPrepareNoZeroFill  & forDirection) uplFlags |= UPL_NOZEROFILLIO;
+>>>>>>> origin/10.9
     if (kIODirectionPrepareNonCoherent & forDirection) uplFlags |= UPL_REQUEST_FORCE_COHERENCY;
 
     mapBase = 0;

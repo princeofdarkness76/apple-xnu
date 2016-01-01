@@ -560,6 +560,7 @@ cpu_desc_load64(cpu_data_t *cdp)
 	 * their complete re-initialization.
 	 */
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 	gdtptr64.length = GDTSZ * sizeof(struct real_descriptor) - 1;
 	gdtptr64.offset[0] = (uint32_t) cdi->cdi_gdt.ptr;
@@ -570,6 +571,8 @@ cpu_desc_load64(cpu_data_t *cdp)
 
 	/* Make sure busy bit is cleared in the TSS */
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.9
 	gdt_desc_p(KERNEL_TSS)->access &= ~ACC_TSS_BUSY;
 
 	/* Load the GDT, LDT, IDT and TSS */

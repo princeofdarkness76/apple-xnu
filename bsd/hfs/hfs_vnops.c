@@ -510,7 +510,11 @@ get_uthread_doc_tombstone(void)
 // where we have the necessary info.
 // 
 static void
+<<<<<<< HEAD
 clear_tombstone_docid(struct  doc_tombstone *ut, __unused struct hfsmount *hfsmp, struct cnode *dst_cnode)
+=======
+clear_tombstone_docid(struct  doc_tombstone *ut, struct hfsmount *hfsmp, struct cnode *dst_cnode)
+>>>>>>> origin/10.9
 {
 	uint32_t old_id = ut->t_lastop_document_id;
 
@@ -535,7 +539,11 @@ clear_tombstone_docid(struct  doc_tombstone *ut, __unused struct hfsmount *hfsmp
 		// printf("clearing doc-id from ino %d\n", ocp->c_desc.cd_cnid);
 		ofip->document_id = 0;
 		ocp->c_bsdflags &= ~UF_TRACKED;
+<<<<<<< HEAD
 		ocp->c_flag |= C_MODIFIED;
+=======
+		ocp->c_flag |= C_MODIFIED | C_FORCEUPDATE;   // mark it dirty
+>>>>>>> origin/10.9
 		/* cat_update(hfsmp, &ocp->c_desc, &ocp->c_attr, NULL, NULL); */
 
 	}
@@ -629,6 +637,9 @@ save_tombstone(struct hfsmount *hfsmp, struct vnode *dvp, struct vnode *vp, stru
 	}
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.9
 	ut->t_lastop_parent     = dvp;
 	ut->t_lastop_parent_vid = vnode_vid(dvp);
 	ut->t_lastop_fileid     = cp->c_fileid;
@@ -638,6 +649,7 @@ save_tombstone(struct hfsmount *hfsmp, struct vnode *dvp, struct vnode *vp, stru
 	} else {
 		ut->t_lastop_item      = vp;
 		ut->t_lastop_item_vid  = vnode_vid(vp);
+<<<<<<< HEAD
 =======
 	if (cp->c_flags & (IMMUTABLE | APPEND))
 		return (EPERM);
@@ -681,6 +693,8 @@ save_tombstone(struct hfsmount *hfsmp, struct vnode *dvp, struct vnode *vp, stru
 		if ((error = VOP_TRUNCATE(vp, vap->va_size, 0, cred, p)))
 			return (error);
 >>>>>>> origin/10.2
+=======
+>>>>>>> origin/10.9
 	}
 		
 	strlcpy((char *)&ut->t_lastop_filename[0], cnp->cn_nameptr, sizeof(ut->t_lastop_filename));
@@ -1469,6 +1483,7 @@ hfs_vnop_getattr(struct vnop_getattr_args *ap)
 	vap->va_supported |= VNODE_ATTR_va_data_size;
 #endif
 
+<<<<<<< HEAD
 #if CONFIG_PROTECT
 	if (VATTR_IS_ACTIVE(vap, va_dataprotect_class)) {
     		vap->va_dataprotect_class = cp->c_cpentry ? CP_CLASS(cp->c_cpentry->cp_pclass) : 0;
@@ -1490,6 +1505,28 @@ hfs_vnop_getattr(struct vnop_getattr_args *ap)
 		}
 
 		VATTR_SET_SUPPORTED(vap, va_write_gencount);
+=======
+	if (VATTR_IS_ACTIVE(vap, va_gen)) {
+		if (UBCINFOEXISTS(vp) && (vp->v_ubcinfo->ui_flags & UI_ISMAPPED)) {
+			/* While file is mmapped the generation count is invalid. 
+		 	 * However, bump the value so that the write-gen counter 
+		 	 * will be different once the file is unmapped (since,
+		 	 * when unmapped the pageouts may not yet have happened)
+		 	 */
+			if (vp->v_ubcinfo->ui_flags & UI_MAPPEDWRITE) {
+			     	hfs_incr_gencount (cp);
+			}
+			vap->va_gen = 0;
+		} else {
+			vap->va_gen = hfs_get_gencount(cp);
+		}
+			
+		VATTR_SET_SUPPORTED(vap, va_gen);
+	}
+	if (VATTR_IS_ACTIVE(vap, va_document_id)) {
+		vap->va_document_id = hfs_get_document_id(cp);
+		VATTR_SET_SUPPORTED(vap, va_document_id);
+>>>>>>> origin/10.9
 	}
 
 	/* Mark them all at once instead of individual VATTR_SET_SUPPORTED calls. */
@@ -1887,11 +1924,18 @@ hfs_vnop_setattr(ap)
 				cp->c_bsdflags &= ~UF_TRACKED;
 			}
 		}
+<<<<<<< HEAD
 
 		cp->c_bsdflags = vap->va_flags;
 		cp->c_flag |= C_MODIFIED;
 		cp->c_touch_chgtime = TRUE;
 
+=======
+
+		cp->c_bsdflags = vap->va_flags;
+		cp->c_touch_chgtime = TRUE;
+
+>>>>>>> origin/10.9
 		
 		/*
 		 * Mirror the UF_HIDDEN flag to the invisible bit of the Finder Info.
@@ -4051,8 +4095,15 @@ hfs_removedir(struct vnode *dvp, struct vnode *vp, struct componentname *cnp,
 			dcp->c_entries--;
 		DEC_FOLDERCOUNT(hfsmp, dcp->c_attr);
 		dcp->c_dirchangecnt++;
+<<<<<<< HEAD
 		hfs_incr_gencount(dcp);
 
+=======
+		{
+			struct FndrExtendedDirInfo *extinfo = (struct FndrExtendedDirInfo *)((u_int8_t*)dcp->c_finderinfo + 16);
+			extinfo->write_gen_counter = OSSwapHostToBigInt32(OSSwapBigToHostInt32(extinfo->write_gen_counter) + 1);
+		}
+>>>>>>> origin/10.9
 		dcp->c_touch_chgtime = TRUE;
 		dcp->c_touch_modtime = TRUE;
 		dcp->c_flag |= C_MODIFIED;
@@ -4890,6 +4941,7 @@ hfs_removefile(struct vnode *dvp, struct vnode *vp, struct componentname *cnp,
 				DEC_FOLDERCOUNT(hfsmp, dcp->c_attr);
 			}
 			dcp->c_dirchangecnt++;
+<<<<<<< HEAD
 			hfs_incr_gencount(dcp);
 =======
 		// XXXdbg - only bump this count if we were successful
@@ -4909,6 +4961,12 @@ hfs_removefile(struct vnode *dvp, struct vnode *vp, struct componentname *cnp,
 		(void) VOP_UPDATE(vp, &tv, &tv, 0);
 >>>>>>> origin/10.2
 
+=======
+			{
+				struct FndrExtendedDirInfo *extinfo = (struct FndrExtendedDirInfo *)((u_int8_t*)dcp->c_finderinfo + 16);
+				extinfo->write_gen_counter = OSSwapHostToBigInt32(OSSwapBigToHostInt32(extinfo->write_gen_counter) + 1);
+			}
+>>>>>>> origin/10.9
 			dcp->c_ctime = tv.tv_sec;
 			dcp->c_mtime = tv.tv_sec;
 			(void) cat_update(hfsmp, &dcp->c_desc, &dcp->c_attr, NULL, NULL);
@@ -5037,8 +5095,15 @@ hfs_removefile(struct vnode *dvp, struct vnode *vp, struct componentname *cnp,
 			if (dcp->c_entries > 0)
 				dcp->c_entries--;
 			dcp->c_dirchangecnt++;
+<<<<<<< HEAD
 			hfs_incr_gencount(dcp);
 
+=======
+			{
+				struct FndrExtendedDirInfo *extinfo = (struct FndrExtendedDirInfo *)((u_int8_t*)dcp->c_finderinfo + 16);
+				extinfo->write_gen_counter = OSSwapHostToBigInt32(OSSwapBigToHostInt32(extinfo->write_gen_counter) + 1);
+			}
+>>>>>>> origin/10.9
 			dcp->c_ctime = tv.tv_sec;
 			dcp->c_mtime = tv.tv_sec;
 			(void) cat_update(hfsmp, &dcp->c_desc, &dcp->c_attr, NULL, NULL);
@@ -5357,8 +5422,11 @@ hfs_vnop_rename(ap)
 <<<<<<< HEAD
 	int is_tracked = 0;
 	int unlocked;
+<<<<<<< HEAD
 =======
 >>>>>>> origin/10.7
+=======
+>>>>>>> origin/10.9
 
 	orig_from_ctime = VTOC(fvp)->c_ctime;
 	if (tvp && VTOC(tvp)) {
@@ -5613,6 +5681,75 @@ relock:
 	tdcp = VTOC(tdvp);
 	tcp = tvp ? VTOC(tvp) : NULL;
 <<<<<<< HEAD
+
+	//
+	// if the item is tracked but doesn't have a document_id, assign one and generate an fsevent for it
+	//
+	unlocked = 0;
+	if ((fcp->c_bsdflags & UF_TRACKED) && ((struct FndrExtendedDirInfo *)((char *)&fcp->c_attr.ca_finderinfo + 16))->document_id == 0) {
+		uint32_t newid;
+
+		hfs_unlockfour(VTOC(fdvp), VTOC(fvp), VTOC(tdvp), tvp ? VTOC(tvp) : NULL);
+		unlocked = 1;
+
+		if (hfs_generate_document_id(hfsmp, &newid) == 0) {
+			hfs_lock(fcp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT);
+			((struct FndrExtendedDirInfo *)((char *)&fcp->c_attr.ca_finderinfo + 16))->document_id = newid;
+#if CONFIG_FSE
+			add_fsevent(FSE_DOCID_CHANGED, vfs_context_current(),
+				    FSE_ARG_DEV,   hfsmp->hfs_raw_dev,
+				    FSE_ARG_INO,   (ino64_t)0,             // src inode #
+				    FSE_ARG_INO,   (ino64_t)fcp->c_fileid,  // dst inode #
+				    FSE_ARG_INT32, newid,
+				    FSE_ARG_DONE);
+#endif
+			hfs_unlock(fcp);
+		} else {
+			// XXXdbg - couldn't get a new docid... what to do?  can't really fail the rename...
+		}
+
+		//
+		// check if we're going to need to fix tcp as well.  if we aren't, go back relock
+		// everything.  otherwise continue on and fix up tcp as well before relocking.
+		//
+		if (tcp == NULL || !(tcp->c_bsdflags & UF_TRACKED) || ((struct FndrExtendedDirInfo *)((char *)&tcp->c_attr.ca_finderinfo + 16))->document_id != 0) {
+			goto relock;
+		}
+	}
+
+	//
+	// same thing for tcp if it's set
+	//
+	if (tcp && (tcp->c_bsdflags & UF_TRACKED) && ((struct FndrExtendedDirInfo *)((char *)&tcp->c_attr.ca_finderinfo + 16))->document_id == 0) {
+		uint32_t newid;
+
+		if (!unlocked) {
+			hfs_unlockfour(VTOC(fdvp), VTOC(fvp), VTOC(tdvp), tvp ? VTOC(tvp) : NULL);
+			unlocked = 1;
+		}
+
+		if (hfs_generate_document_id(hfsmp, &newid) == 0) {
+			hfs_lock(tcp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT);
+			((struct FndrExtendedDirInfo *)((char *)&tcp->c_attr.ca_finderinfo + 16))->document_id = newid;
+#if CONFIG_FSE
+			add_fsevent(FSE_DOCID_CHANGED, vfs_context_current(),
+				    FSE_ARG_DEV,   hfsmp->hfs_raw_dev,
+				    FSE_ARG_INO,   (ino64_t)0,             // src inode #
+				    FSE_ARG_INO,   (ino64_t)tcp->c_fileid,  // dst inode #
+				    FSE_ARG_INT32, newid,
+				    FSE_ARG_DONE);
+#endif
+			hfs_unlock(tcp);
+		} else {
+			// XXXdbg - couldn't get a new docid... what to do?  can't really fail the rename...
+		}
+
+		// go back up and relock everything.  next time through the if statement won't be true
+		// and we'll skip over this block of code.
+		goto relock;
+	}
+
+
 
 	//
 	// if the item is tracked but doesn't have a document_id, assign one and generate an fsevent for it
@@ -6404,9 +6541,16 @@ skip_rm:
 		}
 		tdcp->c_entries++;
 		tdcp->c_dirchangecnt++;
+<<<<<<< HEAD
 		tdcp->c_flag |= C_MODIFIED;
 		hfs_incr_gencount(tdcp);
 
+=======
+		{
+			struct FndrExtendedDirInfo *extinfo = (struct FndrExtendedDirInfo *)((u_int8_t*)tdcp->c_finderinfo + 16);
+			extinfo->write_gen_counter = OSSwapHostToBigInt32(OSSwapBigToHostInt32(extinfo->write_gen_counter) + 1);
+		}
+>>>>>>> origin/10.9
 		if (fdcp->c_entries > 0)
 			fdcp->c_entries--;
 		fdcp->c_dirchangecnt++;
@@ -6422,7 +6566,14 @@ skip_rm:
 
 		(void) hfs_update(fdvp, 0);
 	}
+<<<<<<< HEAD
 	hfs_incr_gencount(fdcp);
+=======
+	{	
+		struct FndrExtendedDirInfo *extinfo = (struct FndrExtendedDirInfo *)((u_int8_t*)fdcp->c_finderinfo + 16);
+		extinfo->write_gen_counter = OSSwapHostToBigInt32(OSSwapBigToHostInt32(extinfo->write_gen_counter) + 1);
+	}
+>>>>>>> origin/10.9
 		
 	tdcp->c_childhint = out_desc.cd_hint;	/* Cache directory's location */
 	tdcp->c_touch_chgtime = TRUE;
@@ -8322,17 +8473,34 @@ hfs_makenode(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp,
 		/* Update the parent directory */
 		dcp->c_childhint = out_desc.cd_hint;	/* Cache directory's location */
 		dcp->c_entries++;
+<<<<<<< HEAD
 
+=======
+		{
+			struct FndrExtendedDirInfo *extinfo = (struct FndrExtendedDirInfo *)((u_int8_t*)dcp->c_finderinfo + 16);
+			extinfo->write_gen_counter = OSSwapHostToBigInt32(OSSwapBigToHostInt32(extinfo->write_gen_counter) + 1);
+		}
+>>>>>>> origin/10.9
 		if (vnodetype == VDIR) {
 			INC_FOLDERCOUNT(hfsmp, dcp->c_attr);
 		}
 		dcp->c_dirchangecnt++;
+<<<<<<< HEAD
 		hfs_incr_gencount(dcp);
 
 		dcp->c_touch_chgtime = dcp->c_touch_modtime = true;
 		dcp->c_flag |= C_MODIFIED;
 
 		hfs_update(dcp->c_vp, 0);
+=======
+		{	
+			struct FndrExtendedDirInfo *extinfo = (struct FndrExtendedDirInfo *)((u_int8_t*)dcp->c_finderinfo + 16);
+			extinfo->write_gen_counter = OSSwapHostToBigInt32(OSSwapBigToHostInt32(extinfo->write_gen_counter) + 1);
+		}
+		dcp->c_ctime = tv.tv_sec;
+		dcp->c_mtime = tv.tv_sec;
+		(void) cat_update(hfsmp, &dcp->c_desc, &dcp->c_attr, NULL, NULL);
+>>>>>>> origin/10.9
 
 #if CONFIG_PROTECT
 		/*
@@ -8465,21 +8633,33 @@ hfs_makenode(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp,
 
 	cp = VTOC(tvp);
 
+<<<<<<< HEAD
 	cp->c_update_txn = txn;
 
+=======
+>>>>>>> origin/10.9
 	struct  doc_tombstone *ut;
 	ut = get_uthread_doc_tombstone();
 	if (   ut->t_lastop_document_id != 0 
 	    && ut->t_lastop_parent == dvp
 	    && ut->t_lastop_parent_vid == vnode_vid(dvp)
+<<<<<<< HEAD
 	    && strcmp((char *)ut->t_lastop_filename, (const char *)cp->c_desc.cd_nameptr) == 0) {
+=======
+	    && strcmp((char *)ut->t_lastop_filename, (char *)cp->c_desc.cd_nameptr) == 0) {
+>>>>>>> origin/10.9
 		struct FndrExtendedDirInfo *fip = (struct FndrExtendedDirInfo *)((char *)&cp->c_attr.ca_finderinfo + 16);
 
 		//printf("CREATE: preserving doc-id %lld on %s\n", ut->t_lastop_document_id, ut->t_lastop_filename);
 		fip->document_id = (uint32_t)(ut->t_lastop_document_id & 0xffffffff);
 
 		cp->c_bsdflags |= UF_TRACKED;
+<<<<<<< HEAD
 		cp->c_flag |= C_MODIFIED;
+=======
+		// mark the cnode dirty
+		cp->c_flag |= C_MODIFIED | C_FORCEUPDATE;
+>>>>>>> origin/10.9
 
 		if ((error = hfs_start_transaction(hfsmp)) == 0) {
 			lockflags = hfs_systemfile_lock(hfsmp, SFL_CATALOG, HFS_EXCLUSIVE_LOCK);
@@ -8504,6 +8684,7 @@ hfs_makenode(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp,
 			// printf("CREATE: clearing tombstone because %s is NOT a temp name.\n", cnp->cn_nameptr);
 			clear_tombstone_docid(ut, hfsmp, NULL);
 		}
+<<<<<<< HEAD
 =======
 		journal_end_transaction(hfsmp->jnl);
 		started_tr = 0;
@@ -8571,6 +8752,10 @@ hfs_makenode(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp,
 		(void) hfs_addhotfile(tvp);
 	}
 	
+=======
+	}
+
+>>>>>>> origin/10.9
 	*vpp = tvp;
 
 #if CONFIG_PROTECT
@@ -9289,6 +9474,7 @@ hfsfifo_close(ap)
 static u_int32_t 
 hfs_get_document_id_internal(const uint8_t *finderinfo, mode_t mode)
 {
+<<<<<<< HEAD
 	const uint8_t *finfo = NULL;
 	u_int32_t doc_id = 0;
 	
@@ -9300,6 +9486,19 @@ hfs_get_document_id_internal(const uint8_t *finderinfo, mode_t mode)
 		doc_id = extinfo->document_id;
 	} else if (S_ISDIR(mode)) {
 		const struct FndrExtendedDirInfo *extinfo = (const struct FndrExtendedDirInfo *)finfo;
+=======
+	u_int8_t *finfo = NULL;
+	u_int32_t doc_id = 0;
+	
+	/* overlay the FinderInfo to the correct pointer, and advance */
+	finfo = ((uint8_t *)finderinfo) + 16;
+
+	if (S_ISDIR(mode) || S_ISREG(mode)) {
+		struct FndrExtendedFileInfo *extinfo = (struct FndrExtendedFileInfo *)finfo;
+		doc_id = extinfo->document_id;
+	} else if (S_ISDIR(mode)) {
+		struct FndrExtendedDirInfo *extinfo = (struct FndrExtendedDirInfo *)((u_int8_t*)finderinfo + 16);
+>>>>>>> origin/10.9
 		doc_id = extinfo->document_id;
 	}	
 

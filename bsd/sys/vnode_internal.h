@@ -540,7 +540,10 @@ errno_t	vnode_suspend(vnode_t);
 
 
 errno_t	vnode_mtime(vnode_t, struct timespec *, vfs_context_t);
+<<<<<<< HEAD
 errno_t vnode_flags(vnode_t, uint32_t *, vfs_context_t);
+=======
+>>>>>>> origin/10.9
 
 errno_t	vnode_size(vnode_t, off_t *, vfs_context_t);
 errno_t	vnode_setsize(vnode_t, off_t, int ioflag, vfs_context_t);

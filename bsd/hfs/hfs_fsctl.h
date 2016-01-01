@@ -385,6 +385,16 @@ enum {
 #define HFS_NEVER_FASTDEVCANDIDATE  0x0004
 
 
+/* revisiond uses this to allocate a doc-id for files from Cab and earlier systems that are marked tracked but don't have a doc-id */
+#define HFS_DOCUMENT_ID_ALLOCATE	0x1
+
+#define HFSIOC_GET_DOCUMENT_ID  _IOR('h', 31, u_int32_t)
+#define HFS_GET_DOCUMENT_ID  IOCBASECMD(HFSIOC_GET_DOCUMENT_ID)
+
+/* revisiond only uses this when something transforms in a way the kernel can't track such as "foo.rtf" -> "foo.rtfd" */
+#define HFSIOC_TRANSFER_DOCUMENT_ID  _IOW('h', 32, u_int32_t)
+#define HFS_TRANSFER_DOCUMENT_ID  IOCBASECMD(HFSIOC_TRANSFER_DOCUMENT_ID)
+
 #endif /* __APPLE_API_UNSTABLE */
 
 #endif /* ! _HFS_FSCTL_H_ */

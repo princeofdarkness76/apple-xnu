@@ -274,6 +274,7 @@ struct tcptimerlist {
 	uint32_t maxentries;	/* Max number of entries at any time */
 
 	/* Set desired mode when timer list running */
+<<<<<<< HEAD
 	boolean_t running;	/* Set when timer list is being processed */
 	boolean_t scheduled;	/* set when the timer is scheduled */
 #define TCP_TIMERLIST_10MS_MODE 0x1
@@ -285,6 +286,17 @@ struct tcptimerlist {
 	uint32_t idleruns;	/* Number of times the list has been idle in fast mode */
 	struct tcptimerentry *next_te;	/* next timer entry pointer to process */
 	u_int16_t probe_if_index; /* Interface index that needs to send probes */
+=======
+	boolean_t running;		/* Set when timer list is being processed */
+	boolean_t scheduled;		/* Set when timer is scheduled */
+#define TCP_TIMERLIST_FASTMODE 0x1
+#define TCP_TIMERLIST_SLOWMODE 0x2
+	uint32_t mode;			/* Current mode, fast or slow */
+	uint32_t pref_mode;		/* Preferred mode set by a connection, fast or slow */
+	uint32_t pref_offset;		/* Preferred offset set by a connection */
+	uint32_t idlegen;		/* Number of times the list has been idle in fast mode */
+	struct tcptimerentry *next_te;	/* Store the next timer entry pointer to process */
+>>>>>>> origin/10.9
 
 };
 

@@ -313,6 +313,7 @@ struct vm_page {
 			slid:1,
 		        compressor:1,	/* page owned by compressor pool */
 		        written_by_kernel:1,	/* page was written by kernel (i.e. decompressed) */
+<<<<<<< HEAD
 			__unused_object_bits:4;  /* 5 bits available here */
 =======
 			no_cache:1,	   /* page is not to be cached and */
@@ -327,6 +328,9 @@ struct vm_page {
 		        lopage:1,
 			__unused_object_bits:6;  /* 6 bits available here */
 >>>>>>> origin/10.6
+=======
+			__unused_object_bits:5;	/* 5 bits available here */
+>>>>>>> origin/10.9
 
 	ppnum_t		phys_page;	/* Physical address of page, passed
 					 *  to pmap_enter (read-only) */
@@ -1062,11 +1066,14 @@ extern vm_page_t vm_object_page_grab(vm_object_t);
 #if VM_PAGE_BUCKETS_CHECK
 extern void vm_page_buckets_check(void);
 #endif /* VM_PAGE_BUCKETS_CHECK */
+<<<<<<< HEAD
 
 extern void vm_page_queues_remove(vm_page_t mem);
 extern void vm_page_remove_internal(vm_page_t page);
 extern void vm_page_enqueue_inactive(vm_page_t mem, boolean_t first);
 extern void vm_page_check_pageable_safe(vm_page_t page);
 
+=======
+>>>>>>> origin/10.9
 
 #endif	/* _VM_VM_PAGE_H_ */

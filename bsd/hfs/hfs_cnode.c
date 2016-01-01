@@ -2261,6 +2261,7 @@ uint32_t hfs_incr_gencount (struct cnode *cp) {
 	return gcount;
 }
 
+<<<<<<< HEAD
 /*
  * There is no need for any locks here (other than an iocount on an
  * associated vnode) because reading and writing an aligned 32 bit
@@ -2274,6 +2275,16 @@ hfs_get_gencount_internal(const uint8_t *finderinfo, mode_t mode)
 
 	/* overlay the FinderInfo to the correct pointer, and advance */
 	finfo = finderinfo;
+=======
+static u_int32_t
+hfs_get_gencount_internal(const uint8_t *finderinfo, mode_t mode)
+{
+	u_int8_t *finfo = NULL;
+	u_int32_t gcount = 0;
+
+	/* overlay the FinderInfo to the correct pointer, and advance */
+	finfo = (u_int8_t*)finderinfo;
+>>>>>>> origin/10.9
 	finfo = finfo + 16;
 
 	/* 
@@ -2285,7 +2296,11 @@ hfs_get_gencount_internal(const uint8_t *finderinfo, mode_t mode)
 	 *       last 32-bit word) so it is safe to have one code path here.
 	 */
 	if (S_ISDIR(mode) || S_ISREG(mode)) {
+<<<<<<< HEAD
 		const struct FndrExtendedFileInfo *extinfo = (const struct FndrExtendedFileInfo *)finfo;
+=======
+		struct FndrExtendedFileInfo *extinfo = (struct FndrExtendedFileInfo *)finfo;
+>>>>>>> origin/10.9
 		gcount = OSSwapBigToHostInt32 (extinfo->write_gen_counter);
 		
 		/* 
@@ -2296,7 +2311,20 @@ hfs_get_gencount_internal(const uint8_t *finderinfo, mode_t mode)
 		if (gcount == 0) {
 			gcount++;	
 		}
+<<<<<<< HEAD
 	}
+=======
+	} else if (S_ISDIR(mode)) {
+		struct FndrExtendedDirInfo *extinfo = (struct FndrExtendedDirInfo *)((u_int8_t*)finderinfo + 16);
+		gcount = OSSwapBigToHostInt32 (extinfo->write_gen_counter);
+
+		if (gcount == 0) {
+			gcount++;	
+		}
+	} else {
+		gcount = 0;
+	}	
+>>>>>>> origin/10.9
 
 	return gcount;
 }
@@ -2311,6 +2339,7 @@ u_int32_t hfs_get_gencount_from_blob (const uint8_t *finfoblob, mode_t mode) {
 	return hfs_get_gencount_internal(finfoblob, mode);
 }
 
+<<<<<<< HEAD
 void hfs_clear_might_be_dirty_flag(cnode_t *cp)
 {
 	/*
@@ -2322,6 +2351,8 @@ void hfs_clear_might_be_dirty_flag(cnode_t *cp)
 	CLR(cp->c_flag, C_MIGHT_BE_DIRTY_FROM_MAPPING);
 }
 
+=======
+>>>>>>> origin/10.9
 /*
  * Touch cnode times based on c_touch_xxx flags
  *

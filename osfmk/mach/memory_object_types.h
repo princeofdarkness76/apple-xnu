@@ -504,6 +504,7 @@ typedef uint64_t upl_control_flags_t;
 #define UPL_PAGE_TICKET_SHIFT   16
 
 /* ... flags resume here */
+<<<<<<< HEAD
 #define UPL_BLOCK_ACCESS	0x00100000ULL
 #define UPL_ENCRYPT		0x00200000ULL
 #define UPL_NOZEROFILL		0x00400000ULL
@@ -525,6 +526,24 @@ typedef uint64_t upl_control_flags_t;
 
 /* UPL flags known by this kernel */
 #define UPL_VALID_FLAGS		0xFFFFFFFFFFULL
+=======
+#define UPL_BLOCK_ACCESS	0x00100000
+#define UPL_ENCRYPT		0x00200000
+#define UPL_NOZEROFILL		0x00400000
+#define UPL_WILL_MODIFY		0x00800000 /* caller will modify the pages */
+
+#define UPL_NEED_32BIT_ADDR	0x01000000
+#define UPL_UBC_MSYNC		0x02000000
+#define UPL_UBC_PAGEOUT		0x04000000
+#define UPL_UBC_PAGEIN		0x08000000
+#define UPL_REQUEST_SET_DIRTY	0x10000000
+#define UPL_REQUEST_NO_FAULT	0x20000000 /* fail if pages not all resident */
+#define UPL_NOZEROFILLIO	0x40000000 /* allow non zerofill pages present */
+#define UPL_REQUEST_FORCE_COHERENCY	0x80000000
+
+/* UPL flags known by this kernel */
+#define UPL_VALID_FLAGS		0xFFFFFFFF
+>>>>>>> origin/10.9
 
 
 /* upl abort error flags */
@@ -630,6 +649,7 @@ typedef uint64_t upl_control_flags_t;
 #define UPL_COMMIT_SPECULATE		0x100
 #define UPL_COMMIT_FREE_ABSENT		0x200
 <<<<<<< HEAD
+<<<<<<< HEAD
 #define UPL_COMMIT_WRITTEN_BY_KERNEL	0x400
 
 #define UPL_COMMIT_KERNEL_ONLY_FLAGS	(UPL_COMMIT_CS_VALIDATED | UPL_COMMIT_FREE_ABSENT)
@@ -640,6 +660,9 @@ typedef uint64_t upl_control_flags_t;
 #define UPL_COMMIT_KERNEL_ONLY_FLAGS	(UPL_COMMIT_CS_VALIDATED)
 >>>>>>> origin/10.5
 =======
+=======
+#define UPL_COMMIT_WRITTEN_BY_KERNEL	0x400
+>>>>>>> origin/10.9
 
 #define UPL_COMMIT_KERNEL_ONLY_FLAGS	(UPL_COMMIT_CS_VALIDATED | UPL_COMMIT_FREE_ABSENT)
 >>>>>>> origin/10.6

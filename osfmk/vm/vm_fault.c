@@ -1736,6 +1736,7 @@ vm_fault_page(
 						 */
 						pmap_sync_page_attributes_phys(
 							m->phys_page);
+<<<<<<< HEAD
 					} else {
 						m->written_by_kernel = TRUE;
 					}
@@ -1761,6 +1762,10 @@ vm_fault_page(
 							-1);
 					}
 
+=======
+					} else
+						m->written_by_kernel = TRUE;
+>>>>>>> origin/10.9
 					break;
 				case KERN_MEMORY_FAILURE:
 					m->unusual = TRUE;
@@ -2863,7 +2868,11 @@ vm_fault_enter(vm_page_t m,
 		}
 		
 		if (reject_page) {
+<<<<<<< HEAD
 			/* reject the invalid page: abort the page fault */
+=======
+			/* reject the tainted page: abort the page fault */
+>>>>>>> origin/10.9
 			int			pid;
 			const char		*procname;
 			task_t			task;
@@ -2910,11 +2919,20 @@ vm_fault_enter(vm_page_t m,
 			pathname_len = 0;
 			filename_len = 0;
 			truncated_path = FALSE;
+<<<<<<< HEAD
 			/* no pager -> no file -> no pathname, use "<nil>" in that case */
 			if (file_object->pager != NULL) {
 				pathname = (char *)kalloc(__PATH_MAX * 2);
 				if (pathname) {
 					pathname[0] = '\0';
+=======
+			if (file_object->pager == NULL) {
+				/* no pager -> no file -> no pathname */
+				pathname = (char *) "<nil>";
+			} else {
+				pathname = (char *)kalloc(__PATH_MAX * 2);
+				if (pathname) {
+>>>>>>> origin/10.9
 					pathname_len = __PATH_MAX;
 					filename = pathname + pathname_len;
 					filename_len = __PATH_MAX;
@@ -2925,11 +2943,14 @@ vm_fault_enter(vm_page_t m,
 							    filename,
 							    filename_len,
 							    &truncated_path);
+<<<<<<< HEAD
 				if (pathname) {
 					/* safety first... */
 					pathname[__PATH_MAX-1] = '\0';
 					filename[__PATH_MAX-1] = '\0';
 				}
+=======
+>>>>>>> origin/10.9
 				vnode_pager_get_object_mtime(file_object->pager,
 							     &mtime,
 							     &cs_mtime);
@@ -2942,7 +2963,11 @@ vm_fault_enter(vm_page_t m,
 			       "wpmapped:%d slid:%d)\n",
 			       pid, procname, (addr64_t) vaddr,
 			       file_offset,
+<<<<<<< HEAD
 			       (pathname ? pathname : "<nil>"),
+=======
+			       pathname,
+>>>>>>> origin/10.9
 			       (truncated_path ? "/.../" : ""),
 			       (truncated_path ? filename : ""),
 			       cs_mtime.tv_sec, cs_mtime.tv_nsec,
@@ -3012,8 +3037,13 @@ vm_fault_enter(vm_page_t m,
 		if (kr != KERN_SUCCESS) {
 			if (cs_debug) {
 				printf("CODESIGNING: vm_fault_enter(0x%llx): "
+<<<<<<< HEAD
 				       "*** INVALID PAGE ***\n",
 				       (long long)vaddr);
+=======
+				       "page %p obj %p off 0x%llx *** INVALID PAGE ***\n",
+				       (long long)vaddr, m, m->object, m->offset);
+>>>>>>> origin/10.9
 			}
 #if !SECURE_KERNEL
 			if (cs_enforcement_panic) {
@@ -6828,6 +6858,7 @@ vm_page_validate_cs_mapped(
 	}
 }
 
+extern int panic_on_cs_killed;
 void
 vm_page_validate_cs(
 	vm_page_t	page)
@@ -6869,12 +6900,20 @@ vm_page_validate_cs(
 		return;
 	}
 
+<<<<<<< HEAD
 	if (page->slid) {
 		panic("vm_page_validate_cs(%p): page is slid\n", page);
 	}
 	assert(!page->slid);
 =======
 >>>>>>> origin/10.5
+=======
+	if (panic_on_cs_killed &&
+	    page->slid) {
+		panic("vm_page_validate_cs(%p): page is slid\n", page);
+	}
+	assert(!page->slid);
+>>>>>>> origin/10.9
 
 #if CHECK_CS_VALIDATION_BITMAP	
 	if ( vnode_pager_cs_check_validation_bitmap( page->object->pager, trunc_page(page->offset + page->object->paging_offset), CS_BITMAP_CHECK ) == KERN_SUCCESS) {

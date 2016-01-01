@@ -786,12 +786,15 @@ hfs_vnop_setxattr(struct vnop_setxattr_args *ap)
 		dateadded = hfs_get_dateadded (cp);
 		if (S_ISREG(cp->c_attr.ca_mode) || S_ISLNK(cp->c_attr.ca_mode)) {
 			struct FndrExtendedFileInfo *extinfo = (struct FndrExtendedFileInfo *)((u_int8_t*)cp->c_finderinfo + 16);
+<<<<<<< HEAD
 			/* 
 			 * Grab generation counter directly from the cnode 
 			 * instead of calling hfs_get_gencount(), because 
 			 * for zero generation count values hfs_get_gencount() 
 			 * lies and bumps it up to one.
 			 */
+=======
+>>>>>>> origin/10.9
 			write_gen_counter = extinfo->write_gen_counter;
 			document_id = extinfo->document_id;
 		} else if (S_ISDIR(cp->c_attr.ca_mode)) {

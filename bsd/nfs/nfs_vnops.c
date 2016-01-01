@@ -658,6 +658,19 @@ nfsmout:
 }
 
 /*
+ * See if our mount is in trouble. Note this is inherently racey.
+ */
+static int
+nfs_notresponding(struct nfsmount *nmp)
+{
+	int timeoutmask = NFSSTA_TIMEO | NFSSTA_LOCKTIMEO | NFSSTA_JUKEBOXTIMEO;
+	if (NMFLAG(nmp, MUTEJUKEBOX)) /* jukebox timeouts don't count as unresponsive if muted */
+		   timeoutmask &= ~NFSSTA_JUKEBOXTIMEO;
+
+	return ((nmp->nm_state & timeoutmask) || !(nmp->nm_sockflags & NMSOCK_READY));
+}
+
+/*
  * NFS access vnode op.
  * For NFS version 2, just return ok. File accesses may fail later.
  * For NFS version 3+, use the access RPC to check accessibility. If file
@@ -704,6 +717,7 @@ nfs_vnop_access(
 	 */
 <<<<<<< HEAD
 
+<<<<<<< HEAD
 =======
 	if (v3) {
 		if (ap->a_mode & VREAD)
@@ -752,6 +766,8 @@ nfs_vnop_access(
 	} else
 		return (nfsspec_access(ap)); /* NFSv2 case checks for EROFS here */
 >>>>>>> origin/10.1
+=======
+>>>>>>> origin/10.9
 	/*
 	 * Convert KAUTH primitives to NFS access rights.
 	 */
@@ -865,12 +881,45 @@ nfs_open(ap)
 		dorpc = 0;
 		waccess = 0;
 	} else if (NACCESSVALID(np, slot)) {
+<<<<<<< HEAD
 		microuptime(&now);
 		if (((now.tv_sec < (np->n_accessstamp[slot] + nfs_access_cache_timeout)) &&
 		    ((np->n_access[slot] & access) == access)) || nfs_use_cache(nmp)) {
+=======
+		/*
+		 * In addition if the kernel is checking for access, i.e.,
+		 * KAUTH_VNODE_ACCESS is not set, and the server does not seem
+		 * to be responding just return if we have something in the
+		 * cache even if its stale for the user. If were granted access
+		 * by the cache and we're a kernel access, then call it good
+		 * enough. We want to avoid having this particular request going
+		 * over the wire causing a hang. This is because at this moment
+		 * we do not know what the state of the server is and what ever
+		 * we get back be it either yea or nay is going to be stale.
+		 * Finder (Desktop services/FileURL) might hang when going over
+		 * the wire when just asking getattrlist for the roots FSID
+		 * since we are going to be called to see if we're authorized
+		 * for search. 
+		 *
+		 * N.B. This is also the strategy that SMB is using.
+		 */
+		int granted = ((np->n_access[slot] & access) == access);
+
+		if (!(ap->a_action & KAUTH_VNODE_ACCESS)) {
+			if (granted || nfs_notresponding(nmp)) {
+				dorpc = 0;
+				waccess = np->n_access[slot];
+			}
+		} else {
+			int stale;
+			microuptime(&now);
+			stale = (now.tv_sec >= (np->n_accessstamp[slot] + nfs_access_cache_timeout));
+			if (granted && !stale) {
+>>>>>>> origin/10.9
 			/* OSAddAtomic(1, &nfsstats.accesscache_hits); */
-			dorpc = 0;
-			waccess = np->n_access[slot];
+				dorpc = 0;
+				waccess = np->n_access[slot];
+			}
 		}
 	}
 	nfs_node_unlock(np);

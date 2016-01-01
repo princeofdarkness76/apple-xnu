@@ -1,6 +1,7 @@
 /*
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
@@ -8,6 +9,9 @@
 =======
  * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
 >>>>>>> origin/10.6
+=======
+ * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+>>>>>>> origin/10.9
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -1287,6 +1291,7 @@ after_sack_rexmit:
 	}
 #endif /* MPTCP */
 
+
 	/*
 	 * If the socket is capable of doing unordered send,
 	 * pull the amount of data that can be sent from the
@@ -2496,7 +2501,12 @@ send:
 timer:
 		if (tp->t_timer[TCPT_REXMT] == 0 &&
 		    ((sack_rxmit && tp->snd_nxt != tp->snd_max) ||
+<<<<<<< HEAD
 			tp->snd_nxt != tp->snd_una || (flags & TH_FIN))) {
+=======
+			tp->snd_nxt != tp->snd_una ||
+			(flags & TH_FIN))) {
+>>>>>>> origin/10.9
 			if (tp->t_timer[TCPT_PERSIST]) {
 				tp->t_timer[TCPT_PERSIST] = 0;
 				tp->t_rxtshift = 0;

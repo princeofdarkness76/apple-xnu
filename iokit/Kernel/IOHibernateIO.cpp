@@ -252,6 +252,20 @@ static void     IOSetBootImageNVRAM(OSData * data);
 enum { kDefaultIOSize = 128 * 1024 };
 enum { kVideoMapSize  = 80 * 1024 * 1024 };
 
+<<<<<<< HEAD
+=======
+#ifndef kIOMediaPreferredBlockSizeKey
+#define kIOMediaPreferredBlockSizeKey	"Preferred Block Size"
+#endif
+
+#ifndef kIOBootPathKey	
+#define kIOBootPathKey			"bootpath"
+#endif
+#ifndef kIOSelectedBootDeviceKey	
+#define kIOSelectedBootDeviceKey	"boot-device"
+#endif
+
+>>>>>>> origin/10.9
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
 // copy from phys addr to MD
@@ -707,7 +721,8 @@ IOPolledFileOpen( const char * filename, uint64_t setFileSize,
 	int minor, major;
 	IORegistryEntry * next;
 	IORegistryEntry * child;
-	OSData * data;
+	IOService       * service;
+	OSData          * data;
 
 	num = (OSNumber *) part->getProperty(kIOBSDMajorKey);
 	if (!num)
@@ -739,6 +754,11 @@ IOPolledFileOpen( const char * filename, uint64_t setFileSize,
 	    }
             else if ((poller = OSDynamicCast(IOPolledInterface, obj)))
                 vars->pollers->setObject(poller);
+
+	    if ((service = OSDynamicCast(IOService, next)) 
+		&& service->getDeviceMemory()
+		&& !vars->pollers->getCount())	break;
+
 	    if ((num = OSDynamicCast(OSNumber, next->getProperty(kIOMediaPreferredBlockSizeKey))))
 		vars->blockSize = num->unsigned32BitValue();
             child = next;
@@ -747,8 +767,22 @@ IOPolledFileOpen( const char * filename, uint64_t setFileSize,
                 && child->isParent(next, gIOServicePlane, true));
 
 	HIBLOG("hibernate image major %d, minor %d, blocksize %ld, pollers %d\n",
+<<<<<<< HEAD
 		    major, minor, vars->blockSize, vars->pollers->getCount());
 	if (vars->pollers->getCount() < kIOHibernateMinPollersNeeded)
+=======
+		    major(hibernate_image_dev), minor(hibernate_image_dev), (long)vars->blockSize, 
+		    vars->pollers->getCount());
+
+	if (!vars->pollers->getCount())
+	{
+            err = kIOReturnUnsupported;
+	    continue;
+	}
+	if (vars->blockSize < sizeof(IOHibernateImageHeader))
+	{
+	    err = kIOReturnError;
+>>>>>>> origin/10.9
 	    continue;
 
 	err = IOHibernatePollerProbe(vars, (IOService *) part);
@@ -1235,11 +1269,13 @@ IOHibernateSystemSleep(void)
 	    bzero(&consoleInfo, sizeof(consoleInfo));
 	    IOService::getPlatform()->getConsoleInfo(&consoleInfo);
 
-	    // estimate: 5% increase in pages compressed
+	    // estimate: 6% increase in pages compressed
 	    // screen preview 2 images compressed 50%
-	    setFileSize = ((ptoa_64((105 * pageCount) / 100) * gIOHibernateCompression) >> 8)
+	    setFileSize = ((ptoa_64((106 * pageCount) / 100) * gIOHibernateCompression) >> 8)
 				+ vars->page_list->list_size
-	 			+ (consoleInfo.v_width * consoleInfo.v_height * 4);
+	 			+ (consoleInfo.v_width * consoleInfo.v_height * 8);
+	    enum { setFileRound = 1024*1024ULL };
+	    setFileSize = ((setFileSize + setFileRound) & ~(setFileRound - 1));
 
 	    HIBLOG("hibernate_page_list_setall preflight pageCount %d est comp %qd setfile %qd min %qd\n", 
 		    pageCount, (100ULL * gIOHibernateCompression) >> 8,
@@ -1257,7 +1293,11 @@ IOHibernateSystemSleep(void)
         err = IOPolledFileOpen(gIOHibernateFilename, setFileSize, vars->ioBuffer,
                                 &vars->fileVars, &vars->fileExtents, &data, 
                                 &vars->volumeCryptKey[0]);
+<<<<<<< HEAD
 >>>>>>> origin/10.8
+=======
+
+>>>>>>> origin/10.9
         if (KERN_SUCCESS != err)
             break;
 
@@ -3124,12 +3164,18 @@ hibernate_write_image(void)
         {
             if (kIOReturnOverrun == err)
             {
+<<<<<<< HEAD
                 // update actual compression ratio on not enough space (for retry)
                 gIOHibernateCompression = (compressedSize << 8) / uncompressedSize;
             }
 
             // update partial amount written (for IOPolledFileClose cleanup/unmap)
             header->imageSize = vars->fileVars->position;
+=======
+		// update actual compression ratio on not enough space
+                gIOHibernateCompression = (compressedSize << 8) / uncompressedSize;
+            }
+>>>>>>> origin/10.9
             break;
         }
 
@@ -3674,6 +3720,10 @@ void IOHibernateSetWakeCapabilities(uint32_t capability)
 	{
 		vm_compressor_do_warmup();
 	}
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.9
     }
 =======
     HIBLOG("hibernate_machine_init pagesDone %d sum2 %x, time: %qd ms\n", 

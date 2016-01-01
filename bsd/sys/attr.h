@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2010 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2000-2014 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -401,6 +401,7 @@ typedef struct vol_attributes_attr {
  */
 #define ATTR_CMN_RETURNED_ATTRS 		0x80000000	
 
+<<<<<<< HEAD
 #define ATTR_CMN_VALIDMASK			0xFFFFFFFF
 /*
  * The settable ATTR_CMN_* attributes include the following:
@@ -423,6 +424,9 @@ typedef struct vol_attributes_attr {
  * 
  * ATTR_CMN_GRPUUID
  */
+=======
+#define ATTR_CMN_VALIDMASK			0xBFFFFFFF
+>>>>>>> origin/10.9
 #define ATTR_CMN_SETMASK			0x01C7FF00
 #define ATTR_CMN_VOLSETMASK			0x00006700
 

@@ -4313,6 +4313,20 @@ uint64_t hfs_usecs_to_deadline(uint64_t usecs)
     return deadline;
 }
 
+<<<<<<< HEAD
+=======
+__private_extern__
+void hfs_syncer_queue(thread_call_t syncer)
+{
+    if (thread_call_enter_delayed_with_leeway(syncer,
+                                              NULL,
+                                              hfs_usecs_to_deadline(HFS_META_DELAY),
+                                              0,
+                                              THREAD_CALL_DELAY_SYS_BACKGROUND)) {
+        printf ("hfs: syncer already scheduled!");
+    }
+}
+>>>>>>> origin/10.9
 
 //
 // Fire off a timed callback to sync the disk if the
@@ -4322,36 +4336,43 @@ uint64_t hfs_usecs_to_deadline(uint64_t usecs)
 void
 hfs_sync_ejectable(struct hfsmount *hfsmp)
 {
+<<<<<<< HEAD
 	if (hfsmp->hfs_syncer)	{
 		uint32_t secs, usecs;
 		uint64_t now;
 
 		clock_get_calendar_microtime(&secs, &usecs);
 		now = ((uint64_t)secs * 1000000) + usecs;
+=======
+    // If we don't have a syncer or we get called by the syncer, just return
+    if (!hfsmp->hfs_syncer || current_thread() == hfsmp->hfs_syncer_thread)
+        return;
 
-		if (hfsmp->hfs_sync_scheduled == 0) {
-			uint64_t deadline;
+    hfs_syncer_lock(hfsmp);
 
-			hfsmp->hfs_last_sync_request_time = now;
+    if (!timerisset(&hfsmp->hfs_sync_req_oldest))
+        microuptime(&hfsmp->hfs_sync_req_oldest);
+>>>>>>> origin/10.9
 
+    /* If hfs_unmount is running, it will set hfs_syncer to NULL. Also we
+       don't want to queue again if there is a sync outstanding. */
+    if (!hfsmp->hfs_syncer || hfsmp->hfs_sync_incomplete) {
+        hfs_syncer_unlock(hfsmp);
+        return;
+    }
+
+    hfsmp->hfs_sync_incomplete = TRUE;
+
+<<<<<<< HEAD
 			clock_interval_to_deadline(HFS_META_DELAY, HFS_MILLISEC_SCALE, &deadline);
+=======
+    thread_call_t syncer = hfsmp->hfs_syncer;
+>>>>>>> origin/10.9
 
-			/*
-			 * Increment hfs_sync_scheduled on the assumption that we're the
-			 * first thread to schedule the timer.  If some other thread beat
-			 * us, then we'll decrement it.  If we *were* the first to
-			 * schedule the timer, then we need to keep track that the
-			 * callback is waiting to complete.
-			 */
-			OSIncrementAtomic((volatile SInt32 *)&hfsmp->hfs_sync_scheduled);
-			if (thread_call_enter_delayed(hfsmp->hfs_syncer, deadline))
-				OSDecrementAtomic((volatile SInt32 *)&hfsmp->hfs_sync_scheduled);
-			else
-				OSIncrementAtomic((volatile SInt32 *)&hfsmp->hfs_sync_incomplete);
-		}		
-	}
+    hfs_syncer_unlock(hfsmp);
+
+    hfs_syncer_queue(syncer);
 }
-
 
 __private_extern__
 void hfs_syncer_queue(thread_call_t syncer)
@@ -5027,6 +5048,9 @@ int
 hfs_generate_document_id(struct hfsmount *hfsmp, uint32_t *docid)
 {
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.9
 	struct vnode *rvp;
 	struct cnode *cp;
 	int error;
@@ -5045,6 +5069,7 @@ hfs_generate_document_id(struct hfsmount *hfsmp, uint32_t *docid)
 	int lockflags;
 	if (hfs_start_transaction(hfsmp) != 0) {
 		return error;
+<<<<<<< HEAD
 =======
 	struct hfs_index *entry;
 
@@ -5054,6 +5079,8 @@ hfs_generate_document_id(struct hfsmount *hfsmp, uint32_t *docid)
 				return (entry->hi_name);
 		}
 >>>>>>> origin/10.3
+=======
+>>>>>>> origin/10.9
 	}
 	lockflags = hfs_systemfile_lock(hfsmp, SFL_CATALOG, HFS_EXCLUSIVE_LOCK);
 					
@@ -5065,8 +5092,13 @@ hfs_generate_document_id(struct hfsmount *hfsmp, uint32_t *docid)
 	*docid = extinfo->document_id++;
 
 	// mark the root cnode dirty
+<<<<<<< HEAD
 	cp->c_flag |= C_MODIFIED;
 	hfs_update(cp->c_vp, 0);
+=======
+	cp->c_flag |= C_MODIFIED | C_FORCEUPDATE;
+	(void) cat_update(hfsmp, &cp->c_desc, &cp->c_attr, NULL, NULL);
+>>>>>>> origin/10.9
 
 	hfs_systemfile_unlock (hfsmp, lockflags);
 	(void) hfs_end_transaction(hfsmp);
@@ -5078,6 +5110,7 @@ hfs_generate_document_id(struct hfsmount *hfsmp, uint32_t *docid)
 
 	return 0;
 }
+<<<<<<< HEAD
 
 
 /* 
@@ -5598,3 +5631,5 @@ hfs_late_journal_init(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp, void *_a
 	return 0;
 }
 >>>>>>> origin/10.2
+=======
+>>>>>>> origin/10.9

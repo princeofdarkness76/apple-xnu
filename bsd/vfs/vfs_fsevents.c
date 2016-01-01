@@ -438,10 +438,14 @@ add_fsevent(int type, vfs_context_t ctx, ...)
     // same as a previous event)
     //
 <<<<<<< HEAD
+<<<<<<< HEAD
     if (type != FSE_CREATE_FILE && type != FSE_DELETE && type != FSE_RENAME && type != FSE_EXCHANGE && type != FSE_CHOWN && type != FSE_DOCID_CHANGED && type != FSE_DOCID_CREATED) {
 =======
     if (type != FSE_CREATE_FILE && type != FSE_DELETE && type != FSE_RENAME && type != FSE_EXCHANGE && type != FSE_CHOWN) {
 >>>>>>> origin/10.5
+=======
+    if (type != FSE_CREATE_FILE && type != FSE_DELETE && type != FSE_RENAME && type != FSE_EXCHANGE && type != FSE_CHOWN && type != FSE_DOCID_CHANGED && type != FSE_DOCID_CREATED) {
+>>>>>>> origin/10.9
 	void *ptr=NULL;
 	int   vid=0, was_str=0, nlen=0;
 
@@ -1611,10 +1615,14 @@ fmod_watch(fs_event_watcher *watcher, struct uio *uio)
 	if (watcher->event_list[kfse->type] == FSE_REPORT && watcher_cares_about_dev(watcher, kfse->dev)) {
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	  if (!(watcher->flags & WATCHER_APPLE_SYSTEM_SERVICE) && kfse->type != FSE_DOCID_CHANGED && is_ignored_directory(kfse->str)) {
 =======
 	  if (!(watcher->flags & WATCHER_APPLE_SYSTEM_SERVICE) & is_ignored_directory(kfse->str)) {
 >>>>>>> origin/10.8
+=======
+	  if (!(watcher->flags & WATCHER_APPLE_SYSTEM_SERVICE) && kfse->type != FSE_DOCID_CHANGED && is_ignored_directory(kfse->str)) {
+>>>>>>> origin/10.9
 	    // If this is not an Apple System Service, skip specified directories
 	    // radar://12034844
 	    error = 0;

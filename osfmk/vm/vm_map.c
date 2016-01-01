@@ -3201,7 +3201,11 @@ vm_map_enter_mem_object_helper(
 			/* overflow */
 			return KERN_INVALID_ARGUMENT;
 		}
+<<<<<<< HEAD
 		if (named_entry->size < (offset + initial_size)) {
+=======
+		if (named_entry->size < (offset + size))
+>>>>>>> origin/10.9
 			return KERN_INVALID_ARGUMENT;
 		}
 

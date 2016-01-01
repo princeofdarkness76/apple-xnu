@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+>>>>>>> origin/10.9
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -375,7 +379,11 @@ struct tcp_last_report_stats {
 #define TIMER_IS_ON_LIST(tp) ((tp)->t_flags & TF_TIMER_ONLIST)
 
 /* Run the TCP timerlist atleast once every hour */
+<<<<<<< HEAD
 #define TCP_TIMERLIST_MAX_OFFSET (60 * 60 * TCP_RETRANSHZ)
+=======
+#define	TCP_TIMERLIST_MAX_OFFSET	(60 * 60 * TCP_RETRANSHZ)
+>>>>>>> origin/10.9
 
 
 static void add_to_time_wait_locked(struct tcpcb *tp, uint32_t delay);
@@ -1596,6 +1604,14 @@ need_to_resched_timerlist(u_int32_t runtime, u_int16_t mode)
 {
 	struct tcptimerlist *listp = &tcp_timer_list;
 	int32_t diff;
+<<<<<<< HEAD
+=======
+	boolean_t is_fast;
+
+	if (index == TCPT_NONE)
+		return FALSE;
+	is_fast = !(IS_TIMER_SLOW(index));
+>>>>>>> origin/10.9
 
 	/*
 	 * If the list is being processed then the state of the list is
@@ -1603,7 +1619,11 @@ need_to_resched_timerlist(u_int32_t runtime, u_int16_t mode)
 	 * correctly.
 	 */
 	if (listp->running)
+<<<<<<< HEAD
 		return (TRUE);
+=======
+		return TRUE;
+>>>>>>> origin/10.9
 
 	if (!listp->scheduled)
 		return (TRUE);
@@ -1637,10 +1657,15 @@ tcp_sched_timerlist(uint32_t offset)
 
 	offset = min(offset, TCP_TIMERLIST_MAX_OFFSET);
 	listp->runtime = tcp_now + offset;
+<<<<<<< HEAD
 	if (listp->runtime == 0) {
 		listp->runtime++;
 		offset++;
 	}
+=======
+	if (listp->runtime == 0)
+		listp->runtime++;
+>>>>>>> origin/10.9
 
 	clock_interval_to_deadline(offset, USEC_PER_SEC, &deadline);
 
@@ -1688,6 +1713,7 @@ tcp_run_conn_timer(struct tcpcb *tp, u_int16_t *te_mode,
 		goto done;
 	}
 
+<<<<<<< HEAD
 	/*
 	 * If this connection is over an interface that needs to
 	 * be probed, send probe packets to reinitiate communication.
@@ -1708,6 +1734,14 @@ tcp_run_conn_timer(struct tcpcb *tp, u_int16_t *te_mode,
 	if ((index = tp->tentry.index) == TCPT_NONE)
 		goto done;
 	
+=======
+        /* Since the timer thread needs to wait for tcp lock, it may race
+         * with another thread that can cancel or reschedule the timer that is
+         * about to run. Check if we need to run anything.
+         */
+	if ((index = tp->tentry.index) == TCPT_NONE)
+		goto done;
+>>>>>>> origin/10.9
 	timer_val = tp->t_timer[index];
 
 	diff = timer_diff(tp->tentry.runtime, 0, tcp_now, 0);
@@ -1752,11 +1786,16 @@ tcp_run_conn_timer(struct tcpcb *tp, u_int16_t *te_mode,
 	
 	tp->tentry.timer_start = tcp_now;
 	tp->tentry.index = lo_index;
+<<<<<<< HEAD
 	VERIFY(tp->tentry.index == TCPT_NONE || tp->tentry.mode > 0);
 
 	if (tp->tentry.index != TCPT_NONE) {
 		tp->tentry.runtime = tp->tentry.timer_start +
 			tp->t_timer[tp->tentry.index];
+=======
+	if (lo_index != TCPT_NONE) {
+		tp->tentry.runtime = tp->tentry.timer_start + tp->t_timer[lo_index];
+>>>>>>> origin/10.9
 		if (tp->tentry.runtime == 0)
 			tp->tentry.runtime++;
 	}
@@ -1769,7 +1808,11 @@ tcp_run_conn_timer(struct tcpcb *tp, u_int16_t *te_mode,
 				tp = tcp_timers(tp, i);
 				if (tp == NULL) {
 					offset = 0;
+<<<<<<< HEAD
 					*(te_mode) = 0;
+=======
+					*(next_index) = TCPT_NONE;
+>>>>>>> origin/10.9
 					goto done;
 				}
 			}
@@ -1945,7 +1988,12 @@ tcp_sched_timers(struct tcpcb *tp)
 	u_int16_t mode = te->mode;
 	struct tcptimerlist *listp = &tcp_timer_list;
 	int32_t offset = 0;
+<<<<<<< HEAD
 	boolean_t list_locked = FALSE;
+=======
+	boolean_t is_fast;
+	int list_locked = 0;
+>>>>>>> origin/10.9
 
 	if (tp->t_inpcb->inp_state == INPCB_STATE_DEAD) {
 		/* Just return without adding the dead pcb to the list */
@@ -1961,10 +2009,14 @@ tcp_sched_timers(struct tcpcb *tp)
 		return;
 	}
 
+<<<<<<< HEAD
 	/*
 	 * compute the offset at which the next timer for this connection
 	 * has to run.
 	 */
+=======
+	is_fast = !(IS_TIMER_SLOW(index));
+>>>>>>> origin/10.9
 	offset = timer_diff(te->runtime, 0, tcp_now, 0);
 	if (offset <= 0) {
 		offset = 1;
@@ -2006,15 +2058,26 @@ tcp_sched_timers(struct tcpcb *tp)
 		VERIFY_PREV_LINK(te, le);
 
 		if (listp->running) {
+<<<<<<< HEAD
 			listp->pref_mode |= mode;
 			if (listp->pref_offset == 0 ||
+=======
+			if (is_fast) {
+				listp->pref_mode = TCP_TIMERLIST_FASTMODE;
+			} else if (listp->pref_offset == 0 ||
+>>>>>>> origin/10.9
 				offset < listp->pref_offset) {
 				listp->pref_offset = offset;
 			}
 		} else {
 			/*
+<<<<<<< HEAD
 			 * The list could have got rescheduled while
 			 * this thread was waiting for the lock
+=======
+			 * The list could have got scheduled while this
+			 * thread was waiting for the lock
+>>>>>>> origin/10.9
 			 */
 			if (listp->scheduled) {
 				int32_t diff;
@@ -2071,12 +2134,17 @@ tcp_set_lotimer_index(struct tcpcb *tp)
 		}
 	}
 	tp->tentry.index = lo_index;
+<<<<<<< HEAD
 	tp->tentry.mode = mode;
 	VERIFY(tp->tentry.index == TCPT_NONE || tp->tentry.mode > 0);
 
 	if (tp->tentry.index != TCPT_NONE) {
 		tp->tentry.runtime = tp->tentry.timer_start 
 		    + tp->t_timer[tp->tentry.index];
+=======
+	if (lo_index != TCPT_NONE) {
+		tp->tentry.runtime = tp->tentry.timer_start + tp->t_timer[lo_index];
+>>>>>>> origin/10.9
 		if (tp->tentry.runtime == 0)
 			tp->tentry.runtime++;
 	}

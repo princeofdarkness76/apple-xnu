@@ -1045,12 +1045,15 @@ vm_shared_region_map_file(
 	vm_object_size_t	obj_size;
 	struct shared_file_mapping_np	*mapping_to_slide = NULL;
 	mach_vm_offset_t	first_mapping = (mach_vm_offset_t) -1;
+<<<<<<< HEAD
 
 =======
 	mach_vm_offset_t	target_address;
 	vm_object_t		object;
 	vm_object_size_t	obj_size;
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.9
 
 
 	kr = KERN_SUCCESS;
@@ -1291,6 +1294,7 @@ vm_shared_region_map_file(
 				 (long long)slide_start,
 				 (long long)slide_size,
 				 kr));
+<<<<<<< HEAD
 			vm_shared_region_undo_mappings(sr_map,
 						       sr_base_address,
 						       mappings,
@@ -1396,6 +1400,12 @@ vm_shared_region_map_file(
 		if (shared_region->sr_first_mapping == (mach_vm_offset_t) -1) {
 			shared_region->sr_first_mapping = target_address;
 >>>>>>> origin/10.5
+=======
+			vm_shared_region_undo_mappings(NULL,
+						       0,
+						       mappings,
+						       mappings_count);
+>>>>>>> origin/10.9
 		}
 	}
 

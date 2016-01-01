@@ -834,10 +834,14 @@ done:
 			boolean_t empty;
 			upl_commit_range(upl, 0, upl->size, 
 <<<<<<< HEAD
+<<<<<<< HEAD
 					 UPL_COMMIT_CS_VALIDATED | UPL_COMMIT_WRITTEN_BY_KERNEL,
 =======
 					 UPL_COMMIT_CS_VALIDATED,
 >>>>>>> origin/10.5
+=======
+					 UPL_COMMIT_CS_VALIDATED | UPL_COMMIT_WRITTEN_BY_KERNEL,
+>>>>>>> origin/10.9
 					 upl_pl, pl_count, &empty);
 		}
 

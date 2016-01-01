@@ -3,6 +3,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 1999-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 1999-2008 Apple Inc. All rights reserved.
@@ -16,6 +17,9 @@
 =======
  * Copyright (c) 1999-2013 Apple Inc. All rights reserved.
 >>>>>>> origin/10.8
+=======
+ * Copyright (c) 1999-2014 Apple Inc. All rights reserved.
+>>>>>>> origin/10.9
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -1240,6 +1244,9 @@ hfs_reload(struct mount *mountp)
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.9
 __unused
 static uint64_t tv_to_usecs(struct timeval *tv)
 {
@@ -1247,10 +1254,14 @@ static uint64_t tv_to_usecs(struct timeval *tv)
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.9
 // Returns TRUE if b - a >= usecs
 static boolean_t hfs_has_elapsed (const struct timeval *a, 
                                   const struct timeval *b,
                                   uint64_t usecs)
+<<<<<<< HEAD
 =======
 static int
 get_raw_device(char *fspec, int is_user, int ronly, struct vnode **rvp, struct ucred *cred, struct proc *p)
@@ -1333,12 +1344,21 @@ get_raw_device(char *fspec, int is_user, int ronly, struct vnode **rvp, struct u
 int hfs_last_io_wait_time = 125000;
 SYSCTL_INT (_kern, OID_AUTO, hfs_last_io_wait_time, CTLFLAG_RW, &hfs_last_io_wait_time, 0, "number of usecs to wait after an i/o before syncing ejectable media");
 
+=======
+{
+    struct timeval diff;
+    timersub(b, a, &diff);
+    return diff.tv_sec * 1000000ULL + diff.tv_usec >= usecs;
+}
+
+>>>>>>> origin/10.9
 static void
 hfs_syncer(void *arg0, void *unused)
 {
 #pragma unused(unused)
 
     struct hfsmount *hfsmp = arg0;
+<<<<<<< HEAD
     uint32_t secs, usecs, delay = HFS_META_DELAY;
     uint64_t now;
     struct timeval nowtv, last_io;
@@ -1532,6 +1552,9 @@ hfs_syncer(void *arg0, __unused void *unused)
 		isroot = 1;
 	}
 >>>>>>> origin/10.6
+=======
+    struct timeval   now;
+>>>>>>> origin/10.9
 
     microuptime(&now);
 
@@ -1589,12 +1612,21 @@ hfs_syncer(void *arg0, __unused void *unused)
                           hfsmp->hfs_mp->mnt_pending_write_size, 0);
 
     if (hfsmp->hfs_syncer_thread) {
+<<<<<<< HEAD
         printf("hfs: syncer already running!\n");
+=======
+        printf("hfs: syncer already running!");
+>>>>>>> origin/10.9
 		return;
 	}
 
     hfsmp->hfs_syncer_thread = current_thread();
 
+<<<<<<< HEAD
+=======
+    hfs_start_transaction(hfsmp);   // so we hold off any new writes
+
+>>>>>>> origin/10.9
     /*
      * We intentionally do a synchronous flush (of the journal or entire volume) here.
      * For journaled volumes, this means we wait until the metadata blocks are written
@@ -1613,6 +1645,7 @@ hfs_syncer(void *arg0, __unused void *unused)
      * user data to be written.
      */
     if (hfsmp->jnl) {
+<<<<<<< HEAD
         hfs_flush(hfsmp, HFS_FLUSH_JOURNAL_META);
     } else {
         hfs_sync(hfsmp->hfs_mp, MNT_WAIT, vfs_context_kernel());
@@ -1641,6 +1674,38 @@ hfs_syncer(void *arg0, __unused void *unused)
         hfs_syncer_wakeup(hfsmp);
     }
 
+=======
+        hfs_journal_flush(hfsmp, TRUE);
+    } else {
+        hfs_sync(hfsmp->hfs_mp, MNT_WAIT, vfs_context_kernel());
+    }
+
+    KERNEL_DEBUG_CONSTANT(HFSDBG_SYNCER_TIMED | DBG_FUNC_END, 
+                          (microuptime(&now), tv_to_usecs(&now)),
+                          tv_to_usecs(&hfsmp->hfs_mp->mnt_last_write_completed_timestamp), 
+                          tv_to_usecs(&hfsmp->hfs_mp->mnt_last_write_issued_timestamp), 
+                          hfsmp->hfs_mp->mnt_pending_write_size, 0);
+
+    hfs_end_transaction(hfsmp);
+
+    hfsmp->hfs_syncer_thread = NULL;
+
+    hfs_syncer_lock(hfsmp);
+
+    // If hfs_unmount lets us and we missed a sync, schedule again
+    if (hfsmp->hfs_syncer && timerisset(&hfsmp->hfs_sync_req_oldest)) {
+        thread_call_t syncer = hfsmp->hfs_syncer;
+
+        hfs_syncer_unlock(hfsmp);
+
+        hfs_syncer_queue(syncer);
+    } else {
+        hfsmp->hfs_sync_incomplete = FALSE;
+        hfs_syncer_unlock(hfsmp);
+        hfs_syncer_wakeup(hfsmp);
+    }
+
+>>>>>>> origin/10.9
     /* BE CAREFUL WHAT YOU ADD HERE: at this point hfs_unmount is free
        to continue and therefore hfsmp might be invalid. */
 
@@ -3200,6 +3265,7 @@ hfs_unmount(struct mount *mp, int mntflags, vfs_context_t context)
 				hfs_unlock (VTOC(hfsmp->hfs_allocation_vp));
 			}
 
+<<<<<<< HEAD
 		}
 	}
 	
@@ -3229,6 +3295,55 @@ hfs_unmount(struct mount *mp, int mntflags, vfs_context_t context)
 		while(hfsmp->hfs_sync_incomplete > 0)
 		{
 			msleep((caddr_t)&hfsmp->hfs_sync_incomplete, NULL, PWAIT, "hfs_unmount", &ts);
+=======
+    // Tidy up the syncer
+	if (hfsmp->hfs_syncer)
+	{
+        hfs_syncer_lock(hfsmp);
+
+        /* First, make sure everything else knows we don't want any more
+           requests queued. */
+        thread_call_t syncer = hfsmp->hfs_syncer;
+        hfsmp->hfs_syncer = NULL;
+
+        hfs_syncer_unlock(hfsmp);
+
+        // Now deal with requests that are outstanding
+        if (hfsmp->hfs_sync_incomplete) {
+            if (thread_call_cancel(syncer)) {
+                // We managed to cancel the timer so we're done
+                hfsmp->hfs_sync_incomplete = FALSE;
+            } else {
+                // Syncer must be running right now so we have to wait
+                hfs_syncer_lock(hfsmp);
+                while (hfsmp->hfs_sync_incomplete)
+                    hfs_syncer_wait(hfsmp);
+                hfs_syncer_unlock(hfsmp);
+            }
+        }
+
+        // Now we're safe to free the syncer
+		thread_call_free(syncer);
+	}
+
+	if (hfsmp->hfs_flags & HFS_SUMMARY_TABLE) {
+		if (hfsmp->hfs_summary_table) {
+			int err = 0;
+			/* 
+		 	 * Take the bitmap lock to serialize against a concurrent bitmap scan still in progress 
+			 */
+			if (hfsmp->hfs_allocation_vp) {
+				err = hfs_lock (VTOC(hfsmp->hfs_allocation_vp), HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT);
+			}
+			FREE (hfsmp->hfs_summary_table, M_TEMP);
+			hfsmp->hfs_summary_table = NULL;
+			hfsmp->hfs_flags &= ~HFS_SUMMARY_TABLE;
+			
+			if (err == 0 && hfsmp->hfs_allocation_vp){
+				hfs_unlock (VTOC(hfsmp->hfs_allocation_vp));
+			}
+
+>>>>>>> origin/10.9
 		}
 		
 		if (hfsmp->hfs_sync_incomplete < 0)

@@ -3110,6 +3110,7 @@ ubc_cs_blob_add(
 	memory_object_size_t	blob_size;
 	const CS_CodeDirectory *cd;
 	off_t			blob_start_offset, blob_end_offset;
+<<<<<<< HEAD
 	union cs_hash_union	mdctx;
 	boolean_t		record_mtime;
 	int			cs_flags;
@@ -3118,6 +3119,12 @@ ubc_cs_blob_add(
 	cs_flags = 0;
 	if (ret_blob)
 	    *ret_blob = NULL;
+=======
+	SHA1_CTX		sha1ctxt;
+	boolean_t		record_mtime;
+
+	record_mtime = FALSE;
+>>>>>>> origin/10.9
 
 	blob_handle = IPC_PORT_NULL;
 
@@ -3378,9 +3385,12 @@ ubc_cs_blob_add(
 		record_mtime = TRUE;
 	}
 
+<<<<<<< HEAD
 	/* set the generation count for cs_blobs */
 	uip->cs_add_gen = cs_blob_generation_count;
 
+=======
+>>>>>>> origin/10.9
 	/*
 	 * Add this blob to the list of blobs for this vnode.
 	 * We always add at the front of the list and we never remove a
@@ -3425,9 +3435,12 @@ ubc_cs_blob_add(
 		vnode_mtime(vp, &uip->cs_mtime, vfs_context_current());
 	}
 
+<<<<<<< HEAD
 	if (ret_blob)
 		*ret_blob = blob;
 
+=======
+>>>>>>> origin/10.9
 	error = 0;	/* success ! */
 
 out:

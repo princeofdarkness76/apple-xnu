@@ -83,9 +83,12 @@
 
 #define MAX_REALIGN_LEN 2000
 #define AES_BLOCKLEN 16
+<<<<<<< HEAD
 #define ESP_GCM_SALT_LEN 4   // RFC 4106 Section 4
 #define ESP_GCM_IVLEN 8
 #define ESP_GCM_ALIGN 16
+=======
+>>>>>>> origin/10.9
 
 extern lck_mtx_t *sadb_mutex;
 

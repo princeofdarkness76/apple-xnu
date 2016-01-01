@@ -155,6 +155,7 @@ typedef union {
 	uint64_t	val			:BIT1(63);
     }		bits_tes_p;
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
     struct ia32_mc8_specific {
 	uint64_t	channel_number		:BITS(3,0);
@@ -172,6 +173,8 @@ typedef union {
 	uint64_t	cor_err_cnt		:BITS(52,38);
     }		bits_mc8;
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.9
     uint64_t	u64;
 } ia32_mci_status_t;
 
@@ -181,6 +184,7 @@ typedef union {
 #define THRESHOLD_STATUS_YELLOW		2
 #define THRESHOLD_STATUS_RESERVED	3
 
+<<<<<<< HEAD
 /* MC8 memory operations encoding: */
 #define	MC8_MMM_GENERIC			0
 #define	MC8_MMM_READ			1
@@ -242,6 +246,11 @@ typedef uint64_t	ia32_mci_misc_t;
 #define IA32_MCG_R15		(0x197)
 
 >>>>>>> origin/10.5
+=======
+typedef uint64_t	ia32_mci_addr_t;
+typedef uint64_t	ia32_mci_misc_t;
+
+>>>>>>> origin/10.9
 extern void		mca_cpu_alloc(cpu_data_t *cdp);
 extern void		mca_cpu_init(void);
 extern void		mca_dump(void);

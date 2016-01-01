@@ -1228,6 +1228,7 @@ private:
 
     bool        latchDisplayWranglerTickle( bool latch );
     void        setDisplayPowerOn( uint32_t options );
+<<<<<<< HEAD
 
     void        acceptSystemWakeEvents( bool accept );
     void        systemDidNotSleep( void );
@@ -1301,6 +1302,10 @@ private:
 =======
     bool        latchDisplayWranglerTickle( bool latch );
 >>>>>>> origin/10.7
+=======
+    void        systemDidNotSleep( void );
+    void        preventTransitionToUserActive( bool prevent );
+>>>>>>> origin/10.9
 #endif /* XNU_KERNEL_PRIVATE */
 >>>>>>> origin/10.6
 };

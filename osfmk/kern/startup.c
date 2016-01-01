@@ -301,11 +301,14 @@ kernel_bootstrap(void)
 =======
 	PE_parse_boot_argn("trace_wake", &wake_nkdbufs, sizeof (wake_nkdbufs));
 
+<<<<<<< HEAD
 	/* i386_vm_init already checks for this ; do it aagin anyway */
         if (PE_parse_boot_argn("serverperfmode", &serverperfmode, sizeof (serverperfmode))) {
                 serverperfmode = 1;
         }
 >>>>>>> origin/10.8
+=======
+>>>>>>> origin/10.9
 	scale_setup();
 
 	kernel_bootstrap_log("vm_mem_bootstrap");

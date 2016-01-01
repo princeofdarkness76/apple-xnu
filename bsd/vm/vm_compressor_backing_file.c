@@ -195,8 +195,13 @@ vm_swapfile_io(vnode_t vp, uint64_t offset, uint64_t start, int npages, int flag
 	int		upl_control_flags = 0;
 	upl_size_t	upl_size = 0;
 
+<<<<<<< HEAD
 	upl_create_flags = UPL_SET_INTERNAL | UPL_SET_LITE
 			| UPL_MEMORY_TAG_MAKE(VM_KERN_MEMORY_OSFMK);
+=======
+	upl_create_flags = UPL_SET_INTERNAL | UPL_SET_LITE;
+	upl_control_flags = UPL_IOSYNC | UPL_PAGING_ENCRYPTED;
+>>>>>>> origin/10.9
 
 #if ENCRYPTED_SWAP
 	upl_control_flags = UPL_IOSYNC | UPL_PAGING_ENCRYPTED;

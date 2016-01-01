@@ -33,9 +33,13 @@
 #include <i386/cpu_topology.h>
 #include <i386/cpu_threads.h>
 <<<<<<< HEAD
+<<<<<<< HEAD
 #include <i386/lapic.h>
 =======
 >>>>>>> origin/10.5
+=======
+#include <i386/lapic.h>
+>>>>>>> origin/10.9
 #include <i386/machine_cpu.h>
 #include <i386/machine_check.h>
 #include <i386/proc_reg.h>
@@ -60,11 +64,14 @@ static uint32_t		mca_family = 0;
 static unsigned int	mca_error_bank_count = 0;
 static boolean_t	mca_control_MSR_present = FALSE;
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 static boolean_t	mca_threshold_status_present = FALSE;
 static boolean_t	mca_extended_MSRs_present = FALSE;
 static unsigned int	mca_extended_MSRs_count = 0;
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.9
 static boolean_t	mca_cmci_present = FALSE;
 static ia32_mcg_cap_t	ia32_mcg_cap;
 decl_simple_lock_data(static, mca_lock);
@@ -127,6 +134,7 @@ mca_get_availability(void)
 		mca_error_bank_count = ia32_mcg_cap.bits.count;
 		mca_control_MSR_present = ia32_mcg_cap.bits.mcg_ctl_p;
 <<<<<<< HEAD
+<<<<<<< HEAD
 		mca_cmci_present = ia32_mcg_cap.bits.mcg_ext_corr_err_p;
 =======
 		mca_threshold_status_present = ia32_mcg_cap.bits.mcg_tes_p;
@@ -136,6 +144,9 @@ mca_get_availability(void)
 			mca_extended_MSRs_count = ia32_mcg_cap.bits.mcg_ext_cnt;
 		}
 >>>>>>> origin/10.5
+=======
+		mca_cmci_present = ia32_mcg_cap.bits.mcg_ext_corr_err_p;
+>>>>>>> origin/10.9
 	}
 }
 
@@ -256,6 +267,9 @@ mca_save_state(mca_state_t *mca_state)
 	if (x86_package()->mca_state == NULL)
 		x86_package()->mca_state = mca_state;
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.9
 
 	mca_state->mca_is_saved = TRUE;
 =======
@@ -269,6 +283,7 @@ mca_check_save(void)
 		mca_save_state(current_cpu_datap()->cpu_mca_state);
 }
 
+<<<<<<< HEAD
 static void
 mca_report_cpu_info(void)
 {
@@ -286,6 +301,8 @@ mca_report_cpu_info(void)
 
 }
 
+=======
+>>>>>>> origin/10.9
 static void
 mca_dump_bank(mca_state_t *state, int i)
 {
@@ -332,6 +349,7 @@ mca_report_cpu_info(void)
 		infop->cpuid_family,
 		infop->cpuid_model,
 		infop->cpuid_stepping,
+<<<<<<< HEAD
 		(uint32_t) microcode);
 	kdb_printf(" %s\n", infop->cpuid_brand_string);
 }
@@ -415,6 +433,16 @@ static const char *mca_threshold_status[] = {
 	[THRESHOLD_STATUS_RESERVED]	"Reserved"
 };
 
+=======
+		infop->cpuid_microcode_version);
+	kdb_printf(" signature: 0x%x\n",
+		infop->cpuid_signature);
+	kdb_printf(" %s\n",
+		infop->cpuid_brand_string);
+
+}
+
+>>>>>>> origin/10.9
 static void
 mca_dump_bank(mca_state_t *state, int i)
 {
@@ -423,12 +451,10 @@ mca_dump_bank(mca_state_t *state, int i)
 
 	bank = &state->mca_error_bank[i];
 	status = bank->mca_mci_status;
-	kdb_printf(
-		" IA32_MC%d_STATUS(0x%x): 0x%016qx %svalid\n",
-		i, IA32_MCi_STATUS(i), status.u64, IF(!status.bits.val, "in"));
 	if (!status.bits.val)
 		return;
 
+<<<<<<< HEAD
 	kdb_printf(
 		"  MCA error code:            0x%04x\n",
 		status.bits.mca_error);
@@ -457,13 +483,17 @@ mca_dump_bank(mca_state_t *state, int i)
 		IF(status.bits.en,    "   Error enabled\n"),
 		IF(status.bits.uc,    "   Uncorrected error\n"),
 		IF(status.bits.over,  "   Error overflow\n"));
+=======
+	kdb_printf(" IA32_MC%d_STATUS(0x%x): 0x%016qx\n",
+		i, IA32_MCi_STATUS(i), status.u64);
+
+>>>>>>> origin/10.9
 	if (status.bits.addrv)
-		kdb_printf(
-			" IA32_MC%d_ADDR(0x%x): 0x%016qx\n",
+		kdb_printf(" IA32_MC%d_ADDR(0x%x):   0x%016qx\n",
 			i, IA32_MCi_ADDR(i), bank->mca_mci_addr);
+
 	if (status.bits.miscv)
-		kdb_printf(
-			" IA32_MC%d_MISC(0x%x): 0x%016qx\n",
+		kdb_printf(" IA32_MC%d_MISC(0x%x):   0x%016qx\n",
 			i, IA32_MCi_MISC(i), bank->mca_mci_misc);
 }
 
@@ -472,6 +502,7 @@ mca_dump_error_banks(mca_state_t *state)
 {
 	unsigned int 		i;
 
+<<<<<<< HEAD
 	kdb_printf("MCA error-reporting registers:\n");
 	for (i = 0; i < mca_error_bank_count; i++ ) {
 		if (i == 8) {
@@ -506,6 +537,12 @@ mca_dump_error_banks(mca_state_t *state)
 			continue;
 		}
 >>>>>>> origin/10.5
+=======
+	if (!state->mca_is_valid)
+		return;
+
+	for (i = 0; i < mca_error_bank_count; i++ ) {
+>>>>>>> origin/10.9
 		mca_dump_bank(state, i);
 	}
 }
@@ -560,24 +597,21 @@ mca_dump(void)
 	mca_dump_state = DUMPING;
 	simple_unlock(&mca_lock);
 
+<<<<<<< HEAD
 =======
 	kdb_printf(
 		"Machine-check capabilities (cpu %d) 0x%016qx:\n",
 		cpu_number(), ia32_mcg_cap.u64);
+=======
+	/*
+	 * Report machine-check capabilities:
+	 */
+	kdb_printf("Machine-check capabilities: 0x%016qx\n", ia32_mcg_cap.u64);
+>>>>>>> origin/10.9
 
 	mca_report_cpu_info();
 
-	kdb_printf(
-		" %d error-reporting banks\n%s%s%s", mca_error_bank_count,
-		IF(mca_control_MSR_present,
-		   " control MSR present\n"),
-		IF(mca_threshold_status_present,
-		   " threshold-based error status present\n"),
-		IF(mca_cmci_present,
-		   " extended corrected memory error handling present\n"));
-	if (mca_extended_MSRs_present)
-		kdb_printf(
-			" %d extended MSRs present\n", mca_extended_MSRs_count);
+	kdb_printf(" %d error-reporting banks\n", mca_error_bank_count);
  
 >>>>>>> origin/10.5
 	/*

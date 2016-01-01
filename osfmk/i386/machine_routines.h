@@ -469,6 +469,7 @@ int ml_get_current_cpus(
 =======
 >>>>>>> origin/10.8
 
+boolean_t ml_recent_wake(void);
 #endif /* XNU_KERNEL_PRIVATE */
 =======
 

@@ -1162,6 +1162,7 @@ packcommonattr(
 		*((u_int32_t *)attrbufptr) = cap->ca_flags;
 		attrbufptr = ((u_int32_t *)attrbufptr) + 1;
 	}
+
 	if (ATTR_CMN_USERACCESS & attr) {
 		u_int32_t user_access;
 

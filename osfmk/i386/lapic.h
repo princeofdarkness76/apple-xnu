@@ -509,6 +509,7 @@ extern void		lapic_disable_timer(void);
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 extern uint8_t		lapic_get_cmci_vector(void);
 
 #define	MAX_LAPICIDS	(LAPIC_ID_MAX+1)
@@ -518,6 +519,10 @@ extern uint8_t		lapic_get_cmci_vector(void);
 =======
 >>>>>>> origin/10.6
 =======
+=======
+extern uint8_t		lapic_get_cmci_vector(void);
+
+>>>>>>> origin/10.9
 #define	MAX_LAPICIDS	(LAPIC_ID_MAX+1)
 >>>>>>> origin/10.8
 #ifdef MP_DEBUG

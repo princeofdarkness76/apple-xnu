@@ -5858,6 +5858,7 @@ vnode_mtime(vnode_t vp, struct timespec *mtime, vfs_context_t ctx)
 	return error;
 }
 
+<<<<<<< HEAD
 errno_t
 vnode_flags(vnode_t vp, uint32_t *flags, vfs_context_t ctx)
 {
@@ -5872,6 +5873,8 @@ vnode_flags(vnode_t vp, uint32_t *flags, vfs_context_t ctx)
 	return error;
 }
 
+=======
+>>>>>>> origin/10.9
 /*
  * Returns:	0			Success
  *	vnode_getattr:???

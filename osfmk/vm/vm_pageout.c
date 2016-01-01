@@ -5566,6 +5566,11 @@ vm_set_restrictions()
 	}
 }
 
+#if VM_PAGE_BUCKETS_CHECK
+#if VM_PAGE_FAKE_BUCKETS
+extern vm_map_offset_t vm_page_fake_buckets_start, vm_page_fake_buckets_end;
+#endif /* VM_PAGE_FAKE_BUCKETS */
+#endif /* VM_PAGE_BUCKETS_CHECK */
 
 void
 vm_pageout(void)
@@ -5711,6 +5716,7 @@ vm_pageout(void)
 	if (COMPRESSED_PAGER_IS_ACTIVE || DEFAULT_FREEZER_COMPRESSED_PAGER_IS_ACTIVE)
 		vm_compressor_pager_init();
 
+<<<<<<< HEAD
 #if VM_PRESSURE_EVENTS
 	vm_pressure_events_enabled = TRUE;
 #endif /* VM_PRESSURE_EVENTS */
@@ -5723,6 +5729,12 @@ vm_pageout(void)
 	printf("**** DEBUG: protecting fake buckets [0x%llx:0x%llx]\n",
 	       (uint64_t) vm_page_fake_buckets_start,
 	       (uint64_t) vm_page_fake_buckets_end);
+=======
+#if VM_PAGE_BUCKETS_CHECK
+#if VM_PAGE_FAKE_BUCKETS
+	printf("**** DEBUG: protecting fake buckets [0x%llx:0x%llx]\n",
+	       vm_page_fake_buckets_start, vm_page_fake_buckets_end);
+>>>>>>> origin/10.9
 	pmap_protect(kernel_pmap,
 		     vm_page_fake_buckets_start,
 		     vm_page_fake_buckets_end,
@@ -5731,6 +5743,7 @@ vm_pageout(void)
 #endif /* VM_PAGE_FAKE_BUCKETS */
 #endif /* VM_PAGE_BUCKETS_CHECK */
 
+<<<<<<< HEAD
 #if VM_OBJECT_TRACKING
 	vm_object_tracking_init();
 #endif /* VM_OBJECT_TRACKING */
@@ -5986,6 +5999,8 @@ vm_pageout(void)
 	printf("FBDP_TEST_WIRE_AND_EXTRACT: PASS\n");
 #endif /* FBDP_TEST_WIRE_AND_EXTRACT */
 
+=======
+>>>>>>> origin/10.9
 	vm_pageout_continue();
 
 	/*
@@ -8122,6 +8137,7 @@ process_upl_to_remove:
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 static void
 dw_do_work(
@@ -8207,6 +8223,9 @@ dw_do_work(
 
 
 >>>>>>> origin/10.6
+=======
+extern int panic_on_cs_killed;
+>>>>>>> origin/10.9
 kern_return_t
 upl_commit_range(
 	upl_t			upl, 
@@ -8440,9 +8459,14 @@ process_upl_to_commit:
 			m->cs_nx = page_list[entry].cs_nx;
 		}
 		if (flags & UPL_COMMIT_WRITTEN_BY_KERNEL)
+<<<<<<< HEAD
 			m->written_by_kernel = TRUE;
 
 <<<<<<< HEAD
+=======
+		        m->written_by_kernel = TRUE;
+
+>>>>>>> origin/10.9
 		if (upl->flags & UPL_IO_WIRE) {
 
 =======
@@ -8464,7 +8488,12 @@ process_upl_to_commit:
 					 * so it will need to be
 					 * re-validated.
 					 */
+<<<<<<< HEAD
 					if (m->slid) {
+=======
+					if (panic_on_cs_killed &&
+					    m->slid) {
+>>>>>>> origin/10.9
 						panic("upl_commit_range(%p): page %p was slid\n",
 						      upl, m);
 					}
@@ -8710,7 +8739,12 @@ process_upl_to_commit:
 			 * so it will need to be
 			 * re-validated.
 			 */
+<<<<<<< HEAD
 			if (m->slid) {
+=======
+			if (panic_on_cs_killed &&
+			    m->slid) {
+>>>>>>> origin/10.9
 				panic("upl_commit_range(%p): page %p was slid\n",
 				      upl, m);
 			}
@@ -8865,6 +8899,7 @@ process_upl_to_commit:
 			 */
 			dwp->dw_mask |= DW_clear_busy;
 		}
+
 		/*
 		 * Wakeup any thread waiting for the page to be un-cleaning.
 		 */

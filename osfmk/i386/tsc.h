@@ -66,9 +66,13 @@ extern uint32_t	flex_ratio;
 extern uint32_t	flex_ratio_min;
 extern uint32_t	flex_ratio_max;
 <<<<<<< HEAD
+<<<<<<< HEAD
 extern uint64_t	tsc_at_boot;
 =======
 >>>>>>> origin/10.5
+=======
+extern uint64_t	tsc_at_boot;
+>>>>>>> origin/10.9
 
 struct tscInfo
 {

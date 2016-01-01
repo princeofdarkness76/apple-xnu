@@ -968,7 +968,11 @@ void
 lapic_trigger_MC(void)
 {
 	/* A 64-bit access to any register will do it. */
+<<<<<<< HEAD
 	volatile uint64_t dummy = *(volatile uint64_t *) (volatile void *) LAPIC_MMIO(ID);
+=======
+	volatile uint64_t dummy = *(uint64_t *) (void *) LAPIC_MMIO(ID);
+>>>>>>> origin/10.9
 	dummy++;
 }
 #endif

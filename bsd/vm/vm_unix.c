@@ -1856,6 +1856,9 @@ shared_region_map_and_slide_np(
 	}
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.9
 done:
 	return kr;
 =======

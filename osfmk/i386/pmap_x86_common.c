@@ -529,6 +529,9 @@ pmap_enter_options(
 	boolean_t		superpage = flags & VM_MEM_SUPERPAGE;
 	vm_object_t		delpage_pm_obj = NULL;
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.9
 	uint64_t		delpage_pde_index = 0;
 	pt_entry_t		old_pte;
 	kern_return_t		kr_expand;
@@ -650,10 +653,14 @@ Retry:
 		 * can free the page at the end of this function.
 		 */
 <<<<<<< HEAD
+<<<<<<< HEAD
 		delpage_pde_index = pdeidx(pmap, vaddr);
 =======
 		delpage_pde_index = (int)pdeidx(pmap, vaddr);
 >>>>>>> origin/10.6
+=======
+		delpage_pde_index = pdeidx(pmap, vaddr);
+>>>>>>> origin/10.9
 		delpage_pm_obj = pmap->pm_obj;
 		*pte = 0;
 	}
@@ -773,7 +780,11 @@ Retry:
 		}
 
 		if (superpage)		/* this path can not be used */
+<<<<<<< HEAD
 			template |= PTE_PS;	/* to change the page size! */
+=======
+			template |= INTEL_PTE_PS;	/* to change the page size! */
+>>>>>>> origin/10.9
 
 		if (old_attributes == template)
 			goto dont_update_pte;
@@ -803,6 +814,7 @@ Retry:
 			npte = template | (opte & (PTE_REF(is_ept) | PTE_MOD(is_ept)));
 		} while (!pmap_cmpx_pte(pte, opte, npte));
 dont_update_pte:
+<<<<<<< HEAD
 =======
 		if (pmap != kernel_pmap)
 			template |= INTEL_PTE_USER;
@@ -831,6 +843,8 @@ dont_update_pte:
 		pmap_update_pte(pte, *pte,
 			template | (*pte & (INTEL_PTE_REF | INTEL_PTE_MOD)));
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.9
 		if (old_pa_locked) {
 			UNLOCK_PVH(pai);
 			old_pa_locked = FALSE;
@@ -1233,6 +1247,9 @@ Done:
 
 		vm_object_lock(delpage_pm_obj);
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.9
 		m = vm_page_lookup(delpage_pm_obj, (delpage_pde_index * PAGE_SIZE));
 		if (m == VM_PAGE_NULL)
 		    panic("pmap_enter: pte page not in object");

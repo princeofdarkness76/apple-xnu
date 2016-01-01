@@ -785,7 +785,10 @@ hfs_vnop_link(struct vnop_link_args *ap)
 			}
 		}
 		tdcp->c_dirchangecnt++;
+<<<<<<< HEAD
 		tdcp->c_flag |= C_MODIFIED;
+=======
+>>>>>>> origin/10.9
 		hfs_incr_gencount(tdcp);
 		tdcp->c_touch_chgtime = TRUE;
 		tdcp->c_touch_modtime = TRUE;

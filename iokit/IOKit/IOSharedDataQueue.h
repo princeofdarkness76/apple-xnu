@@ -83,6 +83,9 @@ protected:
      */
     Boolean setQueueSize(UInt32 size);
 
+    UInt32 getQueueSize();
+    Boolean setQueueSize(UInt32 size);
+
 public:
     /*!
      * @function withCapacity
@@ -146,7 +149,11 @@ public:
      * @param dataSize Size of the data pointed to by data.
      * @result Returns true on success and false on failure.  Typically failure means that the queue is full.
      */
+<<<<<<< HEAD
     virtual Boolean enqueue(void *data, UInt32 dataSize) APPLE_KEXT_OVERRIDE;
+=======
+    virtual Boolean enqueue(void *data, UInt32 dataSize);
+>>>>>>> origin/10.9
 
     OSMetaClassDeclareReservedUnused(IOSharedDataQueue, 0);
     OSMetaClassDeclareReservedUnused(IOSharedDataQueue, 1);

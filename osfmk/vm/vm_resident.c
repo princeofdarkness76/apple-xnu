@@ -216,6 +216,13 @@ vm_map_offset_t vm_page_fake_buckets_start, vm_page_fake_buckets_end;
 
 extern int not_in_kdp;
 
+#if VM_PAGE_BUCKETS_CHECK
+boolean_t vm_page_buckets_check_ready = FALSE;
+#if VM_PAGE_FAKE_BUCKETS
+vm_page_bucket_t *vm_page_fake_buckets;	/* decoy buckets */
+vm_map_offset_t vm_page_fake_buckets_start, vm_page_fake_buckets_end;
+#endif /* VM_PAGE_FAKE_BUCKETS */
+#endif /* VM_PAGE_BUCKETS_CHECK */
 
 #if	MACH_PAGE_HASH_STATS
 /* This routine is only for debug.  It is intended to be called by
@@ -767,7 +774,10 @@ vm_page_bootstrap(
 #endif /* VM_PAGE_FAKE_BUCKETS */
 #endif /* VM_PAGE_BUCKETS_CHECK */
 
+<<<<<<< HEAD
 	kernel_debug_string_simple("vm_page_buckets");
+=======
+>>>>>>> origin/10.9
 	vm_page_buckets = (vm_page_bucket_t *)
 		pmap_steal_memory(vm_page_bucket_count *
 				  sizeof(vm_page_bucket_t));
@@ -790,10 +800,13 @@ vm_page_bootstrap(
 	for (i = 0; i < vm_page_bucket_lock_count; i++)
 	        lck_spin_init(&vm_page_bucket_locks[i], &vm_page_lck_grp_bucket, &vm_page_lck_attr);
 
+<<<<<<< HEAD
 	lck_spin_init(&vm_objects_wired_lock, &vm_page_lck_grp_bucket, &vm_page_lck_attr);
 	lck_spin_init(&vm_allocation_sites_lock, &vm_page_lck_grp_bucket, &vm_page_lck_attr);
 	vm_tag_init();
 
+=======
+>>>>>>> origin/10.9
 #if VM_PAGE_BUCKETS_CHECK
 	vm_page_buckets_check_ready = TRUE;
 #endif /* VM_PAGE_BUCKETS_CHECK */
@@ -1507,7 +1520,11 @@ vm_page_replace(
 				/*
 				 * Remove old page from hash list
 				 */
+<<<<<<< HEAD
 				*mp = m->next_m;
+=======
+				*mp = m->next;
+>>>>>>> origin/10.9
 				m->hashed = FALSE;
 
 				found_m = m;
@@ -1523,7 +1540,11 @@ vm_page_replace(
 	/*
 	 * insert new page at head of hash list
 	 */
+<<<<<<< HEAD
 	bucket->page_list = VM_PAGE_PACK_PTR(mem);
+=======
+	bucket->pages = mem;
+>>>>>>> origin/10.9
 	mem->hashed = TRUE;
 
 	lck_spin_unlock(bucket_lock);
@@ -5681,6 +5702,11 @@ struct hibernate_statistics {
 	int cd_found_cleaning;
 	int cd_found_laundry;
 	int cd_found_dirty;
+<<<<<<< HEAD
+=======
+	int cd_found_xpmapped;
+	int cd_skipped_xpmapped;
+>>>>>>> origin/10.9
 	int cd_local_free;
 	int cd_total_free;
 	int cd_vm_page_wire_count;
@@ -5689,6 +5715,13 @@ struct hibernate_statistics {
 	int cd_count_wire;
 } hibernate_stats;
 
+
+/*
+ * clamp the number of 'xpmapped' pages we'll sweep into the hibernation image
+ * so that we don't overrun the estimated image size, which would
+ * result in a hibernation failure.
+ */
+#define	HIBERNATE_XPMAPPED_LIMIT	40000
 
 
 static int
@@ -8290,7 +8323,11 @@ hibernate_teardown_vm_structs(hibernate_page_list_t *page_list, hibernate_page_l
 
 		bucket = &vm_page_buckets[i];
 
+<<<<<<< HEAD
 		for (mem = VM_PAGE_UNPACK_PTR(bucket->page_list); mem != VM_PAGE_NULL; mem = mem_next) {
+=======
+		for (mem = bucket->pages; mem != VM_PAGE_NULL; mem = mem_next) {
+>>>>>>> origin/10.9
 			assert(mem->hashed);
 
 			mem_next = VM_PAGE_UNPACK_PTR(mem->next_m);
@@ -8504,21 +8541,34 @@ vm_page_buckets_check(void)
 			panic("BUCKET_CHECK: corruption at %p in fake buckets "
 			      "[0x%llx:0x%llx]\n",
 			      cp,
+<<<<<<< HEAD
 			      (uint64_t) vm_page_fake_buckets_start,
 			      (uint64_t) vm_page_fake_buckets_end);
+=======
+			      vm_page_fake_buckets_start,
+			      vm_page_fake_buckets_end);
+>>>>>>> origin/10.9
 		}
 	}
 #endif /* VM_PAGE_FAKE_BUCKETS */
 
 	for (i = 0; i < vm_page_bucket_count; i++) {
 		bucket = &vm_page_buckets[i];
+<<<<<<< HEAD
 		if (!bucket->page_list) {
+=======
+		if (bucket->pages == VM_PAGE_NULL) {
+>>>>>>> origin/10.9
 			continue;
 		}
 
 		bucket_lock = &vm_page_bucket_locks[i / BUCKETS_PER_LOCK];
 		lck_spin_lock(bucket_lock);
+<<<<<<< HEAD
 		p = VM_PAGE_UNPACK_PTR(bucket->page_list);
+=======
+		p = bucket->pages;
+>>>>>>> origin/10.9
 		while (p != VM_PAGE_NULL) {
 			if (!p->hashed) {
 				panic("BUCKET_CHECK: page %p (%p,0x%llx) "
@@ -8535,7 +8585,11 @@ vm_page_buckets_check(void)
 				      i, bucket, p, p->object, p->offset,
 				      p_hash);
 			}
+<<<<<<< HEAD
 			p = VM_PAGE_UNPACK_PTR(p->next_m);
+=======
+			p = p->next;
+>>>>>>> origin/10.9
 		}
 		lck_spin_unlock(bucket_lock);
 	}
@@ -8543,6 +8597,7 @@ vm_page_buckets_check(void)
 //	printf("BUCKET_CHECK: checked buckets\n");
 }
 #endif /* VM_PAGE_BUCKETS_CHECK */
+<<<<<<< HEAD
 
 /*
  * 'vm_fault_enter' will place newly created pages (zero-fill and COW) onto the
@@ -9121,3 +9176,5 @@ vm_page_diagnose(mach_memory_info_t * sites, unsigned int num_sites)
     
     return (KERN_SUCCESS);
 }
+=======
+>>>>>>> origin/10.9

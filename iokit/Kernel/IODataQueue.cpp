@@ -58,12 +58,15 @@
 #include <IOKit/IOLib.h>
 #include <IOKit/IOMemoryDescriptor.h>
 #include <libkern/OSAtomic.h>
+<<<<<<< HEAD
 
 struct IODataQueueInternal
 {
     mach_msg_header_t msg;
     UInt32            queueSize;
 };
+=======
+>>>>>>> origin/10.9
 
 #ifdef enqueue
 #undef enqueue
@@ -188,10 +191,15 @@ Boolean IODataQueue::enqueue(void * data, UInt32 dataSize)
     if (dataSize > UINT32_MAX - DATA_QUEUE_ENTRY_HEADER_SIZE) {
         return false;
     }
+<<<<<<< HEAD
 
     // Check for underflow of (dataQueue->queueSize - tail)
     queueSize = ((IODataQueueInternal *) notifyMsg)->queueSize;
     if ((queueSize < tail) || (queueSize < head)) {
+=======
+    // Check for underflow of (dataQueue->queueSize - tail)
+    if (dataQueue->queueSize < tail) {
+>>>>>>> origin/10.9
         return false;
     }
 
@@ -199,7 +207,11 @@ Boolean IODataQueue::enqueue(void * data, UInt32 dataSize)
     {
         // Is there enough room at the end for the entry?
         if ((entrySize <= UINT32_MAX - tail) &&
+<<<<<<< HEAD
             ((tail + entrySize) <= queueSize) )
+=======
+            ((tail + entrySize) <= dataQueue->queueSize) )
+>>>>>>> origin/10.9
         {
             entry = (IODataQueueEntry *)((UInt8 *)dataQueue->queue + tail);
 

@@ -504,6 +504,7 @@ typedef struct hfsmount {
 
     // Records whether a sync has been queued or is in progress
 	boolean_t		hfs_sync_incomplete;
+<<<<<<< HEAD
 
 	thread_call_t   hfs_syncer;	       // removeable devices get sync'ed by this guy
 
@@ -572,6 +573,17 @@ typedef struct hfsmount {
 	u_int32_t            hfs_jnlinfoblkid;
     volatile int         readers;
 	volatile int         blocker;
+=======
+
+	thread_call_t   hfs_syncer;	       // removeable devices get sync'ed by this guy
+
+    /* Records the syncer thread so that we can avoid the syncer
+       queing more syncs. */
+    thread_t		hfs_syncer_thread;
+
+    // Not currently used except for debugging purposes
+	uint32_t        hfs_active_threads;
+>>>>>>> origin/10.9
 } hfsmount_t;
 
 #define hfs_private_metadata_dir	hfs_privdir_desc.cd_cnid
@@ -626,9 +638,12 @@ enum {
     HFS_META_DELAY     = 100  * 1000,	// 0.1 secs
     HFS_MAX_META_DELAY = 5000 * 1000	// 5 secs
 };
+<<<<<<< HEAD
 
 #define HFS_META_DELAY     (100)
 #define HFS_MILLISEC_SCALE (1000*1000)
+=======
+>>>>>>> origin/10.9
 
 typedef hfsmount_t  ExtendedVCB;
 
@@ -1239,10 +1254,14 @@ extern int hfs_owner_rights(struct hfsmount *hfsmp, uid_t cnode_uid, kauth_cred_
 extern int check_for_tracked_file(struct vnode *vp, time_t ctime, uint64_t op_type, void *arg);
 extern int check_for_dataless_file(struct vnode *vp, uint64_t op_type);
 extern int hfs_generate_document_id(struct hfsmount *hfsmp, uint32_t *docid);
+<<<<<<< HEAD
 extern void hfs_pin_fs_metadata(struct hfsmount *hfsmp);
 
 /* Return information about number of metadata blocks for volume */
 extern int hfs_getinfo_metadata_blocks(struct hfsmount *hfsmp, struct hfsinfo_metadata *hinfo);
+=======
+
+>>>>>>> origin/10.9
 
 /*
  * Journal lock function prototypes
@@ -1298,8 +1317,12 @@ extern int  hfs_virtualmetafile(struct cnode *);
 extern int hfs_start_transaction(struct hfsmount *hfsmp);
 extern int hfs_end_transaction(struct hfsmount *hfsmp);
 <<<<<<< HEAD
+<<<<<<< HEAD
 extern void hfs_journal_lock(struct hfsmount *hfsmp);
 extern void hfs_journal_unlock(struct hfsmount *hfsmp);
+=======
+extern int hfs_journal_flush(struct hfsmount *hfsmp, boolean_t wait_for_IO);
+>>>>>>> origin/10.9
 extern void hfs_syncer_lock(struct hfsmount *hfsmp);
 extern void hfs_syncer_unlock(struct hfsmount *hfsmp);
 extern void hfs_syncer_wait(struct hfsmount *hfsmp);
@@ -1325,12 +1348,15 @@ extern int hfs_erase_unused_nodes(struct hfsmount *hfsmp);
 
 extern uint64_t hfs_usecs_to_deadline(uint64_t usecs);
 
+<<<<<<< HEAD
 extern int hfs_freeze(struct hfsmount *hfsmp);
 extern int hfs_thaw(struct hfsmount *hfsmp, const struct proc *process);
 =======
 extern void hfs_sync_ejectable(struct hfsmount *hfsmp);
 >>>>>>> origin/10.5
 
+=======
+>>>>>>> origin/10.9
 
 /*****************************************************************************
 	Functions from hfs_vnops.c

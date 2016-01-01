@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+>>>>>>> origin/10.9
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -4426,10 +4430,18 @@ trimthenstep6:
 				 * instead of the dupack
 				 */ 
 				if ((thflags & TH_FIN) &&
+<<<<<<< HEAD
 				    (tp->t_flags & TF_SENTFIN) &&
 				    !TCPS_HAVERCVDFIN(tp->t_state) &&
 				    (th->th_ack + 1) == tp->snd_max)
 					break;
+=======
+					(tp->t_flags & TF_SENTFIN) &&
+					!TCPS_HAVERCVDFIN(tp->t_state) &&
+					(th->th_ack + 1) == tp->snd_max) {
+					break;
+				}
+>>>>>>> origin/10.9
 process_dupack:
 #if MPTCP
 				/*

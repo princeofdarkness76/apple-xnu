@@ -320,11 +320,18 @@ struct uthread {
 	void *		uu_threadlist;
 <<<<<<< HEAD
 	char *		pth_name;
+<<<<<<< HEAD
 
 	/* Document Tracking struct used to track a "tombstone" for a document */
 	struct doc_tombstone *t_tombstone;
 =======
 >>>>>>> origin/10.5
+=======
+	struct label *	uu_label;	/* MAC label */
+
+	/* Document Tracking struct used to track a "tombstone" for a document */
+	struct doc_tombstone *t_tombstone;
+>>>>>>> origin/10.9
 };
 
 typedef struct uthread * uthread_t;

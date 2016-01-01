@@ -76,9 +76,13 @@ uint32_t	flex_ratio_min = 0;
 uint32_t	flex_ratio_max = 0;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 uint64_t	tsc_at_boot = 0;
 =======
 >>>>>>> origin/10.5
+=======
+uint64_t	tsc_at_boot = 0;
+>>>>>>> origin/10.9
 
 #define bit(n)		(1ULL << (n))
 #define bitmask(h,l)	((bit(h)|(bit(h)-1)) & ~(bit(l)-1))
@@ -93,13 +97,22 @@ uint64_t	tsc_at_boot = 0;
 
 #define CPU_FAMILY_PENTIUM_M	(0x6)
 
+<<<<<<< HEAD
+=======
+static const char	FSB_Frequency_prop[] = "FSBFrequency";
+static const char	TSC_at_boot_prop[]   = "InitialTSC";
+>>>>>>> origin/10.9
 /*
 <<<<<<< HEAD
  * This routine extracts a frequency property in Hz from the device tree.
  * Also reads any initial TSC value at boot from the device tree.
 =======
  * This routine extracts the bus frequency in Hz from the device tree.
+<<<<<<< HEAD
 >>>>>>> origin/10.5
+=======
+ * Also reads any initial TSC value at boot from the device tree.
+>>>>>>> origin/10.9
  */
 static uint64_t
 EFI_get_frequency(const char *prop)
@@ -134,6 +147,20 @@ EFI_get_frequency(const char *prop)
 		}
 	}
 
+<<<<<<< HEAD
+=======
+	/*
+	 * While we're here, see if EFI published an initial TSC value.
+	 */
+	if (DTGetProperty(entry,TSC_at_boot_prop,&value,&size) == kSuccess) {
+		if (size == sizeof(uint64_t)) {
+			tsc_at_boot = *(uint64_t *) value;
+			kprintf("EFI_FSB_frequency: read %s value: %llu\n",
+				TSC_at_boot_prop, tsc_at_boot);
+		}
+	}
+
+>>>>>>> origin/10.9
 	return frequency;
 }
 

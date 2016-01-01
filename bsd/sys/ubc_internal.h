@@ -206,6 +206,7 @@ int	ubc_cs_blob_add(vnode_t, cpu_type_t, off_t, vm_address_t, vm_size_t, int, st
 int	ubc_cs_sigpup_add(vnode_t, vm_address_t, vm_size_t);
 struct cs_blob *ubc_get_cs_blobs(vnode_t);
 void	ubc_get_cs_mtime(vnode_t, struct timespec *);
+<<<<<<< HEAD
 =======
 int UBCINFOEXISTS(vnode_t);
 
@@ -214,6 +215,8 @@ struct cs_blob;
 int	ubc_cs_blob_add(vnode_t, cpu_type_t, off_t, vm_address_t, vm_size_t);
 struct cs_blob *ubc_get_cs_blobs(vnode_t);
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.9
 int	ubc_cs_getcdhash(vnode_t, off_t, unsigned char *);
 kern_return_t ubc_cs_blob_allocate(vm_offset_t *, vm_size_t *);
 void ubc_cs_blob_deallocate(vm_offset_t, vm_size_t);

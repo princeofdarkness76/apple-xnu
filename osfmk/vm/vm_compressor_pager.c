@@ -552,7 +552,10 @@ compressor_memory_object_create(
 	pager->cpgr_control = MEMORY_OBJECT_CONTROL_NULL;
 	pager->cpgr_references = 1;
 	pager->cpgr_num_slots = (uint32_t)(new_size/PAGE_SIZE);
+<<<<<<< HEAD
 	pager->cpgr_num_slots_occupied = 0;
+=======
+>>>>>>> origin/10.9
 
 	num_chunks = (pager->cpgr_num_slots + COMPRESSOR_SLOTS_PER_CHUNK - 1) / COMPRESSOR_SLOTS_PER_CHUNK;
 	if (num_chunks > 1) {
@@ -763,8 +766,11 @@ vm_compressor_pager_get(
 	
 	compressor_pager_stats.get++;
 
+<<<<<<< HEAD
 	*compressed_count_delta_p = 0;
 
+=======
+>>>>>>> origin/10.9
 	if ((uint32_t)(offset/PAGE_SIZE) != (offset/PAGE_SIZE)) {
 		panic("%s: offset 0x%llx overflow\n",
 		      __FUNCTION__, (uint64_t) offset);
@@ -834,7 +840,11 @@ vm_compressor_pager_state_clr(
 		/* overflow */
 		panic("%s: offset 0x%llx overflow\n",
 		      __FUNCTION__, (uint64_t) offset);
+<<<<<<< HEAD
 		return 0;
+=======
+		return;
+>>>>>>> origin/10.9
 	}
 
 	compressor_pager_lookup(mem_obj, pager);

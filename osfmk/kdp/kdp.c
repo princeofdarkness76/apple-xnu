@@ -1162,7 +1162,65 @@ kdp_stackshot(int pid, void *tracebuf, uint32_t tracebuf_size, uint32_t trace_fl
 			task_snap->ss_flags = 0;
 			if (task64)
 				task_snap->ss_flags |= kUser64_p;
+<<<<<<< HEAD
 			
+=======
+			if (task64 && task_pid == 0)
+				task_snap->ss_flags |= kKernel64_p;
+			if (!task->active) 
+				task_snap->ss_flags |= kTerminatedSnapshot;
+			if(task->pidsuspended) task_snap->ss_flags |= kPidSuspended;
+			if(task->frozen) task_snap->ss_flags |= kFrozen;
+
+			if (task->effective_policy.darwinbg ==  1) {
+				task_snap->ss_flags |= kTaskDarwinBG;
+			}
+
+			if (task->effective_policy.t_sup_active == 1)
+				task_snap->ss_flags |= kTaskIsSuppressed;
+
+			task_snap->latency_qos = (task->effective_policy.t_latency_qos == LATENCY_QOS_TIER_UNSPECIFIED) ?
+			                         LATENCY_QOS_TIER_UNSPECIFIED : ((0xFF << 16) | task->effective_policy.t_latency_qos);
+
+			task_snap->suspend_count = task->suspend_count;
+			task_snap->task_size = have_pmap ? pmap_resident_count(task->map->pmap) : 0;
+			task_snap->faults = task->faults;
+			task_snap->pageins = task->pageins;
+			task_snap->cow_faults = task->cow_faults;
+
+			task_snap->user_time_in_terminated_threads = task->total_user_time;
+			task_snap->system_time_in_terminated_threads = task->total_system_time;
+			/*
+			 * The throttling counters are maintained as 64-bit counters in the proc
+			 * structure. However, we reserve 32-bits (each) for them in the task_snapshot
+			 * struct to save space and since we do not expect them to overflow 32-bits. If we
+			 * find these values overflowing in the future, the fix would be to simply 
+			 * upgrade these counters to 64-bit in the task_snapshot struct
+			 */
+			task_snap->was_throttled = (uint32_t) proc_was_throttled_from_task(task);
+			task_snap->did_throttle = (uint32_t) proc_did_throttle_from_task(task);
+
+			if (task->shared_region && ml_validate_nofault((vm_offset_t)task->shared_region,
+														   sizeof(struct vm_shared_region))) {
+				struct vm_shared_region *sr = task->shared_region;
+
+				shared_cache_base_address = sr->sr_base_address + sr->sr_first_mapping;
+			}
+			if (!shared_cache_base_address
+				|| !kdp_copyin(task->map->pmap, shared_cache_base_address, task_snap->shared_cache_identifier, sizeof(task_snap->shared_cache_identifier))) {
+				memset(task_snap->shared_cache_identifier, 0x0, sizeof(task_snap->shared_cache_identifier));
+			}
+			if (task->shared_region) {
+				/*
+				 * No refcounting here, but we are in debugger
+				 * context, so that should be safe.
+				 */
+				task_snap->shared_cache_slide = task->shared_region->sr_slide_info.slide;
+			} else {
+				task_snap->shared_cache_slide = 0;
+			}
+
+>>>>>>> origin/10.9
 			tracepos += sizeof(struct task_snapshot);
 
 			if (task_pid > 0 && uuid_info_count > 0) {

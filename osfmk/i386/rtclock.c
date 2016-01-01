@@ -759,12 +759,16 @@ rtc_set_timescale(uint64_t cycles)
 	rntp->shift = shift;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.9
 	/*
 	 * On some platforms, the TSC is not reset at warm boot. But the
 	 * rebase time must be relative to the current boot so we can't use
 	 * mach_absolute_time(). Instead, we convert the TSC delta since boot
 	 * to nanoseconds.
 	 */
+<<<<<<< HEAD
 	if (tsc_rebase_abs_time == 0)
 		tsc_rebase_abs_time = _rtc_tsc_to_nanoseconds(
 						rdtsc64() - tsc_at_boot, rntp);
@@ -781,6 +785,11 @@ rtc_set_timescale(uint64_t cycles)
 	if (tsc_rebase_abs_time == 0)
 		tsc_rebase_abs_time = mach_absolute_time();
 >>>>>>> origin/10.8
+=======
+	if (tsc_rebase_abs_time == 0)
+		tsc_rebase_abs_time = _rtc_tsc_to_nanoseconds(
+						rdtsc64() - tsc_at_boot, rntp);
+>>>>>>> origin/10.9
 
 	rtc_nanotime_init(0);
 }

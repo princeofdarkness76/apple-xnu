@@ -562,6 +562,7 @@ struct vnode_trigger_param {
 #define VNODE_ATTR_va_dataprotect_class	(1LL<<31)	/* 80000000 */
 #define VNODE_ATTR_va_dataprotect_flags	(1LL<<32)	/* 100000000 */
 #define VNODE_ATTR_va_document_id	(1LL<<33)	/* 200000000 */
+<<<<<<< HEAD
 #define VNODE_ATTR_va_devid		(1LL<<34)	/* 400000000 */
 #define VNODE_ATTR_va_objtype		(1LL<<35)	/* 800000000 */
 #define VNODE_ATTR_va_objtag		(1LL<<36)	/* 1000000000 */
@@ -571,6 +572,8 @@ struct vnode_trigger_param {
 #define VNODE_ATTR_va_rsrc_alloc	(1LL<<40)	/* 10000000000 */
 #define VNODE_ATTR_va_fsid64		(1LL<<41)	/* 20000000000 */
 #define VNODE_ATTR_va_write_gencount    (1LL<<42)	/* 40000000000 */
+=======
+>>>>>>> origin/10.9
 
 #define VNODE_ATTR_BIT(n)	(VNODE_ATTR_ ## n)
 /*
@@ -688,6 +691,7 @@ struct vnode_attr {
 	/* Data Protection fields */
 	uint32_t va_dataprotect_class;	/* class specified for this file if it didn't exist */
 	uint32_t va_dataprotect_flags;	/* flags from NP open(2) to the filesystem */
+<<<<<<< HEAD
 
 	/* Document revision tracking */
 	uint32_t va_document_id;
@@ -705,6 +709,9 @@ struct vnode_attr {
 	uint32_t va_write_gencount;     /* counter that increments each time the file changes */
 
 	/* add new fields here only */
+=======
+	uint32_t va_document_id;
+>>>>>>> origin/10.9
 };
 
 #ifdef BSD_KERNEL_PRIVATE

@@ -657,8 +657,13 @@ copytobuffer:
 		 * We can't fit a record in the space available, so wrap around to the beginning.
 		 * Save the current position as the known end point of valid data.
 		 */
+<<<<<<< HEAD
 		current_buffer->end_point = current_record_start;
 		current_buffer->current_position = 0;
+=======
+		telemetry_buffer_end_point = current_record_start;
+		telemetry_buffer_current_position = 0;
+>>>>>>> origin/10.9
 		if (current_record_start == 0) {
 			/* This sample is too large to fit in the buffer even when we started at 0, so skip it */
 			goto cancel_sample;
@@ -676,9 +681,15 @@ copytobuffer:
 
 	current_buffer->current_position += sizeof(struct micro_snapshot);
 
+<<<<<<< HEAD
 	if ((current_buffer->size - current_buffer->current_position) < sizeof(struct task_snapshot)) {
 		current_buffer->end_point = current_record_start;
 		current_buffer->current_position = 0;
+=======
+	if ((telemetry_buffer_size - telemetry_buffer_current_position) < sizeof(struct task_snapshot)) {
+		telemetry_buffer_end_point = current_record_start;
+		telemetry_buffer_current_position = 0;
+>>>>>>> origin/10.9
 		if (current_record_start == 0) {
 			/* This sample is too large to fit in the buffer even when we started at 0, so skip it */
 			goto cancel_sample;
@@ -748,9 +759,15 @@ copytobuffer:
 	 * Directly after the task snapshot, place the array of UUID's corresponding to the binaries
 	 * used by this task.
 	 */
+<<<<<<< HEAD
 	if ((current_buffer->size - current_buffer->current_position) < uuid_info_array_size) {
 		current_buffer->end_point = current_record_start;
 		current_buffer->current_position = 0;
+=======
+	if ((telemetry_buffer_size - telemetry_buffer_current_position) < uuid_info_array_size) {
+		telemetry_buffer_end_point = current_record_start;
+		telemetry_buffer_current_position = 0;
+>>>>>>> origin/10.9
 		if (current_record_start == 0) {
 			/* This sample is too large to fit in the buffer even when we started at 0, so skip it */
 			goto cancel_sample;
@@ -774,8 +791,13 @@ copytobuffer:
 
 	if ((current_buffer->size - current_buffer->current_position) < sizeof(struct thread_snapshot)) {
 		/* wrap and overwrite */
+<<<<<<< HEAD
 		current_buffer->end_point = current_record_start;		
 		current_buffer->current_position = 0;
+=======
+		telemetry_buffer_end_point = current_record_start;		
+		telemetry_buffer_current_position = 0;
+>>>>>>> origin/10.9
 		if (current_record_start == 0) {
 			/* This sample is too large to fit in the buffer even when we started at 0, so skip it */
 			goto cancel_sample;
@@ -820,8 +842,13 @@ copytobuffer:
 	if (dqserialnum_valid) {
 		if ((current_buffer->size - current_buffer->current_position) < sizeof(dqserialnum)) {
 			/* wrap and overwrite */
+<<<<<<< HEAD
 			current_buffer->end_point = current_record_start;		
 			current_buffer->current_position = 0;
+=======
+			telemetry_buffer_end_point = current_record_start;		
+			telemetry_buffer_current_position = 0;
+>>>>>>> origin/10.9
 			if (current_record_start == 0) {
 				/* This sample is too large to fit in the buffer even when we started at 0, so skip it */
 				goto cancel_sample;
@@ -847,9 +874,15 @@ copytobuffer:
 	 * If we can't fit this entire stacktrace then cancel this record, wrap to the beginning,
 	 * and start again there so that we always store a full record.
 	 */
+<<<<<<< HEAD
 	if ((current_buffer->size - current_buffer->current_position)/framesize < btcount) {
 		current_buffer->end_point = current_record_start;
 		current_buffer->current_position = 0;
+=======
+	if ((telemetry_buffer_size - telemetry_buffer_current_position)/framesize < btcount) {
+		telemetry_buffer_end_point = current_record_start;
+		telemetry_buffer_current_position = 0;
+>>>>>>> origin/10.9
 		if (current_record_start == 0) {
 			/* This sample is too large to fit in the buffer even when we started at 0, so skip it */
 			goto cancel_sample;

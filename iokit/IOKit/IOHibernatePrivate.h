@@ -375,6 +375,9 @@ kern_close_file_for_direct_io(struct kern_direct_file_io_ref_t * ref,
 #endif /* _SYS_CONF_H_ */
 >>>>>>> origin/10.7
 
+void
+vm_compressor_do_warmup(void);
+
 hibernate_page_list_t *
 hibernate_page_list_allocate(boolean_t log);
 <<<<<<< HEAD
