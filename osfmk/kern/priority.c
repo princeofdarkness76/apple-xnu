@@ -160,6 +160,8 @@ thread_quantum_expire(
 	commpage_update_mach_approximate_time(ctime);
 #endif
 
+	SCHED_STATS_QUANTUM_TIMER_EXPIRATION(processor);
+
 	thread_lock(thread);
 
 	/*
@@ -219,6 +221,7 @@ thread_quantum_expire(
 
 	thread_quantum_init(thread);
 
+<<<<<<< HEAD
 	/* Reload precise timing global policy to thread-local policy */
 	thread->precise_user_kernel_time = use_precise_user_kernel_time(thread);
 
@@ -236,6 +239,11 @@ thread_quantum_expire(
 	}
 
 	processor->quantum_end = ctime + thread->quantum_remaining;
+=======
+	processor->quantum_end += thread->current_quantum;
+	timer_call_enter1(&processor->quantum_timer, thread,
+	    processor->quantum_end, TIMER_CALL_CRITICAL);
+>>>>>>> origin/10.7
 
 	/*
 	 *	Context switch check.

@@ -2614,9 +2614,12 @@ kauth_cred_cache_lookup(int from, int to, void *src, void *dst)
 		case KI_VALID_NTSID:
 			expired = kauth_identity_ntsid_expired;
 			break;
+<<<<<<< HEAD
 		case KI_VALID_GROUPS:
 			expired = kauth_identity_groups_expired;
 			break;
+=======
+>>>>>>> origin/10.7
 		default:
 			switch(from) {
 			case KI_VALID_GUID:
@@ -2656,7 +2659,10 @@ kauth_cred_cache_lookup(int from, int to, void *src, void *dst)
 			/* do we have a translation? */
 			if (ki.ki_valid & to) {
 				KAUTH_DEBUG("CACHE - found matching entry with valid 0x%08x", ki.ki_valid);
+<<<<<<< HEAD
 				DTRACE_PROC4(kauth__identity__cache__hit, int, from, int, to, void *, src, void *, dst);
+=======
+>>>>>>> origin/10.7
 				goto found;
 			} else {
 				/*

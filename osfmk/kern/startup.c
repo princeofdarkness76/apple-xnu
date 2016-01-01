@@ -485,6 +485,7 @@ kernel_bootstrap_thread(void)
 
 	kth_started = 1;
 <<<<<<< HEAD
+<<<<<<< HEAD
 		
 #if (defined(__i386__) || defined(__x86_64__)) && NCOPY_WINDOWS > 0
 =======
@@ -493,6 +494,8 @@ kernel_bootstrap_thread(void)
 	kernel_bootstrap_kprintf("calling kdp_init\n");
 	kdp_init();
 #endif
+=======
+>>>>>>> origin/10.7
 		
 #ifdef i386
 >>>>>>> origin/10.5
@@ -503,6 +506,7 @@ kernel_bootstrap_thread(void)
 	cpu_physwindow_init(0);
 #endif
 
+<<<<<<< HEAD
 
 	
 #if MACH_KDP 
@@ -537,6 +541,17 @@ kernel_bootstrap_thread(void)
 
 #if (defined(__i386__) || defined(__x86_64__)) && CONFIG_VMX
 	vmx_init();
+=======
+	vm_kernel_reserved_entry_init();
+	
+#if MACH_KDP
+	kernel_bootstrap_kprintf("calling kdp_init\n");
+	kdp_init();
+#endif
+
+#if CONFIG_COUNTERS
+	pmc_bootstrap();
+>>>>>>> origin/10.7
 #endif
 
 #if (defined(__i386__) || defined(__x86_64__))

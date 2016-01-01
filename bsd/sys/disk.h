@@ -345,6 +345,7 @@ typedef struct
 #define DKIOCLOCKPHYSICALEXTENTS              _IO('d', 81)
 #define DKIOCGETPHYSICALEXTENT                _IOWR('d', 82, dk_physical_extent_t)
 #define DKIOCUNLOCKPHYSICALEXTENTS            _IO('d', 83)
+<<<<<<< HEAD
 #define DKIOCSETTIER                          _IOW('d', 85, dk_set_tier_t)
 #define DKIOCGETENCRYPTIONTYPE                _IOR('d', 86, uint32_t)
 #define DKIOCISLOWPOWERMODE                   _IOR('d', 87, uint32_t)
@@ -401,6 +402,12 @@ typedef struct _dk_cs_unmap {
 #define DKIOCISVIRTUAL                        _IOR('d', 72, uint32_t)
 #define DKIOCGETBASE                          _IOR('d', 73, uint64_t)
 >>>>>>> origin/10.6
+=======
+
+#ifdef PRIVATE
+#define _DKIOCGETMIGRATIONUNITBYTESIZE        _IOR('d', 85, uint32_t)
+#endif /* PRIVATE */
+>>>>>>> origin/10.7
 #endif /* KERNEL */
 
 #ifdef PRIVATE

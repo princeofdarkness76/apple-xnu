@@ -154,6 +154,7 @@ typedef struct boot_icon_element boot_icon_element;
 #define kBootArgsEfiMode32              32
 #define kBootArgsEfiMode64              64
 
+<<<<<<< HEAD
 /* Bitfields for boot_args->flags */
 #define kBootArgsFlagRebootOnPanic	(1 << 0)
 #define kBootArgsFlagHiDPI		(1 << 1)
@@ -164,6 +165,10 @@ typedef struct boot_icon_element boot_icon_element;
 #define kBootArgsFlagBlackBg		(1 << 6)
 #define kBootArgsFlagLoginUI		(1 << 7)
 #define kBootArgsFlagInstallUI		(1 << 8)
+=======
+#define kBootArgsFlagRebootOnPanic	1
+#define kBootArgsFlagHiDPI		2
+>>>>>>> origin/10.7
 
 typedef struct boot_args {
     uint16_t    Revision;	/* Revision of boot_args structure */
@@ -217,12 +222,16 @@ typedef struct boot_args {
     uint64_t    pciConfigSpaceBaseAddress;
     uint32_t    pciConfigSpaceStartBusNumber;
     uint32_t    pciConfigSpaceEndBusNumber;
+<<<<<<< HEAD
     uint32_t	csrActiveConfig;
     uint32_t	csrCapabilities;
     uint32_t    boot_SMC_plimit;
     uint16_t    bootProgressMeterStart;
     uint16_t    bootProgressMeterEnd;
     uint32_t    __reserved4[726];
+=======
+    uint32_t    __reserved4[730];
+>>>>>>> origin/10.7
 
 } boot_args;
 

@@ -345,6 +345,7 @@ commpage_init_cpu_capabilities( void )
 	_cpu_capabilities = bits;		// set kernel version for use by drivers etc
 }
 
+<<<<<<< HEAD
 /* initialize the approx_time_supported flag and set the approx time to 0.
  * Called during initial commpage population.
  */
@@ -373,6 +374,14 @@ commpage_mach_approximate_time_init(void)
 =======
 	if (cpuid_features() & CPUID_FEATURE_AES)
 		bits |= kHasAES;
+=======
+	bits |= (cpuid_features() & CPUID_FEATURE_AES) ? kHasAES : 0;
+
+	bits |= (cpuid_features() & CPUID_FEATURE_F16C) ? kHasF16C : 0;
+	bits |= (cpuid_features() & CPUID_FEATURE_RDRAND) ? kHasRDRAND : 0;
+	bits |= ((cpuid_leaf7_features() & CPUID_LEAF7_FEATURE_ENFSTRG) &&
+		 (rdmsr64(MSR_IA32_MISC_ENABLE) & 1ULL )) ? kHasENFSTRG : 0;
+>>>>>>> origin/10.7
 
 	_cpu_capabilities = bits;		// set kernel version for use by drivers etc
 >>>>>>> origin/10.6

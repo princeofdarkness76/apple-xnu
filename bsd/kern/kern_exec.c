@@ -4238,6 +4238,7 @@ handle_mac_transition:
 			OSBitOrAtomic(P_SUGID, (UInt32 *)&p->p_flag);
 >>>>>>> origin/10.5
 
+<<<<<<< HEAD
 			/*
 			 * Radar 2261856; setuid security hole fix
 			 * XXX For setuid processes, attempt to ensure that
@@ -4304,6 +4305,58 @@ handle_mac_transition:
 
 				FREE(ndp, M_TEMP);
 			}
+=======
+		/*
+		 * Radar 2261856; setuid security hole fix
+		 * XXX For setuid processes, attempt to ensure that
+		 * stdin, stdout, and stderr are already allocated.
+		 * We do not want userland to accidentally allocate
+		 * descriptors in this range which has implied meaning
+		 * to libc.
+		 */
+		for (i = 0; i < 3; i++) {
+
+			if (p->p_fd->fd_ofiles[i] != NULL)
+				continue;
+
+			/*
+			 * Do the kernel equivalent of
+			 *
+			 * 	(void) open("/dev/null", O_RDONLY);
+			 */
+
+			struct fileproc *fp;
+			int indx;
+
+			if ((error = falloc(p,
+			    &fp, &indx, imgp->ip_vfs_context)) != 0)
+				continue;
+
+			struct nameidata nd1;
+
+			NDINIT(&nd1, LOOKUP, OP_OPEN, FOLLOW, UIO_SYSSPACE,
+			    CAST_USER_ADDR_T("/dev/null"),
+			    imgp->ip_vfs_context);
+
+			if ((error = vn_open(&nd1, FREAD, 0)) != 0) {
+				fp_free(p, indx, fp);
+				break;
+			}
+
+			struct fileglob *fg = fp->f_fglob;
+
+			fg->fg_flag = FREAD;
+			fg->fg_type = DTYPE_VNODE;
+			fg->fg_ops = &vnops;
+			fg->fg_data = nd1.ni_vp;
+
+			vnode_put(nd1.ni_vp);
+
+			proc_fdlock(p);
+			procfdtbl_releasefd(p, indx, NULL);
+			fp_drop(p, indx, fp, 1);
+			proc_fdunlock(p);
+>>>>>>> origin/10.7
 		}
 	}
 #if CONFIG_MACF

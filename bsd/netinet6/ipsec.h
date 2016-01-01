@@ -294,7 +294,11 @@ struct ipsecstat {
 #define IPSEC_GET_P2UNALIGNED_OFS(p) 0
 
 struct ipsec_output_state {
+<<<<<<< HEAD
 	int tunneled;
+=======
+    int tunneled;
+>>>>>>> origin/10.7
 	struct mbuf *m;
 	struct route ro;
 	struct sockaddr *dst;

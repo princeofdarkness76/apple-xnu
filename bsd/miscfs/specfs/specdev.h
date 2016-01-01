@@ -113,11 +113,14 @@ struct specinfo {
 	u_int16_t	si_isssd;
 	u_int32_t	si_devbsdunit;
 	u_int64_t	si_throttle_mask;
+<<<<<<< HEAD
 =======
 	daddr_t si_size;                  /* device block size in bytes */
 	u_int64_t	si_devsize;	  /* actual device size in bytes */
 	struct lockf	*si_lockf;	/* head of advisory lock list */
 >>>>>>> origin/10.3
+=======
+>>>>>>> origin/10.7
 };
 /*
  * Exported shorthand

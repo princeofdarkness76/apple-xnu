@@ -2264,9 +2264,17 @@ thread_select_idle(
 		PROCESSOR_DATA(processor, kernel_timer) = &thread->system_timer;
 
 		thread_quantum_init(thread);
+<<<<<<< HEAD
 		processor->quantum_end = processor->last_dispatch + thread->quantum_remaining;
 		timer_call_enter1(&processor->quantum_timer, thread, processor->quantum_end, TIMER_CALL_SYS_CRITICAL | TIMER_CALL_LOCAL);
 		processor->first_timeslice = TRUE;
+=======
+		thread->last_quantum_refill_time = processor->last_dispatch;
+
+		processor->quantum_end = processor->last_dispatch + thread->current_quantum;
+		timer_call_enter1(&processor->quantum_timer, thread, processor->quantum_end, TIMER_CALL_CRITICAL);
+		processor->timeslice = 1;
+>>>>>>> origin/10.7
 
 		thread->computation_epoch = processor->last_dispatch;
 	}
@@ -2946,8 +2954,15 @@ thread_dispatch(
 		/*
 		 *	Set up quantum timer and timeslice.
 		 */
+<<<<<<< HEAD
 		processor->quantum_end = processor->last_dispatch + self->quantum_remaining;
 		timer_call_enter1(&processor->quantum_timer, self, processor->quantum_end, TIMER_CALL_SYS_CRITICAL | TIMER_CALL_LOCAL);
+=======
+		processor->quantum_end = (processor->last_dispatch + self->current_quantum);
+		timer_call_enter1(&processor->quantum_timer, self, processor->quantum_end, TIMER_CALL_CRITICAL);
+
+		processor->timeslice = 1;
+>>>>>>> origin/10.7
 
 		processor->first_timeslice = TRUE;
 	} else {

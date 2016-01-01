@@ -97,6 +97,7 @@
 #define	kHasRDRAND			0x02000000
 #define	kHasF16C			0x04000000
 #define	kHasENFSTRG			0x08000000
+<<<<<<< HEAD
 #define	kHasFMA				0x10000000
 #define	kHasAVX2_0			0x20000000
 #define	kHasBMI1			0x40000000
@@ -109,6 +110,9 @@
 #define	kHasMPX			0x0000001000000000ULL
 #define	kHasSGX			0x0000002000000000ULL
 
+=======
+#define	kNumCPUsShift			16		/* see _NumCPUs() below */
+>>>>>>> origin/10.7
 
 #ifndef	__ASSEMBLER__
 #include <sys/cdefs.h>

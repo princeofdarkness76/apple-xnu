@@ -549,6 +549,9 @@ IOKernelAllocateWithPhysicalRestrict(mach_vm_size_t size, mach_vm_address_t maxP
                            || (alignment > page_size);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.7
 	if (!contiguous)
 	{
 	    if (maxPhys <= 0xFFFFFFFF)
@@ -561,6 +564,7 @@ IOKernelAllocateWithPhysicalRestrict(mach_vm_size_t size, mach_vm_address_t maxP
 		maxPhys = 0;
 	    }
 	}
+<<<<<<< HEAD
 =======
         if ((!contiguous) && (maxPhys <= 0xFFFFFFFF))
         {
@@ -569,6 +573,8 @@ IOKernelAllocateWithPhysicalRestrict(mach_vm_size_t size, mach_vm_address_t maxP
         }
 
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.7
 	if (contiguous || maxPhys)
 	{
 	    kr = kmem_alloc_contig(kernel_map, &virt, size,
@@ -626,7 +632,11 @@ IOKernelAllocateWithPhysicalRestrict(mach_vm_size_t size, mach_vm_address_t maxP
     if (address) {
     IOStatisticsAlloc(kIOStatisticsMallocContiguous, size);
 #if IOALLOCDEBUG
+<<<<<<< HEAD
     OSAddAtomic(size, &debug_iomalloc_size);
+=======
+	debug_iomalloc_size += size;
+>>>>>>> origin/10.7
 #endif
     }
 

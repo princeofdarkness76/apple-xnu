@@ -3504,7 +3504,11 @@ IOReturn IOService::setIdleTimerPeriod( unsigned long period )
 IOReturn IOService::setIgnoreIdleTimer( bool ignore )
 {
     if (!initialized)
+<<<<<<< HEAD
         return IOPMNotYetInitialized;
+=======
+		return IOPMNotYetInitialized;
+>>>>>>> origin/10.7
 
     OUR_PMLog(kIOPMRequestTypeIgnoreIdleTimer, ignore, 0);
 
@@ -3662,7 +3666,21 @@ void IOService::idleTimerExpired( void )
 
     IOLockLock(fActivityLock);
 
+<<<<<<< HEAD
     // Check for device activity (tickles) over last timer period.
+=======
+	if (fDeviceWasActive)
+	{
+		// Device was active - do not drop power, restart timer.
+		fDeviceWasActive = false;
+	}
+	else if (!fIdleTimerIgnored)
+	{
+		// No device activity - drop power state by one level.
+		// Decrement the cached tickle power state when possible.
+		// This value may be (-1) before activityTickle() is called,
+		// but the power drop request must be issued regardless.
+>>>>>>> origin/10.7
 
     if (fDeviceWasActive)
     {
@@ -4727,6 +4745,258 @@ bool IOService::notifyChild( IOPowerConnection * theNub )
 	return (IOPMAckImplied == ret);
 }
 
+<<<<<<< HEAD
+=======
+//*********************************************************************************
+// [private] notifyControllingDriver
+//*********************************************************************************
+
+bool IOService::notifyControllingDriver ( void )
+{
+    DriverCallParam *	param;
+
+    PM_ASSERT_IN_GATE();
+    assert( fDriverCallParamCount == 0  );
+    assert( fControllingDriver );
+
+    if (fInitialSetPowerState)
+    {
+        // Driver specified flag to skip the inital setPowerState()
+        if (fHeadNotePowerArrayEntry->capabilityFlags & kIOPMInitialDeviceState)
+        {
+            return false;
+        }
+        fInitialSetPowerState = false;
+    }
+
+    param = (DriverCallParam *) fDriverCallParamPtr;
+    if (!param)
+    {
+        param = IONew(DriverCallParam, 1);
+        if (!param)
+            return false;	// no memory
+
+        fDriverCallParamPtr   = (void *) param;
+        fDriverCallParamSlots = 1;
+    }
+
+    param->Target = fControllingDriver;
+    fDriverCallParamCount = 1;
+    fDriverTimer = -1;
+
+    // Block state machine and wait for callout completion.
+    assert(!fDriverCallBusy);
+    fDriverCallBusy = true;
+    thread_call_enter( fDriverCallEntry );
+
+    return true;
+}
+
+//*********************************************************************************
+// [private] notifyControllingDriverDone
+//*********************************************************************************
+
+void IOService::notifyControllingDriverDone( void )
+{
+	DriverCallParam *	param;
+	IOReturn			result;
+
+	PM_ASSERT_IN_GATE();
+	param = (DriverCallParam *) fDriverCallParamPtr;
+
+	assert( fDriverCallBusy == false );
+	assert( fMachineState == kIOPM_DriverThreadCallDone );
+
+	if (param && fDriverCallParamCount)
+	{
+		assert(fDriverCallParamCount == 1);
+		
+		// the return value from setPowerState()
+		result = param->Result;
+
+		if ((result == IOPMAckImplied) || (result < 0))
+		{
+            fDriverTimer = 0;
+		}
+		else if (fDriverTimer)
+		{
+            assert(fDriverTimer == -1);
+
+            // Driver has not acked, and has returned a positive result.
+            // Enforce a minimum permissible timeout value.
+            // Make the min value large enough so timeout is less likely
+            // to occur if a driver misinterpreted that the return value
+            // should be in microsecond units.  And make it large enough
+            // to be noticeable if a driver neglects to ack.
+
+            if (result < kMinAckTimeoutTicks)
+                result = kMinAckTimeoutTicks;
+
+            fDriverTimer = (result / (ACK_TIMER_PERIOD / ns_per_us)) + 1;
+		}
+		// else, child has already acked and driver_timer reset to 0.
+
+		fDriverCallParamCount = 0;
+
+		if ( fDriverTimer )
+		{
+			OUR_PMLog(kPMLogStartAckTimer, 0, 0);
+			start_ack_timer();
+		}
+	}
+
+    MS_POP();   // pushed by OurChangeSetPowerState()
+    fIsPreChange  = false;
+}
+
+//*********************************************************************************
+// [private] all_done
+//
+// A power change is done.
+//*********************************************************************************
+
+void IOService::all_done ( void )
+{
+    IOPMPowerStateIndex     prevPowerState;
+    const IOPMPSEntry *     powerStatePtr;
+    IOPMDriverCallEntry     callEntry;
+    uint32_t                prevMachineState = fMachineState;
+    bool                    callAction = false;
+
+    fMachineState = kIOPM_Finished;
+
+    if ((fHeadNoteChangeFlags & kIOPMSynchronize) &&
+        ((prevMachineState == kIOPM_Finished) ||
+         (prevMachineState == kIOPM_SyncFinish)))
+    {
+        // Sync operation and no power change occurred.
+        // Do not inform driver and clients about this request completion,
+        // except for the originator (root domain).
+
+        PM_ACTION_2(actionPowerChangeDone,
+            fHeadNotePowerState, fHeadNoteChangeFlags);
+
+        if (getPMRequestType() == kIOPMRequestTypeSynchronizePowerTree)
+        {
+            powerChangeDone(fCurrentPowerState);
+        }
+
+        return;
+    }
+
+    // our power change
+    if ( fHeadNoteChangeFlags & kIOPMSelfInitiated )
+    {
+        // could our driver switch to the new state?
+        if ( !( fHeadNoteChangeFlags & kIOPMNotDone) )
+        {
+			// we changed, tell our parent
+            requestDomainPower(fHeadNotePowerState);
+
+            // yes, did power raise?
+            if ( fCurrentPowerState < fHeadNotePowerState )
+            {
+                // yes, inform clients and apps
+                tellChangeUp (fHeadNotePowerState);
+            }
+            prevPowerState = fCurrentPowerState;
+            // either way
+            fCurrentPowerState = fHeadNotePowerState;
+#if PM_VARS_SUPPORT
+            fPMVars->myCurrentState = fCurrentPowerState;
+#endif
+            OUR_PMLog(kPMLogChangeDone, fCurrentPowerState, 0);
+            PM_ACTION_2(actionPowerChangeDone,
+                fHeadNotePowerState, fHeadNoteChangeFlags);
+            callAction = true;
+
+            powerStatePtr = &fPowerStates[fCurrentPowerState];
+            fCurrentCapabilityFlags = powerStatePtr->capabilityFlags;
+            if (fCurrentCapabilityFlags & kIOPMStaticPowerValid)
+                fCurrentPowerConsumption = powerStatePtr->staticPower;
+
+            // inform subclass policy-maker
+            if (fPCDFunctionOverride && fParentsKnowState &&
+                assertPMDriverCall(&callEntry, kIOPMADC_NoInactiveCheck))
+            {
+                powerChangeDone(prevPowerState);
+                deassertPMDriverCall(&callEntry);
+            }
+        }
+        else if (getPMRequestType() == kIOPMRequestTypeRequestPowerStateOverride)
+        {
+            // changePowerStateWithOverrideTo() was cancelled
+            fOverrideMaxPowerState = kIOPMPowerStateMax;
+        }
+    }
+
+    // parent's power change
+    if ( fHeadNoteChangeFlags & kIOPMParentInitiated)
+    {
+        if (((fHeadNoteChangeFlags & kIOPMDomainWillChange) &&
+             (fCurrentPowerState >= fHeadNotePowerState))   ||
+			  ((fHeadNoteChangeFlags & kIOPMDomainDidChange)  &&
+             (fCurrentPowerState < fHeadNotePowerState)))
+        {
+            if ((fHeadNoteChangeFlags & kIOPMPowerSuppressed) &&
+                (fHeadNotePowerState != fCurrentPowerState) &&
+                (fHeadNotePowerState == fDesiredPowerState))
+            {
+                // Power changed, and desired power state restored.
+                // Clear any prior power desire while in suppressed state.
+                requestDomainPower(fHeadNotePowerState);
+            }
+
+            // did power raise?
+            if ( fCurrentPowerState < fHeadNotePowerState )
+            {
+                // yes, inform clients and apps
+                tellChangeUp (fHeadNotePowerState);
+            }
+            // either way
+            prevPowerState = fCurrentPowerState;
+            fCurrentPowerState = fHeadNotePowerState;
+#if PM_VARS_SUPPORT
+            fPMVars->myCurrentState = fCurrentPowerState;
+#endif
+            fMaxPowerState = fControllingDriver->maxCapabilityForDomainState(fHeadNoteDomainFlags);
+
+            OUR_PMLog(kPMLogChangeDone, fCurrentPowerState, 0);
+            PM_ACTION_2(actionPowerChangeDone,
+                fHeadNotePowerState, fHeadNoteChangeFlags);
+            callAction = true;
+
+            powerStatePtr = &fPowerStates[fCurrentPowerState];
+            fCurrentCapabilityFlags = powerStatePtr->capabilityFlags;
+            if (fCurrentCapabilityFlags & kIOPMStaticPowerValid)
+                fCurrentPowerConsumption = powerStatePtr->staticPower;
+
+            // inform subclass policy-maker
+            if (fPCDFunctionOverride && fParentsKnowState &&
+                assertPMDriverCall(&callEntry, kIOPMADC_NoInactiveCheck))
+            {
+                powerChangeDone(prevPowerState);
+                deassertPMDriverCall(&callEntry);
+            }
+        }
+    }
+
+    // When power rises enough to satisfy the tickle's desire for more power,
+    // the condition preventing idle-timer from dropping power is removed.
+
+    if (fCurrentPowerState >= fIdleTimerMinPowerState)
+    {
+        fIdleTimerMinPowerState = 0;
+    }
+
+    if (!callAction)
+    {
+        PM_ACTION_2(actionPowerChangeDone,
+            fHeadNotePowerState, fHeadNoteChangeFlags);
+    }
+}
+
+>>>>>>> origin/10.7
 // MARK: -
 // MARK: Power Change Initiated by Driver
 
@@ -7249,8 +7519,12 @@ void IOService::pmTellClientWithResponse( OSObject * object, void * arg )
     }
 
     retCode = context->us->messageClient(msgType, object, (void *) &notify, sizeof(notify));
+<<<<<<< HEAD
 
     if (kIOReturnSuccess == retCode)
+=======
+    if ( kIOReturnSuccess == retCode )
+>>>>>>> origin/10.7
     {
         if (0 == notify.returnValue) {
             OUR_PMLog(kPMLogClientAcknowledge, msgRef, (uintptr_t) object);
@@ -7589,6 +7863,7 @@ static OSNumber * copyClientIDForNotification(
     return clientID;
 }
 
+<<<<<<< HEAD
 static void logClientIDForNotification(
     OSObject *object,
     IOPMInterestContext *context,
@@ -7596,6 +7871,9 @@ static void logClientIDForNotification(
 {
     OSString *logClientID = NULL;
     OSNumber *clientID = copyClientIDForNotification(object, context);
+=======
+    context->us->messageClient(context->messageType, object, &notify, sizeof(notify));
+>>>>>>> origin/10.7
 
     if (logString)
     {
@@ -8896,6 +9174,7 @@ void IOService::executePMRequest( IOPMRequest * request )
             fIdleTimerIgnored = request->fArg0 ? 1 : 0;
             break;
 
+<<<<<<< HEAD
         case kIOPMRequestTypeQuiescePowerTree:
             gIOPMWorkQueue->finishQuiesceRequest(request);
             break;
@@ -8903,6 +9182,11 @@ void IOService::executePMRequest( IOPMRequest * request )
         default:
             panic("executePMRequest: unknown request type %x", request->getType());
     }
+=======
+		default:
+			panic("executePMRequest: unknown request type %x", request->getType());
+	}
+>>>>>>> origin/10.7
 }
 
 //*********************************************************************************

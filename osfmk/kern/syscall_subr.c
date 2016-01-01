@@ -450,7 +450,11 @@ thread_depress_abstime(
 
 		if (interval != 0) {
 			clock_absolutetime_interval_to_deadline(interval, &deadline);
+<<<<<<< HEAD
 			if (!timer_call_enter(&self->depress_timer, deadline, TIMER_CALL_USER_CRITICAL))
+=======
+			if (!timer_call_enter(&self->depress_timer, deadline, TIMER_CALL_CRITICAL))
+>>>>>>> origin/10.7
 				self->depress_timer_active++;
 		}
 	}
@@ -547,7 +551,11 @@ thread_poll_yield(
 			self->sched_flags |= TH_SFLAG_POLLDEPRESS;
 
 			abstime += (total_computation >> sched_poll_yield_shift);
+<<<<<<< HEAD
 			if (!timer_call_enter(&self->depress_timer, abstime, TIMER_CALL_USER_CRITICAL))
+=======
+			if (!timer_call_enter(&self->depress_timer, abstime, TIMER_CALL_CRITICAL))
+>>>>>>> origin/10.7
 				self->depress_timer_active++;
 
 <<<<<<< HEAD

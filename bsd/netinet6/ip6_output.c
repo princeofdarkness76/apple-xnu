@@ -310,6 +310,7 @@ ip6_output_list(struct mbuf *m0, int packetchain, struct ip6_pktopts *opt,
 	struct socket *so = NULL;
 	struct secpolicy *sp = NULL;
 	struct route_in6 *ipsec_saved_route = NULL;
+<<<<<<< HEAD
 	boolean_t needipsectun = FALSE;
 #endif /* IPSEC */
 #if NECP
@@ -407,6 +408,17 @@ ip6_output_list(struct mbuf *m0, int packetchain, struct ip6_pktopts *opt,
 		bcopy(&dn_tag->dn_exthdrs, &exthdrs, sizeof (exthdrs));
 
 		m_tag_delete(m0, tag);
+=======
+	struct ipsec_output_state ipsec_state;
+
+	bzero(&ipsec_state, sizeof(ipsec_state));
+		
+	/* for AH processing. stupid to have "socket" variable in IP layer... */
+	if (ipsec_bypass == 0)
+	{
+		so = ipsec_getsocket(m);
+		(void)ipsec_setsocket(m, NULL);
+>>>>>>> origin/10.7
 	}
 
 tags_done:
@@ -881,7 +893,15 @@ skip_ipsec:
 		 */
 		exthdrs.ip6e_dest2 = NULL;
 
+<<<<<<< HEAD
 		if (exthdrs.ip6e_rthdr != NULL) {
+=======
+	    {
+		struct ip6_rthdr *rh = NULL;
+		int segleft_org = 0;
+
+		if (exthdrs.ip6e_rthdr) {
+>>>>>>> origin/10.7
 			rh = mtod(exthdrs.ip6e_rthdr, struct ip6_rthdr *);
 			segleft_org = rh->ip6r_segleft;
 			rh->ip6r_segleft = 0;
@@ -891,8 +911,13 @@ skip_ipsec:
 		}
 
 		ipsec_state.m = m;
+<<<<<<< HEAD
 		error = ipsec6_output_trans(&ipsec_state, nexthdrp, mprev,
 		    sp, flags, &needipsectun);
+=======
+		error = ipsec6_output_trans(&ipsec_state, nexthdrp, mprev, sp, flags,
+			&needipsectun);
+>>>>>>> origin/10.7
 		m = ipsec_state.m;
 		if (error) {
 			/* mbuf is already reclaimed in ipsec6_output_trans. */
@@ -1047,8 +1072,13 @@ skip_ipsec:
 		dst->sin6_len = sizeof (struct sockaddr_in6);
 		dst->sin6_addr = ip6->ip6_dst;
 	}
+
 #if IPSEC
+<<<<<<< HEAD
 	if (ip6obf.needipsec && needipsectun) {
+=======
+	if (needipsec && needipsectun) {
+>>>>>>> origin/10.7
 #if CONFIG_DTRACE
 		struct ifnet *trace_ifp = (ifpp_save != NULL) ? (*ifpp_save) : NULL;
 #endif /* CONFIG_DTRACE */
@@ -1064,9 +1094,14 @@ skip_ipsec:
 		exthdrs.ip6e_ip6 = m;
 
 		ipsec_state.m = m;
+<<<<<<< HEAD
 		route_copyout(&ipsec_state.ro, (struct route *)ro,
 		    sizeof (ipsec_state.ro));
 		ipsec_state.dst = SA(dst);
+=======
+		route_copyout(&ipsec_state.ro, (struct route *)ro, sizeof(ipsec_state.ro));
+		ipsec_state.dst = (struct sockaddr *)dst;
+>>>>>>> origin/10.7
 
 		/* So that we can see packets inside the tunnel */
 		DTRACE_IP6(send, struct mbuf *, m, struct inpcb *, NULL,
@@ -1074,6 +1109,7 @@ skip_ipsec:
 		    struct ip *, NULL, struct ip6_hdr *, ip6);
 
 		error = ipsec6_output_tunnel(&ipsec_state, sp, flags);
+<<<<<<< HEAD
 		/* tunneled in IPv4? packet is gone */
 		if (ipsec_state.tunneled == 4) {
 			m = NULL;
@@ -1083,6 +1119,14 @@ skip_ipsec:
 		ipsec_saved_route = ro;
 		ro = (struct route_in6 *)&ipsec_state.ro;
 		dst = SIN6(ipsec_state.dst);
+=======
+		if (ipsec_state.tunneled == 4)	/* tunneled in IPv4 - packet is gone */
+			goto done;
+		m = ipsec_state.m;
+		ipsec_saved_route = ro;
+		ro = (struct route_in6 *)&ipsec_state.ro;
+		dst = (struct sockaddr_in6 *)ipsec_state.dst;
+>>>>>>> origin/10.7
 		if (error) {
 			/* mbuf is already reclaimed in ipsec6_output_tunnel. */
 			m = NULL;
@@ -1907,6 +1951,7 @@ ip6_do_fragmentation(struct mbuf **mptr, uint32_t optlen, struct ifnet *ifp,
 			in6_ifstat_inc(ifp, ifs6_out_fragcreat);
 		}
 
+<<<<<<< HEAD
 		if (error) {
 			/* free all the fragments created */
 			if (first_mbufp != NULL) {
@@ -1922,6 +1967,55 @@ ip6_do_fragmentation(struct mbuf **mptr, uint32_t optlen, struct ifnet *ifp,
 			ip6stat.ip6s_fragmented++;
 			in6_ifstat_inc(ifp, ifs6_out_fragok);
 		}
+=======
+		in6_ifstat_inc(ifp, ifs6_out_fragok);
+	}
+
+	/*
+	 * Remove leading garbages.
+	 */
+sendorfree:
+	m = m0->m_nextpkt;
+	m0->m_nextpkt = 0;
+	m_freem(m0);
+	for (m0 = m; m; m = m0) {
+		m0 = m->m_nextpkt;
+		m->m_nextpkt = 0;
+		if (error == 0) {
+ 			/* Record statistics for this interface address. */
+ 			if (ia) {
+#ifndef __APPLE__
+ 				ia->ia_ifa.if_opackets++;
+ 				ia->ia_ifa.if_obytes += m->m_pkthdr.len;
+#endif
+ 			}
+#if IPSEC
+			/* clean ipsec history once it goes out of the node */
+			ipsec_delaux(m);
+#endif
+			error = nd6_output(ifp, origifp, m, dst, ro->ro_rt);
+
+		} else
+			m_freem(m);
+	}
+
+	if (error == 0)
+		ip6stat.ip6s_fragmented++;
+
+done:
+#if IPSEC
+	if (ipsec_saved_route) {
+		ro = ipsec_saved_route;
+		if (ipsec_state.ro.ro_rt) { 
+			rtfree(ipsec_state.ro.ro_rt);
+		}
+	}
+#endif /* IPSEC */
+	if (ro == &ip6route && ro->ro_rt) { /* brace necessary for rtfree */
+		rtfree(ro->ro_rt);
+	} else if (ro_pmtu == &ip6route && ro_pmtu->ro_rt) {
+		rtfree(ro_pmtu->ro_rt);
+>>>>>>> origin/10.7
 	}
 	return error;
 }

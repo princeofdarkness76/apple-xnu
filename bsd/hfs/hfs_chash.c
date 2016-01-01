@@ -244,8 +244,13 @@ exit:
  * 
  */
 int
+<<<<<<< HEAD
 hfs_chash_snoop(struct hfsmount *hfsmp, ino_t inum, int existence_only, 
 				int (*callout)(const cnode_t *cp, void *), void * arg)
+=======
+hfs_chash_snoop(struct hfsmount *hfsmp, ino_t inum, int existence_only, int (*callout)(const struct cat_desc *,
+                const struct cat_attr *, void *), void * arg)
+>>>>>>> origin/10.7
 {
 	struct cnode *cp;
 	int result = ENOENT;

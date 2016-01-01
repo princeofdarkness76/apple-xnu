@@ -445,7 +445,10 @@ extern  vm_offset_t		sconstdata, econstdata;
 extern void			*KPTphys;
 
 boolean_t pmap_smep_enabled = FALSE;
+<<<<<<< HEAD
 boolean_t pmap_smap_enabled = FALSE;
+=======
+>>>>>>> origin/10.7
 
 void
 pmap_cpu_init(void)
@@ -473,6 +476,7 @@ pmap_cpu_init(void)
 			pmap_smep_enabled = TRUE;
 		}
 	}
+<<<<<<< HEAD
 	if (cpuid_leaf7_features() & CPUID_LEAF7_FEATURE_SMAP) {
 		boolean_t nsmap;
 		if (!PE_parse_boot_argn("-pmap_smap_disable", &nsmap, sizeof(nsmap))) {
@@ -485,6 +489,8 @@ pmap_cpu_init(void)
 		boolean_t enable = TRUE;
 		cpu_pmc_control(&enable);
 	}
+=======
+>>>>>>> origin/10.7
 }
 
 static uint32_t pmap_scale_shift(void) {
@@ -609,6 +615,7 @@ pmap_bootstrap(
 
 	if (pmap_smep_enabled)
 		printf("PMAP: Supervisor Mode Execute Protection enabled\n");
+<<<<<<< HEAD
 	if (pmap_smap_enabled)
 		printf("PMAP: Supervisor Mode Access Protection enabled\n");
 
@@ -632,6 +639,8 @@ pmap_bootstrap(
 		boolean_t *pdknhp = (boolean_t *) &pmap_disable_kstack_nx;
 		*pdknhp = TRUE;
 	}
+=======
+>>>>>>> origin/10.7
 
 	boot_args *args = (boot_args *)PE_state.bootArgs;
 	if (args->efiMode == kBootArgsEfiMode32) {
@@ -911,12 +920,16 @@ pmap_init(void)
 					last_managed_page = pn;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 				if (pn >= lowest_hi && pn <= highest_hi)
 					pmap_phys_attributes[pn] |= PHYS_NOENCRYPT;
 =======
 				if (pn < lowest_lo)
 					pmap_phys_attributes[pn] |= PHYS_NOENCRYPT;
 				else if (pn >= lowest_hi && pn <= highest_hi)
+=======
+				if (pn >= lowest_hi && pn <= highest_hi)
+>>>>>>> origin/10.7
 					pmap_phys_attributes[pn] |= PHYS_NOENCRYPT;
 
 >>>>>>> origin/10.6

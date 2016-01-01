@@ -4910,6 +4910,7 @@ void IOService::updateConsoleUsers(OSArray * consoleUsers, IOMessage systemMessa
     IORegistryEntry * regEntry;
     OSObject *        locked = kOSBooleanFalse;
     uint32_t          idx;
+    bool              loggedIn;
     bool              publish;
     OSDictionary *    user;
     static IOMessage  sSystemPower;
@@ -4931,7 +4932,11 @@ void IOService::updateConsoleUsers(OSArray * consoleUsers, IOMessage systemMessa
 	}
 #endif /* HIBERNATION */
     }
+<<<<<<< HEAD
 
+=======
+    loggedIn = false;
+>>>>>>> origin/10.7
     if (consoleUsers)
     {
         OSNumber * num = 0;
@@ -4940,7 +4945,11 @@ void IOService::updateConsoleUsers(OSArray * consoleUsers, IOMessage systemMessa
 	      (user = OSDynamicCast(OSDictionary, consoleUsers->getObject(idx))); 
 	      idx++)
 	{
+<<<<<<< HEAD
 	    gIOConsoleLoggedIn |= ((kOSBooleanTrue == user->getObject(gIOConsoleSessionOnConsoleKey))
+=======
+	    loggedIn |= ((kOSBooleanTrue == user->getObject(gIOConsoleSessionOnConsoleKey))
+>>>>>>> origin/10.7
 	      		&& (kOSBooleanTrue == user->getObject(gIOConsoleSessionLoginDoneKey)));
 	    if (!num)
 	    {
@@ -4950,7 +4959,11 @@ void IOService::updateConsoleUsers(OSArray * consoleUsers, IOMessage systemMessa
         gIOConsoleLockTime = num ? num->unsigned32BitValue() : 0;
     }
 
+<<<<<<< HEAD
     if (!gIOConsoleLoggedIn 
+=======
+    if (!loggedIn 
+>>>>>>> origin/10.7
      || (kIOMessageSystemWillSleep == sSystemPower)
      || (kIOMessageSystemPagingOff == sSystemPower))
     {

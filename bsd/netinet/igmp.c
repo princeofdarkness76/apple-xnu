@@ -139,6 +139,8 @@
 
 SLIST_HEAD(igmp_inm_relhead, in_multi);
 
+SLIST_HEAD(igmp_inm_relhead, in_multi);
+
 static void	igi_initvar(struct igmp_ifinfo *, struct ifnet *, int);
 static struct igmp_ifinfo *igi_alloc(int);
 static void	igi_free(struct igmp_ifinfo *);
@@ -169,7 +171,11 @@ static struct mbuf *igmp_ra_alloc(void);
 #ifdef IGMP_DEBUG
 static const char *igmp_rec_type_to_str(const int);
 #endif
+<<<<<<< HEAD
 static uint32_t	igmp_set_version(struct igmp_ifinfo *, const int);
+=======
+static void	igmp_set_version(struct igmp_ifinfo *, const int);
+>>>>>>> origin/10.7
 static void	igmp_flush_relq(struct igmp_ifinfo *,
     struct igmp_inm_relhead *);
 static int	igmp_v1v2_queue_report(struct in_multi *, const int);
@@ -749,6 +755,7 @@ igmp_domifdetach(struct ifnet *ifp)
 
 	SLIST_INIT(&inm_dthead);
 
+<<<<<<< HEAD
 	IGMP_PRINTF(("%s: called for ifp 0x%llx(%s%d)\n", __func__,
 	    (uint64_t)VM_KERNEL_ADDRPERM(ifp), ifp->if_name, ifp->if_unit));
 
@@ -756,6 +763,15 @@ igmp_domifdetach(struct ifnet *ifp)
 	igi_delete(ifp, (struct igmp_inm_relhead *)&inm_dthead);
 	IGMP_UNLOCK();
 
+=======
+	IGMP_PRINTF(("%s: called for ifp %p(%s%d)\n",
+	    __func__, ifp, ifp->if_name, ifp->if_unit));
+
+	lck_mtx_lock(&igmp_mtx);
+	igi_delete(ifp, (struct igmp_inm_relhead *)&inm_dthead);
+	lck_mtx_unlock(&igmp_mtx);
+
+>>>>>>> origin/10.7
 	/* Now that we're dropped all locks, release detached records */
 	IGMP_REMOVE_DETACHED_INM(&inm_dthead);
 }
@@ -938,8 +954,13 @@ igi_remref(struct igmp_ifinfo *igi)
 	/* Now that we're dropped all locks, release detached records */
 	IGMP_REMOVE_DETACHED_INM(&inm_dthead);
 
+<<<<<<< HEAD
 	IGMP_PRINTF(("%s: freeing igmp_ifinfo for ifp 0x%llx(%s)\n",
 	    __func__, (uint64_t)VM_KERNEL_ADDRPERM(ifp), if_name(ifp)));
+=======
+	IGMP_PRINTF(("%s: freeing igmp_ifinfo for ifp %p(%s%d)\n",
+	    __func__, ifp, ifp->if_name, ifp->if_unit));
+>>>>>>> origin/10.7
 
 	igi_free(igi);
 }
@@ -1974,8 +1995,15 @@ igmp_timeout(void *arg)
 	struct ifnet		*ifp;
 	struct igmp_ifinfo	*igi;
 	struct in_multi		*inm;
+<<<<<<< HEAD
 	int			 loop = 0, uri_sec = 0;
 	SLIST_HEAD(, in_multi)	inm_dthead;
+=======
+	int			 loop = 0, uri_fasthz = 0;
+	SLIST_HEAD(, in_multi)	inm_dthead;
+
+	SLIST_INIT(&inm_dthead);
+>>>>>>> origin/10.7
 
 	SLIST_INIT(&inm_dthead);
 
@@ -2116,6 +2144,7 @@ next:
 	}
 
 out_locked:
+<<<<<<< HEAD
 	/* re-arm the timer if there's work to do */
 	igmp_timeout_run = 0;
 	igmp_sched_timeout();
@@ -2136,6 +2165,12 @@ igmp_sched_timeout(void)
 		igmp_timeout_run = 1;
 		timeout(igmp_timeout, NULL, hz);
 	}
+=======
+	lck_mtx_unlock(&igmp_mtx);
+
+	/* Now that we're dropped all locks, release detached records */
+	IGMP_REMOVE_DETACHED_INM(&inm_dthead);
+>>>>>>> origin/10.7
 }
 
 /*

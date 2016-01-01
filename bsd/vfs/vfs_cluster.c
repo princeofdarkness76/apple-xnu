@@ -471,7 +471,12 @@ int speculative_reads_disabled = 0;
  * can be outstanding on a single vnode
  * before we issue a synchronous write 
  */
+<<<<<<< HEAD
 #define THROTTLE_MAXCNT	0
+=======
+#define HARD_THROTTLE_MAXCNT	0
+#define HARD_THROTTLE_MAXSIZE	(256 * 1024)
+>>>>>>> origin/10.7
 
 <<<<<<< HEAD
 uint32_t throttle_max_iosize = (128 * 1024);

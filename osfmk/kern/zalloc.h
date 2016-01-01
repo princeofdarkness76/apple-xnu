@@ -172,7 +172,14 @@ struct zone {
 	/* boolean_t */	waiting :1,	/* is thread waiting for expansion? */
 	/* boolean_t */	async_pending :1,	/* asynchronous allocation pending? */
 	/* boolean_t */	doing_gc :1,	/* garbage collect in progress? */
+<<<<<<< HEAD
 	/* boolean_t */ noencrypt :1;
+=======
+	/* boolean_t */ noencrypt :1,
+	/* boolean_t */	no_callout:1,
+	/* boolean_t */	async_prio_refill:1;
+	int		index;		/* index into zone_info arrays for this zone */
+>>>>>>> origin/10.7
 	struct zone *	next_zone;	/* Link for all-zones list */
 	call_entry_data_t	call_async_alloc;	/* callout for asynchronous alloc */
 >>>>>>> origin/10.3
@@ -183,12 +190,17 @@ struct zone {
 #if CONFIG_ZLEAKS
 	uint32_t zleak_capture;		/* per-zone counter for capturing every N allocations */
 #endif /* CONFIG_ZLEAKS */
+<<<<<<< HEAD
 	uint32_t zp_count;              /* counter for poisoning every N frees */
 	vm_size_t	prio_refill_watermark;
 	thread_t	zone_replenish_thread;
 #if	CONFIG_GZALLOC
 	gzalloc_data_t	gz;
 #endif /* CONFIG_GZALLOC */
+=======
+	vm_size_t	prio_refill_watermark;
+	thread_t	zone_replenish_thread;
+>>>>>>> origin/10.7
 };
 
 /*
@@ -318,12 +330,15 @@ extern void		zone_prio_refill_configure(zone_t, vm_size_t);
 #define Z_NOCALLOUT 	7	/* Don't asynchronously replenish the zone via
 				 * callouts
 				 */
+<<<<<<< HEAD
 #define Z_ALIGNMENT_REQUIRED 8
 #define Z_GZALLOC_EXEMPT 9	/* Not tracked in guard allocation mode */
 =======
 #define Z_NOENCRYPT	6	/* Don't encrypt zone during hibernation */
 >>>>>>> origin/10.6
 
+=======
+>>>>>>> origin/10.7
 /* Preallocate space for zone from zone map */
 extern void		zprealloc(
 					zone_t		zone,

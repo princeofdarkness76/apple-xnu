@@ -94,6 +94,13 @@ __OUT(l, long)
 extern void cninit(void);
 extern int  sprintf(char * str, const char * format, ...);
 
+<<<<<<< HEAD
+=======
+//------------------------------------------------------------------------
+// from osfmk/console/panic_dialog.c
+extern void panic_ui_initialize(const unsigned char * clut);
+
+>>>>>>> origin/10.7
 /* ------------------------------------------------------------------------
  * from osfmk/i386/serial_io.h
  */

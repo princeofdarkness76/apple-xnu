@@ -54,6 +54,7 @@
 			__FILE__, __LINE__);		\
 	}
 
+<<<<<<< HEAD
 static void debug_topology_print(void);
 
 boolean_t	topo_dbg = FALSE;
@@ -71,6 +72,17 @@ void validate_topology(void);
 
 #define bitmask(h,l)	((bit(h)|(bit(h)-1)) & ~(bit(l)-1))
 #define bitfield(x,h,l)	(((x) & bitmask(h,l)) >> l)
+=======
+#define DIVISOR_GUARD(denom)				\
+	if ((denom) == 0) {				\
+		kprintf("%s: %d Zero divisor: " #denom,	\
+			__FILE__, __LINE__);		\
+	}
+
+static void debug_topology_print(void);
+
+boolean_t	topo_dbg = FALSE;
+>>>>>>> origin/10.7
 
 >>>>>>> origin/10.5
 x86_pkg_t	*x86_pkgs		= NULL;
@@ -90,6 +102,7 @@ x86_topology_parameters_t	topoParms;
 decl_simple_lock_data(, x86_topo_lock);
  
 <<<<<<< HEAD
+<<<<<<< HEAD
 static struct cpu_cache {
 	int	level;	int	type;
 } cpu_caches [LCACHE_MAX] = {
@@ -101,6 +114,17 @@ static struct cpu_cache {
 
 =======
 >>>>>>> origin/10.5
+=======
+static struct cpu_cache {
+	int	level;	int	type;
+} cpu_caches [LCACHE_MAX] = {
+	[L1D] {	1,	CPU_CACHE_TYPE_DATA },
+	[L1I] {	1,	CPU_CACHE_TYPE_INST },
+	[L2U] { 2,	CPU_CACHE_TYPE_UNIF },
+	[L3U] { 3,	CPU_CACHE_TYPE_UNIF },
+};
+
+>>>>>>> origin/10.7
 static boolean_t
 cpu_is_hyperthreaded(void)
 {
@@ -142,6 +166,7 @@ static void
 x86_LLC_info(void)
 {
 <<<<<<< HEAD
+<<<<<<< HEAD
     int			cache_level	= 0;
     uint32_t		nCPUsSharing	= 1;
     i386_cpu_info_t	*cpuinfo;
@@ -158,41 +183,19 @@ x86_LLC_info(void)
     uint32_t		index;
     uint32_t		cache_info[4];
     uint32_t		cache_level	= 0;
+=======
+    int			cache_level	= 0;
+>>>>>>> origin/10.7
     uint32_t		nCPUsSharing	= 1;
     i386_cpu_info_t	*cpuinfo;
+    struct cpu_cache	*cachep;
+    int			i;
 
     cpuinfo = cpuid_info();
 
-    do_cpuid(0, cache_info);
+    for (i = 0, cachep = &cpu_caches[0]; i < LCACHE_MAX; i++, cachep++) {
 
-    if (cache_info[eax] < 4) {
-	/*
-	 * Processor does not support deterministic
-	 * cache information. Set LLC sharing to 1, since
-	 * we have no better information.
-	 */
-	if (cpu_is_hyperthreaded()) {
-	    topoParms.nCoresSharingLLC = 1;
-	    topoParms.nLCPUsSharingLLC = 2;
-	    topoParms.maxSharingLLC = 2;
-	} else {
-	    topoParms.nCoresSharingLLC = 1;
-	    topoParms.nLCPUsSharingLLC = 1;
-	    topoParms.maxSharingLLC = 1;
-	}
-	return;
-    }
-
-    for (index = 0; ; index += 1) {
-	uint32_t		this_level;
-
-	cache_info[eax] = 4;
-	cache_info[ecx] = index;
-	cache_info[ebx] = 0;
-	cache_info[edx] = 0;
-
-	cpuid(cache_info);
-
+<<<<<<< HEAD
 	/*
 	 * See if all levels have been queried.
 	 */
@@ -204,11 +207,16 @@ x86_LLC_info(void)
 	 */
 	this_level = bitfield(cache_info[eax], 7, 5);
 >>>>>>> origin/10.5
+=======
+	if (cachep->type == 0 || cpuid_info()->cache_size[i] == 0)
+	    continue;
+>>>>>>> origin/10.7
 
 	/*
 	 * Only worry about it if it's a deeper level than
 	 * what we've seen before.
 	 */
+<<<<<<< HEAD
 <<<<<<< HEAD
 	if (cachep->level > cache_level) {
 	    cache_level = cachep->level;
@@ -216,15 +224,23 @@ x86_LLC_info(void)
 	if (this_level > cache_level) {
 	    cache_level = this_level;
 >>>>>>> origin/10.5
+=======
+	if (cachep->level > cache_level) {
+	    cache_level = cachep->level;
+>>>>>>> origin/10.7
 
 	    /*
 	     * Save the number of CPUs sharing this cache.
 	     */
 <<<<<<< HEAD
+<<<<<<< HEAD
 	    nCPUsSharing = cpuinfo->cache_sharing[i];
 =======
 	    nCPUsSharing = bitfield(cache_info[eax], 25, 14) + 1;
 >>>>>>> origin/10.5
+=======
+	    nCPUsSharing = cpuinfo->cache_sharing[i];
+>>>>>>> origin/10.7
 	}
     }
 
@@ -275,6 +291,7 @@ initTopoParms(void)
 
     PE_parse_boot_argn("-topo", &topo_dbg, sizeof(topo_dbg));
 
+<<<<<<< HEAD
 =======
 =======
     topoParms.stable = FALSE;
@@ -283,6 +300,8 @@ initTopoParms(void)
     cpuinfo = cpuid_info();
 
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.7
     /*
      * We need to start with getting the LLC information correct.
      */
@@ -292,18 +311,27 @@ initTopoParms(void)
      * Compute the number of threads (logical CPUs) per core.
      */
 <<<<<<< HEAD
+<<<<<<< HEAD
     DIVISOR_GUARD(cpuinfo->core_count);
     topoParms.nLThreadsPerCore = cpuinfo->thread_count / cpuinfo->core_count;
     DIVISOR_GUARD(cpuinfo->cpuid_cores_per_package);
 =======
     topoParms.nLThreadsPerCore = cpuinfo->thread_count / cpuinfo->core_count;
 >>>>>>> origin/10.5
+=======
+    DIVISOR_GUARD(cpuinfo->core_count);
+    topoParms.nLThreadsPerCore = cpuinfo->thread_count / cpuinfo->core_count;
+    DIVISOR_GUARD(cpuinfo->cpuid_cores_per_package);
+>>>>>>> origin/10.7
     topoParms.nPThreadsPerCore = cpuinfo->cpuid_logical_per_package / cpuinfo->cpuid_cores_per_package;
 
     /*
      * Compute the number of dies per package.
      */
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.7
      DIVISOR_GUARD(topoParms.nCoresSharingLLC);
     topoParms.nLDiesPerPackage = cpuinfo->core_count / topoParms.nCoresSharingLLC;
     DIVISOR_GUARD(topoParms.nPThreadsPerCore);
@@ -311,11 +339,14 @@ initTopoParms(void)
     topoParms.nPDiesPerPackage = cpuinfo->cpuid_cores_per_package / (topoParms.maxSharingLLC / topoParms.nPThreadsPerCore);
 
 
+<<<<<<< HEAD
 =======
     topoParms.nLDiesPerPackage = cpuinfo->core_count / topoParms.nCoresSharingLLC;
     topoParms.nPDiesPerPackage = cpuinfo->cpuid_cores_per_package / (topoParms.maxSharingLLC / topoParms.nPThreadsPerCore);
 
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.7
     /*
      * Compute the number of cores per die.
      */
@@ -342,6 +373,9 @@ initTopoParms(void)
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.7
     TOPO_DBG("\nCache Topology Parameters:\n");
     TOPO_DBG("\tLLC Depth:           %d\n", topoParms.LLCDepth);
     TOPO_DBG("\tCores Sharing LLC:   %d\n", topoParms.nCoresSharingLLC);
@@ -363,6 +397,7 @@ initTopoParms(void)
     TOPO_DBG("\tDies per Package:  %d\n", topoParms.nPDiesPerPackage);
     TOPO_DBG("\tCores per Package: %d\n", topoParms.nPCoresPerPackage);
     TOPO_DBG("\tThreads per Package: %d\n", topoParms.nPThreadsPerPackage);
+<<<<<<< HEAD
 =======
 =======
     DBG("\nCache Topology Parameters:\n");
@@ -388,6 +423,8 @@ initTopoParms(void)
     DBG("\tCores per Package: %d\n", topoParms.nPCoresPerPackage);
     DBG("\tThreads per Package: %d\n", topoParms.nPThreadsPerPackage);
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.7
 
     topoParmsInited = TRUE;
 }
@@ -430,6 +467,9 @@ x86_cache_list(void)
 	    break;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.7
 	cur->type       = cachep->type;
 	cur->level      = cachep->level;
 	cur->nlcpus     = 0;
@@ -437,6 +477,7 @@ x86_cache_list(void)
 	cur->partitions = cpuid_info()->cache_partitions[i];
 	cur->cache_size = cpuid_info()->cache_size[i];
 	cur->line_size  = cpuid_info()->cache_linesize;
+<<<<<<< HEAD
 =======
 	cur->type = bitfield(cache_info[eax], 4, 0);
 	cur->level = bitfield(cache_info[eax], 7, 5);
@@ -447,6 +488,8 @@ x86_cache_list(void)
 	nsets = bitfield(cache_info[ecx], 31, 0) + 1;
 	cur->cache_size = cur->line_size * cur->ways * cur->partitions * nsets;
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.7
 
 	if (last == NULL) {
 	    root = cur;
@@ -456,19 +499,26 @@ x86_cache_list(void)
 	    last = cur;
 	}
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 
 	cur->nlcpus = 0;
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.7
 	num_Lx_caches[cur->level - 1] += 1;
     }
     return root;
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 
 =======
 >>>>>>> origin/10.5
+=======
+
+>>>>>>> origin/10.7
 static x86_cpu_cache_t *
 x86_match_cache(x86_cpu_cache_t *list, x86_cpu_cache_t *matcher)
 {
@@ -484,9 +534,12 @@ x86_match_cache(x86_cpu_cache_t *list, x86_cpu_cache_t *matcher)
 	    && cur_cache->type  == matcher->type
 	    && cur_cache->level == matcher->level
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 	    && cur_cache->ways  == matcher->ways
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.7
 	    && cur_cache->partitions == matcher->partitions
 	    && cur_cache->line_size  == matcher->line_size
 	    && cur_cache->cache_size == matcher->cache_size)
@@ -1229,11 +1282,17 @@ validate_topology(void)
     uint32_t		nCPUs;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
     if (topo_dbg)
 	debug_topology_print();
 
 =======
 >>>>>>> origin/10.5
+=======
+    if (topo_dbg)
+	debug_topology_print();
+
+>>>>>>> origin/10.7
     /*
      * XXX
      *
@@ -1266,15 +1325,20 @@ validate_topology(void)
 		      die->pdie_num, die->package->lpkg_num, pkg->lpkg_num);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	    TOPO_DBG("Die(%d)->package %d\n",
 =======
 	    DBG("Die(%d)->package %d\n",
 >>>>>>> origin/10.5
+=======
+	    TOPO_DBG("Die(%d)->package %d\n",
+>>>>>>> origin/10.7
 		die->pdie_num, pkg->lpkg_num);
 
 	    /*
 	     * Make sure that the die has the correct number of cores.
 	     */
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 	    TOPO_DBG("Die(%d)->cores: ", die->pdie_num);
@@ -1284,6 +1348,9 @@ validate_topology(void)
 =======
 	    DBG("Die(%d)->cores: ", die->pdie_num);
 >>>>>>> origin/10.6
+=======
+	    TOPO_DBG("Die(%d)->cores: ", die->pdie_num);
+>>>>>>> origin/10.7
 	    nCores = 0;
 	    core = die->cores;
 	    while (core != NULL) {
@@ -1295,6 +1362,7 @@ validate_topology(void)
 			  core->pcore_num, core->die->pdie_num, die->pdie_num);
 		nCores += 1;
 <<<<<<< HEAD
+<<<<<<< HEAD
 		TOPO_DBG("%d ", core->pcore_num);
 		core = core->next_in_die;
 	    }
@@ -1305,6 +1373,12 @@ validate_topology(void)
 	    }
 	    DBG("\n");
 >>>>>>> origin/10.5
+=======
+		TOPO_DBG("%d ", core->pcore_num);
+		core = core->next_in_die;
+	    }
+	    TOPO_DBG("\n");
+>>>>>>> origin/10.7
 
 	    if (nCores != topoParms.nLCoresPerDie)
 		panic("Should have %d Cores, but only found %d for Die %d",
@@ -1314,10 +1388,14 @@ validate_topology(void)
 	     * Make sure that the die has the correct number of CPUs.
 	     */
 <<<<<<< HEAD
+<<<<<<< HEAD
 	    TOPO_DBG("Die(%d)->lcpus: ", die->pdie_num);
 =======
 	    DBG("Die(%d)->lcpus: ", die->pdie_num);
 >>>>>>> origin/10.5
+=======
+	    TOPO_DBG("Die(%d)->lcpus: ", die->pdie_num);
+>>>>>>> origin/10.7
 	    nCPUs = 0;
 	    lcpu = die->lcpus;
 	    while (lcpu != NULL) {
@@ -1329,6 +1407,7 @@ validate_topology(void)
 			  lcpu->cpu_num, lcpu->die->pdie_num, die->pdie_num);
 		nCPUs += 1;
 <<<<<<< HEAD
+<<<<<<< HEAD
 		TOPO_DBG("%d ", lcpu->cpu_num);
 		lcpu = lcpu->next_in_die;
 	    }
@@ -1339,6 +1418,12 @@ validate_topology(void)
 	    }
 	    DBG("\n");
 >>>>>>> origin/10.5
+=======
+		TOPO_DBG("%d ", lcpu->cpu_num);
+		lcpu = lcpu->next_in_die;
+	    }
+	    TOPO_DBG("\n");
+>>>>>>> origin/10.7
 
 	    if (nCPUs != topoParms.nLThreadsPerDie)
 		panic("Should have %d Threads, but only found %d for Die %d",
@@ -1365,10 +1450,14 @@ validate_topology(void)
 		panic("Core %d points to package %d, should be %d",
 		      core->pcore_num, core->package->lpkg_num, pkg->lpkg_num);
 <<<<<<< HEAD
+<<<<<<< HEAD
 	    TOPO_DBG("Core(%d)->package %d\n",
 =======
 	    DBG("Core(%d)->package %d\n",
 >>>>>>> origin/10.5
+=======
+	    TOPO_DBG("Core(%d)->package %d\n",
+>>>>>>> origin/10.7
 		core->pcore_num, pkg->lpkg_num);
 
 	    /*
@@ -1378,6 +1467,7 @@ validate_topology(void)
 	    lcpu = core->lcpus;
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 	    TOPO_DBG("Core(%d)->lcpus: ", core->pcore_num);
 =======
 	    DBG("Core(%d)->lcpus: ");
@@ -1385,6 +1475,9 @@ validate_topology(void)
 =======
 	    DBG("Core(%d)->lcpus: ", core->pcore_num);
 >>>>>>> origin/10.6
+=======
+	    TOPO_DBG("Core(%d)->lcpus: ", core->pcore_num);
+>>>>>>> origin/10.7
 	    while (lcpu != NULL) {
 		if (lcpu->core == NULL)
 		    panic("CPU(%d)->core is NULL",
@@ -1392,6 +1485,7 @@ validate_topology(void)
 		if (lcpu->core != core)
 		    panic("CPU %d points to core %d, should be %d",
 			  lcpu->cpu_num, lcpu->core->pcore_num, core->pcore_num);
+<<<<<<< HEAD
 <<<<<<< HEAD
 		TOPO_DBG("%d ", lcpu->cpu_num);
 		nCPUs += 1;
@@ -1405,6 +1499,13 @@ validate_topology(void)
 	    }
 	    DBG("\n");
 >>>>>>> origin/10.5
+=======
+		TOPO_DBG("%d ", lcpu->cpu_num);
+		nCPUs += 1;
+		lcpu = lcpu->next_in_core;
+	    }
+	    TOPO_DBG("\n");
+>>>>>>> origin/10.7
 
 	    if (nCPUs != topoParms.nLThreadsPerCore)
 		panic("Should have %d Threads, but only found %d for Core %d",
@@ -1430,10 +1531,14 @@ validate_topology(void)
 		panic("CPU %d points to package %d, should be %d",
 		      lcpu->cpu_num, lcpu->package->lpkg_num, pkg->lpkg_num);
 <<<<<<< HEAD
+<<<<<<< HEAD
 	    TOPO_DBG("CPU(%d)->package %d\n",
 =======
 	    DBG("CPU(%d)->package %d\n",
 >>>>>>> origin/10.5
+=======
+	    TOPO_DBG("CPU(%d)->package %d\n",
+>>>>>>> origin/10.7
 		lcpu->cpu_num, pkg->lpkg_num);
 	    nCPUs += 1;
 	    lcpu = lcpu->next_in_pkg;
@@ -1448,6 +1553,7 @@ validate_topology(void)
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 /*
  * Prints out the topology
  */
@@ -1459,6 +1565,12 @@ static void
  */
 void
 >>>>>>> origin/10.5
+=======
+/*
+ * Prints out the topology
+ */
+static void
+>>>>>>> origin/10.7
 debug_topology_print(void)
 {
     x86_pkg_t		*pkg;
@@ -1512,6 +1624,9 @@ debug_topology_print(void)
     }
 }
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 #endif /* TOPO_DEBUG */
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.7

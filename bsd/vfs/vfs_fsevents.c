@@ -225,7 +225,11 @@ fsevents_internal_init(void)
     zone_change(event_zone, Z_COLLECT, FALSE);
     zone_change(event_zone, Z_CALLERACCT, FALSE);
 
+<<<<<<< HEAD
     if (zfill(event_zone, max_kfs_events) < max_kfs_events) {
+=======
+    if (zfill(event_zone, MAX_KFS_EVENTS) < MAX_KFS_EVENTS) {
+>>>>>>> origin/10.7
 	printf("fsevents: failed to pre-fill the event zone.\n");	
     }
     

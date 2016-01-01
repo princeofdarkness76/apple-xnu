@@ -620,6 +620,7 @@ pmap_map(
 	return(virt);
 }
 
+<<<<<<< HEAD
 /*
  *	Back-door routine for mapping kernel VM at initialization.  
  * 	Useful for mapping memory outside the range
@@ -666,6 +667,9 @@ pmap_map_bd(
 }
 
 extern	char			*first_avail;
+=======
+extern	pmap_paddr_t		first_avail;
+>>>>>>> origin/10.7
 extern	vm_offset_t		virtual_avail, virtual_end;
 extern	pmap_paddr_t		avail_start, avail_end;
 
@@ -996,9 +1000,7 @@ pmap_init(void)
 						if (pn > last_managed_page)
 						        last_managed_page = pn;
 
-						if (pn < lowest_lo)
-							pmap_phys_attributes[pn] |= PHYS_NOENCRYPT;
-						else if (pn >= lowest_hi && pn <= highest_hi)
+						if (pn >= lowest_hi && pn <= highest_hi)
 							pmap_phys_attributes[pn] |= PHYS_NOENCRYPT;
 					}
 				}

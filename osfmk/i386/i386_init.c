@@ -195,11 +195,16 @@ x86_64_post_sleep(uint64_t new_cr3)
 // NPHYSMAP is determined by the maximum supported RAM size plus 4GB to account
 // the PCI hole (which is less 4GB but not more).
 
+<<<<<<< HEAD
 /* Compile-time guard: NPHYSMAP is capped to 256GiB, accounting for
  * randomisation
  */
 extern int maxphymapsupported[NPHYSMAP <= (PTE_PER_PAGE/2) ? 1 : -1];
 
+=======
+// Compile-time guard:
+extern int maxphymapsupported[NPHYSMAP <= PTE_PER_PAGE ? 1 : -1];
+>>>>>>> origin/10.7
 static void
 physmap_init(void)
 {
@@ -391,12 +396,33 @@ vstart(vm_offset_t boot_args_start)
 
 		cpu = 0;
 		cpu_data_alloc(TRUE);
+
+				
+		/*
+		 * Setup boot args given the physical start address.
+		 */
+		kernelBootArgs = (boot_args *)
+		    ml_static_ptovirt(boot_args_start);
+		DBG("i386_init(0x%lx) kernelBootArgs=%p\n",
+		    (unsigned long)boot_args_start, kernelBootArgs);
+
+		PE_init_platform(FALSE, kernelBootArgs);
+		postcode(PE_INIT_PLATFORM_D);
 	} else {
 		/* Switch to kernel's page tables (from the Boot PTs) */
 		set_cr3_raw((uintptr_t)ID_MAP_VTOP(IdlePML4));
 		/* Find our logical cpu number */
 		cpu = lapic_to_cpu[(LAPIC_READ(ID)>>LAPIC_ID_SHIFT) & LAPIC_ID_MASK];
 		DBG("CPU: %d, GSBASE initial value: 0x%llx\n", cpu, rdmsr64(MSR_IA32_GS_BASE));
+<<<<<<< HEAD
+=======
+#ifdef	__x86_64__
+		if (cpuid_extfeatures() & CPUID_EXTFEATURE_XD) {
+			wrmsr64(MSR_IA32_EFER, rdmsr64(MSR_IA32_EFER) | MSR_IA32_EFER_NXE);
+			DBG("vstart() NX/XD enabled, non-boot\n");
+		}
+#endif
+>>>>>>> origin/10.7
 	}
 
 	postcode(VSTART_CPU_DESC_INIT);
@@ -415,9 +441,39 @@ vstart(vm_offset_t boot_args_start)
 			 cpu_datap(cpu)->cpu_int_stack_top);
 }
 
+<<<<<<< HEAD
 void
 pstate_trace(void)
 {
+=======
+	if (is_boot_cpu)
+		i386_init();
+	else
+		i386_init_slave();
+	/*NOTREACHED*/
+#else
+	/* We need to switch to a new per-cpu stack, but we must do this atomically with
+	 * the call to ensure the compiler doesn't assume anything about the stack before
+	 * e.g. tail-call optimisations
+	 */
+	if (is_boot_cpu)
+	{
+		asm volatile(
+				"mov %1, %%rdi;"
+				"mov %0, %%rsp;"
+				"call _i386_init;"	: : "r" 
+				(cpu_datap(cpu)->cpu_int_stack_top), "r" (boot_args_start));
+	}
+	else
+	{
+		asm volatile(
+				"mov %0, %%rsp;"
+				"call _i386_init_slave;"	: : "r" 
+				(cpu_datap(cpu)->cpu_int_stack_top));
+	}
+	/*NOTREACHED*/
+#endif
+>>>>>>> origin/10.7
 }
 
 /*
@@ -453,6 +509,12 @@ i386_init(void)
 	mca_cpu_init();
 #endif
 
+<<<<<<< HEAD
+=======
+
+	kernel_early_bootstrap();
+
+>>>>>>> origin/10.7
 	master_cpu = 0;
 	cpu_init();
 

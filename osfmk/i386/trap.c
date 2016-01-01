@@ -169,7 +169,10 @@ extern boolean_t dtrace_tally_fault(user_addr_t);
 #endif
 
 extern boolean_t pmap_smep_enabled;
+<<<<<<< HEAD
 extern boolean_t pmap_smap_enabled;
+=======
+>>>>>>> origin/10.7
 
 void
 thread_syscall_return(
@@ -749,6 +752,7 @@ kernel_trap(
 					goto debugger_entry;
 				}
 
+<<<<<<< HEAD
 				/*
 				 * Additionally check for SMAP faults...
 				 * which are characterized by page-present and
@@ -760,6 +764,8 @@ kernel_trap(
 					goto debugger_entry;
 				}
 
+=======
+>>>>>>> origin/10.7
 				/*
 				 * If we're not sharing cr3 with the user
 				 * and we faulted in copyio,
@@ -777,8 +783,13 @@ kernel_trap(
 #endif
 		}
 	}
+<<<<<<< HEAD
 	user_addr_t	kd_vaddr = is_user ? vaddr : VM_KERNEL_UNSLIDE(vaddr);	
 	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, 
+=======
+
+	KERNEL_DEBUG_CONSTANT(
+>>>>>>> origin/10.7
 		(MACHDBG_CODE(DBG_MACH_EXCP_KTRAP_x86, type)) | DBG_FUNC_NONE,
 		(unsigned)(kd_vaddr >> 32), (unsigned)kd_vaddr, is_user,
 		VM_KERNEL_UNSLIDE(kern_ip), 0);
@@ -820,6 +831,27 @@ kernel_trap(
 	      goto debugger_entry;
 #endif
 	    case T_PAGE_FAULT:
+<<<<<<< HEAD
+=======
+
+#if	MACH_KDB
+		/*
+		 * Check for watchpoint on kernel static data.
+		 * vm_fault would fail in this case 
+		 */
+		if (map == kernel_map && db_watchpoint_list && db_watchpoints_inserted &&
+		    (code & T_PF_WRITE) && vaddr < vm_map_max(map) &&
+		    ((*(pte = pmap_pte(kernel_pmap, (vm_map_offset_t)vaddr))) & INTEL_PTE_WRITE) == 0) {
+			pmap_store_pte(
+				pte,
+				*pte | INTEL_PTE_VALID | INTEL_PTE_WRITE);
+			/* XXX need invltlb here? */
+
+			result = KERN_SUCCESS;
+			goto look_for_watchpoints;
+		}
+#endif	/* MACH_KDB */
+>>>>>>> origin/10.7
 
 #if CONFIG_DTRACE
 		if (thread != THREAD_NULL && thread->options & TH_OPT_DTRACE) {	/* Executing under dtrace_probe? */
@@ -840,6 +872,16 @@ kernel_trap(
 		        prot |= VM_PROT_WRITE;
 		if (code & T_PF_EXECUTE)
 		        prot |= VM_PROT_EXECUTE;
+
+		
+		prot = VM_PROT_READ;
+
+		if (code & T_PF_WRITE)
+		        prot |= VM_PROT_WRITE;
+#if     PAE
+		if (code & T_PF_EXECUTE)
+		        prot |= VM_PROT_EXECUTE;
+#endif
 
 		result = vm_fault(map,
 				  vm_map_trunc_page(vaddr,
@@ -932,13 +974,43 @@ set_recovery_ip(x86_saved_state64_t  *saved_state, vm_offset_t ip)
 
 
 
+<<<<<<< HEAD
+=======
+	if (regs->trapno < TRAP_TYPES)
+	        trapname = trap_type[regs->trapno];
+#undef panic
+	panic("Kernel trap at 0x%08x, type %d=%s, registers:\n"
+	      "CR0: 0x%08x, CR2: 0x%08x, CR3: 0x%08x, CR4: 0x%08x\n"
+	      "EAX: 0x%08x, EBX: 0x%08x, ECX: 0x%08x, EDX: 0x%08x\n"
+	      "CR2: 0x%08x, EBP: 0x%08x, ESI: 0x%08x, EDI: 0x%08x\n"
+	      "EFL: 0x%08x, EIP: 0x%08x, CS:  0x%08x, DS:  0x%08x\n"
+	      "Error code: 0x%08x\n",
+	      regs->eip, regs->trapno, trapname, cr0, cr2, cr3, cr4,
+	      regs->eax,regs->ebx,regs->ecx,regs->edx,
+	      regs->cr2,regs->ebp,regs->esi,regs->edi,
+	      regs->efl,regs->eip,regs->cs & 0xFFFF, regs->ds & 0xFFFF, regs->err);
+	/*
+	 * This next statement is not executed,
+	 * but it's needed to stop the compiler using tail call optimization
+	 * for the panic call - which confuses the subsequent backtrace.
+	 */
+	cr0 = 0;
+}
+#else
+
+
+>>>>>>> origin/10.7
 static void
 panic_trap(x86_saved_state64_t *regs, uint32_t pl)
 {
 	const char	*trapname = "Unknown";
 	pal_cr_t	cr0, cr2, cr3, cr4;
+<<<<<<< HEAD
 	boolean_t	potential_smep_fault = FALSE, potential_kernel_NX_fault = FALSE;
 	boolean_t	potential_smap_fault = FALSE;
+=======
+	boolean_t	potential_smep_fault = FALSE;
+>>>>>>> origin/10.7
 
 	pal_get_control_registers( &cr0, &cr2, &cr3, &cr4 );
 	assert(ml_get_interrupts_enabled() == FALSE);
@@ -957,6 +1029,7 @@ panic_trap(x86_saved_state64_t *regs, uint32_t pl)
 	if (regs->isf.trapno < TRAP_TYPES)
 	        trapname = trap_type[regs->isf.trapno];
 
+<<<<<<< HEAD
 	if ((regs->isf.trapno == T_PAGE_FAULT) && (regs->isf.err == (T_PF_PROT | T_PF_EXECUTE)) && (regs->isf.rip == regs->cr2)) {
 		if (pmap_smep_enabled && (regs->isf.rip < VM_MAX_USER_PAGE_ADDRESS)) {
 			potential_smep_fault = TRUE;
@@ -969,6 +1042,10 @@ panic_trap(x86_saved_state64_t *regs, uint32_t pl)
 		   regs->cr2 < VM_MAX_USER_PAGE_ADDRESS &&
 		   regs->isf.rip >= VM_MIN_KERNEL_AND_KEXT_ADDRESS) {
 		potential_smap_fault = TRUE;
+=======
+	if ((regs->isf.trapno == T_PAGE_FAULT) && (regs->isf.err == (T_PF_PROT | T_PF_EXECUTE)) && (pmap_smep_enabled) && (regs->isf.rip == regs->cr2) && (regs->isf.rip < VM_MAX_USER_PAGE_ADDRESS)) {
+		potential_smep_fault = TRUE;
+>>>>>>> origin/10.7
 	}
 
 #undef panic
@@ -979,7 +1056,11 @@ panic_trap(x86_saved_state64_t *regs, uint32_t pl)
 	      "R8:  0x%016llx, R9:  0x%016llx, R10: 0x%016llx, R11: 0x%016llx\n"
 	      "R12: 0x%016llx, R13: 0x%016llx, R14: 0x%016llx, R15: 0x%016llx\n"
 	      "RFL: 0x%016llx, RIP: 0x%016llx, CS:  0x%016llx, SS:  0x%016llx\n"
+<<<<<<< HEAD
 	      "Fault CR2: 0x%016llx, Error code: 0x%016llx, Fault CPU: 0x%x%s%s%s%s, PL: %d\n",
+=======
+	      "CR2: 0x%016llx, Error code: 0x%016llx, Faulting CPU: 0x%x%s\n",
+>>>>>>> origin/10.7
 	      regs->isf.rip, regs->isf.trapno, trapname,
 	      cr0, cr2, cr3, cr4,
 	      regs->rax, regs->rbx, regs->rcx, regs->rdx,
@@ -988,10 +1069,14 @@ panic_trap(x86_saved_state64_t *regs, uint32_t pl)
 	      regs->r12, regs->r13, regs->r14, regs->r15,
 	      regs->isf.rflags, regs->isf.rip, regs->isf.cs & 0xFFFF,
 	      regs->isf.ss & 0xFFFF,regs->cr2, regs->isf.err, regs->isf.cpu,
+<<<<<<< HEAD
 	      virtualized ? " VMM" : "",
 	      potential_kernel_NX_fault ? " Kernel NX fault" : "",
 	      potential_smep_fault ? " SMEP/User NX fault" : "",
 	      potential_smap_fault ? " SMAP fault" : "", pl);
+=======
+	      potential_smep_fault ? " SMEP/NX fault" : "");
+>>>>>>> origin/10.7
 	/*
 	 * This next statement is not executed,
 	 * but it's needed to stop the compiler using tail call optimization

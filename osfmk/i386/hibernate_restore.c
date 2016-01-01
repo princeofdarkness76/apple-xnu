@@ -31,7 +31,11 @@
 
 #include <i386/pal_hibernate.h>
 
+<<<<<<< HEAD
 extern pd_entry_t BootPTD[2048];
+=======
+extern pd_entry_t BootstrapPTD[2048];
+>>>>>>> origin/10.7
 
 // src is virtually mapped, not page aligned, 
 // dst is a physical 4k page aligned ptr, len is one 4K page
@@ -72,11 +76,15 @@ pal_hib_map(uintptr_t virt, uint64_t phys)
 	case IMAGE_AREA:
 	case IMAGE2_AREA:
 	    break;
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.7
 	default:
 	    asm("cli;hlt;");
 	    break;
     }
+<<<<<<< HEAD
     if (phys < IMAGE2_AREA)
     {
     	// first 4Gb is all mapped,
@@ -90,6 +98,15 @@ pal_hib_map(uintptr_t virt, uint64_t phys)
     BootPTD[index] = phys;
     invlpg(virt);
     BootPTD[index + 1] = (phys + I386_LPGBYTES);
+=======
+
+    index = (virt >> I386_LPGSHIFT);
+    virt += (uintptr_t)(phys & I386_LPGMASK);
+    phys  = ((phys & ~((uint64_t)I386_LPGMASK)) | INTEL_PTE_PS  | INTEL_PTE_VALID | INTEL_PTE_WRITE);
+    BootstrapPTD[index] = phys;
+    invlpg(virt);
+    BootstrapPTD[index + 1] = (phys + I386_LPGBYTES);
+>>>>>>> origin/10.7
     invlpg(virt + I386_LPGBYTES);
 
     return (virt);

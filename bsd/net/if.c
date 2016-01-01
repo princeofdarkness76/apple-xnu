@@ -2907,10 +2907,20 @@ ifioctl_ifreq(struct socket *so, u_long cmd, struct ifreq *ifr, struct proc *p)
 >>>>>>> origin/10.6
 	}
 
+<<<<<<< HEAD
 >>>>>>> origin/10.3
 	ifp = ifunit(ifr->ifr_name);
 	dlil_if_unlock();
 
+=======
+	/*
+	 * ioctls which require ifp.  Note that we acquire dlil_ifnet_lock
+	 * here to ensure that the ifnet, if found, has been fully attached.
+	 */
+	dlil_if_lock();
+	ifp = ifunit(ifr->ifr_name);
+	dlil_if_unlock();
+>>>>>>> origin/10.7
 	if (ifp == NULL)
 		return (ENXIO);
 

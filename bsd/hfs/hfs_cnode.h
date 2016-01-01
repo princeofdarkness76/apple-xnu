@@ -492,7 +492,12 @@ extern struct vnode * hfs_chash_getvnode(struct hfsmount *hfsmp, ino_t inum, int
 										int skiplock, int allow_deleted);
 extern struct cnode * hfs_chash_getcnode(struct hfsmount *hfsmp, ino_t inum, struct vnode **vpp, 
 										 int wantrsrc, int skiplock, int *out_flags, int *hflags);
+<<<<<<< HEAD
 extern int hfs_chash_snoop(struct hfsmount *, ino_t, int, int (*)(const cnode_t *, void *), void *);
+=======
+extern int hfs_chash_snoop(struct hfsmount *, ino_t, int, int (*)(const struct cat_desc *,
+                            const struct cat_attr *, void *), void *);
+>>>>>>> origin/10.7
 extern int hfs_valid_cnode(struct hfsmount *hfsmp, struct vnode *dvp, struct componentname *cnp, 
 							cnid_t cnid, struct cat_attr *cattr, int *error);
 
@@ -528,8 +533,11 @@ extern int hfs_chash_set_childlinkbit(struct hfsmount *hfsmp, cnid_t cnid);
  *       D. Allocation Bitmap file (always exclusive, supports recursion)
  *       E. Overflow Extents B-tree file (always exclusive, supports recursion)
  *
+<<<<<<< HEAD
  *  7. hfs mount point (always last)
  *
+=======
+>>>>>>> origin/10.7
  *
  * I. HFS cnode hash lock (must not acquire any new locks while holding this lock, always taken last)
  */

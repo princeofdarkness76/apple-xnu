@@ -325,6 +325,14 @@ panic_prologue(const char *str)
 	s = splhigh();
 	disable_preemption();
 
+	if (kdebug_enable) {
+		ml_set_interrupts_enabled(TRUE);
+		kdbg_dump_trace_to_file("/var/tmp/panic.trace");
+	}
+
+	s = splhigh();
+	disable_preemption();
+
 #if	defined(__i386__) || defined(__x86_64__)
 	/* Attempt to display the unparsed panic string */
 	const char *tstr = str;

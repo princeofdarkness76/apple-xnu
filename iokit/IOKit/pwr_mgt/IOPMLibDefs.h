@@ -60,6 +60,7 @@
 #define kPMSetMaintenanceWakeCalendar   8
 #define kPMSetUserAssertionLevels       9
 <<<<<<< HEAD
+<<<<<<< HEAD
 #define kPMActivityTickle               10
 #define kPMGetSystemSleepType           11
 #define kPMSetClamshellSleepState       12
@@ -72,3 +73,8 @@
 
 #define kNumPMMethods                   10
 >>>>>>> origin/10.6
+=======
+#define kPMActivityTickle               10
+
+#define kNumPMMethods                   11
+>>>>>>> origin/10.7

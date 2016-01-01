@@ -271,7 +271,15 @@ ml_phys_read_data(pmap_paddr_t paddr, int size)
 		sabs = mach_absolute_time();
 	}
 
+	if (!physmap_enclosed(paddr))
+		panic("%s: 0x%llx out of bounds\n", __FUNCTION__, paddr);
+
         switch (size) {
+<<<<<<< HEAD
+=======
+		unsigned char s1;
+		unsigned short s2;
+>>>>>>> origin/10.7
         case 1:
 		s1 = *(volatile unsigned char *)PHYSMAP_PTOV(paddr);
 		result = s1;
@@ -287,6 +295,7 @@ ml_phys_read_data(pmap_paddr_t paddr, int size)
 		panic("Invalid size %d for ml_phys_read_data\n", size);
 		break;
         }
+<<<<<<< HEAD
 
 	if (__improbable(reportphyreaddelayabs != 0)) {
 		eabs = mach_absolute_time();
@@ -303,6 +312,8 @@ ml_phys_read_data(pmap_paddr_t paddr, int size)
 		}
 	}
 
+=======
+>>>>>>> origin/10.7
         return result;
 }
 

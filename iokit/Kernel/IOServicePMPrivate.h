@@ -55,8 +55,12 @@ enum {
     kIOPMRequestTypeRequestPowerStateOverride   = 0x0E,
     kIOPMRequestTypeSetIdleTimerPeriod          = 0x0F,
     kIOPMRequestTypeIgnoreIdleTimer             = 0x10,
+<<<<<<< HEAD
     kIOPMRequestTypeQuiescePowerTree            = 0x11,
 
+=======
+    
+>>>>>>> origin/10.7
     /* Reply Types */
     kIOPMRequestTypeReplyStart                  = 0x80,
     kIOPMRequestTypeAckPowerChange              = 0x81,
@@ -220,6 +224,7 @@ private:
     // PM state lock.
     IOLock *                PMLock;
 
+<<<<<<< HEAD
     unsigned int            InitialPowerChange          :1;
     unsigned int            InitialSetPowerState        :1;
     unsigned int            DeviceOverrideEnabled       :1;
@@ -236,6 +241,21 @@ private:
     unsigned int            HasAdvisoryDesire           :1;
     unsigned int            AdvisoryTickleUsed          :1;
     unsigned int            ResetPowerStateOnWake       :1;
+=======
+    unsigned int            InitialPowerChange:1;
+    unsigned int            InitialSetPowerState:1;
+    unsigned int            DeviceOverrideEnabled:1;
+    unsigned int            DeviceWasActive:1;
+    unsigned int            DoNotPowerDown:1;
+    unsigned int            ParentsKnowState:1;
+    unsigned int            StrictTreeOrder:1;
+    unsigned int            IdleTimerStopped:1;
+    unsigned int            AdjustPowerScheduled:1;
+    unsigned int            IsPreChange:1;
+    unsigned int            DriverCallBusy:1;
+    unsigned int            PCDFunctionOverride:1;
+    unsigned int            IdleTimerIgnored:1;
+>>>>>>> origin/10.7
 
     // Time of last device activity.
     AbsoluteTime            DeviceActiveTimestamp;
@@ -390,9 +410,12 @@ private:
 #define fDriverCallBusy             pwrMgt->DriverCallBusy
 #define fPCDFunctionOverride        pwrMgt->PCDFunctionOverride
 #define fIdleTimerIgnored           pwrMgt->IdleTimerIgnored
+<<<<<<< HEAD
 #define fHasAdvisoryDesire          pwrMgt->HasAdvisoryDesire
 #define fAdvisoryTickleUsed         pwrMgt->AdvisoryTickleUsed
 #define fResetPowerStateOnWake      pwrMgt->ResetPowerStateOnWake
+=======
+>>>>>>> origin/10.7
 #define fDeviceActiveTimestamp      pwrMgt->DeviceActiveTimestamp
 #define fMaxPowerStateEntryTime     pwrMgt->MaxPowerStateEntryTime
 #define fMaxPowerStateExitTime      pwrMgt->MaxPowerStateExitTime
@@ -501,6 +524,7 @@ the ack timer is ticking every tenth of a second.
 #define kIOPMSyncNoChildNotify      0x0200  // sync root domain only, not entire tree
 #define kIOPMSyncTellPowerDown      0x0400  // send the ask/will power off messages
 #define kIOPMSyncCancelPowerDown    0x0800  // sleep cancel for maintenance wake
+<<<<<<< HEAD
 #define kIOPMInitialPowerChange     0x1000  // set for initial power change
 #define kIOPMRootChangeUp           0x2000  // Root power domain change up
 #define kIOPMRootChangeDown         0x4000  // Root power domain change down
@@ -514,6 +538,9 @@ the ack timer is ticking every tenth of a second.
 #define kTickleTypePowerRise        0x02
 #define kTickleTypeActivity         0x04
 #define kTickleTypeAdvisory         0x08
+=======
+#define kIOPMPowerSuppressed        0x1000  // power suppressed for dark wake
+>>>>>>> origin/10.7
 
 enum {
     kDriverCallInformPreChange,

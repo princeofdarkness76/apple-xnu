@@ -156,8 +156,11 @@ vm_offset_t	last_addr;
 #include <libkern/kernel_mach_header.h>
 #include <libkern/OSKextLibPrivate.h>
 
+<<<<<<< HEAD
 #include <mach/branch_predicates.h>
 
+=======
+>>>>>>> origin/10.7
 #if	DEBUG
 #define DPRINTF(x...)	kprintf(x)
 #else
@@ -940,11 +943,14 @@ uint64_t panic_restart_timeout = ~(0ULL);
 
 #define PANIC_RESTART_TIMEOUT (3ULL * NSEC_PER_SEC)
 
+<<<<<<< HEAD
 =======
 #if !CONFIG_EMBEDDED
 >>>>>>> origin/10.5
 =======
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.7
 static void
 machine_halt_cpu(void) {
 	uint64_t deadline;
@@ -970,6 +976,10 @@ machine_halt_cpu(void) {
 	 * writing, this is routine is chained through AppleSMC->
 	 * AppleACPIPlatform
 	 */
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.7
 	if (PE_halt_restart)
 		(*PE_halt_restart)(kPERestartCPU);
 	pmCPUHalt(PM_HALT_DEBUG);
@@ -1154,6 +1164,9 @@ Debugger(
 			 */
 			mp_rendezvous_break_lock();
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.7
 
 			/* Non-maskably interrupt all other processors
 			 * If a restart timeout is specified, this processor

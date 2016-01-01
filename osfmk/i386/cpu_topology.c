@@ -42,6 +42,7 @@
 #include <i386/lock.h>
 #include <i386/lapic.h>
 
+<<<<<<< HEAD
 //#define TOPO_DEBUG 1
 #if TOPO_DEBUG
 #define DBG(x...)	kprintf("DBG: " x)
@@ -52,6 +53,8 @@ void debug_topology_print(void);
 void validate_topology(void);
 >>>>>>> origin/10.5
 
+=======
+>>>>>>> origin/10.7
 __private_extern__ void qsort(
     void * array,
     size_t nmembers,
@@ -164,14 +167,15 @@ cpu_topology_sort(int ncpus)
 		x86_set_pkg_numbers(pkg, &cpup->lcpu);
 	}
 
-#if TOPO_DEBUG
-	debug_topology_print();
-#endif /* TOPO_DEBUG */
 	validate_topology();
 
 	ml_set_interrupts_enabled(istate);
+<<<<<<< HEAD
 	DBG("cpu_topology_start() LLC is L%d\n", topoParms.LLCDepth + 1);
 >>>>>>> origin/10.5
+=======
+	TOPO_DBG("cpu_topology_start() LLC is L%d\n", topoParms.LLCDepth + 1);
+>>>>>>> origin/10.7
 
 	/*
 	 * Let the CPU Power Management know that the topology is stable.
@@ -212,10 +216,14 @@ cpu_topology_sort(int ncpus)
 		}
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 		TOPO_DBG("\tprocessor_init set %p(%d) lcpup %p(%d) cpu %p processor %p\n",
 =======
 		DBG("\tprocessor_init set %p(%d) lcpup %p(%d) cpu %p processor %p\n",
 >>>>>>> origin/10.5
+=======
+		TOPO_DBG("\tprocessor_init set %p(%d) lcpup %p(%d) cpu %p processor %p\n",
+>>>>>>> origin/10.7
 			aset, aset->num, lcpup, lcpup->cpu_num, cpup, cpup->cpu_processor);
 
 		if (i != master_cpu)

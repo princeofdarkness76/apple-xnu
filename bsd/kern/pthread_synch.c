@@ -138,9 +138,14 @@ static void wq_unpark_continue(void);
 static void wq_unsuspend_continue(void);
 >>>>>>> origin/10.6
 static int setup_wqthread(proc_t p, thread_t th, user_addr_t item, int reuse_thread, struct threadlist *tl);
+<<<<<<< HEAD
 static int  workqueue_addnewthread(struct workqueue *wq);
 static void workqueue_removethread(struct workqueue *wq);
 static void workqueue_lock(proc_t);
+=======
+static boolean_t workqueue_addnewthread(struct workqueue *wq, boolean_t oc_thread);
+static void workqueue_removethread(struct threadlist *tl, int fromexit);
+>>>>>>> origin/10.7
 static void workqueue_lock_spin(proc_t);
 static void workqueue_unlock(proc_t);
 
@@ -1300,18 +1305,37 @@ workqueue_callback(
 }
 
 static void
+<<<<<<< HEAD
 workqueue_removethread(struct workqueue *wq)
+=======
+workqueue_removethread(struct threadlist *tl, int fromexit)
+>>>>>>> origin/10.7
 {
         struct threadlist *tl;
 	uint32_t	i, affinity_tag = 0;
 
+<<<<<<< HEAD
 	tl = NULL;
+=======
+	/* 
+	 * If fromexit is set, the call is from workqueue_exit(,
+	 * so some cleanups are to be avoided.
+	 */
+	wq = tl->th_workq;
+>>>>>>> origin/10.7
 
 	workqueue_lock_spin(wq->wq_proc);
 	
 	for (i = 0; i < wq->wq_affinity_max; i++) {
 
+<<<<<<< HEAD
 	        affinity_tag = wq->wq_nextaffinitytag;
+=======
+	if (fromexit == 0) {
+		wq->wq_nthreads--;
+		wq->wq_thidlecount--;
+	}
+>>>>>>> origin/10.7
 
 		if (affinity_tag == 0)
 		        affinity_tag = wq->wq_affinity_max - 1;
@@ -1333,7 +1357,10 @@ workqueue_removethread(struct workqueue *wq)
 			break;
 		}
 	}
-	workqueue_unlock(wq->wq_proc);
+	if (fromexit == 0) {
+		/* during exit the lock is not held */
+		workqueue_unlock(wq->wq_proc);
+	}
 
 	if (tl != NULL) {
 		thread_sched_call(tl->th_thread, NULL);
@@ -1356,7 +1383,15 @@ workqueue_removethread(struct workqueue *wq)
 		/*
 		 * drop our ref on the thread
 		 */
+<<<<<<< HEAD
 		thread_deallocate(tl->th_thread);
+=======
+		if (fromexit == 0) {
+			/* vm map is already deallocated when this is called from exit */
+			(void)mach_vm_deallocate(wq->wq_map, tl->th_stackaddr, tl->th_allocsize);
+		}
+		(void)mach_port_deallocate(get_task_ipcspace(wq->wq_task), tl->th_thport);
+>>>>>>> origin/10.7
 
 		kfree(tl, sizeof(struct threadlist));
 	}
@@ -1373,7 +1408,34 @@ workqueue_addnewthread(struct workqueue *wq)
 	proc_t		p;
 	void 	 	*sright;
 	mach_vm_offset_t stackaddr;
+<<<<<<< HEAD
 	uint32_t	affinity_tag;
+=======
+
+	if ((wq->wq_flags & WQ_EXITING) == WQ_EXITING)
+		return (FALSE);
+
+	if (wq->wq_nthreads >= wq_max_threads || wq->wq_nthreads >= (CONFIG_THREAD_MAX - 20)) {
+		wq->wq_lflags |= WQL_EXCEEDED_TOTAL_THREAD_LIMIT;
+		return (FALSE);
+	}
+	wq->wq_lflags &= ~WQL_EXCEEDED_TOTAL_THREAD_LIMIT;
+
+	if (oc_thread == FALSE && wq->wq_constrained_threads_scheduled >= wq_max_constrained_threads) {
+		/*
+		 * if we're not creating this thread to service an overcommit request,
+		 * then check the size of the constrained thread pool...  if we've already
+		 * reached our max for threads scheduled from this pool, don't create a new
+		 * one... the callers of this function are prepared for failure.
+		 */
+		wq->wq_lflags |= WQL_EXCEEDED_CONSTRAINED_THREAD_LIMIT;
+		return (FALSE);
+	}
+	if (wq->wq_constrained_threads_scheduled < wq_max_constrained_threads)
+		wq->wq_lflags &= ~WQL_EXCEEDED_CONSTRAINED_THREAD_LIMIT;
+
+	wq->wq_nthreads++;
+>>>>>>> origin/10.7
 
 	p = wq->wq_proc;
 
@@ -1469,7 +1531,6 @@ workqueue_addnewthread(struct workqueue *wq)
 	thread_sched_call(th, workqueue_callback);
 
 	uth = get_bsdthread_info(tl->th_thread);
-	uth->uu_threadlist = (void *)tl;
 
         workqueue_lock_spin(p);
 <<<<<<< HEAD
@@ -1479,6 +1540,7 @@ workqueue_addnewthread(struct workqueue *wq)
 	wq->wq_thcount[affinity_tag]++;
 =======
 	
+	uth->uu_threadlist = (void *)tl;
 	TAILQ_INSERT_TAIL(&wq->wq_thidlelist, tl, th_entry);
 
 	wq->wq_thidlecount++;
@@ -1649,28 +1711,117 @@ workq_ops(struct proc *p, struct workq_ops_args  *uap, __unused register_t *retv
 	return(error);
 }
 
+/*
+ * Routine:	workqueue_mark_exiting
+ *
+ * Function:	Mark the work queue such that new threads will not be added to the
+ *		work queue after we return.  
+ *
+ * Conditions:	Called against the current process.
+ */
 void
-workqueue_exit(struct proc *p)
+workqueue_mark_exiting(struct proc *p)
 {
 	struct workqueue  * wq;
+<<<<<<< HEAD
 	struct threadlist  * tl, *tlist;
 	uint32_t i;
+=======
+>>>>>>> origin/10.7
 
-	if (p->p_wqptr != NULL) {
+	wq = p->p_wqptr;
+	if (wq != NULL) {
 
+<<<<<<< HEAD
 	        workqueue_lock_spin(p);
 
 	        wq = (struct workqueue *)p->p_wqptr;
 		p->p_wqptr = NULL;
+=======
+		KERNEL_DEBUG(0x9008088 | DBG_FUNC_START, p->p_wqptr, 0, 0, 0, 0);
+
+	        workqueue_lock_spin(p);
+
+		/*
+		 * we now arm the timer in the callback function w/o holding the workq lock...
+		 * we do this by setting  WQ_ATIMER_RUNNING via OSCompareAndSwap in order to 
+		 * insure only a single timer if running and to notice that WQ_EXITING has
+		 * been set (we don't want to start a timer once WQ_EXITING is posted)
+		 *
+		 * so once we have successfully set WQ_EXITING, we cannot fire up a new timer...
+		 * therefor no need to clear the timer state atomically from the flags
+		 *
+		 * since we always hold the workq lock when dropping WQ_ATIMER_RUNNING
+		 * the check for and sleep until clear is protected
+		 */
+		while ( !(OSCompareAndSwap(wq->wq_flags, (wq->wq_flags | WQ_EXITING), (UInt32 *)&wq->wq_flags)));
+
+		if (wq->wq_flags & WQ_ATIMER_RUNNING) {
+			if (thread_call_cancel(wq->wq_atimer_call) == TRUE)
+				wq->wq_flags &= ~WQ_ATIMER_RUNNING;
+		}
+		while ((wq->wq_flags & WQ_ATIMER_RUNNING) || (wq->wq_lflags & WQL_ATIMER_BUSY)) {
+
+			assert_wait((caddr_t)wq, (THREAD_UNINT));
+			workqueue_unlock(p);
+
+			thread_block(THREAD_CONTINUE_NULL);
+>>>>>>> origin/10.7
 
 		workqueue_unlock(p);
 
+<<<<<<< HEAD
 		if (wq == NULL)
 		        return;
 		
 		if (wq->wq_flags & WQ_TIMER_RUNNING)
 		        thread_call_cancel(wq->wq_timer_call);
 		thread_call_free(wq->wq_timer_call);
+=======
+		KERNEL_DEBUG(0x9008088 | DBG_FUNC_END, 0, 0, 0, 0, 0);
+	}
+}
+
+/*
+ * Routine:	workqueue_exit
+ *
+ * Function:	clean up the work queue structure(s) now that there are no threads
+ *		left running inside the work queue (except possibly current_thread).
+ *
+ * Conditions:	Called by the last thread in the process.
+ *		Called against current process.
+ */
+void
+workqueue_exit(struct proc *p)
+{
+	struct workqueue  * wq;
+	struct threadlist  * tl, *tlist;
+	struct uthread	*uth;
+	int wq_size = 0;
+
+	wq = (struct workqueue *)p->p_wqptr;
+	if (wq != NULL) {
+
+		KERNEL_DEBUG(0x900808c | DBG_FUNC_START, p->p_wqptr, 0, 0, 0, 0);
+
+		wq_size = p->p_wqsize;
+		p->p_wqptr = NULL;
+		p->p_wqsize = 0;
+
+		/*
+		 * Clean up workqueue data structures for threads that exited and
+		 * didn't get a chance to clean up after themselves.
+		 */
+		TAILQ_FOREACH_SAFE(tl, &wq->wq_thrunlist, th_entry, tlist) {
+
+		        thread_sched_call(tl->th_thread, NULL);
+
+			uth = get_bsdthread_info(tl->th_thread);
+			if (uth != (struct uthread *)0) {
+				uth->uu_threadlist = NULL;
+			}
+			TAILQ_REMOVE(&wq->wq_thrunlist, tl, th_entry);
+>>>>>>> origin/10.7
 
 		TAILQ_FOREACH_SAFE(tl, &wq->wq_thrunlist, th_entry, tlist) {
 		        /*
@@ -1682,6 +1833,7 @@ workqueue_exit(struct proc *p)
 			TAILQ_REMOVE(&wq->wq_thrunlist, tl, th_entry);
 			kfree(tl, sizeof(struct threadlist));
 		}
+<<<<<<< HEAD
 		for (i = 0; i < wq->wq_affinity_max; i++) {
 		        TAILQ_FOREACH_SAFE(tl, &wq->wq_thidlelist[i], th_entry, tlist) {
 			        /*
@@ -1693,6 +1845,10 @@ workqueue_exit(struct proc *p)
 				TAILQ_REMOVE(&wq->wq_thidlelist[i], tl, th_entry);
 				kfree(tl, sizeof(struct threadlist));
 			}
+=======
+		TAILQ_FOREACH_SAFE(tl, &wq->wq_thidlelist, th_entry, tlist) {
+			workqueue_removethread(tl, 1);
+>>>>>>> origin/10.7
 		}
 		kfree(wq, p->p_wqsize);
 	}
@@ -2049,7 +2205,7 @@ normal_resume_to_user:
 			 * queue... remove it from our domain...
 			 * workqueue_removethread consumes the lock
 			 */
-			workqueue_removethread(tl);
+			workqueue_removethread(tl, 0);
 
 			thread_bootstrap_return();
 		}
@@ -2121,7 +2277,7 @@ normal_return_to_user:
 				 *
 				 * workqueue_removethread consumes the lock
 				 */
-				workqueue_removethread(tl);
+				workqueue_removethread(tl, 0);
 					
 				thread_exception_return();
 			}

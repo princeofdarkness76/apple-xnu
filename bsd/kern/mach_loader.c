@@ -500,6 +500,7 @@ load_machfile(
 			 *
 			 * NOTE: task_start_halt() makes sure that no new
 			 * threads are created in the task during the transition.
+<<<<<<< HEAD
 			 * We need to mark the workqueue as exiting before we
 			 * wait for threads to terminate (at the end of which
 			 * we no longer have a prohibition on thread creation).
@@ -520,6 +521,25 @@ load_machfile(
 			kqueue_dealloc(p->p_wqkqueue);
 			p->p_wqkqueue = NULL;
 		}
+=======
+ 			 * We need to mark the workqueue as exiting before we
+ 			 * wait for threads to terminate (at the end of which
+ 			 * we no longer have a prohibition on thread creation).
+ 			 * 
+ 			 * Finally, clean up any lingering workqueue data structures
+ 			 * that may have been left behind by the workqueue threads
+ 			 * as they exited (and then clean up the work queue itself).
+  			 */
+  			kret = task_start_halt(task);
+  			if (kret != KERN_SUCCESS) {
+  				return(kret);		
+  			}
+ 			proc_transcommit(p, 0);
+ 			workqueue_mark_exiting(p);
+  			task_complete_halt(task);
+ 			workqueue_exit(p);
+  		}
+>>>>>>> origin/10.7
 		old_map = swap_task_map(old_task, thread, map, !spawn);
 		vm_map_deallocate(old_map);
 	}

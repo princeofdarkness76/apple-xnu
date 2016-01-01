@@ -849,9 +849,12 @@ proc_exit(proc_t p)
 	
 	proc_refdrain(p);
 
+<<<<<<< HEAD
 	/* if any pending cpu limits action, clear it */
 	task_clear_cpuusage(p->task, TRUE);
 
+=======
+>>>>>>> origin/10.7
 	workqueue_mark_exiting(p);
 	workqueue_exit(p);
 	kqueue_dealloc(p->p_wqkqueue);

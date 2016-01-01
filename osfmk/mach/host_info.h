@@ -303,6 +303,7 @@ struct _processor_statistics_np  {
 
 	uint32_t		ps_idle_transitions;
 	uint32_t		ps_quantum_timer_expirations;
+<<<<<<< HEAD
 };
 
 struct host_debug_info_internal {
@@ -311,6 +312,8 @@ struct host_debug_info_internal {
 		 config_csr:1,
 		 config_coalitions:1,
 		 config_unused:60;
+=======
+>>>>>>> origin/10.7
 };
 
 typedef struct host_debug_info_internal *host_debug_info_internal_t;

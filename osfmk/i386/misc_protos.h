@@ -67,7 +67,11 @@ extern	boolean_t virtualized;
 
 extern void		vstart(vm_offset_t);
 extern void		i386_init(void);
+<<<<<<< HEAD
 extern void		x86_init_wrapper(uintptr_t, uintptr_t) __attribute__((noreturn));
+=======
+
+>>>>>>> origin/10.7
 extern void		i386_vm_init(
 				uint64_t,
 				boolean_t,

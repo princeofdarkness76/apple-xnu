@@ -376,6 +376,7 @@ enum {
  *  not present == Retain FV key when going to standby mode
  */
 #define kIOPMDestroyFVKeyOnStandbyKey       "DestroyFVKeyOnStandby"
+<<<<<<< HEAD
 
 /*******************************************************************************
  *
@@ -400,6 +401,8 @@ enum {
  * runtime before calling PMinit().
  */
 #define kIOPMResetPowerStateOnWakeKey       "IOPMResetPowerStateOnWake"
+=======
+>>>>>>> origin/10.7
 
 /*******************************************************************************
  *
@@ -447,6 +450,7 @@ enum {
      */
     kIOPMDriverAssertionReservedBit7                = 0x80,
 
+<<<<<<< HEAD
     /*! kIOPMDriverAssertionMagicPacketWakeEnabledBit
      * When set, driver is informing PM that magic packet wake is enabled.
      */
@@ -457,6 +461,12 @@ enum {
      * interface up to do TCPKeepAlive
      */
     kIOPMDriverAssertionNetworkKeepAliveActiveBit   = 0x200
+=======
+    /*! kIOPMDriverAssertionReservedBit8
+     * Reserved for networking family.
+     */
+    kIOPMDriverAssertionReservedBit8                = 0x100
+>>>>>>> origin/10.7
 };
 
  /* kIOPMAssertionsDriverKey

@@ -89,10 +89,13 @@
  * Attributes of an I/O to be used by lower layers
  */
 struct bufattr {
+<<<<<<< HEAD
 #if CONFIG_PROTECT
 	struct cpx *ba_cpx;
 	uint64_t ba_cp_file_off;
 #endif
+=======
+>>>>>>> origin/10.7
 	uint64_t ba_flags;	/* flags. Some are only in-use on embedded devices */
 };
 
@@ -145,7 +148,11 @@ struct buf {
 #if CONFIG_PROTECT
 	struct cprotect *b_cpentry; 	/* address of cp_entry, to be passed further down  */
 #endif /* CONFIG_PROTECT */
+<<<<<<< HEAD
 >>>>>>> origin/10.6
+=======
+	struct bufattr b_attr;
+>>>>>>> origin/10.7
 #ifdef JOE_DEBUG
         void *	b_owner;
         int     b_tag;
@@ -269,6 +276,7 @@ extern vm_offset_t buf_kernel_addrperm;
  * ba_flags (Buffer Attribute flags)
  * Some of these may be in-use only on embedded devices.
  */
+<<<<<<< HEAD
 #define BA_RAW_ENCRYPTED_IO     0x00000001
 #define BA_THROTTLED_IO         0x00000002
 #define BA_DELAYIDLESLEEP       0x00000004	/* Process is marked to delay idle sleep on disk IO */
@@ -294,6 +302,10 @@ do {										\
 	(bap)->ba_flags &= (~BA_IO_TIER_MASK); 					\
 	(bap)->ba_flags |= (((tier) << BA_IO_TIER_SHIFT) & BA_IO_TIER_MASK);	\
 } while(0)
+=======
+#define BA_THROTTLED_IO         0x000000002
+
+>>>>>>> origin/10.7
 
 extern int niobuf_headers;		/* The number of IO buffer headers for cluster IO */
 extern int nbuf_headers;		/* The number of buffer headers */

@@ -190,6 +190,9 @@ cpu_extfeatures SYSCTL_HANDLER_ARGS
 
 static int
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.7
 cpu_leaf7_features SYSCTL_HANDLER_ARGS
 {
     __unused struct sysctl_oid *unused_oidp = oidp;
@@ -208,8 +211,11 @@ cpu_leaf7_features SYSCTL_HANDLER_ARGS
 }
 
 static int
+<<<<<<< HEAD
 =======
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.7
 cpu_logical_per_package SYSCTL_HANDLER_ARGS
 {
 	__unused struct sysctl_oid *unused_oidp = oidp;
@@ -498,6 +504,11 @@ SYSCTL_PROC(_machdep_cpu, OID_AUTO, leaf7_features,
 	    cpu_features, "A", "CPU feature names");
 >>>>>>> origin/10.6
 
+SYSCTL_PROC(_machdep_cpu, OID_AUTO, leaf7_features,
+	    CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_LOCKED, 
+	    0, 0,
+	    cpu_leaf7_features, "A", "CPU Leaf7 feature names");
+
 SYSCTL_PROC(_machdep_cpu, OID_AUTO, extfeatures, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_LOCKED, 
 	    0, 0,
 	    cpu_extfeatures, "A", "CPU extended feature names");
@@ -695,8 +706,11 @@ SYSCTL_PROC(_machdep_cpu_thermal, OID_AUTO, energy_policy,
 	    sizeof(boolean_t),
 	    cpu_thermal, "I", "Energy Efficient Policy Support");
 
+<<<<<<< HEAD
 
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.7
 SYSCTL_NODE(_machdep_cpu, OID_AUTO, xsave, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
 	"xsave");
 

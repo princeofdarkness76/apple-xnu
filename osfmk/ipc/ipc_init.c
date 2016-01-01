@@ -246,8 +246,11 @@ ipc_bootstrap(void)
 			      "ipc kmsgs");
 <<<<<<< HEAD
 	zone_change(ipc_kmsg_zone, Z_CALLERACCT, FALSE);
+<<<<<<< HEAD
 =======
 	zone_change(ipc_kmsg_zone, Z_NOENCRYPT, TRUE);
+=======
+>>>>>>> origin/10.7
 
 #if CONFIG_MACF_MACH
 	ipc_labelh_zone = 

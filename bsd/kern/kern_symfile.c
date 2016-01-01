@@ -101,9 +101,13 @@ struct kern_direct_file_io_ref_t
     struct vnode * vp;
     dev_t          device;
     uint32_t	   blksize;
+<<<<<<< HEAD
     off_t          filelength;
     char           cf;
     char           pinned;
+=======
+    off_t		   filelength;
+>>>>>>> origin/10.7
 };
 
 
@@ -120,6 +124,7 @@ static int device_ioctl(void * p1, __unused void * p2, u_long theIoctl, caddr_t 
     return (VNOP_IOCTL(p1, theIoctl, result, 0, p2));
 }
 
+<<<<<<< HEAD
 static int
 kern_ioctl_file_extents(struct kern_direct_file_io_ref_t * ref, u_long theIoctl, off_t offset, off_t end)
 {
@@ -220,6 +225,12 @@ kern_ioctl_file_extents(struct kern_direct_file_io_ref_t * ref, u_long theIoctl,
 }
 
 extern uint32_t freespace_mb(vnode_t vp);
+=======
+void
+kern_unmap_file(struct kern_direct_file_io_ref_t * ref, off_t f_offset, off_t end);
+int
+kern_write_file(struct kern_direct_file_io_ref_t * ref, off_t offset, caddr_t addr, vm_size_t len);
+>>>>>>> origin/10.7
 
 struct kern_direct_file_io_ref_t *
 kern_open_file_for_direct_io(const char * name, 
@@ -243,6 +254,7 @@ kern_open_file_for_direct_io(const char * name,
 {
     struct kern_direct_file_io_ref_t * ref;
 
+<<<<<<< HEAD
     proc_t            p;
     struct vnode_attr va;
     int               error;
@@ -261,6 +273,22 @@ kern_open_file_for_direct_io(const char * name,
     struct            nameidata nd;
     u_int32_t         ndflags;
     off_t             mpFree;
+=======
+    proc_t			p;
+    struct vnode_attr		va;
+    int				error;
+    off_t			f_offset;
+    uint64_t                    fileblk;
+    size_t                      filechunk;
+    uint64_t                    physoffset;
+    dev_t			device;
+    dev_t			target = 0;
+    int			        isssd = 0;
+    uint32_t                    flags = 0;
+    uint32_t			blksize;
+    off_t 			maxiocount, count;
+    boolean_t                   locked = FALSE;
+>>>>>>> origin/10.7
 
     int (*do_ioctl)(void * p1, void * p2, u_long theIoctl, caddr_t result);
     void * p1 = NULL;
@@ -373,10 +401,20 @@ kern_open_file_for_direct_io(const char * name,
     if (error)
         goto out;
 
+<<<<<<< HEAD
     if (ref->vp->v_type != VREG)
     {
         error = do_ioctl(p1, p2, DKIOCGETBLOCKCOUNT, (caddr_t) &fileblk);
         if (error) goto out;
+=======
+    if (ref->vp->v_type == VREG)
+        ref->filelength = va.va_data_size;
+    else
+    {
+        error = do_ioctl(p1, p2, DKIOCGETBLOCKCOUNT, (caddr_t) &fileblk);
+        if (error)
+            goto out;
+>>>>>>> origin/10.7
 	ref->filelength = fileblk * ref->blksize;    
     }
 
@@ -605,8 +643,67 @@ kern_file_mount(struct kern_direct_file_io_ref_t * ref)
 }
 
 void
+kern_unmap_file(struct kern_direct_file_io_ref_t * ref, off_t offset, off_t end)
+{
+    int error;
+	int (*do_ioctl)(void * p1, void * p2, u_long theIoctl, caddr_t result);
+	void * p1;
+	void * p2;
+	dk_extent_t extent;
+	dk_unmap_t  unmap;
+    uint64_t    fileblk;
+    size_t      filechunk;
+
+	bzero(&extent, sizeof(dk_extent_t));
+	bzero(&unmap, sizeof(dk_unmap_t));
+	if (ref->vp->v_type == VREG)
+	{
+		p1 = &ref->device;
+		p2 = kernproc;
+		do_ioctl = &file_ioctl;
+	}
+	else
+	{
+		/* Partition. */
+		p1 = ref->vp;
+		p2 = ref->ctx;
+		do_ioctl = &device_ioctl;
+	}
+    while (offset < end) 
+    {
+        if (ref->vp->v_type == VREG)
+        {
+            daddr64_t blkno;
+			filechunk = 1*1024*1024*1024;
+			if (filechunk > (size_t)(end - offset))
+				filechunk = (size_t)(end - offset);
+            error = VNOP_BLOCKMAP(ref->vp, offset, filechunk, &blkno, &filechunk, NULL, 0, NULL);
+			if (error) break;
+            fileblk = blkno * ref->blksize;
+        }
+        else if ((ref->vp->v_type == VBLK) || (ref->vp->v_type == VCHR))
+        {
+            fileblk = offset;
+            filechunk = ref->filelength;
+        }
+		extent.offset = fileblk;
+		extent.length = filechunk;
+		unmap.extents = &extent;
+		unmap.extentsCount = 1;
+        error = do_ioctl(p1, p2, DKIOCUNMAP, (caddr_t)&unmap);
+//		kprintf("DKIOCUNMAP(%d) 0x%qx, 0x%qx\n", error, extent.offset, extent.length);
+		if (error) break;
+        offset += filechunk;
+    }
+}
+
+void
 kern_close_file_for_direct_io(struct kern_direct_file_io_ref_t * ref,
+<<<<<<< HEAD
 			      off_t write_offset, void * addr, size_t write_length,
+=======
+			      off_t write_offset, caddr_t addr, vm_size_t write_length,
+>>>>>>> origin/10.7
 			      off_t discard_offset, off_t discard_end)
 {
     int error;
@@ -634,6 +731,7 @@ kern_close_file_for_direct_io(struct kern_direct_file_io_ref_t * ref,
             do_ioctl = &device_ioctl;
         }
         (void) do_ioctl(p1, p2, DKIOCUNLOCKPHYSICALEXTENTS, NULL);
+<<<<<<< HEAD
 
 		//XXX If unmapping extents then don't also need to unpin; except ...
 		//XXX if file unaligned (HFS 4k / Fusion 128k) then pin is superset and
@@ -653,6 +751,16 @@ kern_close_file_for_direct_io(struct kern_direct_file_io_ref_t * ref,
         if (addr && write_length)
         {
             (void) kern_write_file(ref, write_offset, addr, write_length, 0);
+=======
+        
+        if (addr && write_length)
+        {
+            (void) kern_write_file(ref, write_offset, addr, write_length);
+        }
+        if (discard_offset && discard_end)
+        {
+            (void) kern_unmap_file(ref, discard_offset, discard_end);
+>>>>>>> origin/10.7
         }
 
         error = vnode_close(ref->vp, FWRITE, ref->ctx);

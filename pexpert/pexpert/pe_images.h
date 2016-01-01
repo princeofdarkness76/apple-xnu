@@ -64,7 +64,10 @@ static const unsigned char * default_noroot_data;
 
 static const unsigned char * default_progress_data1x = gGearPict;
 static const unsigned char * default_progress_data2x = gGearPict2x;
+<<<<<<< HEAD
 static const unsigned char * default_progress_data3x = NULL;
+=======
+>>>>>>> origin/10.7
 
 static vc_progress_element default_progress = 
 	{   0, 4|1, 1000 / kGearFPS, kGearFrames, {0, 0, 0}, 

@@ -331,6 +331,7 @@ typedef void (*kern_get_file_extents_callback_t)(void * ref, uint64_t start, uin
 struct kern_direct_file_io_ref_t *
 kern_open_file_for_direct_io(const char * name, 
 			     kern_get_file_extents_callback_t callback, 
+<<<<<<< HEAD
 			     void *      callback_ref,
 			     dev_t *     device_result,
                              uint64_t *  partitionbase_result,
@@ -342,6 +343,22 @@ kern_open_file_for_direct_io(const char * name,
 void
 vm_compressor_do_warmup(void);
 
+=======
+			     void * callback_ref,
+			     dev_t * partition_device_result,
+			     dev_t * image_device_result,
+                             uint64_t * partitionbase_result,
+                             uint64_t * maxiocount_result,
+                             uint32_t * oflags,
+                             off_t offset,
+                             caddr_t addr,
+                             vm_size_t len);
+void
+kern_close_file_for_direct_io(struct kern_direct_file_io_ref_t * ref,
+			      off_t write_offset, caddr_t addr, vm_size_t write_length,
+			      off_t discard_offset, off_t discard_end);
+#endif /* _SYS_CONF_H_ */
+>>>>>>> origin/10.7
 
 hibernate_page_list_t *
 hibernate_page_list_allocate(boolean_t log);

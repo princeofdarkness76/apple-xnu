@@ -128,6 +128,7 @@
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 
+<<<<<<< HEAD
 /*
  * Checksum routine for Internet Protocol family headers (Portable Version).
  *
@@ -171,6 +172,13 @@ in6_pseudo(const struct in6_addr *src, const struct in6_addr *dst, uint32_t x)
 	 *	htonl(proto + length + sum)
 	 **/
 	sum += x;
+=======
+#include <net/net_osdep.h>
+
+#include <machine/endian.h>
+
+
+>>>>>>> origin/10.7
 
 	/* fold in carry bits */
 	ADDCARRY(sum);
@@ -232,3 +240,7 @@ inet6_cksum(struct mbuf *m, uint32_t nxt, uint32_t off, uint32_t len)
 
 	return (~sum & 0xffff);
 }
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.7

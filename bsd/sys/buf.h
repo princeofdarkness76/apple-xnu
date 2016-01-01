@@ -1117,6 +1117,7 @@ void	buf_set_redundancy_flags(buf_t, uint32_t);
  */
 bufattr_t buf_attr(buf_t);
 
+<<<<<<< HEAD
 /*!
  @function buf_markstatic
  @abstract Mark a buffer as being likely to contain static data.
@@ -1133,6 +1134,8 @@ bufattr_t buf_attr(buf_t);
  */
 int	buf_static(buf_t);
 
+=======
+>>>>>>> origin/10.7
 #ifdef KERNEL_PRIVATE
 <<<<<<< HEAD
 void	buf_setfilter(buf_t, void (*)(buf_t, void *), void *, void (**)(buf_t, void *), void **);
@@ -1175,6 +1178,14 @@ void buf_setcpaddr(buf_t, void *);
  @return int.
  */
 void *buf_getcpaddr(buf_t);
+
+/*!
+ @function buf_throttled
+ @abstract Check if a buffer is throttled.
+ @param bap Buffer attribute to test.
+ @return Nonzero if the buffer is throttled, 0 otherwise.
+ */
+int bufattr_throttled(bufattr_t bap);
 #endif /* KERNEL_PRIVATE */
 >>>>>>> origin/10.6
 

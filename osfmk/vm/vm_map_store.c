@@ -139,9 +139,12 @@ void
 _vm_map_store_entry_link( struct vm_map_header * mapHdr, vm_map_entry_t after_where, vm_map_entry_t entry)
 {
 	assert(entry->vme_start < entry->vme_end);
+<<<<<<< HEAD
 	if (__improbable(vm_debug_events))
 		DTRACE_VM4(map_entry_link, vm_map_t, (char *)mapHdr - sizeof (lck_rw_t), vm_map_entry_t, entry, vm_address_t, entry->links.start, vm_address_t, entry->links.end);
 
+=======
+>>>>>>> origin/10.7
 	vm_map_store_entry_link_ll(mapHdr, after_where, entry);
 #ifdef VM_MAP_STORE_USE_RB
 	if (vm_map_store_has_RB_support( mapHdr )) {

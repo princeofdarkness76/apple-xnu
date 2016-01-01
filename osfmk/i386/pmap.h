@@ -473,7 +473,18 @@ extern uint32_t		pmap_kernel_text_ps;
 #ifdef __x86_64__
 #define ID_MAP_VTOP(x)	((void *)(((uint64_t)(x)) & LOW_4GB_MASK))
 
+<<<<<<< HEAD
 extern	uint64_t physmap_base, physmap_max;
+=======
+#define PHYSMAP_BASE	KVADDR(KERNEL_PHYSMAP_INDEX,0,0,0)
+#define NPHYSMAP (MAX(K64_MAXMEM/GB + 4, 4))
+#define PHYSMAP_PTOV(x)	((void *)(((uint64_t)(x)) + PHYSMAP_BASE))
+
+static inline boolean_t physmap_enclosed(addr64_t a) {
+	return (a < (NPHYSMAP * GB));
+}
+#endif
+>>>>>>> origin/10.7
 
 #define NPHYSMAP (MAX(K64_MAXMEM/GB + 4, 4))
 
@@ -580,10 +591,16 @@ extern void         pmap_put_mapwindow(mapwindow_t *map);
 #endif
 
 typedef struct pmap_memory_regions {
+<<<<<<< HEAD
 	ppnum_t base;		/* first page of this region */
 	ppnum_t alloc_up;	/* pages below this one have been "stolen" */
 	ppnum_t alloc_down;	/* pages above this one have been "stolen" */
 	ppnum_t end;		/* last page of this region */
+=======
+	ppnum_t base;
+	ppnum_t end;
+	ppnum_t alloc;
+>>>>>>> origin/10.7
 	uint32_t type;
 	uint64_t attribute;
 } pmap_memory_region_t;

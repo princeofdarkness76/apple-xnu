@@ -767,6 +767,7 @@ hfs_vnop_open(struct vnop_open_args *ap)
 	if (hfs_is_journal_file(hfsmp, cp))
 		return (EPERM);
 
+<<<<<<< HEAD
 	bool have_lock = false;
 
 #if CONFIG_PROTECT
@@ -799,6 +800,8 @@ hfs_vnop_open(struct vnop_open_args *ap)
 	}
 #endif
 
+=======
+>>>>>>> origin/10.7
 	if ((hfsmp->hfs_flags & HFS_READ_ONLY) ||
 	    (hfsmp->jnl == NULL) ||
 #if NAMEDSTREAMS
@@ -5320,8 +5323,11 @@ hfs_vnop_rename(ap)
 	time_t orig_from_ctime, orig_to_ctime;
 	int emit_rename = 1;
 	int emit_delete = 1;
+<<<<<<< HEAD
 	int is_tracked = 0;
 	int unlocked;
+=======
+>>>>>>> origin/10.7
 
 	orig_from_ctime = VTOC(fvp)->c_ctime;
 	if (tvp && VTOC(tvp)) {
@@ -5331,6 +5337,59 @@ hfs_vnop_rename(ap)
 	}
 
 	hfsmp = VTOHFS(tdvp);
+<<<<<<< HEAD
+=======
+	/* 
+	 * Do special case checks here.  If fvp == tvp then we need to check the
+	 * cnode with locks held.
+	 */
+	if (fvp == tvp) {
+		int is_hardlink = 0;
+		/* 
+		 * In this case, we do *NOT* ever emit a DELETE event.  
+		 * We may not necessarily emit a RENAME event 
+		 */	
+		emit_delete = 0;
+		if ((error = hfs_lock(VTOC(fvp), HFS_SHARED_LOCK))) {
+			return error;
+		}
+		/* Check to see if the item is a hardlink or not */
+		is_hardlink = (VTOC(fvp)->c_flag & C_HARDLINK);
+		hfs_unlock (VTOC(fvp));
+		
+		/* 
+		 * If the item is not a hardlink, then case sensitivity must be off, otherwise
+		 * two names should not resolve to the same cnode unless they were case variants.
+		 */
+		if (is_hardlink) {
+			emit_rename = 0;
+			/*
+			 * Hardlinks are a little trickier.  We only want to emit a rename event
+			 * if the item is a hardlink, the parent directories are the same, case sensitivity
+			 * is off, and the case folded names are the same.  See the fvp == tvp case below for more
+			 * info.
+			 */
+
+			if ((fdvp == tdvp) && ((hfsmp->hfs_flags & HFS_CASE_SENSITIVE) == 0)) {
+				if (hfs_namecmp((const u_int8_t *)fcnp->cn_nameptr, fcnp->cn_namelen,
+							(const u_int8_t *)tcnp->cn_nameptr, tcnp->cn_namelen) == 0) {
+					/* Then in this case only it is ok to emit a rename */
+					emit_rename = 1;
+				}
+			}
+		}
+	}
+	if (emit_rename) {
+		check_for_tracked_file(fvp, orig_from_ctime, NAMESPACE_HANDLER_RENAME_OP, NULL);
+	}
+
+	if (tvp && VTOC(tvp)) {
+		if (emit_delete) {
+			check_for_tracked_file(tvp, orig_to_ctime, NAMESPACE_HANDLER_DELETE_OP, NULL);
+		}
+	}
+	
+>>>>>>> origin/10.7
 	/* 
 	 * Do special case checks here.  If fvp == tvp then we need to check the
 	 * cnode with locks held.
@@ -5522,6 +5581,7 @@ relock:
 	fcp = VTOC(fvp);
 	tdcp = VTOC(tdvp);
 	tcp = tvp ? VTOC(tvp) : NULL;
+<<<<<<< HEAD
 
 	//
 	// if the item is tracked but doesn't have a document_id, assign one and generate an fsevent for it
@@ -5624,6 +5684,8 @@ relock:
 	}
 
 
+=======
+>>>>>>> origin/10.7
 
 	/* Ensure we didn't race src or dst parent directories with rmdir. */
 	if (fdcp->c_flag & (C_NOEXISTS | C_DELETED)) {
@@ -6337,10 +6399,17 @@ skip_rm:
 
 	(void) hfs_update(tdvp, 0);
 
+<<<<<<< HEAD
 	/* Update the vnode's name now that the rename has completed. */
 	vnode_update_identity(fvp, tdvp, tcnp->cn_nameptr, tcnp->cn_namelen, 
 			tcnp->cn_hash, (VNODE_UPDATE_PARENT | VNODE_UPDATE_NAME));
 	
+=======
+
+	/* Update the vnode's name now that the rename has completed. */
+	vnode_update_identity(fvp, tdvp, tcnp->cn_nameptr, tcnp->cn_namelen, 
+			tcnp->cn_hash, (VNODE_UPDATE_PARENT | VNODE_UPDATE_NAME));
+>>>>>>> origin/10.7
 	/* 
 	 * At this point, we may have a resource fork vnode attached to the 
 	 * 'from' vnode.  If it exists, we will want to update its name, because
@@ -6367,10 +6436,18 @@ skip_rm:
 		 * 4) update the vnode's vid
 		 */
 		vnode_update_identity (fcp->c_rsrc_vp, fvp, rsrc_path, len, 0, (VNODE_UPDATE_NAME | VNODE_UPDATE_CACHE));
+<<<<<<< HEAD
 		
 		/* Free the memory associated with the resource fork's name */
 		FREE_ZONE (rsrc_path, MAXPATHLEN, M_NAMEI);	
 	}
+=======
+
+		/* Free the memory associated with the resource fork's name */
+		FREE_ZONE (rsrc_path, MAXPATHLEN, M_NAMEI);	
+	}
+
+>>>>>>> origin/10.7
 out:
 	if (got_cookie) {
 		cat_postflight(hfsmp, &cookie, p);

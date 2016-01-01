@@ -623,6 +623,7 @@ SYSCTL_DECL(_user);
 #define KERN_KDGETENTROPY       16		/* Obsolescent */
 #define KERN_KDWRITETR		17
 #define KERN_KDWRITEMAP		18
+<<<<<<< HEAD
 #define KERN_KDENABLE_BG_TRACE	19
 #define KERN_KDDISABLE_BG_TRACE	20
 #define KERN_KDREADCURTHRMAP	21
@@ -633,6 +634,15 @@ SYSCTL_DECL(_user);
 #define KERN_KDSET_BG_TYPEFILTER   26
 #define KERN_KDWRITEMAP_V3	27
 #define KERN_KDWRITETR_V3	28
+=======
+
+
+/* KERN_PANICINFO types */
+#define	KERN_PANICINFO_MAXSIZE	1	/* quad: panic UI image size limit */
+#define	KERN_PANICINFO_IMAGE	2	/* panic UI in 8-bit kraw format */
+#define KERN_PANICINFO_TEST 	4	/* Allow the panic UI to be tested by root without causing a panic */
+#define KERN_PANICINFO_NOROOT_TEST	5	/* Allow the noroot UI to be tested by root */
+>>>>>>> origin/10.7
 
 #define CTL_KERN_NAMES { \
 	{ 0, 0 }, \

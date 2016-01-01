@@ -225,12 +225,15 @@
 #include <pexpert/pexpert.h>
 #include <machine/pal_routines.h>
 #include <console/video_console.h>
+<<<<<<< HEAD
 =======
 
 extern shared_region_mapping_t       system_shared_region;
 >>>>>>> origin/10.1
 
 <<<<<<< HEAD
+=======
+>>>>>>> origin/10.7
 
 =======
 >>>>>>> origin/10.6

@@ -192,11 +192,16 @@ void PE_init_iokit(void)
     /*
      * Initialize the spinning wheel (progress indicator).
      */
+<<<<<<< HEAD
     vc_progress_initialize(&default_progress, 
 			    default_progress_data1x,
 			    default_progress_data2x, 
 			    default_progress_data3x, 
 			    (unsigned char *) appleClut8);
+=======
+    vc_progress_initialize( &default_progress, default_progress_data1x, default_progress_data2x,
+                            (unsigned char *) appleClut8 );
+>>>>>>> origin/10.7
 
     StartIOKit( PE_state.deviceTreeHead, PE_state.bootArgs, gPEEFIRuntimeServices, NULL);
 }
@@ -217,6 +222,7 @@ void PE_init_platform(boolean_t vm_initialized, void * _args)
         PE_state.video.v_height	    = args->Video.v_height;
         PE_state.video.v_depth	    = args->Video.v_depth;
         PE_state.video.v_display    = args->Video.v_display;
+        PE_state.video.v_scale      = (kBootArgsFlagHiDPI & args->flags) ? 2 : 1;
         strlcpy(PE_state.video.v_pixelFormat, "PPPPPPPP",
 		sizeof(PE_state.video.v_pixelFormat));
 
@@ -346,12 +352,16 @@ boolean_t
 PE_reboot_on_panic(void)
 {
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.7
 	boot_args *args = (boot_args *)PE_state.bootArgs;
 
 	if (args->flags & kBootArgsFlagRebootOnPanic)
 		return TRUE;
 	else
 		return FALSE;
+<<<<<<< HEAD
 }
 
 /* rdar://problem/21244753 */
@@ -373,4 +383,6 @@ PE_i_can_has_debugger(uint32_t *debug_flags)
 =======
 	return FALSE;
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.7
 }

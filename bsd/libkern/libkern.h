@@ -228,6 +228,20 @@ extern void flush_dcache64(addr64_t, unsigned, int);
 static __inline__ unsigned int
 clz(unsigned int num)
 {
+<<<<<<< HEAD
+=======
+#if __i386__
+	unsigned int result;
+	__asm__ volatile(
+		"bsrl   %1, %0\n\t"
+		"cmovel %2, %0"
+		: "=r" (result)
+		: "rm" (num), "r" (63)
+	);
+	return 31 ^ result;
+
+#else
+>>>>>>> origin/10.7
 	return num?__builtin_clz(num):__builtin_clz(0);
 }
 

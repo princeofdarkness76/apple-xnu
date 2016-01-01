@@ -172,8 +172,11 @@
  * CR4
  */
 <<<<<<< HEAD
+<<<<<<< HEAD
 #define CR4_SEE		0x00008000	/* Secure Enclave Enable XXX */
 #define CR4_SMAP	0x00200000	/* Supervisor-Mode Access Protect */
+=======
+>>>>>>> origin/10.7
 #define CR4_SMEP	0x00100000	/* Supervisor-Mode Execute Protect */
 #define CR4_OSXSAVE	0x00040000	/* OS supports XSAVE */
 #define CR4_PCIDE	0x00020000	/* PCID Enable */
@@ -191,6 +194,7 @@
 #define	CR4_TSD		0x00000004	/* Time Stamp Disable */
 #define	CR4_PVI		0x00000002	/* Protected-mode Virtual Interrupts */
 #define	CR4_VME		0x00000001	/* Virtual-8086 Mode Extensions */
+<<<<<<< HEAD
 
 /*
  * XCR0 - XFEATURE_ENABLED_MASK (a.k.a. XFEM) register
@@ -225,6 +229,8 @@
 #define	CR4_PVI     0x00000002	/* Protected-mode Virtual Interrupts */
 #define	CR4_VME     0x00000001	/* Virtual-8086 Mode Extensions */
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.7
 
 /*
  * XCR0 - XFEATURE_ENABLED_MASK (a.k.a. XFEM) register

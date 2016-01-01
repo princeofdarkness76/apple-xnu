@@ -1821,10 +1821,13 @@ pf_normalize_ip6(struct mbuf **m0, int dir, struct pfi_kif *kif,
 	u_int16_t		 fragoff = 0;
 	u_int8_t		 proto;
 	int			 terminal;
+<<<<<<< HEAD
 	struct pf_frent		*frent;
 	struct pf_fragment	*pff = NULL;
 	int			 mff = 0, rh_cnt = 0;
 	u_int16_t		 fr_max;
+=======
+>>>>>>> origin/10.7
 	int			 asd = 0;
 	struct pf_ruleset	*ruleset = NULL;
 
@@ -2108,6 +2111,10 @@ pf_normalize_tcp(int dir, struct pfi_kif *kif, struct mbuf *m, int ipoff,
 	u_int8_t	 flags;
 	sa_family_t	 af = pd->af;
 	struct pf_ruleset *ruleset = NULL;
+<<<<<<< HEAD
+=======
+#ifndef NO_APPLE_EXTENSIONS
+>>>>>>> origin/10.7
 	union pf_state_xport sxport, dxport;
 
 	sxport.port = th->th_sport;

@@ -455,6 +455,10 @@ hibernate_kernel_entrypoint(uint32_t p1,
     uint64_t srcPhys;
     uint64_t imageReadPhys;
     uint64_t pageIndexPhys;
+<<<<<<< HEAD
+=======
+    uint32_t idx;
+>>>>>>> origin/10.7
     uint32_t * pageIndexSource;
     hibernate_page_list_t * map;
     uint32_t stage;
@@ -485,10 +489,13 @@ hibernate_kernel_entrypoint(uint32_t p1,
 
     headerPhys = ptoa_64(p1);
 
+    headerPhys = ptoa_64(p1);
+
     if ((kIOHibernateDebugRestoreLogs & gIOHibernateDebugFlags) && !debug_probe())
 	gIOHibernateDebugFlags &= ~kIOHibernateDebugRestoreLogs;
 
     debug_code(kIOHibernateRestoreCodeImageStart, headerPhys);
+<<<<<<< HEAD
 
 <<<<<<< HEAD
     memcpy(gIOHibernateCurrentHeader,
@@ -507,6 +514,13 @@ hibernate_kernel_entrypoint(uint32_t p1,
                 sizeof(hibernate_cryptwakevars_t));
 >>>>>>> origin/10.6
 
+=======
+
+    bcopy_internal((void *) pal_hib_map(IMAGE_AREA, headerPhys), 
+                   gIOHibernateCurrentHeader, 
+                   sizeof(IOHibernateImageHeader));
+
+>>>>>>> origin/10.7
     debug_code(kIOHibernateRestoreCodeSignature, gIOHibernateCurrentHeader->signature);
 
     mapPhys = headerPhys
@@ -697,6 +711,13 @@ hibernate_kernel_entrypoint(uint32_t p1,
 		copyPageList[copyPageIndex++] = bufferPage;
 		copyPageList[copyPageIndex++] = (compressedSize | (stage << 24));
 		copyPageList[0] = copyPageIndex;
+<<<<<<< HEAD
+=======
+
+		dst = (uint32_t *)pal_hib_map(DEST_COPY_AREA, ptoa_64(bufferPage));
+		for (idx = 0; idx < ((compressedSize + 3) >> 2); idx++)
+			dst[idx] = src[idx];
+>>>>>>> origin/10.7
 	    }
 	    srcPhys += ((compressedSize + 3) & ~3);
 	    src     += ((compressedSize + 3) >> 2);

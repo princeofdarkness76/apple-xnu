@@ -67,6 +67,18 @@ static	boolean_t	cpuid_dbg
 			kprintf(x);	\
 	} while (0)			\
 
+static	boolean_t	cpuid_dbg
+#if DEBUG
+				  = TRUE;
+#else
+				  = FALSE;
+#endif
+#define DBG(x...)			\
+	do {				\
+		if (cpuid_dbg)		\
+			kprintf(x);	\
+	} while (0)			\
+
 #define min(a,b) ((a) < (b) ? (a) : (b))
 #define quad(hi,lo)	(((uint64_t)(hi)) << 32 | (lo))
 
@@ -285,9 +297,15 @@ static void cpuid_fn(uint32_t selector, uint32_t *result)
 	} else {
 		do_cpuid(selector, result);
 	}
+	DBG("cpuid_fn(0x%08x) eax:0x%08x ebx:0x%08x ecx:0x%08x edx:0x%08x\n",
+		selector, result[0], result[1], result[2], result[3]);
 }
 #endif
 >>>>>>> origin/10.6
+
+static const char *cache_type_str[LCACHE_MAX] = {
+	"Lnone", "L1I", "L1D", "L2U", "L3U"
+};
 
 /* this function is Intel-specific */
 static void
@@ -352,10 +370,14 @@ cpuid_set_cache_info( i386_cpu_info_t * info_p )
 		reg[ecx] = index;	/* index starting at 0 */
 		cpuid(reg);
 <<<<<<< HEAD
+<<<<<<< HEAD
 		DBG("cpuid(4) index=%d eax=0x%x\n", index, reg[eax]);
 =======
 //kprintf("cpuid(4) index=%d eax=%p\n", index, reg[eax]);
 >>>>>>> origin/10.6
+=======
+		DBG("cpuid(4) index=%d eax=0x%x\n", index, reg[eax]);
+>>>>>>> origin/10.7
 		cache_type = bitfield32(reg[eax], 4, 0);
 		if (cache_type == 0)
 			break;		/* no more caches */
@@ -474,6 +496,9 @@ cpuid_set_cache_info( i386_cpu_info_t * info_p )
 		info_p->cache_linesize = linesizes[L1D];
 	else panic("no linesize");
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.7
 	DBG(" cache_linesize    : %d\n", info_p->cache_linesize);
 
 	/*
@@ -522,6 +547,7 @@ cpuid_set_cache_info( i386_cpu_info_t * info_p )
 		}
 	}
 	DBG("\n");
+<<<<<<< HEAD
 =======
 
 	/*
@@ -594,6 +620,8 @@ cpuid_set_cache_info( i386_cpu_info_t * info_p )
 		}
 	}
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.7
 }
 
 static void
@@ -743,7 +771,11 @@ cpuid_set_generic_info(i386_cpu_info_t *info_p)
 	DBG(" features            : 0x%016llx\n", info_p->cpuid_features);
 	DBG(" extfeatures         : 0x%016llx\n", info_p->cpuid_extfeatures);
 	DBG(" logical_per_package : %d\n", info_p->cpuid_logical_per_package);
+<<<<<<< HEAD
 	DBG(" microcode_version   : 0x%08x\n", info_p->cpuid_microcode_version);
+=======
+        DBG(" microcode_version   : 0x%08x\n", info_p->cpuid_microcode_version);
+>>>>>>> origin/10.7
 
 	/* Fold in the Invariant TSC feature bit, if present */
 	if (info_p->cpuid_max_ext >= 0x80000007) {
@@ -803,14 +835,20 @@ cpuid_set_generic_info(i386_cpu_info_t *info_p)
 		cmp->sub_Cstates  = reg[edx];
 		info_p->cpuid_mwait_leafp = cmp;
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.7
 
 		DBG(" Monitor/Mwait Leaf:\n");
 		DBG("  linesize_min : %d\n", cmp->linesize_min);
 		DBG("  linesize_max : %d\n", cmp->linesize_max);
 		DBG("  extensions   : %d\n", cmp->extensions);
 		DBG("  sub_Cstates  : 0x%08x\n", cmp->sub_Cstates);
+<<<<<<< HEAD
 =======
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.7
 	}
 
 	if (info_p->cpuid_max_basic >= 0x6) {
@@ -853,7 +891,22 @@ cpuid_set_generic_info(i386_cpu_info_t *info_p)
 		ctp->hardware_feedback	  = bitfield32(reg[ecx], 1, 1);
 		ctp->energy_policy	  = bitfield32(reg[ecx], 2, 2);
 		info_p->cpuid_thermal_leafp = ctp;
+<<<<<<< HEAD
 >>>>>>> origin/10.6
+=======
+
+		DBG(" Thermal/Power Leaf:\n");
+		DBG("  sensor               : %d\n", ctp->sensor);
+		DBG("  dynamic_acceleration : %d\n", ctp->dynamic_acceleration);
+		DBG("  invariant_APIC_timer : %d\n", ctp->invariant_APIC_timer);
+		DBG("  core_power_limits    : %d\n", ctp->core_power_limits);
+		DBG("  fine_grain_clock_mod : %d\n", ctp->fine_grain_clock_mod);
+		DBG("  package_thermal_intr : %d\n", ctp->package_thermal_intr);
+		DBG("  thresholds           : %d\n", ctp->thresholds);
+		DBG("  ACNT_MCNT            : %d\n", ctp->ACNT_MCNT);
+		DBG("  hardware_feedback    : %d\n", ctp->hardware_feedback);
+		DBG("  energy_policy        : %d\n", ctp->energy_policy);
+>>>>>>> origin/10.7
 	}
 
 	if (info_p->cpuid_max_basic >= 0xa) {
@@ -872,6 +925,9 @@ cpuid_set_generic_info(i386_cpu_info_t *info_p)
 		capp->fixed_width   = bitfield32(reg[edx], 12,  5);
 		info_p->cpuid_arch_perf_leafp = capp;
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.7
 
 		DBG(" Architectural Performance Monitoring Leaf:\n");
 		DBG("  version       : %d\n", capp->version);
@@ -881,6 +937,7 @@ cpuid_set_generic_info(i386_cpu_info_t *info_p)
 		DBG("  events        : %d\n", capp->events);
 		DBG("  fixed_number  : %d\n", capp->fixed_number);
 		DBG("  fixed_width   : %d\n", capp->fixed_width);
+<<<<<<< HEAD
 	}
 
 	if (info_p->cpuid_max_basic >= 0xd) {
@@ -935,6 +992,8 @@ cpuid_set_generic_info(i386_cpu_info_t *info_p)
 		DBG("  numerator     : 0x%x\n", reg[ebx]);
 		DBG("  denominator   : 0x%x\n", reg[eax]);
 =======
+=======
+>>>>>>> origin/10.7
 	}
 
 	if (info_p->cpuid_max_basic >= 0xd) {
@@ -944,7 +1003,27 @@ cpuid_set_generic_info(i386_cpu_info_t *info_p)
 		 */
 		cpuid_fn(0xd, info_p->cpuid_xsave_leaf.extended_state);
 		info_p->cpuid_xsave_leafp = xsp;
+<<<<<<< HEAD
 >>>>>>> origin/10.6
+=======
+
+		DBG(" XSAVE Leaf:\n");
+		DBG("  EAX           : 0x%x\n", xsp->extended_state[eax]);
+		DBG("  EBX           : 0x%x\n", xsp->extended_state[ebx]);
+		DBG("  ECX           : 0x%x\n", xsp->extended_state[ecx]);
+		DBG("  EDX           : 0x%x\n", xsp->extended_state[edx]);
+	}
+
+	if (info_p->cpuid_model == CPUID_MODEL_IVYBRIDGE) {
+		/*
+		 * XSAVE Features:
+		 */
+		cpuid_fn(0x7, reg);
+		info_p->cpuid_leaf7_features = reg[ebx];
+
+		DBG(" Feature Leaf7:\n");
+		DBG("  EBX           : 0x%x\n", reg[ebx]);
+>>>>>>> origin/10.7
 	}
 
 	return;
@@ -989,6 +1068,7 @@ cpuid_set_cpufamily(i386_cpu_info_t *info_p)
 			cpufamily = CPUFAMILY_INTEL_SANDYBRIDGE;
 			break;
 <<<<<<< HEAD
+<<<<<<< HEAD
 		case CPUID_MODEL_IVYBRIDGE:
 		case CPUID_MODEL_IVYBRIDGE_EP:
 			cpufamily = CPUFAMILY_INTEL_IVYBRIDGE;
@@ -1009,15 +1089,24 @@ cpuid_set_cpufamily(i386_cpu_info_t *info_p)
 			break;
 =======
 >>>>>>> origin/10.6
+=======
+		case CPUID_MODEL_IVYBRIDGE:
+			cpufamily = CPUFAMILY_INTEL_IVYBRIDGE;
+			break;
+>>>>>>> origin/10.7
 		}
 		break;
 	}
 
 	info_p->cpuid_cpufamily = cpufamily;
 <<<<<<< HEAD
+<<<<<<< HEAD
 	DBG("cpuid_set_cpufamily(%p) returning 0x%x\n", info_p, cpufamily);
 =======
 >>>>>>> origin/10.6
+=======
+	DBG("cpuid_set_cpufamily(%p) returning 0x%x\n", info_p, cpufamily);
+>>>>>>> origin/10.7
 	return cpufamily;
 }
 /*
@@ -1029,9 +1118,15 @@ cpuid_set_info(void)
 {
 	i386_cpu_info_t		*info_p = &cpuid_cpu_info;
 <<<<<<< HEAD
+<<<<<<< HEAD
 	boolean_t		enable_x86_64h = TRUE;
 =======
 	
+=======
+
+	PE_parse_boot_argn("-cpuid", &cpuid_dbg, sizeof(cpuid_dbg));
+
+>>>>>>> origin/10.7
 	bzero((void *)info_p, sizeof(cpuid_cpu_info));
 >>>>>>> origin/10.6
 
@@ -1090,8 +1185,12 @@ cpuid_set_info(void)
 		break;
 		}
 <<<<<<< HEAD
+<<<<<<< HEAD
 	default: {
 =======
+=======
+	case CPUFAMILY_INTEL_IVYBRIDGE:
+>>>>>>> origin/10.7
 	case CPUFAMILY_INTEL_SANDYBRIDGE:
 	case CPUFAMILY_INTEL_NEHALEM: {
 >>>>>>> origin/10.6
@@ -1123,6 +1222,9 @@ cpuid_set_info(void)
 =======
 >>>>>>> origin/10.6
 	}
+	DBG("cpuid_set_info():\n");
+	DBG("  core_count   : %d\n", info_p->core_count);
+	DBG("  thread_count : %d\n", info_p->thread_count);
 
 	cpuid_cpu_info.cpuid_model_string = ""; /* deprecated */
 >>>>>>> origin/10.5
@@ -1199,6 +1301,7 @@ static struct table {
 	{CPUID_FEATURE_AVX1_0,    "AVX1.0"},
 	{CPUID_FEATURE_RDRAND,    "RDRAND"},
 	{CPUID_FEATURE_F16C,      "F16C"},
+<<<<<<< HEAD
 =======
 	{CPUID_FEATURE_FPU,   "FPU",},
 	{CPUID_FEATURE_VME,   "VME",},
@@ -1258,6 +1361,8 @@ static struct table {
 	{CPUID_FEATURE_TSCTMR,    "TSCTMR"},
 	{CPUID_FEATURE_AVX1_0,    "AVX1.0"},
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.7
 	{0, 0}
 },
 extfeature_map[] = {
@@ -1274,6 +1379,7 @@ extfeature_map[] = {
 	{CPUID_EXTFEATURE_RDTSCP,  "RDTSCP"},
 	{CPUID_EXTFEATURE_TSCI,    "TSCI"},
 	{0, 0}
+<<<<<<< HEAD
 
 <<<<<<< HEAD
 },
@@ -1302,6 +1408,39 @@ leaf7_feature_map[] = {
 	{0, 0}
 };
 =======
+=======
+
+},
+leaf7_feature_map[] = {
+	{CPUID_LEAF7_FEATURE_RDWRFSGS, "RDWRFSGS"},
+	{CPUID_LEAF7_FEATURE_SMEP,     "SMEP"},
+	{CPUID_LEAF7_FEATURE_ENFSTRG,  "ENFSTRG"},
+	{0, 0}
+};
+
+static char *
+cpuid_get_names(struct table *map, uint64_t bits, char *buf, unsigned buf_len)
+{
+	size_t	len = 0;
+	char	*p = buf;
+	int	i;
+
+	for (i = 0; map[i].mask != 0; i++) {
+		if ((bits & map[i].mask) == 0)
+			continue;
+		if (len && ((size_t) (p - buf) < (buf_len - 1)))
+			*p++ = ' ';
+		len = min(strlen(map[i].name), (size_t)((buf_len-1)-(p-buf)));
+		if (len == 0)
+			break;
+		bcopy(map[i].name, p, len);
+		p += len;
+	}
+	*p = '\0';
+	return buf;
+}
+
+>>>>>>> origin/10.7
 i386_cpu_info_t	*
 cpuid_info(void)
 {
@@ -1317,6 +1456,7 @@ cpuid_info(void)
 static char *
 cpuid_get_names(struct table *map, uint64_t bits, char *buf, unsigned buf_len)
 {
+<<<<<<< HEAD
 	size_t	len = 0;
 	char	*p = buf;
 	int	i;
@@ -1341,6 +1481,9 @@ cpuid_get_names(struct table *map, uint64_t bits, char *buf, unsigned buf_len)
 	}
 	*p = '\0';
 	return buf;
+=======
+	return cpuid_get_names(feature_map, features, buf, buf_len); 
+>>>>>>> origin/10.7
 }
 
 i386_cpu_info_t	*
@@ -1366,6 +1509,7 @@ char *
 cpuid_get_extfeature_names(uint64_t extfeatures, char *buf, unsigned buf_len)
 {
 	return cpuid_get_names(extfeature_map, extfeatures, buf, buf_len); 
+<<<<<<< HEAD
 =======
 	size_t	len = 0;
 	char	*p = buf;
@@ -1385,6 +1529,8 @@ cpuid_get_extfeature_names(uint64_t extfeatures, char *buf, unsigned buf_len)
 	*p = '\0';
 	return buf;
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.7
 }
 
 char *
@@ -1397,7 +1543,11 @@ void
 cpuid_feature_display(
 	const char	*header)
 {
+<<<<<<< HEAD
        char    buf[320];
+=======
+	char	buf[256];
+>>>>>>> origin/10.7
 
 	kprintf("%s: %s", header,
 		 cpuid_get_feature_names(cpuid_features(), buf, sizeof(buf)));
@@ -1495,6 +1645,10 @@ cpuid_leaf7_features(void)
 {
 	return cpuid_info()->cpuid_leaf7_features;
 }
+<<<<<<< HEAD
+=======
+ 
+>>>>>>> origin/10.7
 
 static i386_vmm_info_t	*_cpuid_vmm_infop = NULL;
 static i386_vmm_info_t	_cpuid_vmm_info;

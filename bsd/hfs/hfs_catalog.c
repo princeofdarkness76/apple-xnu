@@ -1237,6 +1237,7 @@ cat_create(struct hfsmount *hfsmp, cnid_t new_fileid, struct cat_desc *descp, st
 		btdata.itemSize = datalen;
 		btdata.itemCount = 1;
 		
+<<<<<<< HEAD
 		/* Caller asserts the following:
 		 *	1) this CNID is not in use by any orphaned EAs 
 		 *  2) There are no lingering cnodes (removed on-disk but still in-core) with this CNID
@@ -1246,6 +1247,60 @@ cat_create(struct hfsmount *hfsmp, cnid_t new_fileid, struct cat_desc *descp, st
 		result = BTInsertRecord(fcb, &bto->iterator, &btdata, datalen);
 		if (result) {
 			goto exit;
+=======
+		for (;;) {
+			// this call requires the attribute file lock to be held
+			result = file_attribute_exist(hfsmp, nextCNID);
+			if (result == EEXIST) {
+				// that cnid has orphaned attributes so just skip it.
+				if (++nextCNID < kHFSFirstUserCatalogNodeID) {
+					nextCNID = kHFSFirstUserCatalogNodeID;
+				}
+				continue;
+			}
+			if (result) goto exit;
+			
+			buildthreadkey(nextCNID, std_hfs, (CatalogKey *) &bto->iterator.key);
+
+			/*
+			 * If the CNID wraparound bit is set, then we need to validate if there
+			 * is a cnode in the hash already with this ID (even if it no longer exists
+			 * on disk).  If so, then just skip this ID and move on to the next one. 
+			 */
+			if (!std_hfs && (hfsmp->vcbAtrb & kHFSCatalogNodeIDsReusedMask)) {
+				if (hfs_chash_snoop (hfsmp, nextCNID, 1, NULL, NULL) == 0) {
+					/* It was found in the cnode hash!*/
+					result = btExists;
+				}	
+			}
+
+			if (result == 0) {
+				result = BTInsertRecord(fcb, &bto->iterator, &btdata, datalen);
+			}
+
+			if ((result == btExists) && !std_hfs && (hfsmp->vcbAtrb & kHFSCatalogNodeIDsReusedMask)) {
+				/*
+				 * Allow CNIDs on HFS Plus volumes to wrap around
+				 */
+				if (++nextCNID < kHFSFirstUserCatalogNodeID) {
+					nextCNID = kHFSFirstUserCatalogNodeID;
+				}
+				continue;
+			}
+			break;
+		}
+		if (result) goto exit;
+	}
+	
+	/*
+	 * CNID is now established. If we have wrapped then
+	 * update the vcbNxtCNID.
+	 */
+	if ((hfsmp->vcbAtrb & kHFSCatalogNodeIDsReusedMask)) {
+		hfsmp->vcbNxtCNID = nextCNID + 1;
+		if (hfsmp->vcbNxtCNID < kHFSFirstUserCatalogNodeID) {
+			hfsmp->vcbNxtCNID = kHFSFirstUserCatalogNodeID;
+>>>>>>> origin/10.7
 		}
 	}
 
@@ -2568,10 +2623,49 @@ cat_createlink(struct hfsmount *hfsmp, struct cat_desc *descp, struct cat_attr *
 	btdata.bufferAddress = &bto->data;
 	btdata.itemSize = datalen;
 	btdata.itemCount = 1;
+<<<<<<< HEAD
 
 	buildthreadkey(nextCNID, 0, (CatalogKey *) &bto->iterator.key);
 	result = BTInsertRecord(fcb, &bto->iterator, &btdata, datalen);
 	if (result) {
+=======
+	
+	for (;;) {
+		buildthreadkey(nextCNID, 0, (CatalogKey *) &bto->iterator.key);
+	
+		/*
+		 * If the CNID wraparound bit is set, then we need to validate if there
+		 * is a cnode in the hash already with this ID (even if it no longer exists
+		 * on disk).  If so, then just skip this ID and move on to the next one. 
+		 */
+		if (!std_hfs && (hfsmp->vcbAtrb & kHFSCatalogNodeIDsReusedMask)) {
+			/* Verify that the CNID does not already exist in the cnode hash... */
+			if (hfs_chash_snoop (hfsmp, nextCNID, 1, NULL, NULL) == 0) {
+				/* It was found in the cnode hash!*/
+				result = btExists;
+			}	
+		}
+
+		if (result == 0) {
+			result = BTInsertRecord(fcb, &bto->iterator, &btdata, datalen);
+		}
+
+		if ((result == btExists) && (hfsmp->vcbAtrb & kHFSCatalogNodeIDsReusedMask)) {
+			/*
+			 * Allow CNIDs on HFS Plus volumes to wrap around
+			 */
+			if (++nextCNID < kHFSFirstUserCatalogNodeID) {
+				nextCNID = kHFSFirstUserCatalogNodeID;
+			}
+			continue;
+		}
+		if (result == 0) {
+			thread_inserted = 1;
+		}
+		break;
+	}
+	if (result)
+>>>>>>> origin/10.7
 		goto exit;
 	}
 	thread_inserted = 1;

@@ -3435,6 +3435,7 @@ extern int vm_map_copy_overwrite_aligned_src_large;
 SYSCTL_INT(_vm, OID_AUTO, vm_copy_src_not_internal, CTLFLAG_RD | CTLFLAG_LOCKED, &vm_map_copy_overwrite_aligned_src_not_internal, 0, "");
 SYSCTL_INT(_vm, OID_AUTO, vm_copy_src_not_symmetric, CTLFLAG_RD | CTLFLAG_LOCKED, &vm_map_copy_overwrite_aligned_src_not_symmetric, 0, "");
 SYSCTL_INT(_vm, OID_AUTO, vm_copy_src_large, CTLFLAG_RD | CTLFLAG_LOCKED, &vm_map_copy_overwrite_aligned_src_large, 0, "");
+<<<<<<< HEAD
 
 
 extern uint32_t	vm_page_external_count;
@@ -3500,6 +3501,8 @@ SYSCTL_INT(_vm, OID_AUTO, phantom_cache_thrashing_threshold_ssd, CTLFLAG_RW | CT
 SYSCTL_UINT(_vm, OID_AUTO, vm_page_creation_throttled_hard,
 		CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED,
 		&vm_page_creation_throttled_hard, 0, "");
+=======
+>>>>>>> origin/10.7
 
 SYSCTL_UINT(_vm, OID_AUTO, vm_page_creation_throttled_soft,
 		CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED,

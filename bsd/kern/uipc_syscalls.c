@@ -2750,8 +2750,13 @@ sockargs(struct mbuf **mp, user_addr_t data, int buflen, int type)
 	int error;
 
 	size_t alloc_buflen = (size_t)buflen;
+<<<<<<< HEAD
 
 	if (alloc_buflen > INT_MAX/2)
+=======
+	
+	if(alloc_buflen > INT_MAX/2) 
+>>>>>>> origin/10.7
 		return (EINVAL);
 #ifdef __LP64__
 	/*
@@ -2764,7 +2769,11 @@ sockargs(struct mbuf **mp, user_addr_t data, int buflen, int type)
 #endif
 	if (alloc_buflen > MLEN) {
 		if (type == MT_SONAME && alloc_buflen <= 112)
+<<<<<<< HEAD
 			alloc_buflen = MLEN;	/* unix domain compat. hack */
+=======
+			alloc_buflen = MLEN;		/* unix domain compat. hack */
+>>>>>>> origin/10.7
 		else if (alloc_buflen > MCLBYTES)
 			return (EINVAL);
 	}

@@ -7474,6 +7474,35 @@ REDISCOVER_ENTRY:
 
 		assert(entry->wired_count == 0);
 
+<<<<<<< HEAD
+=======
+			return KERN_SUCCESS;
+		}
+
+		if (entry->is_sub_map) {
+			vm_map_t	submap;
+
+			submap = entry->object.sub_map;
+			local_start = entry->vme_start;
+			local_offset = entry->offset;
+
+			vm_map_reference(submap);
+			vm_map_unlock_read(map);
+
+			ret = vm_map_create_upl(submap, 
+						local_offset + (offset - local_start), 
+						upl_size, upl, page_list, count, flags);
+			vm_map_deallocate(submap);
+
+			return ret;
+		}
+
+	        if (entry->object.vm_object == VM_OBJECT_NULL || !entry->object.vm_object->phys_contiguous) {
+        		if ((*upl_size/PAGE_SIZE) > MAX_UPL_SIZE)
+               			*upl_size = MAX_UPL_SIZE * PAGE_SIZE;
+		}
+
+>>>>>>> origin/10.7
 		/*
 		 * Lock the VM object and re-check its status: if it's mapped
 		 * in another address space, we could still be racing with
@@ -7490,7 +7519,79 @@ REDISCOVER_ENTRY:
 			       MEMORY_OBJECT_COPY_SYMMETRIC);
 			entry->needs_copy = TRUE;
 		}
+<<<<<<< HEAD
 		vm_object_unlock(local_object);
+=======
+		if (!(caller_flags & UPL_COPYOUT_FROM)) {
+			if (!(entry->protection & VM_PROT_WRITE)) {
+				vm_map_unlock_read(map);
+				return KERN_PROTECTION_FAILURE;
+			}
+
+#if !CONFIG_EMBEDDED
+			local_object = entry->object.vm_object;
+			if (vm_map_entry_should_cow_for_true_share(entry) &&
+			    local_object->vo_size > *upl_size &&
+			    *upl_size != 0) {
+				vm_prot_t	prot;
+
+				/*
+				 * Set up the targeted range for copy-on-write to avoid
+				 * applying true_share/copy_delay to the entire object.
+				 */
+
+				if (vm_map_lock_read_to_write(map)) {
+					goto REDISCOVER_ENTRY;
+				}
+
+				vm_map_clip_start(map, entry, vm_map_trunc_page(offset));
+				vm_map_clip_end(map, entry, vm_map_round_page(offset + *upl_size));
+				prot = entry->protection & ~VM_PROT_WRITE;
+				if (override_nx(map, entry->alias) && prot)
+					prot |= VM_PROT_EXECUTE;
+				vm_object_pmap_protect(local_object,
+						       entry->offset,
+						       entry->vme_end - entry->vme_start,
+						       ((entry->is_shared || map->mapped)
+							? PMAP_NULL
+							: map->pmap),
+						       entry->vme_start,
+						       prot);
+				entry->needs_copy = TRUE;
+
+				vm_map_lock_write_to_read(map);
+			}
+#endif /* !CONFIG_EMBEDDED */
+
+			if (entry->needs_copy)  {
+				/*
+				 * Honor copy-on-write for COPY_SYMMETRIC
+				 * strategy.
+				 */
+				vm_map_t		local_map;
+				vm_object_t		object;
+				vm_object_offset_t	new_offset;
+				vm_prot_t		prot;
+				boolean_t		wired;
+				vm_map_version_t	version;
+				vm_map_t		real_map;
+
+				local_map = map;
+
+				if (vm_map_lookup_locked(&local_map,
+							 offset, VM_PROT_WRITE,
+							 OBJECT_LOCK_EXCLUSIVE,
+							 &version, &object,
+							 &new_offset, &prot, &wired,
+							 NULL,
+							 &real_map) != KERN_SUCCESS) {
+				        vm_map_unlock_read(local_map);
+					return KERN_FAILURE;
+				}
+				if (real_map != map)
+					vm_map_unlock(real_map);
+				vm_map_unlock_read(local_map);
+>>>>>>> origin/10.7
 
 		vm_map_lock_write_to_read(map);
 	}
@@ -7534,9 +7635,17 @@ REDISCOVER_ENTRY:
 			vm_map_unlock_read(local_map);
 			return KERN_FAILURE;
 		}
+<<<<<<< HEAD
 		if (real_map != map)
 			vm_map_unlock(real_map);
 		vm_map_unlock_read(local_map);
+=======
+		if (sync_cow_data) {
+			if (entry->object.vm_object->shadow || entry->object.vm_object->copy) {
+				local_object = entry->object.vm_object;
+				local_start = entry->vme_start;
+				local_offset = entry->offset;
+>>>>>>> origin/10.7
 
 		vm_object_unlock(object);
 
@@ -8377,6 +8486,7 @@ process_upl_to_commit:
 				dwp->dw_mask |= (DW_clear_busy | DW_PAGE_WAKEUP);
 			}
 <<<<<<< HEAD
+<<<<<<< HEAD
 			if (fast_path_possible) {
 				assert(m->object->purgable != VM_PURGABLE_EMPTY);
 				assert(m->object->purgable != VM_PURGABLE_VOLATILE);
@@ -8386,6 +8496,128 @@ process_upl_to_commit:
 
 					m->absent = FALSE;
 					dwp->dw_mask |= (DW_clear_busy | DW_PAGE_WAKEUP);
+=======
+			if (m->absent) {
+				if (flags & UPL_COMMIT_FREE_ABSENT)
+					dwp->dw_mask |= DW_vm_page_free;
+				else {
+					m->absent = FALSE;
+					dwp->dw_mask |= (DW_clear_busy | DW_PAGE_WAKEUP);
+
+					if ( !(dwp->dw_mask & DW_vm_page_deactivate_internal))
+						dwp->dw_mask |= DW_vm_page_activate;
+				}
+			} else
+				dwp->dw_mask |= DW_vm_page_unwire;
+
+			goto commit_next_page;
+		}
+		/*
+		 * make sure to clear the hardware
+		 * modify or reference bits before
+		 * releasing the BUSY bit on this page
+		 * otherwise we risk losing a legitimate
+		 * change of state
+		 */
+		if (flags & UPL_COMMIT_CLEAR_DIRTY) {
+			m->dirty = FALSE;
+
+			if (! (flags & UPL_COMMIT_CS_VALIDATED) &&
+			    m->cs_validated && !m->cs_tainted) {
+				/*
+				 * CODE SIGNING:
+				 * This page is no longer dirty
+				 * but could have been modified,
+				 * so it will need to be
+				 * re-validated.
+				 */
+				m->cs_validated = FALSE;
+#if DEVELOPMENT || DEBUG
+				vm_cs_validated_resets++;
+#endif
+				pmap_disconnect(m->phys_page);
+			}
+			clear_refmod |= VM_MEM_MODIFIED;
+		}
+		if (page_list) {
+			upl_page_info_t *p;
+
+			p = &(page_list[entry]);
+
+			if (p->phys_addr && p->pageout && !m->pageout) {
+				m->busy = TRUE;
+				m->pageout = TRUE;
+
+				dwp->dw_mask |= DW_vm_page_wire;
+
+			} else if (p->phys_addr &&
+				   !p->pageout && m->pageout &&
+				   !m->dump_cleaning) {
+				m->pageout = FALSE;
+				m->absent = FALSE;
+				m->overwriting = FALSE;
+
+				dwp->dw_mask |= (DW_vm_page_unwire | DW_clear_busy | DW_PAGE_WAKEUP);
+			}
+			page_list[entry].phys_addr = 0;
+		}
+		m->dump_cleaning = FALSE;
+
+		if (m->laundry)
+			dwp->dw_mask |= DW_vm_pageout_throttle_up;
+
+		if (m->pageout) {
+			m->cleaning = FALSE;
+			m->encrypted_cleaning = FALSE;
+			m->pageout = FALSE;
+#if MACH_CLUSTER_STATS
+			if (m->wanted) vm_pageout_target_collisions++;
+#endif
+			m->dirty = FALSE;
+
+			if (! (flags & UPL_COMMIT_CS_VALIDATED) &&
+			    m->cs_validated && !m->cs_tainted) {
+				/*
+				 * CODE SIGNING:
+				 * This page is no longer dirty
+				 * but could have been modified,
+				 * so it will need to be
+				 * re-validated.
+				 */
+				m->cs_validated = FALSE;
+#if DEVELOPMENT || DEBUG
+				vm_cs_validated_resets++;
+#endif
+				pmap_disconnect(m->phys_page);
+			}
+
+			if ((flags & UPL_COMMIT_SET_DIRTY) ||
+			    (m->pmapped && (pmap_disconnect(m->phys_page) & VM_MEM_MODIFIED)))
+				m->dirty = TRUE;
+
+			if (m->dirty) {
+				/*
+				 * page was re-dirtied after we started
+				 * the pageout... reactivate it since 
+				 * we don't know whether the on-disk
+				 * copy matches what is now in memory
+				 */
+				dwp->dw_mask |= (DW_vm_page_unwire | DW_clear_busy | DW_PAGE_WAKEUP);
+
+				if (upl->flags & UPL_PAGEOUT) {
+					CLUSTER_STAT(vm_pageout_target_page_dirtied++;)
+					VM_STAT_INCR(reactivations);
+					DTRACE_VM2(pgrec, int, 1, (uint64_t *), NULL);
+				}
+			} else {
+				/*
+				 * page has been successfully cleaned
+				 * go ahead and free it for other use
+				 */
+
+				if (m->object->internal) {
+					DTRACE_VM2(anonpgout, int, 1, (uint64_t *), NULL);
+>>>>>>> origin/10.7
 				} else {
 					if (m->wire_count == 0)
 						panic("wire_count == 0, m = %p, obj = %p\n", m, shadow_object);

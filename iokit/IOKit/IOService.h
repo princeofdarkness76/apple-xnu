@@ -1839,12 +1839,16 @@ public:
     IOReturn quiescePowerTree( void * target, IOPMCompletionAction action, void * param );
     uint32_t getPowerStateForClient( const OSSymbol * client );
     static const char * getIOMessageString( uint32_t msg );
+<<<<<<< HEAD
     static void setAdvisoryTickleEnable( bool enable );
     void reset_watchdog_timer( void );
     void start_watchdog_timer ( void );
     bool stop_watchdog_timer ( void );
     IOReturn registerInterestForNotifer( IONotifier *notify, const OSSymbol * typeOfInterest,
                   IOServiceInterestHandler handler, void * target, void * ref );
+=======
+    IOReturn setIgnoreIdleTimer( bool ignore );
+>>>>>>> origin/10.7
 
 #ifdef __LP64__
     static IOWorkLoop * getPMworkloop( void );

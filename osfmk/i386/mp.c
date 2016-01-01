@@ -197,10 +197,14 @@ volatile	uint64_t	debugger_entry_time;
 volatile	uint64_t	debugger_exit_time;
 #if MACH_KDP
 <<<<<<< HEAD
+<<<<<<< HEAD
 #include <kdp/kdp.h>
 =======
 
 >>>>>>> origin/10.6
+=======
+#include <kdp/kdp.h>
+>>>>>>> origin/10.7
 extern int kdp_snapshot;
 static struct _kdp_xcpu_call_func {
 	kdp_x86_xcpu_func_t func;
@@ -917,12 +921,13 @@ NMIInterruptHandler(x86_saved_state_t *regs)
 			goto NMExit;
 
 	if (spinlock_timed_out) {
-		char pstr[160];
+		char pstr[192];
 		snprintf(&pstr[0], sizeof(pstr), "Panic(CPU %d): NMIPI for spinlock acquisition timeout, spinlock: %p, spinlock owner: %p, current_thread: %p, spinlock_owner_cpu: 0x%x\n", cpu_number(), spinlock_timed_out, (void *) spinlock_timed_out->interlock.lock_data, current_thread(), spinlock_owner_cpu);
 		panic_i386_backtrace(stackptr, 64, &pstr[0], TRUE, regs);
 		
 	} else if (pmap_tlb_flush_timeout == TRUE) {
 		char pstr[128];
+<<<<<<< HEAD
 <<<<<<< HEAD
 		snprintf(&pstr[0], sizeof(pstr), "Panic(CPU %d): Unresponsive processor\n", cpu_number());
 		panic_i386_backtrace(stackptr, 10, &pstr[0], TRUE, regs);
@@ -938,6 +943,10 @@ NMIInterruptHandler(x86_saved_state_t *regs)
 =======
 		snprintf(&pstr[0], sizeof(pstr), "Panic(CPU %d): Unresponsive processor, TLB state:%d\n", cpu_number(), current_cpu_datap()->cpu_tlb_invalid);
 		panic_i386_backtrace(stackptr, 64, &pstr[0], TRUE, regs);
+=======
+		snprintf(&pstr[0], sizeof(pstr), "Panic(CPU %d): Unresponsive processor (this CPU did not acknowledge interrupts) TLB state:0x%x\n", cpu_number(), current_cpu_datap()->cpu_tlb_invalid);
+		panic_i386_backtrace(stackptr, 48, &pstr[0], TRUE, regs);
+>>>>>>> origin/10.7
 	}
 
 #if MACH_KDP
@@ -2053,6 +2062,9 @@ mp_kdp_enter(void)
 	mp_kdp_state = ml_set_interrupts_enabled(FALSE);
 	my_cpu = cpu_number();
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.7
 
 	if (my_cpu == (unsigned) debugger_cpu) {
 		kprintf("\n\nRECURSIVE DEBUGGER ENTRY DETECTED\n\n");

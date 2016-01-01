@@ -311,6 +311,20 @@ int	lowpri_throttle_enabled = 1;
 static void throttle_info_update_internal(struct _throttle_io_info_t *info, uthread_t ut, int flags, boolean_t isssd);
 static int throttle_get_thread_throttle_level(uthread_t ut);
 
+struct _throttle_io_info_t {
+	struct timeval	last_normal_IO_timestamp;
+	struct timeval	last_IO_timestamp;
+	SInt32 numthreads_throttling;
+	SInt32 refcnt;
+	SInt32 alloc;
+};
+
+struct _throttle_io_info_t _throttle_io_info[LOWPRI_MAX_NUM_DEV];
+
+static void throttle_info_update_internal(void *throttle_info, int flags, boolean_t isssd);
+
+
+
 /*
  * Trivial lookup routine that always fails.
  */
@@ -419,9 +433,14 @@ spec_open(struct vnop_open_args *ap)
 			uint32_t devbsdunit = 0;
 
 			if (VNOP_IOCTL(vp, DKIOCGETTHROTTLEMASK, (caddr_t)&throttle_mask, 0, NULL) == 0) {
+<<<<<<< HEAD
 				
 				if (throttle_mask != 0 &&
 				    VNOP_IOCTL(vp, DKIOCISSOLIDSTATE, (caddr_t)&isssd, 0, ap->a_context) == 0) {
+=======
+			
+				if (VNOP_IOCTL(vp, DKIOCISSOLIDSTATE, (caddr_t)&isssd, 0, ap->a_context) == 0) {
+>>>>>>> origin/10.7
 					/*
 					 * as a reasonable approximation, only use the lowest bit of the mask
 					 * to generate a disk unit number
@@ -547,8 +566,15 @@ spec_read(struct vnop_read_args *ap)
 			struct _throttle_io_info_t *throttle_info;
 
 			throttle_info = &_throttle_io_info[vp->v_un.vu_specinfo->si_devbsdunit];
+<<<<<<< HEAD
 			throttle_info_update_internal(throttle_info, NULL, 0, vp->v_un.vu_specinfo->si_isssd);
                 }
+=======
+
+			throttle_info_update_internal(throttle_info, 0, vp->v_un.vu_specinfo->si_isssd);
+                }
+
+>>>>>>> origin/10.7
 		error = (*cdevsw[major(vp->v_rdev)].d_read)
 			(vp->v_rdev, uio, ap->a_ioflag);
 
@@ -640,10 +666,18 @@ spec_write(struct vnop_write_args *ap)
 
 			throttle_info = &_throttle_io_info[vp->v_un.vu_specinfo->si_devbsdunit];
 
+<<<<<<< HEAD
 			throttle_info_update_internal(throttle_info, NULL, 0, vp->v_un.vu_specinfo->si_isssd);
 
 			microuptime(&throttle_info->throttle_last_write_timestamp);
                 }
+=======
+			throttle_info_update_internal(throttle_info, 0, vp->v_un.vu_specinfo->si_isssd);
+
+			microuptime(&throttle_info->last_IO_timestamp);
+                }
+
+>>>>>>> origin/10.7
 		error = (*cdevsw[major(vp->v_rdev)].d_write)
 			(vp->v_rdev, uio, ap->a_ioflag);
 
@@ -1197,6 +1231,25 @@ spec_fsync(struct vnop_fsync_args *ap)
  */
 void throttle_init(void);
 
+<<<<<<< HEAD
+=======
+// the low priority process may wait for at most LOWPRI_MAX_DELAY millisecond
+#define LOWPRI_INITIAL_WINDOW_MSECS 100
+#define LOWPRI_WINDOW_MSECS_INC	50
+#define LOWPRI_MAX_WINDOW_MSECS 200
+#define LOWPRI_MAX_WAITING_MSECS 200
+
+#if CONFIG_EMBEDDED
+#define LOWPRI_SLEEP_INTERVAL 5
+#else
+#define LOWPRI_SLEEP_INTERVAL 2
+#endif
+
+int 	lowpri_IO_initial_window_msecs  = LOWPRI_INITIAL_WINDOW_MSECS;
+int 	lowpri_IO_window_msecs_inc  = LOWPRI_WINDOW_MSECS_INC;
+int 	lowpri_max_window_msecs  = LOWPRI_MAX_WINDOW_MSECS;
+int     lowpri_max_waiting_msecs = LOWPRI_MAX_WAITING_MSECS;
+>>>>>>> origin/10.7
 
 #if 0 
 #define DEBUG_ALLOC_THROTTLE_INFO(format, debug_info, args...)	\
@@ -2503,7 +2556,15 @@ spec_strategy(struct vnop_strategy_args *ap)
 			
 	SET_BUFATTR_IO_TIER(bap, io_tier);
 
+<<<<<<< HEAD
 	if (passive) {
+=======
+	if (policy == IOPOL_THROTTLE) {
+		bp->b_flags |= B_THROTTLED_IO;
+		bp->b_attr.ba_flags |= BA_THROTTLED_IO;
+		bp->b_flags &= ~B_PASSIVE;
+	} else if (policy == IOPOL_PASSIVE)
+>>>>>>> origin/10.7
 		bp->b_flags |= B_PASSIVE;
 		bap->ba_flags |= BA_PASSIVE;
 	}

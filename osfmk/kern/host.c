@@ -742,6 +742,7 @@ get_sched_statistics(struct _processor_statistics_np * out, uint32_t * count)
 
 	processor = processor_list;
 	while (processor) {
+<<<<<<< HEAD
 		struct processor_sched_statistics * stats = &processor->processor_data.sched_stats;
 
 		out->ps_cpuid = processor->cpu_id;
@@ -756,6 +757,22 @@ get_sched_statistics(struct _processor_statistics_np * out, uint32_t * count)
 		out->ps_runq_count_sum = SCHED(processor_runq_stats_count_sum)(processor);
 		out->ps_idle_transitions = stats->idle_transitions;
 		out->ps_quantum_timer_expirations = stats->quantum_timer_expirations;
+=======
+		struct processor_sched_statistics *stats = &processor->processor_data.sched_stats;
+
+		out->ps_cpuid 			= processor->cpu_id;
+		out->ps_csw_count 		= stats->csw_count;
+		out->ps_preempt_count 		= stats->preempt_count;
+		out->ps_preempted_rt_count 	= stats->preempted_rt_count;
+		out->ps_preempted_by_rt_count 	= stats->preempted_by_rt_count;
+		out->ps_rt_sched_count		= stats->rt_sched_count;
+		out->ps_interrupt_count 	= stats->interrupt_count;
+		out->ps_ipi_count 		= stats->ipi_count;
+		out->ps_timer_pop_count 	= stats->timer_pop_count;
+		out->ps_runq_count_sum 		= SCHED(processor_runq_stats_count_sum)(processor);
+		out->ps_idle_transitions	= stats->idle_transitions;
+		out->ps_quantum_timer_expirations	= stats->quantum_timer_expirations;
+>>>>>>> origin/10.7
 
 		out++;
 		processor = processor->processor_list;

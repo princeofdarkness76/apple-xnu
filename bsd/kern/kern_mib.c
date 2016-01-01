@@ -648,6 +648,7 @@ int sse4_2_flag = -1;
 int x86_64_flag = -1;
 int supplementalsse3_flag = -1;
 int aes_flag = -1;
+<<<<<<< HEAD
 
 SYSCTL_INT(_hw_optional, OID_AUTO, mmx, CTLFLAG_RD | CTLFLAG_KERN, &mmx_flag, 0, "");
 SYSCTL_INT(_hw_optional, OID_AUTO, sse, CTLFLAG_RD | CTLFLAG_KERN, &sse_flag, 0, "");
@@ -661,6 +662,29 @@ SYSCTL_INT(_hw_optional, OID_AUTO, sse4_2, CTLFLAG_RD | CTLFLAG_KERN, &sse4_2_fl
 SYSCTL_INT(_hw_optional, OID_AUTO, x86_64, CTLFLAG_RD | CTLFLAG_KERN, &x86_64_flag, 0, "");
 SYSCTL_INT(_hw_optional, OID_AUTO, aes, CTLFLAG_RD | CTLFLAG_KERN, &aes_flag, 0, "");
 #endif /* __ppc__ */
+=======
+int avx1_0_flag = -1;
+int rdrand_flag = -1;
+int f16c_flag = -1;
+int enfstrg_flag = -1;
+
+SYSCTL_INT(_hw_optional, OID_AUTO, mmx, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &mmx_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, sse, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &sse_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, sse2, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &sse2_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, sse3, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &sse3_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, supplementalsse3, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &supplementalsse3_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, sse4_1, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &sse4_1_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, sse4_2, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &sse4_2_flag, 0, "");
+/* "x86_64" is actually a preprocessor symbol on the x86_64 kernel, so we have to hack this */
+#undef x86_64
+SYSCTL_INT(_hw_optional, OID_AUTO, x86_64, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &x86_64_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, aes, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &aes_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, avx1_0, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &avx1_0_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, rdrand, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &rdrand_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, f16c, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &f16c_flag, 0, "");
+SYSCTL_INT(_hw_optional, OID_AUTO, enfstrg, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &enfstrg_flag, 0, "");
+#endif /* !__i386__ && !__x86_64 && !__arm__ */
+>>>>>>> origin/10.7
 
 /*
  * Debugging interface to the CPU power management code.
@@ -731,6 +755,7 @@ sysctl_mib_init(void)
 	}
 
 #if defined (__i386__) || defined (__x86_64__)
+<<<<<<< HEAD
 	/* hw.cpufamily */
 	cpufamily = cpuid_cpufamily();
 
@@ -754,6 +779,22 @@ sysctl_mib_init(void)
 	sse4_2_flag = ((_get_cpu_capabilities() & kHasSSE4_2) == kHasSSE4_2)? 1 : 0;
 	x86_64_flag = ((_get_cpu_capabilities() & k64Bit) == k64Bit)? 1 : 0;
 	aes_flag = ((_get_cpu_capabilities() & kHasAES) == kHasAES)? 1 : 0;
+=======
+#define is_capability_set(k) (((_get_cpu_capabilities() & (k)) == (k)) ? 1 : 0)
+	mmx_flag		= is_capability_set(kHasMMX);
+	sse_flag		= is_capability_set(kHasSSE);
+	sse2_flag		= is_capability_set(kHasSSE2);
+	sse3_flag		= is_capability_set(kHasSSE3);
+	supplementalsse3_flag	= is_capability_set(kHasSupplementalSSE3);
+	sse4_1_flag		= is_capability_set(kHasSSE4_1);
+	sse4_2_flag		= is_capability_set(kHasSSE4_2);
+	x86_64_flag		= is_capability_set(k64Bit);
+	aes_flag		= is_capability_set(kHasAES);
+	avx1_0_flag		= is_capability_set(kHasAVX1_0);
+	rdrand_flag		= is_capability_set(kHasRDRAND);
+	f16c_flag		= is_capability_set(kHasF16C);
+	enfstrg_flag		= is_capability_set(kHasENFSTRG);
+>>>>>>> origin/10.7
 
 	/* hw.cpufamily */
 <<<<<<< HEAD

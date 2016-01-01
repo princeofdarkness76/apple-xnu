@@ -375,6 +375,11 @@ ip_output_list(
 	struct flowadv *adv = NULL;
 	struct timeval start_tv;
 #if IPSEC
+<<<<<<< HEAD
+=======
+	struct ipsec_output_state ipsec_state;
+	struct route *ipsec_saved_route = NULL;
+>>>>>>> origin/10.7
 	struct socket *so = NULL;
 	struct secpolicy *sp = NULL;
 #endif /* IPSEC */
@@ -456,11 +461,18 @@ ip_output_list(
 	boolean_t select_srcif;
 >>>>>>> origin/10.5
 
+<<<<<<< HEAD
 	if (ip_output_measure)
 		net_perf_start_time(&net_perf, &start_tv);
 	KERNEL_DEBUG(DBG_FNC_IP_OUTPUT | DBG_FUNC_START, 0, 0, 0, 0, 0);
 
 	VERIFY(m0->m_flags & M_PKTHDR);
+=======
+#if IPSEC
+	bzero(&ipsec_state, sizeof(ipsec_state));
+#endif /* IPSEC */
+
+>>>>>>> origin/10.7
 	packetlist = m0;
 <<<<<<< HEAD
 
@@ -1591,6 +1603,7 @@ sendit:
 	default:
 		printf("ip_output: Invalid policy found. %d\n", sp->policy);
 	}
+<<<<<<< HEAD
 	{
 	ipsec_state.m = m;
 	if (flags & IP_ROUTETOIF) {
@@ -1599,6 +1612,15 @@ sendit:
 		route_copyout(&ipsec_state.ro, ro, sizeof (ipsec_state.ro));
 	}
 	ipsec_state.dst = SA(dst);
+=======
+    {
+	ipsec_state.m = m;
+	if (flags & IP_ROUTETOIF) {
+		bzero(&ipsec_state.ro, sizeof(ipsec_state.ro));
+	} else
+		route_copyout(&ipsec_state.ro, ro, sizeof(ipsec_state.ro));
+	ipsec_state.dst = (struct sockaddr *)dst;
+>>>>>>> origin/10.7
 
 	ip->ip_sum = 0;
 
@@ -1632,6 +1654,13 @@ sendit:
 		ROUTE_RELEASE(ro);
 #endif /* DUMMYNET */
 
+<<<<<<< HEAD
+=======
+	error = ipsec4_output(&ipsec_state, sp, flags);
+    
+	m0 = m = ipsec_state.m;
+	
+>>>>>>> origin/10.7
 	if (flags & IP_ROUTETOIF) {
 		/*
 		 * if we have tunnel mode SA, we may need to ignore
@@ -1639,12 +1668,23 @@ sendit:
 		 */
 		if (ipsec_state.tunneled) {
 			flags &= ~IP_ROUTETOIF;
+<<<<<<< HEAD
 			ro = &ipsec_state.ro;
 		}
 	} else {
 		ro = &ipsec_state.ro;
 	}
 	dst = SIN(ipsec_state.dst);
+=======
+			ipsec_saved_route = ro;
+			ro = &ipsec_state.ro;
+		}
+	} else {
+		ipsec_saved_route = ro;
+		ro = &ipsec_state.ro;
+	}
+	dst = (struct sockaddr_in *)ipsec_state.dst;
+>>>>>>> origin/10.7
 	if (error) {
 		/* mbuf is already reclaimed in ipsec4_output. */
 		m0 = NULL;
@@ -2256,7 +2296,13 @@ done:
 		ia = NULL;
 	}
 #if IPSEC
+<<<<<<< HEAD
 	ROUTE_RELEASE(&ipsec_state.ro);
+=======
+	if (ipsec_bypass == 0 && (flags & IP_NOIPSEC) == 0) {
+		if (ipsec_state.ro.ro_rt)
+			rtfree(ipsec_state.ro.ro_rt);
+>>>>>>> origin/10.7
 	if (sp != NULL) {
 		KEYDEBUG(KEYDEBUG_IPSEC_STAMP,
 		    printf("DP ip_output call free SP:%x\n", sp));

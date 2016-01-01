@@ -81,10 +81,16 @@ EXPINC_SUBDIRS = \
 	lockd \
 	vm \
 	libsa \
+<<<<<<< HEAD
 	console \
 	kperf \
 	prng
 
+=======
+	kdp \
+	console \
+	pmc
+>>>>>>> origin/10.7
 
 EXPINC_SUBDIRS_X86_64 = \
 	mach	\

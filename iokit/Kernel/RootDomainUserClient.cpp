@@ -340,6 +340,19 @@ IOReturn RootDomainUserClient::externalMethod(
             ret = this->secureSetUserAssertionLevels(
                         (uint32_t)arguments->scalarInput[0]);
             break;
+<<<<<<< HEAD
+=======
+            
+        case kPMActivityTickle:
+            fOwner->reportUserInput( );
+            ret = kIOReturnSuccess;
+            break;
+            
+/*
+        case kPMMethodCopySystemTimeline:
+            // intentional fallthrough
+        case kPMMethodCopyDetailedTimeline:
+>>>>>>> origin/10.7
 
         case kPMActivityTickle:
             if ( fOwner->checkSystemCanSustainFullWake() )

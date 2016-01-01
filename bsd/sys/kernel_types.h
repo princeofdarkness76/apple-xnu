@@ -84,9 +84,13 @@ struct __ifnet_filter;
 struct __rtentry;
 struct __if_clone;
 <<<<<<< HEAD
+<<<<<<< HEAD
 struct __bufattr;
 =======
 >>>>>>> origin/10.6
+=======
+struct __bufattr;
+>>>>>>> origin/10.7
 
 typedef	struct __ifnet*			ifnet_t;
 typedef	struct __mbuf*			mbuf_t;
@@ -99,9 +103,13 @@ typedef struct __ifnet_filter*	interface_filter_t;
 typedef struct __rtentry*		route_t;
 typedef struct __if_clone*		if_clone_t;
 <<<<<<< HEAD
+<<<<<<< HEAD
 typedef struct __bufattr*		bufattr_t;
 =======
 >>>>>>> origin/10.6
+=======
+typedef struct __bufattr*		bufattr_t;
+>>>>>>> origin/10.7
 
 #else /* BSD_BUILD */
 
@@ -131,9 +139,13 @@ typedef struct ifnet_filter*	interface_filter_t;
 typedef struct rtentry*		route_t;
 typedef struct if_clone*	if_clone_t;
 <<<<<<< HEAD
+<<<<<<< HEAD
 typedef struct bufattr*		bufattr_t;
 =======
 >>>>>>> origin/10.6
+=======
+typedef struct bufattr*		bufattr_t;
+>>>>>>> origin/10.7
 #endif /* KERNEL_PRIVATE */
 
 #endif /* !BSD_BUILD */

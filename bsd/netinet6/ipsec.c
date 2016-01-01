@@ -3304,7 +3304,21 @@ ipsec4_output_internal(struct ipsec_output_state *state, struct secasvar *sav)
 	struct ip *ip = NULL;
 	int error = 0;
 	struct sockaddr_in *dst4;
+<<<<<<< HEAD
 	struct route *ro4;
+=======
+	struct sockaddr_in *sin;
+	struct route *ro4;
+
+	lck_mtx_assert(sadb_mutex, LCK_MTX_ASSERT_NOTOWNED);
+	
+	if (!state)
+		panic("state == NULL in ipsec4_output");
+	if (!state->m)
+		panic("state->m == NULL in ipsec4_output");
+	if (!state->dst)
+		panic("state->dst == NULL in ipsec4_output");
+>>>>>>> origin/10.7
 
 	/* validity check */
 	if (sav == NULL || sav->sah == NULL) {
@@ -3599,11 +3613,148 @@ ipsec4_output(struct ipsec_output_state *state, struct secpolicy *sp, __unused i
 		/* validity check */
 		if (sav == NULL) {
 			switch (ipsec_get_reqlevel(isr)) {
+<<<<<<< HEAD
 				case IPSEC_LEVEL_USE:
 					continue;
 				case IPSEC_LEVEL_REQUIRE:
 					/* must be not reached here. */
 					panic("ipsec4_output: no SA found, but required.");
+=======
+			case IPSEC_LEVEL_USE:
+				continue;
+			case IPSEC_LEVEL_REQUIRE:
+				/* must be not reached here. */
+				panic("ipsec4_output: no SA found, but required.");
+			}
+		}
+
+		/*
+		 * If there is no valid SA, we give up to process any
+		 * more.  In such a case, the SA's status is changed
+		 * from DYING to DEAD after allocating.  If a packet
+		 * send to the receiver by dead SA, the receiver can
+		 * not decode a packet because SA has been dead.
+		 */
+		if (sav->state != SADB_SASTATE_MATURE
+		 && sav->state != SADB_SASTATE_DYING) {
+			IPSEC_STAT_INCREMENT(ipsecstat.out_nosa);
+			error = EINVAL;
+			goto bad;
+		}
+
+		/*
+		 * There may be the case that SA status will be changed when
+		 * we are refering to one. So calling splsoftnet().
+		 */
+
+		if (isr->saidx.mode == IPSEC_MODE_TUNNEL) {
+			/*
+			 * build IPsec tunnel.
+			 */
+			/* XXX should be processed with other familiy */
+			if (((struct sockaddr *)&sav->sah->saidx.src)->sa_family != AF_INET) {
+				ipseclog((LOG_ERR, "ipsec4_output: "
+				    "family mismatched between inner and outer spi=%u\n",
+				    (u_int32_t)ntohl(sav->spi)));
+				error = EAFNOSUPPORT;
+				goto bad;
+			}
+
+			state->m = ipsec4_splithdr(state->m);
+			if (!state->m) {
+				error = ENOMEM;
+				goto bad;
+			}
+			error = ipsec4_encapsulate(state->m, sav);
+			if (error) {
+				state->m = NULL;
+				goto bad;
+			}
+			ip = mtod(state->m, struct ip *);
+
+			// grab sadb_mutex, before updating sah's route cache
+			lck_mtx_lock(sadb_mutex);
+			ro4= &sav->sah->sa_route;
+			dst4 = (struct sockaddr_in *)&ro4->ro_dst;
+			if (ro4->ro_rt != NULL) {
+				RT_LOCK(ro4->ro_rt);
+			}
+			if (ro4->ro_rt != NULL &&
+			    (ro4->ro_rt->generation_id != route_generation ||
+			    !(ro4->ro_rt->rt_flags & RTF_UP) ||
+			    dst4->sin_addr.s_addr != ip->ip_dst.s_addr)) {
+				RT_UNLOCK(ro4->ro_rt);
+				rtfree(ro4->ro_rt);
+				ro4->ro_rt = NULL;
+			}
+			if (ro4->ro_rt == 0) {
+				dst4->sin_family = AF_INET;
+				dst4->sin_len = sizeof(*dst4);
+				dst4->sin_addr = ip->ip_dst;
+				rtalloc(ro4);
+				if (ro4->ro_rt == 0) {
+					OSAddAtomic(1, &ipstat.ips_noroute);
+					error = EHOSTUNREACH;
+					// release sadb_mutex, after updating sah's route cache
+					lck_mtx_unlock(sadb_mutex);
+					goto bad;
+				}
+				RT_LOCK(ro4->ro_rt);
+			}
+
+			/*
+			 * adjust state->dst if tunnel endpoint is offlink
+			 *
+			 * XXX: caching rt_gateway value in the state is
+			 * not really good, since it may point elsewhere
+			 * when the gateway gets modified to a larger
+			 * sockaddr via rt_setgate().  This is currently
+			 * addressed by SA_SIZE roundup in that routine.
+			 */
+			if (ro4->ro_rt->rt_flags & RTF_GATEWAY)
+				dst4 = (struct sockaddr_in *)ro4->ro_rt->rt_gateway;
+			RT_UNLOCK(ro4->ro_rt);
+			if (state->ro.ro_rt != NULL) {
+				rtfree(state->ro.ro_rt);
+				state->ro.ro_rt = NULL;
+			}
+			route_copyout(&state->ro, ro4, sizeof(state->ro));
+			state->dst = (struct sockaddr *)dst4;
+			state->tunneled = 4;
+			// release sadb_mutex, after updating sah's route cache
+			lck_mtx_unlock(sadb_mutex);
+		}
+
+		state->m = ipsec4_splithdr(state->m);
+		if (!state->m) {
+			error = ENOMEM;
+			goto bad;
+		}
+		switch (isr->saidx.proto) {
+		case IPPROTO_ESP:
+#if IPSEC_ESP
+			if ((error = esp4_output(state->m, sav)) != 0) {
+				state->m = NULL;
+				goto bad;
+			}
+			break;
+#else
+			m_freem(state->m);
+			state->m = NULL;
+			error = EINVAL;
+			goto bad;
+#endif
+		case IPPROTO_AH:
+			if ((error = ah4_output(state->m, sav)) != 0) {
+				state->m = NULL;
+				goto bad;
+			}
+			break;
+		case IPPROTO_IPCOMP:
+			if ((error = ipcomp4_output(state->m, sav)) != 0) {
+				state->m = NULL;
+				goto bad;
+>>>>>>> origin/10.7
 			}
 		}
 		
@@ -4117,6 +4268,12 @@ ipsec6_output_tunnel(
 	struct secasindex saidx;
 	struct secasvar *sav = NULL;
 	int error = 0;
+<<<<<<< HEAD
+=======
+	int plen;
+	struct sockaddr_in6* dst6;
+	struct route *ro6;
+>>>>>>> origin/10.7
 
 	lck_mtx_assert(sadb_mutex, LCK_MTX_ASSERT_NOTOWNED);
 	
@@ -4259,7 +4416,7 @@ ipsec6_output_tunnel(
 					error = EINVAL;
 					goto bad;
 				}
-				*tunneledv4 = 1; /* must not process any further in ip6_output */
+				state->tunneled = 4; /* must not process any further in ip6_output */
 				error = ipsec64_encapsulate(state->m, sav);
 				if (error) {
 					state->m = 0;
@@ -4343,6 +4500,7 @@ ipsec6_output_tunnel(
 				error = EAFNOSUPPORT;
 				goto bad;
 			}
+<<<<<<< HEAD
 			
 			state->ro = &sav->sah->sa_route;
 			state->dst = (struct sockaddr *)&state->ro->ro_dst;
@@ -4353,15 +4511,39 @@ ipsec6_output_tunnel(
 			    !IN6_ARE_ADDR_EQUAL(&dst6->sin6_addr, &ip6->ip6_dst))) {
 				rtfree(state->ro->ro_rt);
 				state->ro->ro_rt = NULL;
+=======
+
+			// grab sadb_mutex, before updating sah's route cache
+			lck_mtx_lock(sadb_mutex);
+			ro6 = &sav->sah->sa_route;
+			dst6 = (struct sockaddr_in6 *)&ro6->ro_dst;
+			if (ro6->ro_rt) {
+				RT_LOCK(ro6->ro_rt);
 			}
-			if (state->ro->ro_rt == 0) {
+			if (ro6->ro_rt != NULL &&
+			    (ro6->ro_rt->generation_id != route_generation ||
+			    !(ro6->ro_rt->rt_flags & RTF_UP) ||
+			    !IN6_ARE_ADDR_EQUAL(&dst6->sin6_addr, &ip6->ip6_dst))) {
+				RT_UNLOCK(ro6->ro_rt);
+				rtfree(ro6->ro_rt);
+				ro6->ro_rt = NULL;
+>>>>>>> origin/10.7
+			}
+			if (ro6->ro_rt == 0) {
 				bzero(dst6, sizeof(*dst6));
 				dst6->sin6_family = AF_INET6;
 				dst6->sin6_len = sizeof(*dst6);
 				dst6->sin6_addr = ip6->ip6_dst;
+<<<<<<< HEAD
 				rtalloc(state->ro);
+=======
+				rtalloc(ro6);
+				if (ro6->ro_rt) {
+					RT_LOCK(ro6->ro_rt);
+				}
+>>>>>>> origin/10.7
 			}
-			if (state->ro->ro_rt == 0) {
+			if (ro6->ro_rt == 0) {
 				ip6stat.ip6s_noroute++;
 				IPSEC_STAT_INCREMENT(ipsec6stat.out_noroute);
 				error = EHOSTUNREACH;
@@ -4377,10 +4559,21 @@ ipsec6_output_tunnel(
 			 * sockaddr via rt_setgate().  This is currently
 			 * addressed by SA_SIZE roundup in that routine.
 			 */
-			if (state->ro->ro_rt->rt_flags & RTF_GATEWAY) {
-				state->dst = (struct sockaddr *)state->ro->ro_rt->rt_gateway;
-				dst6 = (struct sockaddr_in6 *)state->dst;
+			if (ro6->ro_rt->rt_flags & RTF_GATEWAY)
+				dst6 = (struct sockaddr_in6 *)ro6->ro_rt->rt_gateway;
+			RT_UNLOCK(ro6->ro_rt);
+			if (state->ro.ro_rt != NULL) {
+				rtfree(state->ro.ro_rt);
+				state->ro.ro_rt = NULL;
 			}
+<<<<<<< HEAD
+=======
+			route_copyout(&state->ro, ro6, sizeof(state->ro));
+			state->dst = (struct sockaddr *)dst6;
+			state->tunneled = 6;
+			// release sadb_mutex, after updating sah's route cache
+			lck_mtx_unlock(sadb_mutex);
+>>>>>>> origin/10.7
 		}
 
 		state->m = ipsec6_splithdr(state->m);

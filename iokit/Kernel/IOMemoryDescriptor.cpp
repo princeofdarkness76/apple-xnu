@@ -2868,8 +2868,23 @@ IOReturn IOGeneralMemoryDescriptor::wireVirtual(IODirection forDirection)
 
     assert(kIOMemoryTypeVirtual == type || kIOMemoryTypeVirtual64 == type || kIOMemoryTypeUIO == type);
 
+<<<<<<< HEAD
     if ((kIODirectionOutIn & forDirection) == kIODirectionNone)
         forDirection = (IODirection) (forDirection | getDirection());
+=======
+    if (_pages > gIOMaximumMappedIOPageCount)
+	return kIOReturnNoResources;
+
+    dataP = getDataP(_memoryEntries);
+    mapper = dataP->fMapper;
+    if (mapper && _pages)
+        mapBase = mapper->iovmAlloc(_pages);
+
+    // Note that appendBytes(NULL) zeros the data up to the
+    // desired length.
+    _memoryEntries->appendBytes(0, dataP->fPageCnt * sizeof(upl_page_info_t));
+    dataP = 0;	// May no longer be valid so lets not get tempted.
+>>>>>>> origin/10.7
 
     upl_control_flags_t uplFlags;    // This Mem Desc's default flags for upl creation
     switch (kIODirectionOutIn & forDirection)

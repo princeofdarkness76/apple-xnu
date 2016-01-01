@@ -2695,6 +2695,28 @@ kern_return_t is_io_registry_entry_get_registry_entry_id(
     return (kIOReturnSuccess);
 }
 
+<<<<<<< HEAD
+=======
+// Create a vm_map_copy_t or kalloc'ed data for memory
+// to be copied out. ipc will free after the copyout.
+
+static kern_return_t copyoutkdata( const void * data, vm_size_t len,
+                                    io_buf_ptr_t * buf )
+{
+    kern_return_t	err;
+    vm_map_copy_t	copy;
+
+    err = vm_map_copyin( kernel_map, CAST_USER_ADDR_T(data), len,
+                    false /* src_destroy */, &copy);
+
+    assert( err == KERN_SUCCESS );
+    if( err == KERN_SUCCESS )
+        *buf = (char *) copy;
+
+    return( err );
+}
+
+>>>>>>> origin/10.7
 /* Routine io_registry_entry_get_property */
 kern_return_t is_io_registry_entry_get_property_bytes(
 	io_object_t registry_entry,
@@ -3684,7 +3706,10 @@ kern_return_t is_io_connect_method_var_output
 
     args.scalarOutput = scalar_output;
     args.scalarOutputCount = *scalar_outputCnt;
+<<<<<<< HEAD
     bzero(&scalar_output[0], *scalar_outputCnt * sizeof(scalar_output[0]));
+=======
+>>>>>>> origin/10.7
     args.structureOutput = inband_output;
     args.structureOutputSize = *inband_outputCnt;
     args.structureOutputDescriptor = NULL;

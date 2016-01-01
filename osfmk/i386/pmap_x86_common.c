@@ -2349,12 +2349,15 @@ pmap_map_bd(
 		if (!(flags & (VM_MEM_GUARDED)))
 			template |= INTEL_PTE_PTA;
 	}
+<<<<<<< HEAD
 
 #if    defined(__x86_64__)
 	if ((prot & VM_PROT_EXECUTE) == 0)
 		template |= INTEL_PTE_NX;
 #endif
 
+=======
+>>>>>>> origin/10.7
 	if (prot & VM_PROT_WRITE)
 		template |= INTEL_PTE_WRITE;
 
@@ -2374,6 +2377,7 @@ pmap_map_bd(
 	PMAP_UPDATE_TLBS(kernel_pmap, base, base + end_addr - start_addr);
 	return(virt);
 }
+<<<<<<< HEAD
 
 mach_vm_size_t
 pmap_query_resident(
@@ -2646,3 +2650,5 @@ void x86_filter_TLB_coherency_interrupts(boolean_t dofilter) {
 }
 
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.7

@@ -396,8 +396,12 @@ hfs_vnop_write(struct vnop_write_args *ap)
 	int do_snapshot = 1;
 	time_t orig_ctime=VTOC(vp)->c_ctime;
 	int took_truncate_lock = 0;
+<<<<<<< HEAD
 	int io_return_on_throttle = 0;
 	int throttled_count = 0;
+=======
+	struct rl_entry *invalid_range;
+>>>>>>> origin/10.7
 
 #if HFS_COMPRESSION
 	if ( hfs_file_is_compressed(VTOC(vp), 1) ) { /* 1 == don't take the cnode lock */
@@ -497,6 +501,10 @@ hfs_vnop_write(struct vnop_write_args *ap)
 >>>>>>> origin/10.2
 
 again:
+<<<<<<< HEAD
+=======
+	/* Protect against a size change. */
+>>>>>>> origin/10.7
 	/*
 	 * Protect against a size change.
 	 *
@@ -505,7 +513,11 @@ again:
 	 * start.
 	 */
 	if (ioflag & IO_APPEND || took_truncate_lock) {
+<<<<<<< HEAD
 		hfs_lock_truncate(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT);
+=======
+		hfs_lock_truncate(cp, HFS_EXCLUSIVE_LOCK);
+>>>>>>> origin/10.7
 	}	
 	else {
 		hfs_lock_truncate(cp, HFS_SHARED_LOCK, HFS_LOCK_DEFAULT);
@@ -545,11 +557,22 @@ again:
 	 *    old EOF and new EOF are in the same block, we still need to
 	 *    protect that range of bytes until they are written for the
 	 *    first time.
+<<<<<<< HEAD
+=======
+	 * 3. The write overlaps some invalid ranges (delayed zero fill; that
+	 *    part of the file has been allocated, but not yet written).
+>>>>>>> origin/10.7
 	 *
 	 * If we had a shared lock with the above cases, we need to try to upgrade
 	 * to an exclusive lock.  If the upgrade fails, we will lose the shared
 	 * lock, and will need to take the truncate lock again; the took_truncate_lock
 	 * flag will still be set, causing us to try for an exclusive lock next time.
+<<<<<<< HEAD
+=======
+	 *
+	 * NOTE: Testing for #3 (delayed zero fill) needs to be done while the cnode
+	 * lock is held, since it protects the range lists.
+>>>>>>> origin/10.7
 	 */
 	if ((cp->c_truncatelockowner == HFS_SHARED_OWNER) &&
 	    ((fp->ff_unallocblocks != 0) ||
@@ -572,6 +595,7 @@ again:
 		goto exit;
 	}
 	cnode_locked = 1;
+<<<<<<< HEAD
 
 	filebytes = hfs_blk_to_bytes(fp->ff_blocks, hfsmp->blockSize);
 
@@ -580,7 +604,31 @@ again:
 							 hfsmp->blockSize) < offset - filebytes)) {
 		retval = ENOSPC;
 		goto exit;
+=======
+	
+	/*
+	 * Now that we have the cnode lock, see if there are delayed zero fill ranges
+	 * overlapping our write.  If so, we need the truncate lock exclusive (see above).
+	 */
+	if ((cp->c_truncatelockowner == HFS_SHARED_OWNER) &&
+	    (rl_scan(&fp->ff_invalidranges, offset, writelimit-1, &invalid_range) != RL_NOOVERLAP)) {
+	    	/*
+		 * When testing, it appeared that calling lck_rw_lock_shared_to_exclusive() causes
+		 * a deadlock, rather than simply returning failure.  (That is, it apparently does
+		 * not behave like a "try_lock").  Since this condition is rare, just drop the
+		 * cnode lock and try again.  Since took_truncate_lock is set, we will
+		 * automatically take the truncate lock exclusive.
+		 */
+		hfs_unlock(cp);
+		cnode_locked = 0;
+		hfs_unlock_truncate(cp, 0);
+		goto again;
+>>>>>>> origin/10.7
 	}
+	
+	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 0)) | DBG_FUNC_START,
+		     (int)offset, uio_resid(uio), (int)fp->ff_size,
+		     (int)filebytes, 0);
 
 	KERNEL_DEBUG(HFSDBG_WRITE | DBG_FUNC_START,
 		     (int)offset, uio_resid(uio), (int)fp->ff_size,
@@ -1151,6 +1199,7 @@ do_attr_lookup(struct hfsmount *hfsmp, struct access_cache *cache, cnid_t cnid,
 		cnattrp->ca_recflags = skip_cp->c_attr.ca_recflags;
 		keyp->hfsPlus.parentID = skip_cp->c_parentcnid;
     } else {
+<<<<<<< HEAD
 		struct cinfo c_info;
 
 		/* otherwise, check the cnode hash incase the file/dir is incore */
@@ -1175,6 +1224,24 @@ do_attr_lookup(struct hfsmount *hfsmp, struct access_cache *cache, cnid_t cnid,
 
 			/* lookup this cnid in the catalog */
 			error = cat_getkeyplusattr(hfsmp, cnid, keyp, cnattrp);
+=======
+	struct cinfo c_info;
+
+	/* otherwise, check the cnode hash incase the file/dir is incore */
+	if (hfs_chash_snoop(hfsmp, cnid, 0, snoop_callback, &c_info) == 0) {
+	    cnattrp->ca_uid = c_info.uid;
+	    cnattrp->ca_gid = c_info.gid;
+	    cnattrp->ca_mode = c_info.mode;
+	    cnattrp->ca_recflags = c_info.recflags;
+	    keyp->hfsPlus.parentID = c_info.parentcnid;
+	} else {
+	    int lockflags;
+			
+	    lockflags = hfs_systemfile_lock(hfsmp, SFL_CATALOG, HFS_SHARED_LOCK);
+			
+	    /* lookup this cnid in the catalog */
+	    error = cat_getkeyplusattr(hfsmp, cnid, keyp, cnattrp);
+>>>>>>> origin/10.7
 			
 			hfs_systemfile_unlock(hfsmp, lockflags);
 			
@@ -2757,6 +2824,13 @@ fail_change_next_allocation:
 		return (error);
 	}
 
+<<<<<<< HEAD
+=======
+	case F_READBOOTSTRAP:
+	case F_WRITEBOOTSTRAP:
+		return 0;
+
+>>>>>>> origin/10.7
 	case _IOC(IOC_OUT,'h', 4, 0):     /* Create date in local time */
 	{
 		if (is64bit) {

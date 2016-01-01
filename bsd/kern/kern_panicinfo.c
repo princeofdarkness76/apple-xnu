@@ -37,8 +37,16 @@ extern void kmem_free(vm_map_t, vm_offset_t, vm_size_t);
 extern kern_return_t kmem_alloc_wired(vm_map_t, vm_offset_t *, vm_size_t);
 
 
+<<<<<<< HEAD
 /* Globals */
 static off_t imagesizelimit = (4 * 4096);
+=======
+/* prototypes not exported by osfmk/console. */
+extern void panic_dialog_test( void );
+extern void noroot_icon_test(void);
+extern int  panic_dialog_set_image( const unsigned char * ptr, unsigned int size );
+extern void panic_dialog_get_image( unsigned char ** ptr, unsigned int * size );
+>>>>>>> origin/10.7
 
 /* Information about the current panic image */
 static int image_bits = 32;	/* Bitdepth */
@@ -46,8 +54,12 @@ static int image_bits = 32;	/* Bitdepth */
 static char *image_pathname = NULL;	/* path to it */
 static size_t image_pathlen = 0;	/* and the length of the pathname */
 
+<<<<<<< HEAD
 static vm_offset_t image_ptr = NULL; /* the image itself */
 static off_t image_size = 0; /* and the imagesize */
+=======
+#define PANIC_IMAGE_SIZE_LIMIT	(32 * 4096)				/* 128K - Maximum amount of memory consumed for the panic UI */
+>>>>>>> origin/10.7
 
 
 __private_extern__ void
@@ -89,10 +101,31 @@ panicimage_from_file(
 		goto out;
 	}
 
+<<<<<<< HEAD
 	/* get the file size */
 	error = VOP_GETATTR(vp, &vattr, cred, p);
 	if (error)
 		goto out;
+=======
+	switch (name[0]) {
+	default:
+		return (ENOTSUP);
+
+	case KERN_PANICINFO_TEST:
+		
+		panic_dialog_test();
+		break;
+
+	case KERN_PANICINFO_NOROOT_TEST:
+		printf("Testing noroot icon \n");
+
+		noroot_icon_test();
+		break;
+
+	case KERN_PANICINFO_MAXSIZE:
+
+		/* return the image size limits */
+>>>>>>> origin/10.7
 
 	/* validate the file size */
 	if (vattr.va_size > sizelimit) {

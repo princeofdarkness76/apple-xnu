@@ -535,9 +535,14 @@ tcp_garbage_collect(struct inpcb *inp, int istimewait)
 			struct tcpcb *, tp, int32_t, TCPS_CLOSED);
 		/* Become a regular mutex */
 		lck_mtx_convert_spin(&inp->inpcb_mtx);
+<<<<<<< HEAD
 
 		/*
 		 * If this tp still happens to be on the timer list, 
+=======
+		
+		/* If this tp still happens to be on the timer list, 
+>>>>>>> origin/10.7
 		 * take it out
 		 */
 		if (TIMER_IS_ON_LIST(tp)) {

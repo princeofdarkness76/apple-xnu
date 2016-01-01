@@ -452,6 +452,7 @@ in_pseudo(uint32_t a, uint32_t b, uint32_t c)
         return (sum);
 }
 
+<<<<<<< HEAD
 uint16_t
 in_pseudo64(uint64_t a, uint64_t b, uint64_t c)
 {
@@ -513,6 +514,12 @@ ip_cksum_hdr_dir(struct mbuf *m, uint32_t hlen, int out)
  */
 uint16_t
 inet_cksum(struct mbuf *m, uint32_t nxt, uint32_t off, uint32_t len)
+=======
+
+u_int16_t
+inet_cksum(struct mbuf *m, unsigned int nxt, unsigned int skip,
+    unsigned int len)
+>>>>>>> origin/10.7
 {
 <<<<<<< HEAD
 	uint32_t sum;
@@ -607,3 +614,7 @@ skip_start:
 
 	return (~sum & 0xffff);
 }
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.7

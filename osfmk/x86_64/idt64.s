@@ -266,6 +266,7 @@ L_dispatch_U32: /* 32-bit user task */
 	 * Copy registers already saved in the machine state 
 	 * (in the interrupt stack frame) into the compat save area.
 	 */
+<<<<<<< HEAD
 	mov	R64_RIP(%r15), %eax
 	mov	%eax, R32_EIP(%r15)
 	mov	R64_RFLAGS(%r15), %eax
@@ -282,6 +283,24 @@ L_dispatch_U32_after_fault:
 	mov	R64_ERR(%r15), %eax
 	mov	%eax, R32_ERR(%r15)
 	mov	R64_TRAPFN(%r15), %rdx		/* %rdx := trapfn for later */
+=======
+	mov	ISC32_RIP(%rsp), %eax
+	mov	%eax, R32_EIP(%rsp)
+	mov	ISC32_RFLAGS(%rsp), %eax
+	mov	%eax, R32_EFLAGS(%rsp)
+	mov	ISC32_RSP(%rsp), %eax
+	mov	%eax, R32_UESP(%rsp)
+	mov	ISC32_SS(%rsp), %eax
+	mov	%eax, R32_SS(%rsp)
+L_32bit_dispatch_after_fault:
+	mov	ISC32_CS(%rsp), %esi		/* %esi := %cs for later */
+	mov	%esi, R32_CS(%rsp)
+	mov	ISC32_TRAPNO(%rsp), %ebx	/* %ebx := trapno for later */
+	mov	%ebx, R32_TRAPNO(%rsp)
+	mov	ISC32_ERR(%rsp), %eax
+	mov	%eax, R32_ERR(%rsp)
+	mov	ISC32_TRAPFN(%rsp), %rdx	/* %rdx := trapfn for later */
+>>>>>>> origin/10.7
 
 L_common_dispatch:
 	cld		/* Ensure the direction flag is clear in the kernel */

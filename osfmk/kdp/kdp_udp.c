@@ -1595,12 +1595,18 @@ kdp_reset(void)
 	kdp.is_halted = kdp.is_conn = FALSE;
 	kdp.exception_seq = kdp.conn_seq = 0;
 <<<<<<< HEAD
+<<<<<<< HEAD
 	kdp.session_key = 0;
 	pkt.input = manual_pkt.input = FALSE;
 	pkt.len = pkt.off = manual_pkt.len = 0;
 =======
         kdp.session_key = 0;
 >>>>>>> origin/10.6
+=======
+	kdp.session_key = 0;
+	pkt.input = manual_pkt.input = FALSE;
+	pkt.len = pkt.off = manual_pkt.len = 0;
+>>>>>>> origin/10.7
 }
 
 struct corehdr *
@@ -2585,6 +2591,7 @@ kdp_init(void)
 #if	defined(__x86_64__)	
 	kdp_machine_init();
 #endif
+<<<<<<< HEAD
 
 	kdp_timer_callout_init();
 	kdp_crashdump_feature_mask = htonl(kdp_crashdump_feature_mask);
@@ -2605,6 +2612,8 @@ kdp_init(void)
 	kdp_register_callout(kdp_serial_callout, NULL);
         kdp_register_link(NULL, kdp_serial_setmode);
 =======
+=======
+>>>>>>> origin/10.7
 #if CONFIG_SERIAL_KDP
 	char kdpname[80];
 	struct in_addr ipaddr;

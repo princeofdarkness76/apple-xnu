@@ -5383,7 +5383,9 @@ OSKext::jettisonLinkeditSegment(void)
     kernel_segment_command_t * linkedit = NULL;
     vm_offset_t                start;
     vm_size_t                  linkeditsize, kextsize;
+    vm_offset_t                linkeditaddr = 0;
     OSData                   * data = NULL;
+<<<<<<< HEAD
 
 #if NO_KEXTD
     /* We can free symbol tables for all embedded kexts because we don't
@@ -5393,6 +5395,10 @@ OSKext::jettisonLinkeditSegment(void)
 #else
     if (sKeepSymbols || isLibrary() || !isExecutable() || !linkedExecutable || flags.jettisonLinkeditSeg) {
 #endif
+=======
+	
+    if (sKeepSymbols || isLibrary() || !isExecutable() || !linkedExecutable) {
+>>>>>>> origin/10.7
         goto finish;
     }
 
@@ -5415,8 +5421,15 @@ OSKext::jettisonLinkeditSegment(void)
     */
     linkeditsize = round_page(linkedit->vmsize);
     kextsize = kmod_info->size - linkeditsize;
+<<<<<<< HEAD
     start = linkedit->vmaddr;
 
+=======
+	
+	/* Save linkedit address as removeLinkeditHeaders() will zero it */
+	linkeditaddr = trunc_page(linkedit->vmaddr);
+	
+>>>>>>> origin/10.7
     data = OSData::withBytesNoCopy((void *)kmod_info->address, kextsize);
     if (!data) {
         goto finish;
@@ -5438,11 +5451,15 @@ OSKext::jettisonLinkeditSegment(void)
         
    /* Free the linkedit segment.
     */
+<<<<<<< HEAD
 #if VM_MAPPED_KEXTS
     kext_free(start, linkeditsize);
 #else
     ml_static_mfree(start, linkeditsize);
 #endif
+=======
+    kext_free(linkeditaddr, linkeditsize);
+>>>>>>> origin/10.7
 
 finish:
     return;

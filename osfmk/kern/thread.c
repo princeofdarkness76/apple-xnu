@@ -390,6 +390,7 @@ thread_init(void)
 			THREAD_CHUNK * sizeof(struct thread),
 			"threads");
 <<<<<<< HEAD
+<<<<<<< HEAD
 
 	thread_qos_override_zone = zinit(
 		sizeof(struct thread_qos_override),
@@ -405,6 +406,9 @@ thread_init(void)
 	zone_change(thread_zone, Z_NOENCRYPT, TRUE);
 	
 >>>>>>> origin/10.6
+=======
+
+>>>>>>> origin/10.7
 	lck_grp_attr_setdefault(&thread_lck_grp_attr);
 	lck_grp_init(&thread_lck_grp, "thread", &thread_lck_grp_attr);
 	lck_attr_setdefault(&thread_lck_attr);

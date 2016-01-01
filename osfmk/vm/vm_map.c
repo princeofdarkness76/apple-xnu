@@ -336,7 +336,10 @@ static kern_return_t	vm_map_pageout(
  * wire count; it's used for map splitting and zone changing in
  * vm_map_copyout.
  */
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.7
 #define vm_map_entry_copy(NEW,OLD)	\
 MACRO_BEGIN				\
 boolean_t _vmec_reserved = (NEW)->from_reserved_zone;	\
@@ -347,11 +350,15 @@ boolean_t _vmec_reserved = (NEW)->from_reserved_zone;	\
 	(NEW)->wired_count = 0;         \
 	(NEW)->user_wired_count = 0;    \
 	(NEW)->permanent = FALSE;	\
+<<<<<<< HEAD
 	(NEW)->used_for_jit = FALSE;	\
 	(NEW)->from_reserved_zone = _vmec_reserved;	\
 	(NEW)->iokit_acct = FALSE;	\
 	(NEW)->vme_resilient_codesign = FALSE; \
 	(NEW)->vme_resilient_media = FALSE;	\
+=======
+	(NEW)->from_reserved_zone = _vmec_reserved;			\
+>>>>>>> origin/10.7
 MACRO_END
 
 #define vm_map_entry_copy_full(NEW,OLD)			\
@@ -484,8 +491,11 @@ static void		*map_data;
 static vm_size_t	map_data_size;
 static void		*kentry_data;
 static vm_size_t	kentry_data_size;
+<<<<<<< HEAD
 static void		*map_holes_data;
 static vm_size_t	map_holes_data_size;
+=======
+>>>>>>> origin/10.7
 
 #define         NO_COALESCE_LIMIT  ((1024 * 128) - 1)
 
@@ -810,10 +820,14 @@ lck_attr_t		vm_map_lck_rw_attr;
  *	vm_map_zone:		used to allocate maps.
  *	vm_map_entry_zone:	used to allocate map entries.
 <<<<<<< HEAD
+<<<<<<< HEAD
  *	vm_map_entry_reserved_zone:	fallback zone for kernel map entries
 =======
  *	vm_map_kentry_zone:	used to allocate map entries for the kernel.
 >>>>>>> origin/10.5
+=======
+ *	vm_map_entry_reserved_zone:	fallback zone for kernel map entries
+>>>>>>> origin/10.7
  *
  *	The kernel allocates map entries from a special zone that is initially
  *	"crammed" with memory.  It would be difficult (perhaps impossible) for
@@ -826,17 +840,24 @@ vm_map_init(
 	void)
 {
 	vm_size_t entry_zone_alloc_size;
+<<<<<<< HEAD
 	const char *mez_name = "VM map entries";
 
 	vm_map_zone = zinit((vm_map_size_t) sizeof(struct _vm_map), 40*1024,
 			    PAGE_SIZE, "maps");
 	zone_change(vm_map_zone, Z_NOENCRYPT, TRUE);
 <<<<<<< HEAD
+=======
+	vm_map_zone = zinit((vm_map_size_t) sizeof(struct _vm_map), 40*1024,
+			    PAGE_SIZE, "maps");
+	zone_change(vm_map_zone, Z_NOENCRYPT, TRUE);
+>>>>>>> origin/10.7
 #if	defined(__LP64__)
 	entry_zone_alloc_size = PAGE_SIZE * 5;
 #else
 	entry_zone_alloc_size = PAGE_SIZE * 6;
 #endif
+<<<<<<< HEAD
 	vm_map_entry_zone = zinit((vm_map_size_t) sizeof(struct vm_map_entry),
 				  1024*1024, entry_zone_alloc_size,
 				  mez_name);
@@ -859,18 +880,22 @@ vm_map_init(
 =======
 
 
+=======
+	
+>>>>>>> origin/10.7
 	vm_map_entry_zone = zinit((vm_map_size_t) sizeof(struct vm_map_entry),
-				  1024*1024, PAGE_SIZE*5,
-				  "non-kernel map entries");
+				  1024*1024, entry_zone_alloc_size,
+				  "VM map entries");
 	zone_change(vm_map_entry_zone, Z_NOENCRYPT, TRUE);
+	zone_change(vm_map_entry_zone, Z_NOCALLOUT, TRUE);
 
-	vm_map_kentry_zone = zinit((vm_map_size_t) sizeof(struct vm_map_entry),
-				   kentry_data_size, kentry_data_size,
-				   "kernel map entries");
-	zone_change(vm_map_kentry_zone, Z_NOENCRYPT, TRUE);
+	vm_map_entry_reserved_zone = zinit((vm_map_size_t) sizeof(struct vm_map_entry),
+				   kentry_data_size * 64, kentry_data_size,
+				   "Reserved VM map entries");
+	zone_change(vm_map_entry_reserved_zone, Z_NOENCRYPT, TRUE);
 
 	vm_map_copy_zone = zinit((vm_map_size_t) sizeof(struct vm_map_copy),
-				 16*1024, PAGE_SIZE, "map copies");
+				 16*1024, PAGE_SIZE, "VM map copies");
 	zone_change(vm_map_copy_zone, Z_NOENCRYPT, TRUE);
 >>>>>>> origin/10.6
 
@@ -903,6 +928,12 @@ vm_map_init(
 	zcram(vm_map_holes_zone, (vm_offset_t)map_holes_data, map_holes_data_size);
 	VM_PAGE_MOVE_STOLEN(atop_64(map_data_size) + atop_64(kentry_data_size) + atop_64(map_holes_data_size));
 
+<<<<<<< HEAD
+=======
+	zcram(vm_map_zone, (vm_offset_t)map_data, map_data_size);
+	zcram(vm_map_entry_reserved_zone, (vm_offset_t)kentry_data, kentry_data_size);
+	
+>>>>>>> origin/10.7
 	lck_grp_attr_setdefault(&vm_map_lck_grp_attr);
 	lck_grp_init(&vm_map_lck_grp, "vm_map", &vm_map_lck_grp_attr);
 	lck_attr_setdefault(&vm_map_lck_attr);	
@@ -935,6 +966,7 @@ vm_map_steal_memory(
 #else
 	kentry_initial_pages = 6;
 #endif
+<<<<<<< HEAD
 
 #if CONFIG_GZALLOC
 	/* If using the guard allocator, reserve more memory for the kernel
@@ -944,6 +976,8 @@ vm_map_steal_memory(
 		kentry_initial_pages *= 1024;
 #endif
 
+=======
+>>>>>>> origin/10.7
 	kentry_data_size = kentry_initial_pages * PAGE_SIZE;
 	kentry_data = pmap_steal_memory(kentry_data_size);
 
@@ -992,6 +1026,10 @@ vm_map_disable_hole_optimization(vm_map_t map)
 boolean_t
 vm_kernel_map_is_kernel(vm_map_t map) {
 	return (map->pmap == kernel_pmap);
+}
+
+void vm_kernel_reserved_entry_init(void) {
+	zone_prio_refill_configure(vm_map_entry_reserved_zone, (6*PAGE_SIZE)/sizeof(struct vm_map_entry));
 }
 
 /*
@@ -1124,6 +1162,11 @@ _vm_map_entry_create(
 	if (entry == VM_MAP_ENTRY_NULL)
 		panic("vm_map_entry_create");
 	entry->from_reserved_zone = (zone == vm_map_entry_reserved_zone);
+<<<<<<< HEAD
+=======
+
+	vm_map_store_update( (vm_map_t) NULL, entry, VM_MAP_ENTRY_CREATE);
+>>>>>>> origin/10.7
 
 	vm_map_store_update( (vm_map_t) NULL, entry, VM_MAP_ENTRY_CREATE);
 #if	MAP_ENTRY_CREATION_DEBUG
@@ -2609,10 +2652,13 @@ StartAgain: ;
 			 */
 			map->size += (end - entry->vme_end);
 			assert(entry->vme_start < end);
+<<<<<<< HEAD
 			assert(VM_MAP_PAGE_ALIGNED(end,
 						   VM_MAP_PAGE_MASK(map)));
 			if (__improbable(vm_debug_events))
 				DTRACE_VM5(map_entry_extend, vm_map_t, map, vm_map_entry_t, entry, vm_address_t, entry->vme_start, vm_address_t, entry->vme_end, vm_address_t, end);
+=======
+>>>>>>> origin/10.7
 			entry->vme_end = end;
 			if (map->holelistenabled) {
 				vm_map_store_update_first_free(map, entry, TRUE);
@@ -4358,17 +4404,24 @@ _vm_map_clip_start(
 	 *	address.
 	 */
 
+<<<<<<< HEAD
 	if (entry->map_aligned) {
 		assert(VM_MAP_PAGE_ALIGNED(start,
 					   VM_MAP_HDR_PAGE_MASK(map_header)));
 	}
 
+=======
+>>>>>>> origin/10.7
 	new_entry = _vm_map_entry_create(map_header, !map_header->entries_pageable);
 	vm_map_entry_copy_full(new_entry, entry);
 
 	new_entry->vme_end = start;
 	assert(new_entry->vme_start < new_entry->vme_end);
+<<<<<<< HEAD
 	VME_OFFSET_SET(entry, VME_OFFSET(entry) + (start - entry->vme_start));
+=======
+	entry->offset += (start - entry->vme_start);
+>>>>>>> origin/10.7
 	assert(start < entry->vme_end);
 	entry->vme_start = start;
 
@@ -4460,18 +4513,25 @@ _vm_map_clip_end(
 	 *	AFTER the specified entry
 	 */
 
+<<<<<<< HEAD
 	if (entry->map_aligned) {
 		assert(VM_MAP_PAGE_ALIGNED(end,
 					   VM_MAP_HDR_PAGE_MASK(map_header)));
 	}
 
+=======
+>>>>>>> origin/10.7
 	new_entry = _vm_map_entry_create(map_header, !map_header->entries_pageable);
 	vm_map_entry_copy_full(new_entry, entry);
 
 	assert(entry->vme_start < end);
 	new_entry->vme_start = entry->vme_end = end;
+<<<<<<< HEAD
 	VME_OFFSET_SET(new_entry,
 		       VME_OFFSET(new_entry) + (end - entry->vme_start));
+=======
+	new_entry->offset += (end - entry->vme_start);
+>>>>>>> origin/10.7
 	assert(new_entry->vme_start < new_entry->vme_end);
 
 	_vm_map_store_entry_link(map_header, entry, new_entry);
@@ -8466,10 +8526,18 @@ vm_map_copy_overwrite_aligned(
 				continue;
 			}
 
+<<<<<<< HEAD
 #define __TRADEOFF1_OBJ_SIZE (64 * 1024 * 1024)	/* 64 MB */
 #define __TRADEOFF1_COPY_SIZE (128 * 1024)	/* 128 KB */
 			if (VME_OBJECT(copy_entry) != VM_OBJECT_NULL &&
 			    VME_OBJECT(copy_entry)->vo_size >= __TRADEOFF1_OBJ_SIZE &&
+=======
+#if !CONFIG_EMBEDDED
+#define __TRADEOFF1_OBJ_SIZE (64 * 1024 * 1024)	/* 64 MB */
+#define __TRADEOFF1_COPY_SIZE (128 * 1024)	/* 128 KB */
+			if (copy_entry->object.vm_object != VM_OBJECT_NULL &&
+			    copy_entry->object.vm_object->vo_size >= __TRADEOFF1_OBJ_SIZE &&
+>>>>>>> origin/10.7
 			    copy_size <= __TRADEOFF1_COPY_SIZE) {
 				/*
 				 * Virtual vs. Physical copy tradeoff #1.
@@ -8483,23 +8551,41 @@ vm_map_copy_overwrite_aligned(
 				vm_map_copy_overwrite_aligned_src_large++;
 				goto slow_copy;
 			}
+<<<<<<< HEAD
 
 			if ((dst_map->pmap != kernel_pmap) &&
 			    (VME_ALIAS(entry) >= VM_MEMORY_MALLOC) &&
 			    (VME_ALIAS(entry) <= VM_MEMORY_MALLOC_LARGE_REUSED)) {
+=======
+#endif /* !CONFIG_EMBEDDED */
+
+			if (entry->alias >= VM_MEMORY_MALLOC &&
+			    entry->alias <= VM_MEMORY_MALLOC_LARGE_REUSED) {
+>>>>>>> origin/10.7
 				vm_object_t new_object, new_shadow;
 
 				/*
 				 * We're about to map something over a mapping
 				 * established by malloc()...
 				 */
+<<<<<<< HEAD
 				new_object = VME_OBJECT(copy_entry);
+=======
+				new_object = copy_entry->object.vm_object;
+>>>>>>> origin/10.7
 				if (new_object != VM_OBJECT_NULL) {
 					vm_object_lock_shared(new_object);
 				}
 				while (new_object != VM_OBJECT_NULL &&
+<<<<<<< HEAD
 				       !new_object->true_share &&
 				       new_object->copy_strategy == MEMORY_OBJECT_COPY_SYMMETRIC &&
+=======
+#if !CONFIG_EMBEDDED
+				       !new_object->true_share &&
+				       new_object->copy_strategy == MEMORY_OBJECT_COPY_SYMMETRIC &&
+#endif /* !CONFIG_EMBEDDED */
+>>>>>>> origin/10.7
 				       new_object->internal) {
 					new_shadow = new_object->shadow;
 					if (new_shadow == VM_OBJECT_NULL) {
@@ -8524,6 +8610,10 @@ vm_map_copy_overwrite_aligned(
 						vm_object_unlock(new_object);
 						goto slow_copy;
 					}
+<<<<<<< HEAD
+=======
+#if !CONFIG_EMBEDDED
+>>>>>>> origin/10.7
 					if (new_object->true_share ||
 					    new_object->copy_strategy != MEMORY_OBJECT_COPY_SYMMETRIC) {
 						/*
@@ -8536,6 +8626,10 @@ vm_map_copy_overwrite_aligned(
 						vm_object_unlock(new_object);
 						goto slow_copy;
 					}
+<<<<<<< HEAD
+=======
+#endif /* !CONFIG_EMBEDDED */
+>>>>>>> origin/10.7
 					vm_object_unlock(new_object);
 				}
 				/*
@@ -8636,6 +8730,7 @@ vm_map_copy_overwrite_aligned(
 
 		slow_copy:
 			if (entry->needs_copy) {
+<<<<<<< HEAD
 				VME_OBJECT_SHADOW(entry,
 						  (entry->vme_end -
 						   entry->vme_start));
@@ -8644,6 +8739,17 @@ vm_map_copy_overwrite_aligned(
 
 			dst_object = VME_OBJECT(entry);
 			dst_offset = VME_OFFSET(entry);
+=======
+				vm_object_shadow(&entry->object.vm_object,
+						 &entry->offset,
+						 (entry->vme_end -
+						  entry->vme_start));
+				entry->needs_copy = FALSE;
+			}
+
+			dst_object = entry->object.vm_object;
+			dst_offset = entry->offset;
+>>>>>>> origin/10.7
 
 			/*
 			 *	Take an object reference, and record
@@ -8667,9 +8773,14 @@ vm_map_copy_overwrite_aligned(
 				dst_object = vm_object_allocate(
 					entry->vme_end - entry->vme_start);
 				dst_offset = 0;
+<<<<<<< HEAD
 				VME_OBJECT_SET(entry, dst_object);
 				VME_OFFSET_SET(entry, dst_offset);
 				assert(entry->use_pmap);
+=======
+				entry->object.vm_object = dst_object;
+				entry->offset = dst_offset;
+>>>>>>> origin/10.7
 				
 			}
 
@@ -12601,11 +12712,16 @@ vm_map_simplify_entry(
 	    (prev_entry->superpage_size == FALSE) &&
 	    (this_entry->superpage_size == FALSE)
 		) {
+<<<<<<< HEAD
 		vm_map_store_entry_unlink(map, prev_entry);
 		assert(prev_entry->vme_start < this_entry->vme_end);
 		if (prev_entry->map_aligned)
 			assert(VM_MAP_PAGE_ALIGNED(prev_entry->vme_start,
 						   VM_MAP_PAGE_MASK(map)));
+=======
+		_vm_map_store_entry_unlink(&map->hdr, prev_entry);
+		assert(prev_entry->vme_start < this_entry->vme_end);
+>>>>>>> origin/10.7
 		this_entry->vme_start = prev_entry->vme_start;
 		VME_OFFSET_SET(this_entry, VME_OFFSET(prev_entry));
 
@@ -13573,6 +13689,7 @@ vm_map_entry_insert(
 	assert(insp_entry != (vm_map_entry_t)0);
 
 	new_entry = vm_map_entry_create(map, !map->hdr.entries_pageable);
+<<<<<<< HEAD
 
 	if (VM_MAP_PAGE_SHIFT(map) != PAGE_SHIFT) {
 		new_entry->map_aligned = TRUE;
@@ -13584,17 +13701,22 @@ vm_map_entry_insert(
 	     ! VM_MAP_PAGE_ALIGNED(end, VM_MAP_PAGE_MASK(map)))) {
 		new_entry->map_aligned = FALSE;
 	}
+=======
+>>>>>>> origin/10.7
 
 	new_entry->vme_start = start;
 	new_entry->vme_end = end;
 	assert(page_aligned(new_entry->vme_start));
 	assert(page_aligned(new_entry->vme_end));
+<<<<<<< HEAD
 	if (new_entry->map_aligned) {
 		assert(VM_MAP_PAGE_ALIGNED(new_entry->vme_start,
 					   VM_MAP_PAGE_MASK(map)));
 		assert(VM_MAP_PAGE_ALIGNED(new_entry->vme_end,
 					   VM_MAP_PAGE_MASK(map)));
 	}
+=======
+>>>>>>> origin/10.7
 	assert(new_entry->vme_start < new_entry->vme_end);
 
 	VME_OBJECT_SET(new_entry, object);
@@ -16438,6 +16560,7 @@ vm_map_purge(
 			goto next;
 		}
 #endif
+<<<<<<< HEAD
 		next_address = entry->vme_end;
 		vm_map_unlock_read(map);
 		state = VM_PURGABLE_EMPTY;
@@ -16642,3 +16765,87 @@ void		vm_map_set_prot_copy_allow(vm_map_t		map,
 >>>>>>> origin/10.5
 =======
 >>>>>>> origin/10.6
+=======
+
+#if !CONFIG_EMBEDDED
+/*
+ * vm_map_entry_should_cow_for_true_share:
+ *
+ * Determines if the map entry should be clipped and setup for copy-on-write
+ * to avoid applying "true_share" to a large VM object when only a subset is
+ * targeted.
+ *
+ * For now, we target only the map entries created for the Objective C
+ * Garbage Collector, which initially have the following properties:
+ *	- alias == VM_MEMORY_MALLOC
+ * 	- wired_count == 0
+ * 	- !needs_copy
+ * and a VM object with:
+ * 	- internal
+ * 	- copy_strategy == MEMORY_OBJECT_COPY_SYMMETRIC
+ * 	- !true_share
+ * 	- vo_size == ANON_CHUNK_SIZE
+ */
+boolean_t
+vm_map_entry_should_cow_for_true_share(
+	vm_map_entry_t	entry)
+{
+	vm_object_t	object;
+
+	if (entry->is_sub_map) {
+		/* entry does not point at a VM object */
+		return FALSE;
+	}
+
+	if (entry->needs_copy) {
+		/* already set for copy_on_write: done! */
+		return FALSE;
+	}
+
+	if (entry->alias != VM_MEMORY_MALLOC) {
+		/* not tagged as an ObjectiveC's Garbage Collector entry */
+		return FALSE;
+	}
+
+	if (entry->wired_count) {
+		/* wired: can't change the map entry... */
+		return FALSE;
+	}
+
+	object = entry->object.vm_object;
+
+	if (object == VM_OBJECT_NULL) {
+		/* no object yet... */
+		return FALSE;
+	}
+
+	if (!object->internal) {
+		/* not an internal object */
+		return FALSE;
+	}
+
+	if (object->copy_strategy != MEMORY_OBJECT_COPY_SYMMETRIC) {
+		/* not the default copy strategy */
+		return FALSE;
+	}
+
+	if (object->true_share) {
+		/* already true_share: too late to avoid it */
+		return FALSE;
+	}
+
+	if (object->vo_size != ANON_CHUNK_SIZE) {
+		/* not an object created for the ObjC Garbage Collector */
+		return FALSE;
+	}
+
+	/*
+	 * All the criteria match: we have a large object being targeted for "true_share".
+	 * To limit the adverse side-effects linked with "true_share", tell the caller to
+	 * try and avoid setting up the entire object for "true_share" by clipping the
+	 * targeted range and setting it up for copy-on-write.
+	 */
+	return TRUE;
+}
+#endif /* !CONFIG_EMBEDDED */
+>>>>>>> origin/10.7

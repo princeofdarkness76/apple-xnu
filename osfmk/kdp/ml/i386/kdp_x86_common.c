@@ -413,7 +413,11 @@ kdp_machine_init(void) {
 	kern_return_t kr = vm_map_find_space(kernel_map,
 	    &debugger_window_kva,
 	    PAGE_SIZE, 0,
+<<<<<<< HEAD
 	    VM_MAKE_TAG(VM_KERN_MEMORY_OSFMK), &e);
+=======
+	    VM_MAKE_TAG(VM_MEMORY_IOKIT), &e);
+>>>>>>> origin/10.7
 
 	if (kr != KERN_SUCCESS) {
 		panic("%s: vm_map_find_space failed with %d\n", __FUNCTION__, kr);
@@ -424,6 +428,7 @@ kdp_machine_init(void) {
 	debugger_ptep = pmap_pte(kernel_pmap, debugger_window_kva);
 
 	if (debugger_ptep == NULL) {
+<<<<<<< HEAD
 		pmap_expand(kernel_pmap, debugger_window_kva, PMAP_EXPAND_OPTIONS_NONE);
 		debugger_ptep = pmap_pte(kernel_pmap, debugger_window_kva);
 	}
@@ -431,3 +436,9 @@ kdp_machine_init(void) {
 
 
 
+=======
+		pmap_expand(kernel_pmap, debugger_window_kva);
+		debugger_ptep = pmap_pte(kernel_pmap, debugger_window_kva);
+	}
+}
+>>>>>>> origin/10.7
