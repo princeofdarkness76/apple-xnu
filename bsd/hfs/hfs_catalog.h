@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2002-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2002-2013 Apple Inc. All rights reserved.
+>>>>>>> origin/10.8
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 

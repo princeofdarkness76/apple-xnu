@@ -566,9 +566,12 @@ int	mac_vnode_notify_create(vfs_context_t ctx, struct mount *mp,
 void	mac_vnode_notify_rename(vfs_context_t ctx, struct vnode *vp,
 	    struct vnode *dvp, struct componentname *cnp);
 void	mac_vnode_notify_open(vfs_context_t ctx, struct vnode *vp, int acc_flags);
+<<<<<<< HEAD
 void	mac_vnode_notify_link(vfs_context_t ctx, struct vnode *vp,
 			      struct vnode *dvp, struct componentname *cnp);
 int	mac_vnode_find_sigs(struct proc *p, struct vnode *vp, off_t offsetInMacho);
+=======
+>>>>>>> origin/10.8
 int	vnode_label(struct mount *mp, struct vnode *dvp, struct vnode *vp,
 	    struct componentname *cnp, int flags, vfs_context_t ctx);
 void	vnode_relabel(struct vnode *vp);

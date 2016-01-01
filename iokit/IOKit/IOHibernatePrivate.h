@@ -103,6 +103,7 @@ struct IOHibernateImageHeader
     uint32_t	sleepTime;
     uint32_t    compression;
 
+<<<<<<< HEAD
     uint32_t	reserved[58];		// make sizeof == 512
     uint32_t	booterTime0;
     uint32_t	booterTime1;
@@ -114,6 +115,13 @@ struct IOHibernateImageHeader
     uint32_t	splashTime;
     uint32_t	booterTime;
     uint32_t	trampolineTime;
+=======
+    uint32_t	reserved[62];		// make sizeof == 512
+
+    uint64_t	restoreTime1 __attribute__ ((packed));
+    uint64_t	restoreTime2 __attribute__ ((packed));
+    uint64_t	restoreTime3 __attribute__ ((packed));
+>>>>>>> origin/10.8
 
     uint64_t	encryptEnd __attribute__ ((packed));
     uint64_t	deviceBase __attribute__ ((packed));
@@ -318,7 +326,10 @@ IOReturn IOHibernateSystemWake(void);
 IOReturn IOHibernateSystemPostWake(void);
 bool     IOHibernateWasScreenLocked(void);
 void     IOHibernateSetScreenLocked(uint32_t lockState);
+<<<<<<< HEAD
 void     IOHibernateSetWakeCapabilities(uint32_t capability);
+=======
+>>>>>>> origin/10.8
 void     IOHibernateSystemRestart(void);
 
 #endif /* __cplusplus */
@@ -345,14 +356,18 @@ vm_compressor_do_warmup(void);
 
 =======
 			     void * callback_ref,
+
+                             off_t set_file_size,
+
+                             off_t write_file_offset,
+                             caddr_t write_file_addr,
+                             vm_size_t write_file_len,
+
 			     dev_t * partition_device_result,
 			     dev_t * image_device_result,
                              uint64_t * partitionbase_result,
                              uint64_t * maxiocount_result,
-                             uint32_t * oflags,
-                             off_t offset,
-                             caddr_t addr,
-                             vm_size_t len);
+                             uint32_t * oflags);
 void
 kern_close_file_for_direct_io(struct kern_direct_file_io_ref_t * ref,
 			      off_t write_offset, caddr_t addr, vm_size_t write_length,
@@ -362,12 +377,15 @@ kern_close_file_for_direct_io(struct kern_direct_file_io_ref_t * ref,
 
 hibernate_page_list_t *
 hibernate_page_list_allocate(boolean_t log);
+<<<<<<< HEAD
 
 kern_return_t 
 hibernate_alloc_page_lists(
 		hibernate_page_list_t ** page_list_ret,
 		hibernate_page_list_t ** page_list_wired_ret,
 		hibernate_page_list_t ** page_list_pal_ret);
+=======
+>>>>>>> origin/10.8
 
 kern_return_t 
 hibernate_setup(IOHibernateImageHeader * header,
@@ -383,8 +401,12 @@ hibernate_setup(IOHibernateImageHeader * header,
                         boolean_t vmflush,
 			hibernate_page_list_t ** page_list_ret,
 			hibernate_page_list_t ** page_list_wired_ret,
+<<<<<<< HEAD
                         boolean_t * encryptedswap);
 >>>>>>> origin/10.6
+=======
+			hibernate_page_list_t ** page_list_pal_ret);
+>>>>>>> origin/10.8
 kern_return_t 
 hibernate_teardown(hibernate_page_list_t * page_list,
                     hibernate_page_list_t * page_list_wired,
@@ -413,8 +435,12 @@ void
 hibernate_page_list_setall(hibernate_page_list_t * page_list,
 			   hibernate_page_list_t * page_list_wired,
 			   hibernate_page_list_t * page_list_pal,
+<<<<<<< HEAD
 			   boolean_t preflight, 
 			   boolean_t discard_all,
+=======
+			   boolean_t preflight,
+>>>>>>> origin/10.8
 			   uint32_t * pagesOut);
 
 // mark pages to be saved, or pages not to be saved but available 
@@ -507,9 +533,13 @@ enum
     kIOHibernateModeRestart	= 0x00000040,
     kIOHibernateModeSSDInvert	= 0x00000080,
 <<<<<<< HEAD
+<<<<<<< HEAD
     kIOHibernateModeFileResize	= 0x00000100,
 =======
 >>>>>>> origin/10.6
+=======
+    kIOHibernateModeFileResize	= 0x00000100,
+>>>>>>> origin/10.8
 };
 
 // IOHibernateImageHeader.signature

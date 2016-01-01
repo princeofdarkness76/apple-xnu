@@ -54,6 +54,8 @@
 #include <kern/clock.h>
 #include <libkern/libkern.h>
 #include <i386/lapic.h>
+#include <i386/pmCPU.h>
+
 
 =======
 >>>>>>> origin/10.5
@@ -657,6 +659,7 @@ SYSCTL_PROC(_machdep_cpu_thermal, OID_AUTO, package_thermal_intr,
 	    (void *)offsetof(cpuid_thermal_leaf_t, package_thermal_intr),
 	    sizeof(boolean_t),
 	    cpu_thermal, "I", "Package Thermal interrupt and Status");
+<<<<<<< HEAD
 
 SYSCTL_PROC(_machdep_cpu_thermal, OID_AUTO, hardware_feedback,
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
@@ -693,6 +696,8 @@ SYSCTL_PROC(_machdep_cpu_thermal, OID_AUTO, package_thermal_intr,
 	    (void *)offsetof(cpuid_thermal_leaf_t, package_thermal_intr),
 	    sizeof(boolean_t),
 	    cpu_thermal, "I", "Packge Thermal interrupt and Status");
+=======
+>>>>>>> origin/10.8
 
 SYSCTL_PROC(_machdep_cpu_thermal, OID_AUTO, hardware_feedback,
 	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, 
@@ -1067,21 +1072,29 @@ SYSCTL_QUAD(_machdep_memmap, OID_AUTO, Other, CTLFLAG_RD|CTLFLAG_LOCKED, &firmwa
 SYSCTL_NODE(_machdep, OID_AUTO, tsc, CTLFLAG_RD|CTLFLAG_LOCKED, NULL, "Timestamp counter parameters");
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.8
 SYSCTL_QUAD(_machdep_tsc, OID_AUTO, frequency,
 	CTLFLAG_RD|CTLFLAG_LOCKED, &tscFreq, "");
 
 extern uint32_t deep_idle_rebase;
 SYSCTL_UINT(_machdep_tsc, OID_AUTO, deep_idle_rebase,
+<<<<<<< HEAD
 	CTLFLAG_RD|CTLFLAG_LOCKED, &deep_idle_rebase, 0, "");
 SYSCTL_QUAD(_machdep_tsc, OID_AUTO, at_boot,
 	CTLFLAG_RD|CTLFLAG_LOCKED, &tsc_at_boot, "");
 SYSCTL_QUAD(_machdep_tsc, OID_AUTO, rebase_abs_time,
 	CTLFLAG_RD|CTLFLAG_LOCKED, &tsc_rebase_abs_time, "");
+=======
+	CTLFLAG_RW|CTLFLAG_KERN|CTLFLAG_LOCKED, &deep_idle_rebase, 0, "");
+>>>>>>> origin/10.8
 
 SYSCTL_NODE(_machdep_tsc, OID_AUTO, nanotime,
 	CTLFLAG_RD|CTLFLAG_LOCKED, NULL, "TSC to ns conversion");
 SYSCTL_QUAD(_machdep_tsc_nanotime, OID_AUTO, tsc_base,
 	CTLFLAG_RD | CTLFLAG_LOCKED,
+<<<<<<< HEAD
 	__DECONST(uint64_t *, &pal_rtc_nanotime_info.tsc_base), "");
 SYSCTL_QUAD(_machdep_tsc_nanotime, OID_AUTO, ns_base,
 	CTLFLAG_RD | CTLFLAG_LOCKED,
@@ -1095,6 +1108,21 @@ SYSCTL_UINT(_machdep_tsc_nanotime, OID_AUTO, shift,
 SYSCTL_UINT(_machdep_tsc_nanotime, OID_AUTO, generation,
 	CTLFLAG_RD | CTLFLAG_LOCKED,
 	__DECONST(uint32_t *, &pal_rtc_nanotime_info.generation), 0, "");
+=======
+	(uint64_t *) &pal_rtc_nanotime_info.tsc_base, "");
+SYSCTL_QUAD(_machdep_tsc_nanotime, OID_AUTO, ns_base,
+	CTLFLAG_RD | CTLFLAG_LOCKED,
+	(uint64_t *)&pal_rtc_nanotime_info.ns_base, "");
+SYSCTL_UINT(_machdep_tsc_nanotime, OID_AUTO, scale,
+	CTLFLAG_RD | CTLFLAG_LOCKED,
+	(uint32_t *)&pal_rtc_nanotime_info.scale, 0, "");
+SYSCTL_UINT(_machdep_tsc_nanotime, OID_AUTO, shift,
+	CTLFLAG_RD | CTLFLAG_LOCKED,
+	(uint32_t *)&pal_rtc_nanotime_info.shift, 0, "");
+SYSCTL_UINT(_machdep_tsc_nanotime, OID_AUTO, generation,
+	CTLFLAG_RD | CTLFLAG_LOCKED,
+	(uint32_t *)&pal_rtc_nanotime_info.generation, 0, "");
+>>>>>>> origin/10.8
 
 SYSCTL_NODE(_machdep, OID_AUTO, misc, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
 	"Miscellaneous x86 kernel parameters");

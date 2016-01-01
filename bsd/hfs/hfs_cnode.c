@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2002-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2002-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2002-2013 Apple Inc. All rights reserved.
+>>>>>>> origin/10.8
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -428,6 +432,7 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 				}
 				truncated = 1;
 
+<<<<<<< HEAD
 				/* (SYMLINKS ONLY): Close/End our transaction after truncating the file record */
 				if (started_tr) {
 					hfs_end_transaction(hfsmp);
@@ -464,6 +469,43 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 			 * to get rid of the resource fork's data. Note that because we are holding the 
 			 * cnode lock, it is impossible for a competing thread to create the resource fork
 			 * vnode from underneath us while we do this.
+=======
+		/* Truncate away our own fork data. (Case A, B, C above) */
+		if (VTOF(vp)->ff_blocks != 0) {
+
+			/* 
+			 * SYMLINKS only:
+			 *
+			 * Encapsulate the entire change (including truncating the link) in 
+			 * nested transactions if we are modifying a symlink, because we know that its
+			 * file length will be at most 4k, and we can fit both the truncation and 
+			 * any relevant bitmap changes into a single journal transaction.  We also want
+			 * the kill_block code to execute in the same transaction so that any dirty symlink
+			 * blocks will not be written. Otherwise, rely on
+			 * hfs_truncate doing its own transactions to ensure that we don't blow up
+			 * the journal.
+			 */ 
+			if ((started_tr == 0) && (v_type == VLNK)) {
+				if (hfs_start_transaction(hfsmp) != 0) {
+					error = EINVAL;
+					goto out;
+				}
+				else {
+					started_tr = 1;
+				}
+			}
+
+ 			/*
+			 * At this point, we have decided that this cnode is
+			 * suitable for full removal.  We are about to deallocate
+			 * its blocks and remove its entry from the catalog. 
+			 * If it was a symlink, then it's possible that the operation
+			 * which created it is still in the current transaction group
+			 * due to coalescing.  Take action here to kill the data blocks
+			 * of the symlink out of the journal before moving to 
+			 * deallocate the blocks.  We need to be in the middle of
+			 * a transaction before calling buf_iterate like this.
+>>>>>>> origin/10.8
 			 * 
 			 * This is invoked via case A above only.
 			 */
@@ -482,6 +524,7 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 					bzero (lookup_rsrc, sizeof (struct cat_lookup_buffer));
 				}
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 				if (cp->c_desc.cd_namelen == 0) {
 					/* Initialize the rsrc descriptor for lookup if necessary*/
@@ -506,6 +549,55 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 			       (int)cp->c_fileid, (int)cp->c_blocks);
 		}
 >>>>>>> origin/10.5
+=======
+			if (hfsmp->jnl && vnode_islnk(vp)) {
+				buf_iterate(vp, hfs_removefile_callback, BUF_SKIP_NONLOCKED, (void *)hfsmp);
+			}
+	
+			/*
+			 * This truncate call (and the one below) is fine from VNOP_RECLAIM's 
+			 * context because we're only removing blocks, not zero-filling new 
+			 * ones.  The C_DELETED check above makes things much simpler. 
+			 */
+			error = hfs_truncate(vp, (off_t)0, IO_NDELAY, 0, 0, ctx);
+			if (error) {
+				goto out;
+			}
+			truncated = 1;
+
+			/* (SYMLINKS ONLY): Close/End our transaction after truncating the file record */
+			if (started_tr) {
+				hfs_end_transaction(hfsmp);
+				started_tr = 0;
+			}
+		}
+		
+		/* 
+		 * Truncate away the resource fork, if we represent the data fork and
+		 * it is the last fork.  That means, by definition, the rsrc fork is not in 
+		 * core.  To avoid bringing a vnode into core for the sole purpose of deleting the
+		 * data in the resource fork, we call cat_lookup directly, then hfs_release_storage
+		 * to get rid of the resource fork's data. Note that because we are holding the 
+		 * cnode lock, it is impossible for a competing thread to create the resource fork
+		 * vnode from underneath us while we do this.
+		 * 
+		 * This is invoked via case A above only.
+		 */
+		if ((cp->c_blocks > 0) && (forkcount == 1) && (vp != cp->c_rsrc_vp)) {
+			struct cat_lookup_buffer *lookup_rsrc = NULL;
+			struct cat_desc *desc_ptr = NULL;
+			lockflags = 0;
+
+			MALLOC(lookup_rsrc, struct cat_lookup_buffer*, sizeof (struct cat_lookup_buffer), M_TEMP, M_WAITOK);
+			if (lookup_rsrc == NULL) {
+				printf("hfs_cnode_teardown: ENOMEM from MALLOC\n");
+				error = ENOMEM;
+				goto out;
+			}
+			else {
+				bzero (lookup_rsrc, sizeof (struct cat_lookup_buffer));
+			}
+>>>>>>> origin/10.8
 
 				error = cat_lookup (hfsmp, desc_ptr, 1, 0, (struct cat_desc *) NULL, 
 						(struct cat_attr*) NULL, &lookup_rsrc->lookup_fork.ff_data, NULL);
@@ -658,12 +750,17 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 			if (error == 0)
 				hfs_volupdate(hfsmp, (v_type == VDIR) ? VOL_RMDIR : VOL_RMFILE, 0);
 		}
+<<<<<<< HEAD
 	} // if <open unlinked>
 
 	hfs_update(vp, reclaim ? HFS_UPDATE_FORCE : 0);
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+=======
+	}
+	
+>>>>>>> origin/10.8
 	/*
 	 * Since we are about to finish what might be an inactive call, propagate
 	 * any remaining modified or touch bits from the cnode to the vnode.  This
@@ -1170,11 +1267,21 @@ hfs_getnewvnode(
 	/* Sanity check the vtype and mode */
 	if (vtype == VBAD) {
 		/* Mark the FS as corrupt and bail out */
+<<<<<<< HEAD
 		hfs_mark_inconsistent(hfsmp, HFS_INCONSISTENCY_DETECTED);
 		retval = EINVAL;
 		goto gnv_exit;
 	}
 	
+=======
+		hfs_mark_volume_inconsistent(hfsmp);
+		return (EINVAL);
+	}
+
+	/* Zero out the out_flags */
+	*out_flags = 0;
+
+>>>>>>> origin/10.8
 #ifdef HFS_CHECK_LOCK_ORDER
 	/*
 <<<<<<< HEAD

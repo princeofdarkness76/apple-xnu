@@ -184,7 +184,11 @@ struct inpcb {
 	struct socket *inp_socket;	/* back pointer to socket */
 	LIST_ENTRY(inpcb) inp_portlist;	/* list for this PCB's local port */
 	RB_ENTRY(inpcb) infc_link;	/* link for flowhash RB tree */
+<<<<<<< HEAD
 	struct inpcbport *inp_phd;	/* head of this list */
+=======
+	struct	inpcbport *inp_phd;	/* head of this list */
+>>>>>>> origin/10.8
 	inp_gen_t inp_gencnt;		/* generation count of this instance */
 	int	inp_hash_element;	/* array index of pcb's hash list */
 	int	inp_wantcnt;		/* wanted count; atomically updated */
@@ -193,7 +197,11 @@ struct inpcb {
 	u_short	inp_lport;		/* local port */
 	u_int32_t inp_flags;		/* generic IP/datagram flags */
 	u_int32_t inp_flags2;		/* generic IP/datagram flags #2 */
+<<<<<<< HEAD
 	u_int32_t inp_flow;		/* IPv6 flow information */
+=======
+	u_int32_t inp_flow;
+>>>>>>> origin/10.8
 
 	u_char	inp_sndinprog_cnt;	/* outstanding send operations */
 	u_char	inp_vflag;		/* INP_IPV4 or INP_IPV6 */
@@ -725,6 +733,7 @@ struct inpcbinfo {
 #define	IN6P_BINDV6ONLY		0x01000000 /* do not grab IPv4 traffic */
 
 #ifdef BSD_KERNEL_PRIVATE
+<<<<<<< HEAD
 #define	IN6P_RFC2292		0x02000000 /* used RFC2292 API on the socket */
 #define	IN6P_MTU		0x04000000 /* receive path MTU */
 #define	INP_PKTINFO		0x08000000 /* rcv and snd PKTINFO for IPv4 */
@@ -740,6 +749,41 @@ struct inpcbinfo {
 
 #define	INP_UNMAPPABLEOPTS \
 	(IN6P_HOPOPTS|IN6P_DSTOPTS|IN6P_RTHDR| IN6P_TCLASS|IN6P_AUTOFLOWLABEL)
+=======
+#define	IN6P_RFC2292		0x2000000 /* used RFC2292 API on the socket */
+#define	IN6P_MTU		0x4000000 /* receive path MTU */
+#define	INP_PKTINFO		0x8000000 /* receive and send PKTINFO for IPv4 */
+#define INP_FLOW_SUSPENDED	0x10000000 /* flow suspended */
+#define	INP_NO_IFT_CELLULAR	0x20000000 /* do not use IFT_CELLULAR route */
+#define INP_FLOW_CONTROLLED	0x40000000 /* flow controlled */
+#define INP_FC_FEEDBACK	0x80000000 /* got interface flow adv feedback */
+
+#define	INP_CONTROLOPTS		(INP_RECVOPTS|INP_RECVRETOPTS|INP_RECVDSTADDR|\
+				 INP_RECVIF|INP_RECVTTL|INP_PKTINFO|\
+				 IN6P_PKTINFO|IN6P_HOPLIMIT|IN6P_HOPOPTS|\
+				 IN6P_DSTOPTS|IN6P_RTHDR|IN6P_RTHDRDSTOPTS|\
+				 IN6P_TCLASS|IN6P_RFC2292|IN6P_MTU)
+
+#define	INP_UNMAPPABLEOPTS	(IN6P_HOPOPTS|IN6P_DSTOPTS|IN6P_RTHDR|\
+				 IN6P_TCLASS|IN6P_AUTOFLOWLABEL)
+
+ /* for KAME src sync over BSD*'s */
+#define	IN6P_HIGHPORT		INP_HIGHPORT
+#define	IN6P_LOWPORT		INP_LOWPORT
+#define	IN6P_ANONPORT		INP_ANONPORT
+#define	IN6P_RECVIF		INP_RECVIF
+#define	IN6P_MTUDISC		INP_MTUDISC
+#define	IN6P_RECV_ANYIF		INP_RECV_ANYIF
+#define	IN6P_CONTROLOPTS INP_CONTROLOPTS
+#define	IN6P_NO_IFT_CELLULAR	INP_NO_IFT_CELLULAR
+
+/* Overflowed INP flags; use INP2 prefix to avoid misuse */
+#define INP2_IN_FCTREE		0x2	/* in inp_fc_tree */
+	/*
+	 * socket AF version is {newer than,or include}
+	 * actual datagram AF version
+	 */
+>>>>>>> origin/10.8
 
 /*
  * Flags for inp_flags2.
@@ -897,6 +941,66 @@ extern int	ipport_hilastauto;
 #define WNT_ACQUIRE	0x1		/* that pcb is being acquired, do not recycle this time */
 #define WNT_RELEASE	0x2		/* release acquired mode, can be garbage collected when wantcnt is null */
 
+<<<<<<< HEAD
+=======
+extern void	in_losing(struct inpcb *);
+extern void	in_rtchange(struct inpcb *, int);
+extern int	in_pcballoc(struct socket *, struct inpcbinfo *, struct proc *);
+extern int	in_pcbbind(struct inpcb *, struct sockaddr *, struct proc *);
+extern int	in_pcbconnect(struct inpcb *, struct sockaddr *, struct proc *,
+		    struct ifnet **);
+extern void	in_pcbdetach(struct inpcb *);
+extern void	in_pcbdispose (struct inpcb *);
+extern void	in_pcbdisconnect(struct inpcb *);
+extern int	in_pcbinshash(struct inpcb *, int);
+extern int	in_pcbladdr(struct inpcb *, struct sockaddr *,
+		    struct sockaddr_in *, struct ifnet **);
+extern struct inpcb *in_pcblookup_local(struct inpcbinfo *, struct in_addr,
+		    u_int, int);
+extern struct inpcb *in_pcblookup_local_and_cleanup(struct inpcbinfo *,
+		    struct in_addr, u_int, int);
+extern struct inpcb *in_pcblookup_hash(struct inpcbinfo *, struct in_addr,
+		    u_int, struct in_addr, u_int, int, struct ifnet *);
+extern int	in_pcblookup_hash_exists(struct inpcbinfo *, struct in_addr,
+		    u_int, struct in_addr, u_int, int, uid_t *, gid_t *, struct ifnet *);
+extern void	in_pcbnotifyall(struct inpcbinfo *, struct in_addr, int,
+		    void (*)(struct inpcb *, int));
+extern void	in_pcbrehash(struct inpcb *);
+extern int	in_setpeeraddr(struct socket *so, struct sockaddr **nam);
+extern int	in_setsockaddr(struct socket *so, struct sockaddr **nam);
+extern int	in_pcb_checkstate(struct inpcb *pcb, int mode, int locked);
+
+extern void	in_pcbremlists(struct inpcb *inp);
+extern void	inpcb_to_compat(struct inpcb *inp,
+		    struct inpcb_compat *inp_compat);
+#if !CONFIG_EMBEDDED
+extern void	inpcb_to_xinpcb64(struct inpcb *inp,
+		        struct xinpcb64 *xinp);
+#endif
+extern int get_pcblist_n(short , struct sysctl_req *, struct inpcbinfo *);
+extern void inpcb_get_ports_used(unsigned int , uint8_t *, struct inpcbinfo *);
+
+#define INPCB_OPPORTUNISTIC_THROTTLEON 0x0001
+#define INPCB_OPPORTUNISTIC_SETCMD     0x0002
+extern uint32_t inpcb_count_opportunistic(unsigned int , struct inpcbinfo *, u_int32_t);
+extern void	inp_route_copyout(struct inpcb *, struct route *);
+extern void	inp_route_copyin(struct inpcb *, struct route *);
+extern int	inp_bindif(struct inpcb *, unsigned int);
+extern int	inp_nocellular(struct inpcb *, unsigned int);
+extern u_int32_t inp_calc_flowhash(struct inpcb *);
+extern void	socket_flowadv_init(void);
+
+/* Flags used by inp_fc_getinp */
+#define INPFC_SOLOCKED	0x1
+#define INPFC_REMOVE	0x2
+extern struct inpcb *inp_fc_getinp(u_int32_t, u_int32_t);
+extern void	inp_fc_feedback(struct inpcb *);
+extern void	inp_reset_fc_state(struct inpcb *);
+extern int	inp_set_fc_state(struct inpcb *, int advcode);
+extern void	inp_fc_unthrottle_tcp(struct inpcb *);
+extern int	inp_flush(struct inpcb *, int);
+#endif /* BSD_KERNEL_PRIVATE */
+>>>>>>> origin/10.8
 
 void	in_pcbpurgeif0(struct inpcb *, struct ifnet *);
 void	in_losing(struct inpcb *);

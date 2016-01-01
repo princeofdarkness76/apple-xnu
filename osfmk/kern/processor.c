@@ -223,6 +223,7 @@ processor_init(
 	processor->processor_list = NULL;
 >>>>>>> origin/10.5
 
+	s = splsched();
 	pset_lock(pset);
 	if (pset->cpu_set_count++ == 0)
 		pset->cpu_set_low = pset->cpu_set_hi = cpu_id;
@@ -231,6 +232,7 @@ processor_init(
 		pset->cpu_set_hi = (cpu_id > pset->cpu_set_hi)? cpu_id: pset->cpu_set_hi;
 	}
 	pset_unlock(pset);
+	splx(s);
 
 	simple_lock(&processor_list_lock);
 	if (processor_list == NULL)

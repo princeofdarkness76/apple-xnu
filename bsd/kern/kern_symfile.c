@@ -238,19 +238,29 @@ kern_open_file_for_direct_io(const char * name,
 			     kern_get_file_extents_callback_t callback, 
 			     void * callback_ref,
                              off_t set_file_size,
+<<<<<<< HEAD
                              off_t fs_free_size,
                              off_t write_file_offset,
                              void * write_file_addr,
                              size_t write_file_len,
+=======
+                             off_t write_file_offset,
+                             caddr_t write_file_addr,
+                             vm_size_t write_file_len,
+>>>>>>> origin/10.8
 			     dev_t * partition_device_result,
 			     dev_t * image_device_result,
                              uint64_t * partitionbase_result,
                              uint64_t * maxiocount_result,
 <<<<<<< HEAD
+<<<<<<< HEAD
                              uint32_t * oflags)
 =======
                              boolean_t * solid_state)
 >>>>>>> origin/10.6
+=======
+                             uint32_t * oflags)
+>>>>>>> origin/10.8
 {
     struct kern_direct_file_io_ref_t * ref;
 
@@ -286,7 +296,7 @@ kern_open_file_for_direct_io(const char * name,
     int			        isssd = 0;
     uint32_t                    flags = 0;
     uint32_t			blksize;
-    off_t 			maxiocount, count;
+    off_t 			maxiocount, count, segcount;
     boolean_t                   locked = FALSE;
 >>>>>>> origin/10.7
 
@@ -317,6 +327,7 @@ kern_open_file_for_direct_io(const char * name,
     VATTR_SET(&va, va_dataprotect_class, PROTECTION_CLASS_D);
     if ((error = vn_open_auth(&nd, &fmode, &va))) goto out;
 
+<<<<<<< HEAD
     ref->vp = nd.ni_vp;
     if (ref->vp->v_type == VREG)
     {
@@ -328,6 +339,12 @@ kern_open_file_for_direct_io(const char * name,
     if (write_file_addr && write_file_len)
     {
 	if ((error = kern_write_file(ref, write_file_offset, write_file_addr, write_file_len, 0))) goto out;
+=======
+    if (write_file_addr && write_file_len)
+    {
+	if ((error = kern_write_file(ref, write_file_offset, write_file_addr, write_file_len)))
+	    goto out;
+>>>>>>> origin/10.8
     }
 
     VATTR_INIT(&va);
@@ -356,6 +373,7 @@ kern_open_file_for_direct_io(const char * name,
         p2 = p;
         do_ioctl = &file_ioctl;
 
+<<<<<<< HEAD
         if (set_file_size)
         {
             if (fs_free_size)
@@ -371,6 +389,20 @@ kern_open_file_for_direct_io(const char * name,
 	    if (error) goto out;
 	    ref->filelength = set_file_size;
         }
+=======
+	if (set_file_size)
+	{
+	    off_t     bytesallocated = 0;
+	    u_int32_t alloc_flags = PREALLOCATE | ALLOCATEFROMPEOF | ALLOCATEALL;
+	    error = VNOP_ALLOCATE(ref->vp, set_file_size, alloc_flags,
+				  &bytesallocated, 0 /*fst_offset*/,
+				  ref->ctx);
+	    // F_SETSIZE:
+	    if (!error) error = vnode_setsize(ref->vp, set_file_size, IO_NOZEROFILL, ref->ctx);
+	    kprintf("vnode_setsize(%d) %qd\n", error, set_file_size);
+	    ref->filelength = bytesallocated;
+	}
+>>>>>>> origin/10.8
     }
     else if ((ref->vp->v_type == VBLK) || (ref->vp->v_type == VCHR))
     {
@@ -402,6 +434,7 @@ kern_open_file_for_direct_io(const char * name,
         goto out;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
     if (ref->vp->v_type != VREG)
     {
         error = do_ioctl(p1, p2, DKIOCGETBLOCKCOUNT, (caddr_t) &fileblk);
@@ -410,6 +443,9 @@ kern_open_file_for_direct_io(const char * name,
     if (ref->vp->v_type == VREG)
         ref->filelength = va.va_data_size;
     else
+=======
+    if (ref->vp->v_type != VREG)
+>>>>>>> origin/10.8
     {
         error = do_ioctl(p1, p2, DKIOCGETBLOCKCOUNT, (caddr_t) &fileblk);
         if (error)

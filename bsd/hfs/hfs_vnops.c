@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+>>>>>>> origin/10.8
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -2431,10 +2435,17 @@ hfs_vnop_exchange(ap)
 			goto exit;
 		}
 
+<<<<<<< HEAD
 		if (to_cp >= from_cp) {
 			hfs_lock_truncate(to_cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT);
 			have_to_trunc_lock = true;
 		}
+=======
+	/* Resource forks cannot be exchanged. */
+	if (VNODE_IS_RSRC(from_vp) || VNODE_IS_RSRC(to_vp)) {
+		error = EINVAL;
+		goto exit;
+>>>>>>> origin/10.8
 	}
 
 	if ((error = hfs_lockpair(from_cp, to_cp, HFS_EXCLUSIVE_LOCK)))
@@ -2595,6 +2606,7 @@ hfs_vnop_exchange(ap)
 	from_cp->c_hint = 0;
 	/*
 	 * If 'to' was a hardlink, then we copied over its link ID/CNID/(namespace ID) 
+<<<<<<< HEAD
 	 * when we bcopy'd the descriptor above.  However, the cnode attributes
 	 * are not bcopied.  As a result, make sure to swap the file IDs of each item.
 	 *
@@ -2611,6 +2623,16 @@ hfs_vnop_exchange(ap)
 	 */ 
 	from_cp->c_fileid = to_cp->c_attr.ca_fileid;
 
+=======
+	 * when we bcopy'd the descriptor above.  However, we need to be careful
+	 * when setting up the fileID below, because we cannot assume that the
+	 * file ID is the same as the CNID if either one was a hardlink.  
+	 * The file ID is stored in the c_attr as the ca_fileid. So it needs 
+	 * to be pulled explicitly; we cannot just use the CNID.
+	 */ 
+	from_cp->c_fileid = to_cp->c_attr.ca_fileid;
+	
+>>>>>>> origin/10.8
 	from_cp->c_itime = to_cp->c_itime;
 	from_cp->c_btime = to_cp->c_btime;
 	from_cp->c_atime = to_cp->c_atime;
@@ -2644,7 +2666,12 @@ hfs_vnop_exchange(ap)
 	 * 2) Drop the special bits from the current flags
 	 * 3) swap the special flag bits to their destination
 	 */	 
+<<<<<<< HEAD
 	from_cp->c_flag |= to_flag_special | C_MODIFIED;
+=======
+	from_cp->c_flag |= to_flag_special;
+	
+>>>>>>> origin/10.8
 	from_cp->c_attr.ca_recflags = to_cp->c_attr.ca_recflags;
 	bcopy(to_cp->c_finderinfo, from_cp->c_finderinfo, 32);
 
@@ -2673,7 +2700,11 @@ hfs_vnop_exchange(ap)
 	 * Only OR in the "from" flags into our cnode flags below. 
 	 * Leave the rest of the flags alone.
 	 */
+<<<<<<< HEAD
 	to_cp->c_flag |= from_flag_special | C_MODIFIED;
+=======
+	to_cp->c_flag |= from_flag_special;
+>>>>>>> origin/10.8
 
 	to_cp->c_attr.ca_recflags = tempattr.ca_recflags;
 	bcopy(tempattr.ca_finderinfo, to_cp->c_finderinfo, 32);
@@ -6400,6 +6431,7 @@ skip_rm:
 	(void) hfs_update(tdvp, 0);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	/* Update the vnode's name now that the rename has completed. */
 	vnode_update_identity(fvp, tdvp, tcnp->cn_nameptr, tcnp->cn_namelen, 
 			tcnp->cn_hash, (VNODE_UPDATE_PARENT | VNODE_UPDATE_NAME));
@@ -6410,6 +6442,12 @@ skip_rm:
 	vnode_update_identity(fvp, tdvp, tcnp->cn_nameptr, tcnp->cn_namelen, 
 			tcnp->cn_hash, (VNODE_UPDATE_PARENT | VNODE_UPDATE_NAME));
 >>>>>>> origin/10.7
+=======
+	/* Update the vnode's name now that the rename has completed. */
+	vnode_update_identity(fvp, tdvp, tcnp->cn_nameptr, tcnp->cn_namelen, 
+			tcnp->cn_hash, (VNODE_UPDATE_PARENT | VNODE_UPDATE_NAME));
+
+>>>>>>> origin/10.8
 	/* 
 	 * At this point, we may have a resource fork vnode attached to the 
 	 * 'from' vnode.  If it exists, we will want to update its name, because
@@ -6437,17 +6475,23 @@ skip_rm:
 		 */
 		vnode_update_identity (fcp->c_rsrc_vp, fvp, rsrc_path, len, 0, (VNODE_UPDATE_NAME | VNODE_UPDATE_CACHE));
 <<<<<<< HEAD
+<<<<<<< HEAD
 		
 		/* Free the memory associated with the resource fork's name */
 		FREE_ZONE (rsrc_path, MAXPATHLEN, M_NAMEI);	
 	}
 =======
+=======
+>>>>>>> origin/10.8
 
 		/* Free the memory associated with the resource fork's name */
 		FREE_ZONE (rsrc_path, MAXPATHLEN, M_NAMEI);	
 	}
+<<<<<<< HEAD
 
 >>>>>>> origin/10.7
+=======
+>>>>>>> origin/10.8
 out:
 	if (got_cookie) {
 		cat_postflight(hfsmp, &cookie, p);
@@ -8958,7 +9002,13 @@ restart:
 
 		lockflags = hfs_systemfile_lock(hfsmp, SFL_CATALOG, HFS_SHARED_LOCK);
 
+<<<<<<< HEAD
 		/*
+=======
+		/* 
+		 * Get resource fork data
+		 *
+>>>>>>> origin/10.8
 		 * We call cat_idlookup (instead of cat_lookup) below because we can't
 		 * trust the descriptor in the provided cnode for lookups at this point.  
 		 * Between the time of the original lookup of this vnode and now, the 
@@ -8982,8 +9032,13 @@ restart:
 		 * do a lookup on /tmp/b, you'd acquire an entirely different record's resource
 		 * fork.
 		 * 
+<<<<<<< HEAD
 		 * As a result, we use the fileid, which should be invariant for the lifetime
 		 * of the cnode (possibly barring calls to exchangedata).
+=======
+ 		 * As a result, we use the fileid, which should be invariant for the lifetime
+ 		 * of the cnode (possibly barring calls to exchangedata).
+>>>>>>> origin/10.8
 		 *
 		 * Addendum: We can't do the above for HFS standard since we aren't guaranteed to
 		 * have thread records for files.  They were only required for directories.  So
@@ -8991,6 +9046,7 @@ restart:
 		 * never allowed on HFS standard.
 		 */
 
+<<<<<<< HEAD
 		/* Get resource fork data */
 		if ((hfsmp->hfs_flags & HFS_STANDARD) == 0) {
 			error = cat_idlookup (hfsmp, cp->c_fileid, 0, 1, NULL, NULL, &rsrcfork);
@@ -9011,6 +9067,22 @@ restart:
 					(struct cat_attr*)NULL, &rsrcfork, NULL);
 		}
 #endif
+=======
+		if (hfsmp->hfs_flags & HFS_STANDARD) {
+			/* 
+			 * HFS standard only:
+			 * 
+			 * Get the resource fork for this item via catalog lookup
+			 * since HFS standard was case-insensitive only. We don't want the 
+			 * descriptor; just the fork data here.
+			 */
+			error = cat_lookup (hfsmp, descptr, 1, (struct cat_desc*)NULL, 
+					(struct cat_attr*)NULL, &rsrcfork, NULL);
+		}
+		else {
+			error = cat_idlookup (hfsmp, cp->c_fileid, 0, 1, NULL, NULL, &rsrcfork);
+		}
+>>>>>>> origin/10.8
 
 		hfs_systemfile_unlock(hfsmp, lockflags);
 		if (error) {
@@ -9018,6 +9090,7 @@ restart:
 			vnode_put (empty_rvp);
 			return (error);
 		}
+
 		/*
 		 * Supply hfs_getnewvnode with a component name. 
 		 */

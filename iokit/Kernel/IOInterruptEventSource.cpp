@@ -298,11 +298,15 @@ void IOInterruptEventSource::disable()
 void IOInterruptEventSource::setWorkLoop(IOWorkLoop *inWorkLoop)
 {
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.8
     if (inWorkLoop) super::setWorkLoop(inWorkLoop);
 
     if (provider) {
 	if (!inWorkLoop) {
 	    if (intIndex >= 0) {
+<<<<<<< HEAD
                 /*
                  * It isn't necessarily safe to wait until free() to unregister the interrupt;
                  * our provider may disappear.
@@ -325,12 +329,21 @@ void IOInterruptEventSource::setWorkLoop(IOWorkLoop *inWorkLoop)
     if ( !inWorkLoop ) {
 	if (intIndex >= 0) {
 	    provider->unregisterInterrupt(intIndex);
+=======
+		provider->unregisterInterrupt(intIndex);
+		intIndex = ~intIndex;
+	    }
+	} else if ((intIndex < 0) && (kIOReturnSuccess == registerInterruptHandler(provider, ~intIndex))) {
+>>>>>>> origin/10.8
 	    intIndex = ~intIndex;
 	}
-    } else if ((intIndex < 0) && (kIOReturnSuccess == registerInterruptHandler(provider, ~intIndex))) {
-	intIndex = ~intIndex;
     }
+<<<<<<< HEAD
 >>>>>>> origin/10.6
+=======
+
+    if (!inWorkLoop) super::setWorkLoop(inWorkLoop);
+>>>>>>> origin/10.8
 }
 
 const IOService *IOInterruptEventSource::getProvider() const

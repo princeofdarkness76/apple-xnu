@@ -135,6 +135,7 @@ public:
 
     virtual uint64_t mapToPhysicalAddress(uint64_t mappedAddress) = 0;
 
+<<<<<<< HEAD
     // }
 
 private:
@@ -142,6 +143,25 @@ private:
     OSMetaClassDeclareReservedUnused(IOMapper, 1);
     OSMetaClassDeclareReservedUnused(IOMapper, 2);
     OSMetaClassDeclareReservedUnused(IOMapper, 3);
+=======
+    virtual ppnum_t iovmAllocDMACommand(IODMACommand * command, IOItemCount pageCount);
+    virtual void iovmFreeDMACommand(IODMACommand * command, ppnum_t addr, IOItemCount pageCount);
+    
+    virtual ppnum_t iovmMapMemory(
+    			  OSObject                    * memory,   // dma command or iomd
+			  ppnum_t                       offsetPage,
+			  ppnum_t                       pageCount,
+			  uint32_t                      options,
+			  upl_page_info_t             * pageList,
+			  const IODMAMapSpecification * mapSpecification);
+
+    OSMetaClassDeclareReservedUsed(IOMapper, 0);
+    OSMetaClassDeclareReservedUsed(IOMapper, 1);
+    OSMetaClassDeclareReservedUsed(IOMapper, 2);
+    OSMetaClassDeclareReservedUsed(IOMapper, 3);
+
+private:
+>>>>>>> origin/10.8
     OSMetaClassDeclareReservedUnused(IOMapper, 4);
     OSMetaClassDeclareReservedUnused(IOMapper, 5);
     OSMetaClassDeclareReservedUnused(IOMapper, 6);

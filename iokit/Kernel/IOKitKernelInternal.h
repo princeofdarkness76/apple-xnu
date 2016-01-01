@@ -125,10 +125,50 @@ extern void bcopy_phys(addr64_t from, addr64_t to, vm_size_t size);
 
 __END_DECLS
 
+<<<<<<< HEAD
 #define __IODEQUALIFY(type, expr)       			\
    ({ typeof(expr) expr_ = (type)(uintptr_t)(expr);		\
        (type)(uintptr_t)(expr_); })
 
+=======
+// Used for dedicated communications for IODMACommand
+enum  {
+    kIOMDWalkSegments             = 0x01000000,
+    kIOMDFirstSegment	          = 1 | kIOMDWalkSegments,
+    kIOMDGetCharacteristics       = 0x02000000,
+    kIOMDGetCharacteristicsMapped = 1 | kIOMDGetCharacteristics,
+    kIOMDDMAActive                = 0x03000000,
+    kIOMDSetDMAActive             = 1 | kIOMDDMAActive,
+    kIOMDSetDMAInactive           = kIOMDDMAActive,
+    kIOMDAddDMAMapSpec            = 0x04000000,
+    kIOMDDMAMap                   = 0x05000000,
+    kIOMDDMACommandOperationMask  = 0xFF000000,
+};
+struct IOMDDMACharacteristics {
+    UInt64 fLength;
+    UInt32 fSGCount;
+    UInt32 fPages;
+    UInt32 fPageAlign;
+    ppnum_t fHighestPage;
+    IODirection fDirection;
+    UInt8 fIsPrepared;
+};
+struct IOMDDMAWalkSegmentArgs {
+    UInt64 fOffset;			// Input/Output offset
+    UInt64 fIOVMAddr, fLength;		// Output variables
+    UInt8 fMapped;			// Input Variable, Require mapped IOVMA
+};
+typedef UInt8 IOMDDMAWalkSegmentState[128];
+>>>>>>> origin/10.8
+
+struct IOMDDMAMapArgs {
+    IOMapper *            fMapper;
+    IODMAMapSpecification fMapSpec;
+    uint64_t              fOffset;
+    uint64_t              fLength;
+    uint64_t              fAlloc;
+    ppnum_t               fAllocCount;
+};
 
 struct IODMACommandInternal
 {
@@ -166,7 +206,7 @@ struct IODMACommandInternal
 
     ppnum_t  fCopyPageCount;
 
-    ppnum_t  fLocalMapperPageAlloc;
+    addr64_t  fLocalMapperPageAlloc;
     ppnum_t  fLocalMapperPageCount;
 >>>>>>> origin/10.6
 

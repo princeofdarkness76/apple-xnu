@@ -150,16 +150,27 @@ void pal_preemption_assert(void);
 
 extern boolean_t virtualized;
 #define PAL_VIRTUALIZED_PROPERTY_VALUE 4
+<<<<<<< HEAD
 	
+=======
+
+>>>>>>> origin/10.8
 /* Allow for tricky IOKit property matching */
 #define PAL_AICPM_PROPERTY_NAME "intel_cpupm_matching"
 static inline void 
 pal_get_resource_property(const char **property_name, int *property_value)
 {
+<<<<<<< HEAD
 	*property_name = PAL_AICPM_PROPERTY_NAME;
 	*property_value = PAL_AICPM_PROPERTY_VALUE;
 	if (virtualized)
 		*property_value = PAL_VIRTUALIZED_PROPERTY_VALUE;
+=======
+        *property_name = PAL_AICPM_PROPERTY_NAME;
+        *property_value = PAL_AICPM_PROPERTY_VALUE;
+        if (virtualized)
+                *property_value = PAL_VIRTUALIZED_PROPERTY_VALUE;
+>>>>>>> origin/10.8
 }
 
 /* assembly function to update TSC / timebase info */

@@ -73,7 +73,10 @@
 #if CONFIG_DTRACE
 #include <mach/sdt.h>
 #endif
+<<<<<<< HEAD
 #include <machine/machine_routines.h>
+=======
+>>>>>>> origin/10.8
 
 static zone_t			thread_call_zone;
 static struct waitq		daemon_waitq;
@@ -1346,16 +1349,24 @@ thread_call_enter1_delayed(
     thread_call_param_t		param1,
     uint64_t				deadline)
 {
+<<<<<<< HEAD
 	boolean_t				result = TRUE;
 	thread_call_group_t		group = &thread_call_group0;
     spl_t					s;
 >>>>>>> origin/10.5
+=======
+	boolean_t		result = TRUE;
+	thread_call_group_t	group;
+	spl_t			s;
+	uint64_t		abstime;
+>>>>>>> origin/10.8
 
 	if (UINT64_MAX - deadline <= slop)
 		deadline = UINT64_MAX;
 	else
 		deadline += slop;
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 	if (ratelimited) {
 		call->tc_flags |= TIMER_CALL_RATELIMITED;
@@ -1366,6 +1377,11 @@ thread_call_enter1_delayed(
 
 	call->tc_call.param1 = param1;
 	call->ttd = (sdeadline > abstime) ? (sdeadline - abstime) : 0;
+=======
+	s = splsched();
+	thread_call_lock_spin();
+	abstime =  mach_absolute_time();
+>>>>>>> origin/10.8
 
 	result = _delayed_call_enqueue(call, group, deadline);
 =======
@@ -1380,8 +1396,14 @@ thread_call_enter1_delayed(
 	if (queue_first(&group->delayed_queue) == qe(call))
 		_set_delayed_call_timer(call, group);
 
+<<<<<<< HEAD
 #if CONFIG_DTRACE
 	DTRACE_TMR5(thread_callout__create, thread_call_func_t, call->tc_call.func, uint64_t, (deadline - sdeadline), uint64_t, (call->ttd >> 32), (unsigned) (call->ttd & 0xFFFFFFFF), call);
+=======
+	call->ttd = (deadline > abstime) ? (deadline - abstime) : 0;
+#if CONFIG_DTRACE
+	DTRACE_TMR4(thread_callout__create, thread_call_func_t, call->tc_call.func, 0, (call->ttd >> 32), (unsigned) (call->ttd & 0xFFFFFFFF));
+>>>>>>> origin/10.8
 #endif
 	thread_call_unlock();
 	splx(s);
@@ -1431,6 +1453,7 @@ thread_call_cancel(
 #if CONFIG_DTRACE
 	DTRACE_TMR4(thread_callout__cancel, thread_call_func_t, call->tc_call.func, 0, (call->ttd >> 32), (unsigned) (call->ttd & 0xFFFFFFFF));
 #endif
+<<<<<<< HEAD
 =======
     thread_call_t		call)
 {
@@ -1446,6 +1469,8 @@ thread_call_cancel(
     simple_unlock(&thread_call_lock);
     splx(s);
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.8
 
 	return (result);
 }
@@ -1682,6 +1707,9 @@ thread_call_thread(
 	thread_t	self = current_thread();
 	boolean_t	canwait;
 	spl_t		s;
+
+	if ((thread_get_tag_internal(self) & THREAD_TAG_CALLOUT) == 0)
+		(void)thread_set_tag_internal(self, THREAD_TAG_CALLOUT);
 
 	if ((thread_get_tag_internal(self) & THREAD_TAG_CALLOUT) == 0)
 		(void)thread_set_tag_internal(self, THREAD_TAG_CALLOUT);

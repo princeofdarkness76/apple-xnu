@@ -674,12 +674,16 @@ lf_setlock(struct lockf *lock, struct timespec *timeout)
 <<<<<<< HEAD
 		DTRACE_FSINFO(advlock__wait, vnode_t, vp);
 
+<<<<<<< HEAD
 		error = msleep(lock, &vp->v_lock, priority, lockstr, timeout);
 
+=======
+>>>>>>> origin/10.8
 		if (error == 0 && (lock->lf_flags & F_ABORT) != 0)
 			error = EBADF;
 
 		if (lock->lf_next) {
+<<<<<<< HEAD
 =======
 		error = msleep(lock, &vp->v_lock, priority, lockstr, 0);
 
@@ -698,6 +702,8 @@ lf_setlock(struct lockf *lock, struct timespec *timeout)
 		}
 		if (error) {	/* XXX */
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.8
 			/*
 			 * lf_wakelock() always sets wakelock->lf_next to
 			 * NULL before a wakeup; so we've been woken early
@@ -707,6 +713,9 @@ lf_setlock(struct lockf *lock, struct timespec *timeout)
 			 * in the spurious case, which would create a cycle)
 			 */
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.8
 			TAILQ_REMOVE(&lock->lf_next->lf_blkhd, lock, lf_block);
 			lock->lf_next = NULL;
 
@@ -717,6 +726,7 @@ lf_setlock(struct lockf *lock, struct timespec *timeout)
 				printf("%s: spurious wakeup, retrying lock\n",
 				    __func__);
 				continue;
+<<<<<<< HEAD
 			}
 		}
 
@@ -733,11 +743,24 @@ lf_setlock(struct lockf *lock, struct timespec *timeout)
 				TAILQ_REMOVE(&lock->lf_next->lf_blkhd, lock, lf_block);
 				lock->lf_next->lf_waiters--;
 				lock->lf_next = NOLOCKF;
+=======
+>>>>>>> origin/10.8
 			}
+		}
+
+		if (!TAILQ_EMPTY(&lock->lf_blkhd)) {
+		        if ((block = lf_getblock(lock, -1)) != NULL)
+				lf_move_blocked(block, lock);
+		}
+
+		if (error) {
 			if (!TAILQ_EMPTY(&lock->lf_blkhd))
 			        lf_wakelock(lock, TRUE);
+<<<<<<< HEAD
 			  
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.8
 			FREE(lock, M_LOCKF);
 			/* Return ETIMEDOUT if timeout occoured. */
 			if (error == EWOULDBLOCK) {
@@ -1359,6 +1382,7 @@ lf_wakelock(struct lockf *listhead, boolean_t force_all)
 						/* See rdar://10887303 */
 						panic("cycle in wakelock list");
 					}
+<<<<<<< HEAD
 =======
 
 		        TAILQ_CONCAT(&wakelock->lf_blkhd, &listhead->lf_blkhd, lf_block);
@@ -1370,6 +1394,8 @@ lf_wakelock(struct lockf *listhead, boolean_t force_all)
 
 			        TAILQ_FOREACH(tlock, &wakelock->lf_blkhd, lf_block) {
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.8
 				        tlock->lf_next = wakelock;
 				}
 			}

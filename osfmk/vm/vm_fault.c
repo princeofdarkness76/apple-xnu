@@ -152,6 +152,10 @@ unsigned int	vm_object_pagein_throttle = 16;
  */
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+extern boolean_t thread_is_io_throttled(void);
+>>>>>>> origin/10.8
 extern void throttle_lowpri_io(int);
 
 uint64_t vm_hard_throttle_threshold;
@@ -5465,6 +5469,7 @@ handle_copy_delay:
 done:
 	thread_interrupt_level(interruptible_state);
 
+<<<<<<< HEAD
 	/*
 	 * Only I/O throttle on faults which cause a pagein/swapin.
 	 */
@@ -5487,6 +5492,10 @@ done:
 			}
 		}
 	}
+=======
+	throttle_lowpri_io(TRUE);
+
+>>>>>>> origin/10.8
 	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, 
 			      (MACHDBG_CODE(DBG_MACH_VM, 2)) | DBG_FUNC_END,
 			      ((uint64_t)vaddr >> 32),

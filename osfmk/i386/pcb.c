@@ -1321,6 +1321,31 @@ machine_thread_set_state(
 		return fpu_set_fxstate(thr_act, tstate, flavor);
 	}
 
+	case x86_AVX_STATE:
+	{   
+		x86_avx_state_t       *state;
+
+		if (count != x86_AVX_STATE_COUNT)
+			return(KERN_INVALID_ARGUMENT);
+
+		state = (x86_avx_state_t *)tstate;
+		if (state->ash.flavor == x86_AVX_STATE64 &&
+		    state->ash.count  == x86_FLOAT_STATE64_COUNT &&
+		    thread_is_64bit(thr_act)) {
+			return fpu_set_fxstate(thr_act,
+					       (thread_state_t)&state->ufs.as64,
+					       x86_FLOAT_STATE64);
+		}
+		if (state->ash.flavor == x86_FLOAT_STATE32 &&
+		    state->ash.count  == x86_FLOAT_STATE32_COUNT &&
+		    !thread_is_64bit(thr_act)) {
+			return fpu_set_fxstate(thr_act,
+					       (thread_state_t)&state->ufs.as32,
+					       x86_FLOAT_STATE32); 
+		}
+		return(KERN_INVALID_ARGUMENT);
+	}
+
 	case x86_THREAD_STATE32: 
 	{
 		if (count != x86_THREAD_STATE32_COUNT)
@@ -1591,12 +1616,17 @@ machine_thread_get_state(
 	    }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	    case x86_AVX_STATE32:
 	    {
 =======
 	case x86_AVX_STATE32:
 	{
 >>>>>>> origin/10.6
+=======
+	    case x86_AVX_STATE32:
+	    {
+>>>>>>> origin/10.8
 		if (*count != x86_AVX_STATE32_COUNT)
 			return(KERN_INVALID_ARGUMENT);
 
@@ -1606,6 +1636,7 @@ machine_thread_get_state(
 		*count = x86_AVX_STATE32_COUNT;
 
 		return fpu_get_fxstate(thr_act, tstate, flavor);
+<<<<<<< HEAD
 <<<<<<< HEAD
 	    }
 
@@ -1617,6 +1648,12 @@ machine_thread_get_state(
 	case x86_AVX_STATE64:
 	{
 >>>>>>> origin/10.6
+=======
+	    }
+
+	    case x86_AVX_STATE64:
+	    {
+>>>>>>> origin/10.8
 		if (*count != x86_AVX_STATE64_COUNT)
 			return(KERN_INVALID_ARGUMENT);
 
@@ -1627,6 +1664,9 @@ machine_thread_get_state(
 
 		return fpu_get_fxstate(thr_act, tstate, flavor);
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.8
 	    }
 
 	    case x86_AVX_STATE:
@@ -1657,9 +1697,12 @@ machine_thread_get_state(
 
 		return(kret);
 	    }
+<<<<<<< HEAD
 =======
 	}
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.8
 
 	    case x86_THREAD_STATE32: 
 	    {

@@ -1298,11 +1298,31 @@ mach_port_get_set_status(
 
 		names = (mach_port_name_t *) addr;
 		maxnames = (ipc_entry_num_t)(size / sizeof(mach_port_name_t));
+<<<<<<< HEAD
 
 		ipc_mqueue_set_gather_member_names(space, &pset->ips_messages, maxnames, names, &actual);
 
 		/* release the portset reference */
 		ips_release(pset);
+=======
+		actual = 0;
+
+		table = space->is_table;
+		tsize = space->is_table_size;
+
+		for (index = 0; index < tsize; index++) {
+			ipc_entry_t ientry = &table[index];
+			ipc_port_t port = (ipc_port_t) ientry->ie_object;
+
+			if (ientry->ie_bits & MACH_PORT_TYPE_RECEIVE &&
+			    port->ip_pset_count > 0) {
+				mach_port_gst_helper(pset, port,
+						     maxnames, names, &actual);
+			}
+		}
+
+		is_read_unlock(space);
+>>>>>>> origin/10.8
 
 		if (actual <= maxnames)
 			break;

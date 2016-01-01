@@ -65,6 +65,7 @@ typedef struct IOHibernateVars IOHibernateVars;
 struct IOPolledFileIOVars
 {
     struct kern_direct_file_io_ref_t *	fileRef;
+    IORegistryEntry *                   media;
     class OSArray *			pollers;
     IOByteCount				blockSize;
     uint8_t *  				buffer;
@@ -74,7 +75,13 @@ struct IOPolledFileIOVars
     IOByteCount 			bufferHalf;
     IOByteCount				extentRemaining;
     IOByteCount				lastRead;
+<<<<<<< HEAD
     boolean_t                           solid_state;
+=======
+    IOByteCount				readEnd;
+    uint32_t                            flags;
+    uint64_t				fileSize;
+>>>>>>> origin/10.8
     uint64_t				block0;
     uint64_t				position;
     uint64_t				extentPosition;

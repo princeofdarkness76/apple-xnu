@@ -325,6 +325,9 @@ ip6_init(struct ip6protosw *pp, struct domain *dp)
 		return;
 	ip6_initialized = 1;
 
+	_CASSERT((sizeof(struct ip6_hdr) + sizeof(struct icmp6_hdr)) <= 
+		_MHLEN);
+
 	PE_parse_boot_argn("net.inet6.ip6.scopedroute", &ip6_doscopedroute,
 	    sizeof (ip6_doscopedroute));
 

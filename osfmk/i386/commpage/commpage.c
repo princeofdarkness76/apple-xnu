@@ -327,6 +327,7 @@ commpage_init_cpu_capabilities( void )
 					CPUID_LEAF7_FEATURE_HLE);
 	setif(bits, kHasAVX2_0,  cpuid_leaf7_features() &
 					CPUID_LEAF7_FEATURE_AVX2);
+<<<<<<< HEAD
 	setif(bits, kHasRDSEED,  cpuid_features() &
 					CPUID_LEAF7_FEATURE_RDSEED);
 	setif(bits, kHasADX,     cpuid_features() &
@@ -383,11 +384,22 @@ commpage_mach_approximate_time_init(void)
 		 (rdmsr64(MSR_IA32_MISC_ENABLE) & 1ULL )) ? kHasENFSTRG : 0;
 >>>>>>> origin/10.7
 
+=======
+	
+	uint64_t misc_enable = rdmsr64(MSR_IA32_MISC_ENABLE);
+	setif(bits, kHasENFSTRG, (misc_enable & 1ULL) &&
+				 (cpuid_leaf7_features() &
+					CPUID_LEAF7_FEATURE_ENFSTRG));
+	
+>>>>>>> origin/10.8
 	_cpu_capabilities = bits;		// set kernel version for use by drivers etc
 >>>>>>> origin/10.6
 }
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.8
 uint64_t
 _get_cpu_capabilities(void)
 {

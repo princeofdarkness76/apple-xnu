@@ -63,8 +63,12 @@ hibernate_setup(IOHibernateImageHeader * header,
                         boolean_t vmflush,
 			hibernate_page_list_t ** page_list_ret,
 			hibernate_page_list_t ** page_list_wired_ret,
+<<<<<<< HEAD
                         boolean_t * encryptedswap)
 >>>>>>> origin/10.6
+=======
+			hibernate_page_list_t ** page_list_pal_ret)
+>>>>>>> origin/10.8
 {
 <<<<<<< HEAD
     kern_return_t	retval = KERN_SUCCESS;
@@ -130,10 +134,11 @@ hibernate_setup(IOHibernateImageHeader * header,
     *page_list_ret       = NULL;
     *page_list_wired_ret = NULL;
     
-    if (vmflush)
+    if (vmflush && dp_isssd)
         hibernate_flush_memory();
 >>>>>>> origin/10.6
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 	    retval = KERN_RESOURCE_SHORTAGE;
 	    goto done;
@@ -158,6 +163,11 @@ hibernate_setup(IOHibernateImageHeader * header,
 	hibernate_page_bitset(page_list_wired, TRUE, m->phys_page);
 >>>>>>> origin/10.5
     }
+=======
+    page_list = hibernate_page_list_allocate(TRUE);
+    if (!page_list)
+        return (KERN_RESOURCE_SHORTAGE);
+>>>>>>> origin/10.8
     page_list_wired = hibernate_page_list_allocate(FALSE);
     if (!page_list_wired)
     {
@@ -223,12 +233,17 @@ hibernate_setup(IOHibernateImageHeader * header,
 	bitmap_wired = (hibernate_bitmap_t *) &bitmap_wired->bitmap[bitmap_wired->bitmapwords];
     }
 
+<<<<<<< HEAD
     // machine dependent adjustments
     hibernate_page_list_setall_machine(page_list, page_list_wired, &pages);
 
     clock_get_uptime(&end);
     absolutetime_to_nanoseconds(end - start, &nsec);
     HIBLOG("hibernate_page_list_setall time: %qd ms\n", nsec / 1000000ULL);
+=======
+    // pages we could force out to reduce hibernate image size
+    gobble_count = (uint32_t)((((uint64_t) page_list->page_count) * ((uint64_t) free_page_ratio)) / 100);
+>>>>>>> origin/10.8
 
     HIBLOG("pages %d, wire %d, act %d, inact %d, spec %d, zf %d, throt %d, could discard act %d inact %d purgeable %d spec %d\n", 
                 pages, count_wire, count_active, count_inactive, count_speculative, count_zf, count_throttled,
@@ -237,6 +252,7 @@ hibernate_setup(IOHibernateImageHeader * header,
     *pagesOut = pages - count_discard_active - count_discard_inactive - count_discard_purgeable - count_discard_speculative;
 }
 
+<<<<<<< HEAD
 void
 hibernate_page_list_discard(hibernate_page_list_t * page_list)
 {
@@ -296,6 +312,16 @@ hibernate_page_list_discard(hibernate_page_list_t * page_list)
         m = next;
 >>>>>>> origin/10.5
     }
+=======
+    if (gobble_count)
+	hibernate_gobble_pages(gobble_count, free_page_time);
+
+    HIBLOG("hibernate_alloc_pages act %d, inact %d, anon %d, throt %d, spec %d, wire %d, wireinit %d\n",
+    	    vm_page_active_count, vm_page_inactive_count, 
+	    vm_page_anonymous_count,  vm_page_throttled_count, vm_page_speculative_count,
+	    vm_page_wire_count, vm_page_wire_count_initial);
+
+>>>>>>> origin/10.8
     *page_list_ret        = page_list;
     *page_list_wired_ret  = page_list_wired;
     *page_list_pal_ret    = page_list_pal;

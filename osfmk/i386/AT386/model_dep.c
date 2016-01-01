@@ -426,8 +426,11 @@ machine_startup(void)
 
 	machine_conf();
 
+<<<<<<< HEAD
 	panic_hooks_init();
 
+=======
+>>>>>>> origin/10.8
 	/*
 	 * Start the system.
 	 */
@@ -1150,6 +1153,7 @@ Debugger(
 <<<<<<< HEAD
 =======
 
+<<<<<<< HEAD
 		/* If the user won't be able to read the dialog,
 		 * don't bother trying to show it
 		 */
@@ -1157,6 +1161,8 @@ Debugger(
 			draw_panic_dialog();
 >>>>>>> origin/10.6
 
+=======
+>>>>>>> origin/10.8
 		if (!panicDebugging) {
 			unsigned cnum;
 			/* Clear the MP rendezvous function lock, in the event

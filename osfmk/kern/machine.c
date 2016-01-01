@@ -316,11 +316,16 @@ processor_doshutdown(
 	thread_block(THREAD_CONTINUE_NULL);
 
 	assert(processor->state == PROCESSOR_SHUTDOWN);
+<<<<<<< HEAD
 
 #if CONFIG_DTRACE
 	if (dtrace_cpu_state_changed_hook)
 		(*dtrace_cpu_state_changed_hook)(processor->cpu_id, FALSE);
 #endif
+
+	ml_cpu_down();
+=======
+>>>>>>> origin/10.8
 
 	ml_cpu_down();
 
@@ -334,7 +339,14 @@ processor_doshutdown(
 	pset = processor->processor_set;
 	pset_lock(pset);
 	processor->state = PROCESSOR_OFF_LINE;
+<<<<<<< HEAD
 	--pset->online_processor_count;
+=======
+	if (--pset->online_processor_count == 0) {
+		pset_pri_init_hint(pset, PROCESSOR_NULL);
+		pset_count_init_hint(pset, PROCESSOR_NULL);
+	}
+>>>>>>> origin/10.8
 	(void)hw_atomic_sub(&processor_avail_count, 1);
 	commpage_update_active_cpus();
 	SCHED(processor_queue_shutdown)(processor);
@@ -394,6 +406,7 @@ processor_offline(
 =======
 	PMAP_DEACTIVATE_KERNEL(processor->cpu_num);
 
+<<<<<<< HEAD
 	pset = processor->processor_set;
 	pset_lock(pset);
 	processor->state = PROCESSOR_OFF_LINE;
@@ -406,6 +419,8 @@ processor_offline(
 	ml_cpu_down();
 >>>>>>> origin/10.5
 
+=======
+>>>>>>> origin/10.8
 	cpu_sleep();
 	panic("zombie processor");
 	/*NOTREACHED*/

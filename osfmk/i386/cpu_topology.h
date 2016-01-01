@@ -229,10 +229,15 @@ typedef struct x86_pkg
     void		*pmState;	/* Power Management state for package*/
     struct mca_state	*mca_state;	/* MCA state for memory errors */
 <<<<<<< HEAD
+<<<<<<< HEAD
     uint64_t		package_idle_exits;
     uint32_t		num_idle;
 =======
 >>>>>>> origin/10.5
+=======
+    uint64_t		package_idle_exits;
+    uint32_t		num_idle;
+>>>>>>> origin/10.8
 } x86_pkg_t;
 
 extern x86_pkg_t	*x86_pkgs;	/* root of all CPU packages */

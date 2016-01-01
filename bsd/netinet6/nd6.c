@@ -2310,11 +2310,18 @@ nd6_rtrequest(int req, struct rtentry *rt, struct sockaddr *sa)
 				 * In case we're called before 1.0 sec.
 				 * has elapsed.
 				 */
+<<<<<<< HEAD
 				if (ln != NULL) {
 					ln_setexpire(ln,
 					    (ifp->if_eflags & IFEF_IPV6_ND6ALT)
 					    ? 0 : MAX(timenow, 1));
 				}
+=======
+				if (ln != NULL)
+					ln->ln_expire =
+					    (ifp->if_eflags & IFEF_IPV6_ND6ALT)
+					    ? 0 : MAX(timenow.tv_sec, 1);
+>>>>>>> origin/10.8
 			}
 			if (rt->rt_flags & RTF_CLONING)
 				break;
@@ -2393,10 +2400,17 @@ nd6_rtrequest(int req, struct rtentry *rt, struct sockaddr *sa)
 			 * initialized in rtrequest(), so rt_expire is 0.
 			 */
 			ln->ln_state = ND6_LLINFO_NOSTATE;
+<<<<<<< HEAD
 
 			/* In case we're called before 1.0 sec. has elapsed */
 			ln_setexpire(ln, (ifp->if_eflags & IFEF_IPV6_ND6ALT) ?
 			    0 : MAX(timenow, 1));
+=======
+			
+			/* In case we're called before 1.0 sec. has elapsed */
+			ln->ln_expire = (ifp->if_eflags & IFEF_IPV6_ND6ALT)
+				? 0 : MAX(timenow.tv_sec, 1);
+>>>>>>> origin/10.8
 		}
 		LN_INSERTHEAD(ln);
 		nd6_inuse++;

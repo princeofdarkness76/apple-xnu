@@ -3372,10 +3372,13 @@ close_internal_locked(proc_t p, int fd, struct fileproc *fp, int flags)
 	} else {
 		procfdtbl_reservefd(p, fd);
 	}
+<<<<<<< HEAD
 
 	if (ENTR_SHOULDTRACE && fp->f_type == DTYPE_SOCKET)
 		KERNEL_ENERGYTRACE(kEnTrActKernSocket, DBG_FUNC_END,
 		    fd, 0, (int64_t)VM_KERNEL_ADDRPERM(fp->f_data));
+=======
+>>>>>>> origin/10.8
 
 	error = closef_locked(fp, fp->f_fglob, p);
 	if ((fp->f_flags & FP_WAITCLOSE) == FP_WAITCLOSE)

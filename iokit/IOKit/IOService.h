@@ -1848,7 +1848,11 @@ public:
                   IOServiceInterestHandler handler, void * target, void * ref );
 =======
     IOReturn setIgnoreIdleTimer( bool ignore );
+<<<<<<< HEAD
 >>>>>>> origin/10.7
+=======
+    static void setAdvisoryTickleEnable( bool enable );
+>>>>>>> origin/10.8
 
 #ifdef __LP64__
     static IOWorkLoop * getPMworkloop( void );
@@ -1921,6 +1925,7 @@ private:
     void tellSystemCapabilityChange( uint32_t nextMS );
     void restartIdleTimer( void );
 
+<<<<<<< HEAD
     static void ack_timer_expired( thread_call_param_t, thread_call_param_t );
     static void watchdog_timer_expired ( thread_call_param_t arg0, thread_call_param_t arg1 );
     static void spindump_timer_expired( thread_call_param_t arg0, thread_call_param_t arg1 );
@@ -1934,6 +1939,16 @@ private:
     static void pmDriverCallout( IOService * from );
     static void pmTellAppWithResponse( OSObject * object, void * context );
     static void pmTellClientWithResponse( OSObject * object, void * context );
+=======
+	static void ack_timer_expired( thread_call_param_t, thread_call_param_t );
+	static IOReturn actionAckTimerExpired(OSObject *, void *, void *, void *, void * );
+ 	static IOReturn actionDriverCalloutDone(OSObject *, void *, void *, void *, void * );
+	static IOPMRequest * acquirePMRequest( IOService * target, IOOptionBits type, IOPMRequest * active = 0 );
+	static void releasePMRequest( IOPMRequest * request );
+	static void pmDriverCallout( IOService * from );
+	static void pmTellAppWithResponse( OSObject * object, void * context );
+	static void pmTellClientWithResponse( OSObject * object, void * context );
+>>>>>>> origin/10.8
     static void pmTellCapabilityAppWithResponse ( OSObject * object, void * arg );
     static void pmTellCapabilityClientWithResponse( OSObject * object, void * arg );
     static void submitPMRequest( IOPMRequest * request );

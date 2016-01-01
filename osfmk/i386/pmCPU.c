@@ -102,6 +102,9 @@ uint64_t *cpu_rtime_bins = &cpu_itime_bins[0];
 =======
 >>>>>>> origin/10.7
 
+uint64_t cpu_itime_bins[CPU_ITIME_BINS] = {16* NSEC_PER_USEC, 32* NSEC_PER_USEC, 64* NSEC_PER_USEC, 128* NSEC_PER_USEC, 256* NSEC_PER_USEC, 512* NSEC_PER_USEC, 1024* NSEC_PER_USEC, 2048* NSEC_PER_USEC, 4096* NSEC_PER_USEC, 8192* NSEC_PER_USEC, 16384* NSEC_PER_USEC, 32768* NSEC_PER_USEC};
+uint64_t *cpu_rtime_bins = &cpu_itime_bins[0];
+
 /*
  * The following is set when the KEXT loads and initializes.
  */
@@ -120,7 +123,7 @@ static boolean_t	earlyTopology	= FALSE;
 =======
 pmDispatch_t	*pmDispatch	= NULL;
 
-static uint32_t		pmInitDone		= 0;
+uint32_t		pmInitDone		= 0;
 static boolean_t	earlyTopology		= FALSE;
 static uint64_t		earlyMaxBusDelay	= DELAY_UNSET;
 static uint64_t		earlyMaxIntDelay	= DELAY_UNSET;
@@ -148,6 +151,7 @@ static inline void machine_classify_interval(uint64_t interval, uint64_t *bins, 
  	}
 }
 
+<<<<<<< HEAD
 uint64_t	idle_pending_timers_processed;
 uint32_t	idle_entry_timer_processing_hdeadline_threshold = 5000000;
 
@@ -286,6 +290,8 @@ static uint32_t		pmInitDone	= 0;
 	}
 #endif    
 =======
+=======
+>>>>>>> origin/10.8
 /*
  * Called when the CPU is idle.  It calls into the power management kext
  * to determine the best way to idle the CPU.
@@ -293,11 +299,13 @@ static uint32_t		pmInitDone	= 0;
 void
 machine_idle(void)
 {
-    cpu_data_t		*my_cpu		= current_cpu_datap();
+	cpu_data_t		*my_cpu		= current_cpu_datap();
+	uint64_t		ctime, rtime, itime;
 
-    if (my_cpu == NULL)
-	goto out;
+	if (my_cpu == NULL)
+		goto out;
 
+<<<<<<< HEAD
     my_cpu->lcpu.state = LCPU_IDLE;
     my_cpu->lcpu.flags |= X86CORE_FL_IDLE;
     DBGLOG(cpu_handle, cpu_number(), MP_IDLE);
@@ -312,23 +320,55 @@ machine_idle(void)
 	 */
 	if (earlyMaxBusDelay != DELAY_UNSET)
 	    ml_set_maxbusdelay((uint32_t)(earlyMaxBusDelay & 0xFFFFFFFF));
+=======
+	ctime = mach_absolute_time();
 
-	if (earlyMaxIntDelay != DELAY_UNSET)
-	    ml_set_maxintdelay(earlyMaxIntDelay);
-    }
+	my_cpu->lcpu.state = LCPU_IDLE;
+	DBGLOG(cpu_handle, cpu_number(), MP_IDLE);
+	MARK_CPU_IDLE(cpu_number());
+>>>>>>> origin/10.8
 
-    if (pmInitDone
-	&& pmDispatch != NULL
-	&& pmDispatch->MachineIdle != NULL)
-	(*pmDispatch->MachineIdle)(0x7FFFFFFFFFFFFFFFULL);
-    else {
+	rtime = ctime - my_cpu->cpu_ixtime;
+
+	my_cpu->cpu_rtime_total += rtime;
+	machine_classify_interval(rtime, &my_cpu->cpu_rtimes[0], &cpu_rtime_bins[0], CPU_RTIME_BINS);
+
+	if (pmInitDone) {
+		/*
+		 * Handle case where ml_set_maxbusdelay() or ml_set_maxintdelay()
+		 * were called prior to the CPU PM kext being registered.  We do
+		 * this here since we know at this point the values will be first
+		 * used since idle is where the decisions using these values is made.
+		 */
+		if (earlyMaxBusDelay != DELAY_UNSET)
+			ml_set_maxbusdelay((uint32_t)(earlyMaxBusDelay & 0xFFFFFFFF));
+
+		if (earlyMaxIntDelay != DELAY_UNSET)
+			ml_set_maxintdelay(earlyMaxIntDelay);
+	}
+
+	if (pmInitDone
+	    && pmDispatch != NULL
+	    && pmDispatch->MachineIdle != NULL)
+		(*pmDispatch->MachineIdle)(0x7FFFFFFFFFFFFFFFULL);
+	else {
+		/*
+		 * If no power management, re-enable interrupts and halt.
+		 * This will keep the CPU from spinning through the scheduler
+		 * and will allow at least some minimal power savings (but it
+		 * cause problems in some MP configurations w.r.t. the APIC
+		 * stopping during a GV3 transition).
+		 */
+		pal_hlt();
+
+		/* Once woken, re-disable interrupts. */
+		pal_cli();
+	}
+
 	/*
-	 * If no power management, re-enable interrupts and halt.
-	 * This will keep the CPU from spinning through the scheduler
-	 * and will allow at least some minimal power savings (but it
-	 * cause problems in some MP configurations w.r.t. the APIC
-	 * stopping during a GV3 transition).
+	 * Mark the CPU as running again.
 	 */
+<<<<<<< HEAD
 	__asm__ volatile ("sti; hlt");
     }
 
@@ -346,6 +386,27 @@ machine_idle(void)
   out:
     __asm__ volatile("sti");
 >>>>>>> origin/10.5
+=======
+	MARK_CPU_ACTIVE(cpu_number());
+	DBGLOG(cpu_handle, cpu_number(), MP_UNIDLE);
+
+	uint64_t ixtime = my_cpu->cpu_ixtime = mach_absolute_time();
+	my_cpu->cpu_idle_exits++;
+
+	itime = ixtime - ctime;
+
+	my_cpu->lcpu.state = LCPU_RUN;
+
+	machine_classify_interval(itime, &my_cpu->cpu_itimes[0], &cpu_itime_bins[0], CPU_ITIME_BINS);
+	my_cpu->cpu_itime_total += itime;
+
+
+	/*
+	 * Re-enable interrupts.
+	 */
+out:
+	pal_sti();
+>>>>>>> origin/10.8
 }
 
 /*
@@ -391,6 +452,7 @@ pmCPUHalt(uint32_t reason)
 
 	    /*
 <<<<<<< HEAD
+<<<<<<< HEAD
 	     * We've exited halt, so get the CPU schedulable again.
 	     * - by calling the fast init routine for a slave, or
 	     * - by returning if we're the master processor.
@@ -409,6 +471,18 @@ pmCPUHalt(uint32_t reason)
 	    panic("init_slave_fast returned");
 	} else {
 >>>>>>> origin/10.5
+=======
+	     * We've exited halt, so get the CPU schedulable again.
+	     * - by calling the fast init routine for a slave, or
+	     * - by returning if we're the master processor.
+	     */
+	    if (cpup->cpu_number != master_cpu) {
+		i386_init_slave_fast();
+		panic("init_slave_fast returned");
+	    }
+	} else
+	{
+>>>>>>> origin/10.8
 	    /*
 	     * If no power managment and a processor is taken off-line,
 	     * then invalidate the cache and halt it (it will not be able
@@ -616,10 +690,14 @@ kern_return_t
 pmCPUExitHaltToOff(int cpu)
 {
 <<<<<<< HEAD
+<<<<<<< HEAD
     kern_return_t	rc	= KERN_SUCCESS;
 =======
     kern_return_t	rc	= KERN_INVALID_ARGUMENT;
 >>>>>>> origin/10.5
+=======
+    kern_return_t	rc	= KERN_SUCCESS;
+>>>>>>> origin/10.8
 
     if (pmInitDone
 	&& pmDispatch != NULL
@@ -1293,7 +1371,16 @@ pmKextRegister(uint32_t version, pmDispatch_t *cpuFuncs,
 			panic("Attempt to re-register power management interface--AICPM present in xcpm mode? %p->%p", pmDispatch, cpuFuncs);
 		}
 
+<<<<<<< HEAD
 		pmDispatch = cpuFuncs;
+=======
+    if (cpuFuncs != NULL) {
+        if (pmDispatch) {
+            panic("Attempt to re-register power management interface--AICPM present in xcpm mode? %p->%p", pmDispatch, cpuFuncs);
+        }
+
+	pmDispatch = cpuFuncs;
+>>>>>>> origin/10.8
 
 <<<<<<< HEAD
 		if (earlyTopology
@@ -1382,4 +1469,18 @@ pmsBuild(__unused pmsDef *pd, __unused uint32_t pdsize,
 {
     return(KERN_SUCCESS);
 >>>>>>> origin/10.5
+}
+
+void machine_track_platform_idle(boolean_t entry) {
+	cpu_data_t		*my_cpu		= current_cpu_datap();
+
+	if (entry) {
+		(void)__sync_fetch_and_add(&my_cpu->lcpu.package->num_idle, 1);
+	}
+ 	else {
+ 		uint32_t nidle = __sync_fetch_and_sub(&my_cpu->lcpu.package->num_idle, 1);
+ 		if (nidle == topoParms.nLThreadsPerPackage) {
+ 			my_cpu->lcpu.package->package_idle_exits++;
+ 		}
+ 	}
 }

@@ -918,11 +918,18 @@ fork_create_child(task_t parent_task, coalition_t *parent_coalitions, proc_t chi
 	}
 
 	/*
+<<<<<<< HEAD
          * Tag thread as being the first thread in its task.
          */
 	thread_set_tag(child_thread, THREAD_TAG_MAINTHREAD);
 
 <<<<<<< HEAD
+=======
+	 * Tag thread as being the first thread in its task.
+	 */
+	thread_set_tag(child_thread, THREAD_TAG_MAINTHREAD);
+
+>>>>>>> origin/10.8
 bad:
 	thread_yield_internal(1);
 =======

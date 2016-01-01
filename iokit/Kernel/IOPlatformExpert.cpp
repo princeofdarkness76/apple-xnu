@@ -474,6 +474,7 @@ PMLog(const char *who, unsigned long event,
       unsigned long param1, unsigned long param2)
 {
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
     UInt32 debugFlags = gIOKitDebug;
     UInt32 traceFlags = gIOKitTrace;
@@ -481,11 +482,14 @@ PMLog(const char *who, unsigned long event,
     if (debugFlags & kIOLogPower) {
 
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.8
 	clock_sec_t nows;
 	clock_usec_t nowus;
 	clock_get_system_microtime(&nows, &nowus);
 	nowus += (nows % 1000) * 1000000;
 
+<<<<<<< HEAD
 <<<<<<< HEAD
     kprintf("pm%u %p %.30s %d %lx %lx\n",
 		nowus, OBFUSCATE(current_thread()), who,	// Identity
@@ -519,6 +523,11 @@ PMLog(const char *who, unsigned long event,
 	}
     }
 >>>>>>> origin/10.6
+=======
+    kprintf("pm%u %p %.30s %d %lx %lx\n",
+		nowus, current_thread(), who,	// Identity
+		(int) event, (long) param1, (long) param2);			// Args
+>>>>>>> origin/10.8
 }
 
 

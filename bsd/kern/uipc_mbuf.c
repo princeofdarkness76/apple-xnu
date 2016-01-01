@@ -3269,9 +3269,14 @@ m_clalloc(const u_int32_t num, const int wait, const u_int32_t bufsize)
 
 	lck_mtx_lock(mbuf_mlock);
 
+<<<<<<< HEAD
 	for (i = 0; i < numpages; i++, page += PAGE_SIZE) {
 		ppnum_t offset =
 		    ((unsigned char *)page - mbutl) >> PAGE_SHIFT;
+=======
+	for (i = 0; i < numpages; i++, page += NBPG) {
+		ppnum_t offset = ((char *)page - (char *)mbutl) / NBPG;
+>>>>>>> origin/10.8
 		ppnum_t new_page = pmap_find_phys(kernel_pmap, page);
 
 		/*
@@ -3280,12 +3285,20 @@ m_clalloc(const u_int32_t num, const int wait, const u_int32_t bufsize)
 		 * contents to prevent exposing leftover kernel memory.
 		 */
 		VERIFY(offset < mcl_pages);
+<<<<<<< HEAD
 		if (mcl_paddr_base != 0) {
 			bzero((void *)(uintptr_t) page, PAGE_SIZE);
 			new_page = IOMapperInsertPage(mcl_paddr_base,
 			    offset, new_page);
 		}
 		mcl_paddr[offset] = new_page;
+=======
+		if (mcl_paddr_base) {
+		    bzero((void *)(uintptr_t) page, page_size);
+		    new_page = IOMapperInsertPage(mcl_paddr_base, offset, new_page);
+		}
+		mcl_paddr[offset] = new_page << PGSHIFT;
+>>>>>>> origin/10.8
 
 		/* Pattern-fill this fresh page */
 		if (mclverify) {

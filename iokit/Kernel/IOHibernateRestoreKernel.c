@@ -482,12 +482,19 @@ hibernate_kernel_entrypoint(uint32_t p1,
     uint32_t handoffPages;
     uint32_t handoffPageCount;
 
+<<<<<<< HEAD
     uint64_t timeStart;
     timeStart = rdtsc64();
 
     assert_static(sizeof(IOHibernateImageHeader) == 512);
 
     headerPhys = ptoa_64(p1);
+=======
+    uint64_t timeStart, time;
+    timeStart = rdtsc64();
+
+    C_ASSERT(sizeof(IOHibernateImageHeader) == 512);
+>>>>>>> origin/10.8
 
     headerPhys = ptoa_64(p1);
 
@@ -671,8 +678,14 @@ hibernate_kernel_entrypoint(uint32_t p1,
 
 	    if (!conflicts)
 	    {
+<<<<<<< HEAD
+=======
+//              if (compressedSize)
+		time = rdtsc64();
+>>>>>>> origin/10.8
 		pageSum = store_one_page(gIOHibernateCurrentHeader->processorFlags,
 					 src, compressedSize, 0, ppnum);
+                gIOHibernateCurrentHeader->restoreTime2 += (rdtsc64() - time);
 		if (stage != 2)
 		    sum += pageSum;
 		uncompressedPages++;
@@ -729,6 +742,8 @@ hibernate_kernel_entrypoint(uint32_t p1,
 
     // -- copy back conflicts
 
+    time = rdtsc64();
+
     pageListPage = copyPageListHeadPage;
     while (pageListPage)
     {
@@ -752,6 +767,8 @@ hibernate_kernel_entrypoint(uint32_t p1,
 
     pal_hib_patchup();
 
+    gIOHibernateCurrentHeader->restoreTime3 = (rdtsc64() - time);
+
     // -- image has been destroyed...
 
     gIOHibernateCurrentHeader->actualImage1Sum         = sum;
@@ -761,9 +778,13 @@ hibernate_kernel_entrypoint(uint32_t p1,
 
     gIOHibernateState = kIOHibernateStateWakingFromHibernate;
 
+<<<<<<< HEAD
     gIOHibernateCurrentHeader->trampolineTime = (((rdtsc64() - timeStart)) >> 8);
 
 //  debug_code('done', 0);
+=======
+    gIOHibernateCurrentHeader->restoreTime1 = (rdtsc64() - timeStart);
+>>>>>>> origin/10.8
 
 #if CONFIG_SLEEP
 #if defined(__i386__) || defined(__x86_64__)

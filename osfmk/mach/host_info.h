@@ -218,8 +218,12 @@ typedef struct host_priority_info	*host_priority_info_t;
 /* host_statistics64() */
 #define HOST_VM_INFO64		4	/* 64-bit virtual memory stats */
 #define HOST_EXTMOD_INFO64	5	/* External modification stats */
+<<<<<<< HEAD
 #define HOST_EXPIRED_TASK_INFO	6	/* Statistics for expired tasks */
 
+=======
+#define HOST_EXPIRED_TASK_INFO        6        /* Statistics for expired tasks */
+>>>>>>> origin/10.8
 
 struct host_load_info {
 	integer_t	avenrun[3];	/* scaled by LOAD_SCALE */

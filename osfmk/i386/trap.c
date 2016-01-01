@@ -439,9 +439,12 @@ interrupt(x86_saved_state_t *state)
 	int		cnum = cpu_number();
 	cpu_data_t	*cdp = cpu_data_ptr[cnum];
 	int		itype = 0;
+<<<<<<< HEAD
 =======
 	int		cnum = cpu_number();
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.8
 
 	if (is_saved_state64(state) == TRUE) {
 	        x86_saved_state64_t	*state64;
@@ -1537,7 +1540,11 @@ user_trap(
 
 	    case T_PAGE_FAULT:
 	    {
+<<<<<<< HEAD
 		    prot = VM_PROT_READ;
+=======
+		prot = VM_PROT_READ;
+>>>>>>> origin/10.8
 
 		if (err & T_PF_WRITE)
 		        prot |= VM_PROT_WRITE;
@@ -1554,6 +1561,14 @@ user_trap(
 			/*NOTREACHED*/
 		}
 
+<<<<<<< HEAD
+=======
+		if (__probable((kret == KERN_SUCCESS) || (kret == KERN_ABORTED))) {
+			thread_exception_return();
+		/* NOTREACHED */
+		}
+
+>>>>>>> origin/10.8
 	        user_page_fault_continue(kret);
 	    }	/* NOTREACHED */
 		break;

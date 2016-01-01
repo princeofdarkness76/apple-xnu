@@ -305,6 +305,7 @@ rtc_timer_start(void)
 	etimer_resync_deadlines();
 }
 
+<<<<<<< HEAD
 /*
  * tsc_to_nanoseconds:
  *
@@ -359,6 +360,8 @@ rtc_timer_start(void)
 static inline uint32_t
 _absolutetime_to_microtime(uint64_t abstime, clock_sec_t *secs, clock_usec_t *microsecs)
 =======
+=======
+>>>>>>> origin/10.8
 static inline uint32_t
 _absolutetime_to_microtime(uint64_t abstime, clock_sec_t *secs, clock_usec_t *microsecs)
 {
@@ -515,6 +518,7 @@ static inline uint64_t
 rtc_nanotime_read(void)
 {
 <<<<<<< HEAD
+<<<<<<< HEAD
 	return	_rtc_nanotime_read(&pal_rtc_nanotime_info);
 =======
 	
@@ -529,6 +533,9 @@ rtc_nanotime_read(void)
 =======
 	return	_rtc_nanotime_read(&rtc_nanotime_info, 0);	/* assume fast processor */
 >>>>>>> origin/10.6
+=======
+	return	_rtc_nanotime_read(&pal_rtc_nanotime_info);
+>>>>>>> origin/10.8
 }
 
 /*
@@ -557,12 +564,17 @@ rtc_clock_napped(uint64_t base, uint64_t tsc_base)
 	assert(!ml_get_interrupts_enabled());
 	tsc = rdtsc64();
 <<<<<<< HEAD
+<<<<<<< HEAD
 	oldnsecs = rntp->ns_base + _rtc_tsc_to_nanoseconds(tsc - rntp->tsc_base, rntp);
 	newnsecs = base + _rtc_tsc_to_nanoseconds(tsc - tsc_base, rntp);
 =======
 	oldnsecs = rntp->ns_base + _tsc_to_nanoseconds(tsc - rntp->tsc_base);
 	newnsecs = base + _tsc_to_nanoseconds(tsc - tsc_base);
 >>>>>>> origin/10.5
+=======
+	oldnsecs = rntp->ns_base + _rtc_tsc_to_nanoseconds(tsc - rntp->tsc_base, rntp);
+	newnsecs = base + _rtc_tsc_to_nanoseconds(tsc - tsc_base, rntp);
+>>>>>>> origin/10.8
 	
 	/*
 	 * Only update the base values if time using the new base values
@@ -733,13 +745,20 @@ rtc_set_timescale(uint64_t cycles)
 		cycles <<= 1;
 	}
 	
+<<<<<<< HEAD
 =======
 	rtc_nanotime_t	*rntp = &rtc_nanotime_info;
 >>>>>>> origin/10.6
+=======
+	if ( shift != 0 )
+		printf("Slow TSC, rtc_nanotime.shift == %d\n", shift);
+    
+>>>>>>> origin/10.8
 	rntp->scale = (uint32_t)(((uint64_t)NSEC_PER_SEC << 32) / cycles);
 
 	rntp->shift = shift;
 
+<<<<<<< HEAD
 	/*
 	 * On some platforms, the TSC is not reset at warm boot. But the
 	 * rebase time must be relative to the current boot so we can't use
@@ -758,6 +777,10 @@ rtc_set_timescale(uint64_t cycles)
 	else
 		rntp->shift = 32;
 >>>>>>> origin/10.5
+=======
+	if (tsc_rebase_abs_time == 0)
+		tsc_rebase_abs_time = mach_absolute_time();
+>>>>>>> origin/10.8
 
 	rtc_nanotime_init(0);
 }
@@ -981,6 +1004,7 @@ nanoseconds_to_absolutetime(
 
 void
 machine_delay_until(
+<<<<<<< HEAD
 	uint64_t interval,
 	uint64_t		deadline)
 {
@@ -988,4 +1012,13 @@ machine_delay_until(
 	while (mach_absolute_time() < deadline) {
 		cpu_pause();
 	} 
+=======
+        uint64_t interval,
+        uint64_t                deadline)
+{
+        (void)interval;
+        while (mach_absolute_time() < deadline) {
+                cpu_pause();
+        }
+>>>>>>> origin/10.8
 }

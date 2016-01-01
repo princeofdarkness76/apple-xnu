@@ -665,6 +665,10 @@ fpu_set_fxstate(
 	    !ml_fpu_avx_enabled())
 		return KERN_FAILURE;
 
+	if ((f == x86_AVX_STATE32 || f == x86_AVX_STATE64) &&
+	    !ml_fpu_avx_enabled())
+	    return KERN_FAILURE;
+
 	state = (x86_float_state64_t *)tstate;
 
 	assert(thr_act != THREAD_NULL);
@@ -765,7 +769,7 @@ fpu_set_fxstate(
 		iavx->fp_save_layout = thread_is_64bit(thr_act) ? XSAVE64 : XSAVE32;
 		/* Sanitize XSAVE header */
 		bzero(&iavx->_xh.xhrsvd[0], sizeof(iavx->_xh.xhrsvd));
-		if (state_size == sizeof(struct x86_avx_thread_state))
+		if (fpu_nyreg)
 			iavx->_xh.xsbv = (XFEM_YMM | XFEM_SSE | XFEM_X87);
 		else
 			iavx->_xh.xsbv = (XFEM_SSE | XFEM_X87);

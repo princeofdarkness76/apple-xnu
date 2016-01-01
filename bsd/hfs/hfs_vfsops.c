@@ -2,6 +2,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 1999-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 1999-2008 Apple Inc. All rights reserved.
@@ -12,6 +13,9 @@
 =======
  * Copyright (c) 1999-2012 Apple Inc. All rights reserved.
 >>>>>>> origin/10.7
+=======
+ * Copyright (c) 1999-2013 Apple Inc. All rights reserved.
+>>>>>>> origin/10.8
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -998,10 +1002,14 @@ hfs_reload_callback(struct vnode *vp, void *cargs)
 		/* lookup by fileID since name could have changed */
 		lockflags = hfs_systemfile_lock(args->hfsmp, SFL_CATALOG, HFS_SHARED_LOCK);
 <<<<<<< HEAD
+<<<<<<< HEAD
 		args->error = cat_idlookup(args->hfsmp, cp->c_fileid, 0, 0, &desc, &cp->c_attr, datafork);
 =======
 		args->error = cat_idlookup(args->hfsmp, cp->c_fileid, 0, &desc, &cp->c_attr, datafork);
 >>>>>>> origin/10.5
+=======
+		args->error = cat_idlookup(args->hfsmp, cp->c_fileid, 0, 0, &desc, &cp->c_attr, datafork);
+>>>>>>> origin/10.8
 		hfs_systemfile_unlock(args->hfsmp, lockflags);
 		if (args->error) {
 		        return (VNODE_RETURNED_DONE);
@@ -4469,8 +4477,14 @@ hfs_sysctl(int *name, __unused u_int namelen, user_addr_t oldp, size_t *oldlenp,
 
 	/* all sysctl names at this level are terminal */
 
+<<<<<<< HEAD
 	if (name[0] == HFS_ENCODINGBIAS) {
 		int bias;
+=======
+		lockflags = hfs_systemfile_lock(hfsmp, SFL_CATALOG, HFS_SHARED_LOCK);
+		error = cat_idlookup(hfsmp, cnid, 0, 0, &cndesc, &cnattr, &cnfork);
+		hfs_systemfile_unlock(hfsmp, lockflags);
+>>>>>>> origin/10.8
 
 		bias = hfs_getencodingbias();
 		error = sysctl_int(oldp, oldlenp, newp, newlen, &bias);
@@ -6052,12 +6066,14 @@ struct hfs_reclaim_extent_info {
  *                                        FABN = old FABN - E.blockCount
  *
  * Inputs: 
- *	extent_info - This is the structure that contains state about 
- *	              the current file, extent, and extent record that 
- *	              is being relocated.  This structure is shared 
- *	              among code that traverses through all the extents 
- *	              of the file, code that relocates extents, and 
- *	              code that splits the extent. 
+ *	extent_info -   This is the structure that contains state about 
+ *	                the current file, extent, and extent record that 
+ *	                is being relocated.  This structure is shared 
+ *	                among code that traverses through all the extents 
+ *	                of the file, code that relocates extents, and 
+ *	                code that splits the extent. 
+ *	newBlockCount - The blockCount of the extent to be split after 
+ *	                successfully split operation.
  * Output:
  * 	Zero on success, non-zero on failure.
  */
@@ -6086,6 +6102,13 @@ hfs_split_extent(struct hfs_reclaim_extent_info *extent_info, uint32_t newBlockC
 	is_xattr = extent_info->is_xattr;
 	extents = extent_info->extents;
 	cp = VTOC(extent_info->vp);
+
+	if (newBlockCount == 0) {
+		if (hfs_resize_debug) {
+			printf ("hfs_split_extent: No splitting required for newBlockCount=0\n");
+		}
+		return error;
+	}
 
 	if (hfs_resize_debug) {
 		printf ("hfs_split_extent: Split record:%u recStartBlock=%u %u:(%u,%u) for %u blocks\n", extent_info->overflow_count, extent_info->recStartBlock, index, extents[index].startBlock, extents[index].blockCount, newBlockCount);
@@ -6407,7 +6430,7 @@ hfs_split_extent(struct hfs_reclaim_extent_info *extent_info, uint32_t newBlockC
 				goto out;
 			}
 			if (hfs_resize_debug) {
-				printf ("hfs_split_extent: Deleted record with startBlock=%u\n", (is_xattr ? xattr_key->startBlock : extents_key->startBlock));
+				printf ("hfs_split_extent: Deleted extent record with startBlock=%u\n", (is_xattr ? xattr_key->startBlock : extents_key->startBlock));
 			}
 		}
 
@@ -6427,8 +6450,18 @@ hfs_split_extent(struct hfs_reclaim_extent_info *extent_info, uint32_t newBlockC
 			printf ("hfs_split_extent: Inserted extent record with startBlock=%u\n", write_recStartBlock);
 		}
 	}
-	BTFlushPath(extent_info->fcb);
+
 out:
+	/* 
+	 * Extents overflow btree or attributes btree headers might have 
+	 * been modified during the split/shift operation, so flush the 
+	 * changes to the disk while we are inside journal transaction.  
+	 * We should only be able to generate I/O that modifies the B-Tree 
+	 * header nodes while we're in the middle of a journal transaction.  
+	 * Otherwise it might result in panic during unmount.
+	 */
+	BTFlushPath(extent_info->fcb);
+
 	if (extents_rec) {
 		FREE (extents_rec, M_TEMP);
 	}
@@ -6500,7 +6533,12 @@ hfs_volupdate(struct hfsmount *hfsmp, enum volop op, int inroot)
 	 */
 	if (oldStartBlock < allocLimit) {
 		newBlockCount = allocLimit - oldStartBlock;
-		
+
+		if (hfs_resize_debug) {
+			int idx = extent_info->extent_index;
+			printf ("hfs_reclaim_extent: Split straddling extent %u:(%u,%u) for %u blocks\n", idx, extent_info->extents[idx].startBlock, extent_info->extents[idx].blockCount, newBlockCount);
+		}
+
 		/* If the extent belongs to a btree, check and trim 
 		 * it to be multiple of the node size. 
 		 */
@@ -6516,15 +6554,21 @@ hfs_volupdate(struct hfsmount *hfsmp, enum volop op, int inroot)
 				if (remainder_blocks) {
 					newBlockCount -= remainder_blocks;
 					if (hfs_resize_debug) {
-						printf ("hfs_reclaim_extent: Fixing extent block count, node_blks=%u, old=%u, new=%u\n", node_size/hfsmp->blockSize, newBlockCount + remainder_blocks, newBlockCount);
+						printf ("hfs_reclaim_extent: Round-down newBlockCount to be multiple of nodeSize, node_allocblks=%u, old=%u, new=%u\n", node_size/hfsmp->blockSize, newBlockCount + remainder_blocks, newBlockCount);
 					}
 				}
 			}
-		}
-
-		if (hfs_resize_debug) {
-			int idx = extent_info->extent_index;
-			printf ("hfs_reclaim_extent: Split straddling extent %u:(%u,%u) for %u blocks\n", idx, extent_info->extents[idx].startBlock, extent_info->extents[idx].blockCount, newBlockCount);
+			/* The newBlockCount is zero because of rounding-down so that
+			 * btree nodes are not split across extents.  Therefore this
+			 * straddling extent across resize-boundary does not require 
+			 * splitting.  Skip over to relocating of complete extent.
+			 */
+			if (newBlockCount == 0) {
+				if (hfs_resize_debug) {
+					printf ("hfs_reclaim_extent: After round-down newBlockCount=0, skip split, relocate full extent\n");
+				}
+				goto relocate_full_extent;
+			}
 		}
 
 		/* Split the extents into two parts --- the first extent lies
@@ -6540,10 +6584,12 @@ hfs_volupdate(struct hfsmount *hfsmp, enum volop op, int inroot)
 		}
 		/* Split failed, so try to relocate entire extent */
 		if (hfs_resize_debug) {
-			printf ("hfs_reclaim_extent: Split straddling extent failed, reclocate full extent\n");
+			int idx = extent_info->extent_index;
+			printf ("hfs_reclaim_extent: Split straddling extent %u:(%u,%u) for %u blocks failed, relocate full extent\n", idx, extent_info->extents[idx].startBlock, extent_info->extents[idx].blockCount, newBlockCount);
 		}
 	}
 
+relocate_full_extent:
 	/* At this point, the current extent requires relocation.  
 	 * We will try to allocate space equal to the size of the extent 
 	 * being relocated first to try to relocate it without splitting.  
@@ -7175,7 +7221,11 @@ hfs_reclaim_journal_file(struct hfsmount *hfsmp, vfs_context_t context)
 		goto free_fail;
 	}
 	
+<<<<<<< HEAD
 	error = BlockDeallocate(hfsmp, hfsmp->jnl_start, oldBlockCount, HFS_ALLOC_SKIPFREEBLKS);
+=======
+	error = cat_idlookup(hfsmp, hfsmp->hfs_jnlfileid, 1, 0, &journal_desc, &journal_attr, &journal_fork);
+>>>>>>> origin/10.8
 	if (error) {
 		printf("hfs_reclaim_journal_file: BlockDeallocate returned %d\n", error);
 		goto free_fail;
@@ -7523,7 +7573,7 @@ hfs_flushvolumeheader(struct hfsmount *hfsmp,
 =======
 	
 	/* Update the catalog record for .journal_info_block */
-	error = cat_idlookup(hfsmp, hfsmp->hfs_jnlinfoblkid, 1, &jib_desc, &jib_attr, &jib_fork);
+	error = cat_idlookup(hfsmp, hfsmp->hfs_jnlinfoblkid, 1, 0, &jib_desc, &jib_attr, &jib_fork);
 	if (error) {
 		printf("hfs_reclaim_journal_file: cat_idlookup returned %d\n", error);
 		goto fail;

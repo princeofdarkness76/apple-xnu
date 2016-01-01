@@ -139,12 +139,15 @@
 #define	TRACE_MP_CPU_FAST_START		MACHDBG_CODE(DBG_MACH_MP, 5)
 #define	TRACE_MP_CPU_START		MACHDBG_CODE(DBG_MACH_MP, 6)
 #define	TRACE_MP_CPU_DEACTIVATE		MACHDBG_CODE(DBG_MACH_MP, 7)
+<<<<<<< HEAD
 
 #define ABS(v)		(((v) > 0)?(v):-(v))
 =======
 #define FULL_SLAVE_INIT	(NULL)
 #define FAST_SLAVE_INIT	((void *)(uintptr_t)1)
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.8
 
 #define ABS(v)		(((v) > 0)?(v):-(v))
 
@@ -483,6 +486,7 @@ start_cpu(void *arg)
 	DBG("start_cpu(%p) about to wait for cpu %d\n",
 		arg, psip->target_cpu);
 
+<<<<<<< HEAD
 	mp_wait_for_cpu_up(psip->target_cpu, i*100, 100);
 
 	KERNEL_DEBUG_CONSTANT(
@@ -584,6 +588,15 @@ start_cpu(void *arg)
 <<<<<<< HEAD
 >>>>>>> origin/10.5
 =======
+=======
+	mp_wait_for_cpu_up(psip->target_cpu, i*100, 100);
+
+	KERNEL_DEBUG_CONSTANT(
+		TRACE_MP_CPU_START | DBG_FUNC_END,
+		psip->target_cpu,
+		cpu_datap(psip->target_cpu)->cpu_running, 0, 0, 0);
+
+>>>>>>> origin/10.8
 	if (TSC_sync_margin &&
 	    cpu_datap(psip->target_cpu)->cpu_running) {
 		/*
@@ -1993,11 +2006,15 @@ i386_deactivate_cpu(void)
 	cdp->cpu_running = FALSE;
 	simple_unlock(&x86_topo_lock);
 
+	/*
+	 * Move all of this cpu's timers to the master/boot cpu,
+	 * and poke it in case there's a sooner deadline for it to schedule.
+	 */
 	timer_queue_shutdown(&cdp->rtclock_timer.queue);
-	cdp->rtclock_timer.deadline = EndOfAllTime;
 	mp_cpus_call(cpu_to_cpumask(master_cpu), ASYNC, etimer_timer_expire, NULL);
 
 	/*
+<<<<<<< HEAD
 	 * Move all of this cpu's timers to the master/boot cpu,
 	 * and poke it in case there's a sooner deadline for it to schedule.
 	 */
@@ -2017,6 +2034,20 @@ i386_deactivate_cpu(void)
 	 * Ensure there's no remaining timer deadline set
 	 * - AICPM may have left one active.
 	 */
+=======
+	 * Open an interrupt window
+	 * and ensure any pending IPI or timer is serviced
+	 */
+	mp_disable_preemption();
+	ml_set_interrupts_enabled(TRUE);
+
+	while (cdp->cpu_signals && x86_lcpu()->rtcDeadline != EndOfAllTime)
+		cpu_pause();
+	/*
+	 * Ensure there's no remaining timer deadline set
+	 * - AICPM may have left one active.
+	 */
+>>>>>>> origin/10.8
 	setPop(0);
 
 	ml_set_interrupts_enabled(FALSE);
@@ -2163,6 +2194,9 @@ mp_kdp_enter(void)
 		}
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.8
 	DBG("mp_kdp_enter() %d processors done %s\n",
 	    (int)mp_kdp_ncpus, (mp_kdp_ncpus == ncpus) ? "OK" : "timed out");
 =======
@@ -2326,6 +2360,13 @@ slave_machine_init(void *param)
 		 * Cold start
 		 */
 		clock_init();
+<<<<<<< HEAD
+=======
+		cpu_machine_init();	/* Interrupts enabled hereafter */
+		mp_cpus_call_cpu_init();
+	} else {
+		cpu_machine_init();	/* Interrupts enabled hereafter */
+>>>>>>> origin/10.8
 	}
 	cpu_machine_init();	/* Interrupts enabled hereafter */
 }

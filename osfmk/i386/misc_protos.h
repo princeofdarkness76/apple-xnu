@@ -194,8 +194,13 @@ extern void act_machine_switch_pcb(thread_t old, thread_t new);
 #define FULL_SLAVE_INIT	(NULL)
 #define FAST_SLAVE_INIT	((void *)(uintptr_t)1)
 
+<<<<<<< HEAD
 void cpu_pmc_control(void *);
 
 extern void pstate_trace(void);
 
+=======
+uint64_t ml_early_random(void);
+void cpu_pmc_control(void *);
+>>>>>>> origin/10.8
 #endif /* _I386_MISC_PROTOS_H_ */

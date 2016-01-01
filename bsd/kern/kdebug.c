@@ -3941,13 +3941,24 @@ error_exit:
 }
 
 void
+<<<<<<< HEAD
 start_kern_tracing(unsigned int new_nkdbufs, boolean_t need_map)
 {
+=======
+start_kern_tracing(unsigned int new_nkdbufs, boolean_t need_map) {
+>>>>>>> origin/10.8
 
 	if (!new_nkdbufs)
 		return;
 	nkdbufs = kdbg_set_nkdbufs(new_nkdbufs);
 	kdbg_lock_init();
+<<<<<<< HEAD
+=======
+	kdbg_reinit(TRUE);
+    if (need_map == TRUE)
+       kdbg_mapinit();
+	kdbg_set_tracing_enabled(TRUE, KDEBUG_ENABLE_TRACE);
+>>>>>>> origin/10.8
 
 	kernel_debug_string_simple("start_kern_tracing");
 

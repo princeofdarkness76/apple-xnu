@@ -117,7 +117,12 @@ enum {
     An indication that the power flags represent the state of the root power
     domain. This bit must not be set in the IOPMPowerState structure.
     Power Management may pass this bit to initialPowerStateForDomainState()
+<<<<<<< HEAD
     to map from a global system state to the desired device state.
+=======
+    or powerStateForDomainState() to map from a global system state to the
+    desired device state.
+>>>>>>> origin/10.8
 */
 typedef unsigned long IOPMPowerFlags;
 enum {
@@ -377,6 +382,9 @@ enum {
  */
 #define kIOPMDestroyFVKeyOnStandbyKey       "DestroyFVKeyOnStandby"
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.8
 
 /*******************************************************************************
  *
@@ -401,8 +409,11 @@ enum {
  * runtime before calling PMinit().
  */
 #define kIOPMResetPowerStateOnWakeKey       "IOPMResetPowerStateOnWake"
+<<<<<<< HEAD
 =======
 >>>>>>> origin/10.7
+=======
+>>>>>>> origin/10.8
 
 /*******************************************************************************
  *
@@ -451,6 +462,7 @@ enum {
     kIOPMDriverAssertionReservedBit7                = 0x80,
 
 <<<<<<< HEAD
+<<<<<<< HEAD
     /*! kIOPMDriverAssertionMagicPacketWakeEnabledBit
      * When set, driver is informing PM that magic packet wake is enabled.
      */
@@ -467,6 +479,12 @@ enum {
      */
     kIOPMDriverAssertionReservedBit8                = 0x100
 >>>>>>> origin/10.7
+=======
+    /*! kIOPMDriverAssertionMagicPacketWakeEnabledBit
+     * When set, driver is informing PM that magic packet wake is enabled.
+     */
+    kIOPMDriverAssertionMagicPacketWakeEnabledBit   = 0x100
+>>>>>>> origin/10.8
 };
 
  /* kIOPMAssertionsDriverKey

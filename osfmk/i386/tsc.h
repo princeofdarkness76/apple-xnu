@@ -45,10 +45,13 @@
 #define BASE_ART_CLOCK_SOURCE 	24000000ULL	/* 24Mhz */
 #define IA32_PERF_STS		0x198
 #define	SLOW_TSC_THRESHOLD	1000067800	/* if slower, nonzero shift required in nanotime() algorithm */
+<<<<<<< HEAD
 =======
 #define BASE_NHM_CLOCK_SOURCE 	139806638ULL
 #define IA32_PERF_STS		0x198
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.8
 
 #ifndef ASSEMBLER
 extern uint64_t	busFCvtt2n;

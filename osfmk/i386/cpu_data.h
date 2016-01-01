@@ -140,8 +140,11 @@ typedef	uint8_t		pcid_ref_t;
 #define CPU_RTIME_BINS (12)
 #define CPU_ITIME_BINS (CPU_RTIME_BINS)
 
+<<<<<<< HEAD
 =======
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.8
 /*
  * Per-cpu data.
  *
@@ -181,6 +184,7 @@ typedef struct cpu_data
 	int			cpu_prior_signals;	/* Last set of events,
 							 * debugging
 							 */
+<<<<<<< HEAD
 	int			cpu_mcount_off;		/* mcount recursion */
 >>>>>>> origin/10.6
 	ast_t			cpu_pending_ast;
@@ -193,6 +197,11 @@ typedef struct cpu_data
 	int			cpu_threadtype;
 	int			cpu_running;
 >>>>>>> origin/10.5
+=======
+	ast_t			cpu_pending_ast;
+	volatile int		cpu_running;
+	boolean_t		cpu_fixed_pmcs_enabled;
+>>>>>>> origin/10.8
 	rtclock_timer_t		rtclock_timer;
 	volatile addr64_t	cpu_active_cr3 __attribute((aligned(64)));
 	union {
@@ -230,6 +239,7 @@ typedef struct cpu_data
 	uint32_t		cpu_hwIntCnt[HWINTCNT_SIZE];	/* Interrupt counts */
  	uint64_t		cpu_hwIntpexits[HWINTCNT_SIZE];
 	uint64_t		cpu_hwIntcexits[HWINTCNT_SIZE];
+<<<<<<< HEAD
 =======
 	void 			*cpu_hi_iss;
 	boolean_t		cpu_tlb_invalid;
@@ -237,6 +247,19 @@ typedef struct cpu_data
 >>>>>>> origin/10.5
 	uint64_t		cpu_dr7; /* debug control register */
 	uint64_t		cpu_int_event_time;	/* intr entry/exit time */
+=======
+	uint64_t		cpu_dr7; /* debug control register */
+	uint64_t		cpu_int_event_time;	/* intr entry/exit time */
+	uint64_t		cpu_uber_arg_store;	/* Double mapped address
+							 * of current thread's
+							 * uu_arg array.
+							 */
+	uint64_t		cpu_uber_arg_store_valid; /* Double mapped
+							   * address of pcb
+							   * arg store
+							   * validity flag.
+							   */
+>>>>>>> origin/10.8
 	pal_rtc_nanotime_t	*cpu_nanotime;		/* Nanotime info */
 #if KPC
 	/* double-buffered performance counter data */
@@ -258,6 +281,10 @@ typedef struct cpu_data
 	uint64_t		cpu_pmap_pcid_flushes;
 	uint64_t		cpu_pmap_pcid_preserves;
 #endif
+<<<<<<< HEAD
+=======
+#endif /* x86_64 */
+>>>>>>> origin/10.8
 	uint64_t		cpu_aperf;
 	uint64_t		cpu_mperf;
 	uint64_t		cpu_c3res;
@@ -272,9 +299,16 @@ typedef struct cpu_data
  	uint64_t		cpu_cur_insns;
  	uint64_t		cpu_cur_ucc;
  	uint64_t		cpu_cur_urc;
+<<<<<<< HEAD
 	uint64_t		cpu_gpmcs[4];
 	uint64_t                cpu_max_observed_int_latency;
 	int                     cpu_max_observed_int_latency_vector;
+=======
+	uint64_t                cpu_max_observed_int_latency;
+	int                     cpu_max_observed_int_latency_vector;
+	uint64_t		debugger_entry_time;
+	uint64_t		debugger_ipi_time;
+>>>>>>> origin/10.8
 	volatile boolean_t	cpu_NMI_acknowledged;
 	uint64_t		debugger_entry_time;
 	uint64_t		debugger_ipi_time;
@@ -293,14 +327,19 @@ typedef struct cpu_data
 #if CONFIG_MCA
 	struct mca_state	*cpu_mca_state;		/* State at MC fault */
 <<<<<<< HEAD
+<<<<<<< HEAD
 #endif
 	struct prngContext	*cpu_prng;		/* PRNG's context */
+=======
+#endif
+>>>>>>> origin/10.8
  	int			cpu_type;
  	int			cpu_subtype;
  	int			cpu_threadtype;
  	boolean_t		cpu_iflag;
  	boolean_t		cpu_boot_complete;
  	int			cpu_hibernate;
+<<<<<<< HEAD
 =======
 	uint64_t		cpu_uber_arg_store;	/* Double mapped address
 							 * of current thread's
@@ -330,6 +369,8 @@ typedef struct cpu_data
 	uint32_t		cpu_nested_istack;
 	uint32_t		cpu_nested_istack_events;
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.8
 } cpu_data_t;
 
 extern cpu_data_t	*cpu_data_ptr[];  

@@ -352,12 +352,22 @@ struct task {
 	uint64_t rusage_cpu_deadline;
 	thread_call_t rusage_cpu_callt;
 
+<<<<<<< HEAD
 #if CONFIG_ATM
 	struct atm_task_descriptor *atm_context;  /* pointer to per task atm descriptor */
 #endif
 #if CONFIG_BANK
 	struct bank_task *bank_context;  /* pointer to per task bank structure */
 #endif
+=======
+	vm_extmod_statistics_data_t	extmod_statistics;
+	natural_t	proc_terminate;	/* the process is marked for proc_terminate */
+
+	/* Statistics accumulated for terminated threads from this task */
+	uint32_t	task_timer_wakeups_bin_1;
+	uint32_t	task_timer_wakeups_bin_2;
+};
+>>>>>>> origin/10.8
 
 #if IMPORTANCE_INHERITANCE
 	struct ipc_importance_task  *task_imp_base;	/* Base of IPC importance chain */
@@ -659,6 +669,7 @@ struct _task_ledger_indices {
 	int tkm_shared;
 	int phys_mem;
 	int wired_mem;
+<<<<<<< HEAD
 	int internal;
 	int iokit_mapped;
 	int alternate_accounting;
@@ -678,6 +689,10 @@ struct _task_ledger_indices {
 	int cpu_time_billed_to_me;
 	int cpu_time_billed_to_others;
 #endif
+=======
+	int platform_idle_wakeups;
+	int interrupt_wakeups;
+>>>>>>> origin/10.8
 };
 extern struct _task_ledger_indices task_ledgers;
 

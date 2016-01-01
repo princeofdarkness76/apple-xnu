@@ -70,6 +70,10 @@ __END_DECLS
 =======
 >>>>>>> origin/10.6
 
+#if CONFIG_DTRACE
+#include <mach/sdt.h>
+#endif
+
 #define super IOEventSource
 OSDefineMetaClassAndStructors(IOTimerEventSource, IOEventSource)
 OSMetaClassDefineReservedUnused(IOTimerEventSource, 0);
@@ -157,6 +161,9 @@ void IOTimerEventSource::timeout(void *self)
                                     (uintptr_t) doit, (uintptr_t) me->owner);
 				
                 (*doit)(me->owner, me);
+#if CONFIG_DTRACE
+		DTRACE_TMR3(iotescallout__expire, Action, doit, OSObject, me->owner, void, me->workLoop);
+#endif
                 
 				if (trace)
                 	IOTimeStampEndConstant(IODBG_TIMES(IOTIMES_ACTION),
@@ -209,6 +216,9 @@ void IOTimerEventSource::timeoutAndRelease(void * self, void * c)
                                     (uintptr_t) doit, (uintptr_t) me->owner);
 				
                 (*doit)(me->owner, me);
+#if CONFIG_DTRACE
+		DTRACE_TMR3(iotescallout__expire, Action, doit, OSObject, me->owner, void, me->workLoop);
+#endif
                 
 				if (trace)
                 	IOTimeStampEndConstant(IODBG_TIMES(IOTIMES_ACTION),

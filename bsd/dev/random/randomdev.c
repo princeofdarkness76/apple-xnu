@@ -125,8 +125,11 @@ static lck_attr_t *gYarrowAttr;
 static lck_grp_attr_t *gYarrowGrpAttr;
 static lck_mtx_t *gYarrowMutex = 0;
 static UInt8 gYarrowInitializationLock = 0;
+<<<<<<< HEAD
 
 void CheckReseed(void);
+=======
+>>>>>>> origin/10.8
 
 #define RESEED_TICKS 50 /* how long a reseed operation can take */
 
@@ -424,14 +427,20 @@ random_init(void)
 	int ret;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
+=======
+>>>>>>> origin/10.8
 	if (OSTestAndSet(0, &gRandomInstalled)) {
 		/* do this atomically so that it works correctly with
 		 multiple threads */
 		return;
 	}
 
+<<<<<<< HEAD
 >>>>>>> origin/10.7
+=======
+>>>>>>> origin/10.8
 	ret = cdevsw_add(RANDOM_MAJOR, &random_cdevsw);
 	if (ret < 0) {
 		panic("random_init: failed to allocate a major number!");
@@ -448,10 +457,15 @@ random_init(void)
 		UID_ROOT, GID_WHEEL, 0666, "urandom", 0);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 	/* setup yarrow and the mutex if needed*/
 	PreliminarySetup();
 >>>>>>> origin/10.7
+=======
+	/* setup yarrow and the mutex if needed*/
+	PreliminarySetup();
+>>>>>>> origin/10.8
 }
 
 int

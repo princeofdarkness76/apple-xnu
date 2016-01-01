@@ -411,7 +411,11 @@ main(
         DECLARE("CPU_NUMBER_GS",
 		offsetof(cpu_data_t,cpu_number));
         DECLARE("CPU_RUNNING",
+<<<<<<< HEAD
 		offsetof(cpu_data_t,cpu_running));
+=======
+		offsetof(cpu_data_t *,cpu_running));
+>>>>>>> origin/10.8
 	DECLARE("CPU_PENDING_AST",
 		offsetof(cpu_data_t,cpu_pending_ast));
 	DECLARE("CPU_DESC_TABLEP",

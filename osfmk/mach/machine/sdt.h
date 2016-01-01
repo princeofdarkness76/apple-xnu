@@ -217,12 +217,15 @@
 #define	DTRACE_TMR6(name, type1, arg1, type2, arg2, type3, arg3, arg4, arg5, arg6) \
 	DTRACE_PROBE6(__sdt_, name, arg1, arg2, arg3, arg4, arg5, arg6);
 
+<<<<<<< HEAD
 #define	DTRACE_TMR7(name, type1, arg1, type2, arg2, type3, arg3, arg4, arg5, arg6, arg7) \
 	DTRACE_PROBE7(__sdt_, name, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 
 #define	DTRACE_PHYSLAT3(name, type1, arg1, type2, arg2, type3, arg3)		\
 	DTRACE_PROBE3(__sdt_, name, arg1, arg2, arg3);
 
+=======
+>>>>>>> origin/10.8
 #define	DTRACE_VM(name)							\
 	DTRACE_PROBE(__vminfo_, name)
 

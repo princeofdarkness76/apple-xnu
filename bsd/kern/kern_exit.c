@@ -196,12 +196,15 @@ void vproc_exit(proc_t p);
 __private_extern__ void munge_user64_rusage(struct rusage *a_rusage_p, struct user64_rusage *a_user_rusage_p);
 __private_extern__ void munge_user32_rusage(struct rusage *a_rusage_p, struct user32_rusage *a_user_rusage_p);
 static int reap_child_locked(proc_t parent, proc_t child, int deadparent, int reparentedtoinit, int locked, int droplock);
+<<<<<<< HEAD
 static void populate_corpse_crashinfo(proc_t p, void *crash_info_ptr, struct rusage_superset *rup, mach_exception_data_type_t code, mach_exception_data_type_t subcode);
 extern int proc_pidpathinfo(proc_t p, uint64_t arg, user_addr_t buffer, uint32_t buffersize, int32_t *retval);
 
 static __attribute__((noinline)) void launchd_crashed_panic(proc_t p, int rv);
 extern void proc_piduniqidentifierinfo(proc_t p, struct proc_uniqidentifierinfo *p_uniqidinfo);
 
+=======
+>>>>>>> origin/10.8
 
 /*
  * Things which should have prototypes in headers, but don't
@@ -1044,6 +1047,10 @@ proc_exit(proc_t p)
 	proc_childdrainstart(p);
 	while ((q = p->p_children.lh_first) != NULL) {
 		int reparentedtoinit = (q->p_listflag & P_LIST_DEADPARENT) ? 1 : 0;
+<<<<<<< HEAD
+=======
+		q->p_listflag |= P_LIST_DEADPARENT;
+>>>>>>> origin/10.8
 		if (q->p_stat == SZOMB) {
 			if (p != q->p_pptr)
 				panic("parent child linkage broken");
@@ -1933,6 +1940,7 @@ loop1:
 			/* Prevent other process for waiting for this event? */
 			if (!(uap->options & WNOWAIT)) {
 				(void) reap_child_locked(q, p, 0, 0, 0, 0);
+<<<<<<< HEAD
 =======
 		if (p->p_flag & P_WAITING) {
 			(void)tsleep(&p->p_stat, PWAIT, "waitcoll", 0);
@@ -1977,6 +1985,8 @@ loop1:
 				p->p_flag &= ~P_WAITING;
 				wakeup(&p->p_stat);
 >>>>>>> origin/10.1
+=======
+>>>>>>> origin/10.8
 				return (0);
 			}
 			goto out;

@@ -82,6 +82,7 @@ typedef struct timer_call {
 	boolean_t		async_dequeue;	/* this field is protected by
 						   call_entry queue's lock */
 	uint64_t		ttd; /* Time to deadline at creation */
+<<<<<<< HEAD
 } timer_call_data_t, *timer_call_t;
 
 #define EndOfAllTime		0xFFFFFFFFFFFFFFFFULL
@@ -108,6 +109,16 @@ typedef void		(*timer_call_func_t)(
 #define TIMER_CALL_SYS_CRITICAL		TIMEOUT_URGENCY_SYS_CRITICAL
 #define TIMER_CALL_SYS_BACKGROUND	TIMEOUT_URGENCY_SYS_BACKGROUND
 =======
+=======
+} *timer_call_t;
+
+typedef void				*timer_call_param_t;
+typedef void				(*timer_call_func_t)(
+									timer_call_param_t		param0,
+									timer_call_param_t		param1);
+#define TIMER_CALL_CRITICAL	0x01
+#define TIMER_CALL_LOCAL	0x02
+>>>>>>> origin/10.8
 extern boolean_t	timer_call_enter(
 						timer_call_t	call,
 						uint64_t		deadline);

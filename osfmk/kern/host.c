@@ -526,7 +526,12 @@ host_statistics(host_t host, host_flavor_t flavor, host_info_t info, mach_msg_ty
 		return (KERN_SUCCESS);
 	}
 
+<<<<<<< HEAD
 	case HOST_EXPIRED_TASK_INFO: {
+=======
+	case HOST_EXPIRED_TASK_INFO:
+	{
+>>>>>>> origin/10.8
 		if (*count < TASK_POWER_INFO_COUNT) {
 			return (KERN_FAILURE);
 		}
@@ -537,7 +542,10 @@ host_statistics(host_t host, host_flavor_t flavor, host_info_t info, mach_msg_ty
 		tinfo->task_platform_idle_wakeups = dead_task_statistics.task_platform_idle_wakeups;
 
 		tinfo->task_timer_wakeups_bin_1 = dead_task_statistics.task_timer_wakeups_bin_1;
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.8
 		tinfo->task_timer_wakeups_bin_2 = dead_task_statistics.task_timer_wakeups_bin_2;
 
 		tinfo->total_user = dead_task_statistics.total_user_time;
@@ -545,7 +553,13 @@ host_statistics(host_t host, host_flavor_t flavor, host_info_t info, mach_msg_ty
 
 		return (KERN_SUCCESS);
 	}
+<<<<<<< HEAD
 	default: return (KERN_INVALID_ARGUMENT);
+=======
+
+	default:
+		return (KERN_INVALID_ARGUMENT);
+>>>>>>> origin/10.8
 	}
 }
 

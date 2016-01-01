@@ -11133,8 +11133,13 @@ submap_recurse:
 					*real_map = map;
 					goto RetryLookup;
 				}
+<<<<<<< HEAD
 				vm_map_lock_read(VME_SUBMAP(entry));
 				*var_map = VME_SUBMAP(entry);
+=======
+				vm_map_lock_read(entry->object.sub_map);
+				*var_map = entry->object.sub_map;
+>>>>>>> origin/10.8
 				cow_sub_map_parent = map;
 				/* reset base to map before cow object */
 				/* this is the map which will accept   */
@@ -11144,15 +11149,25 @@ submap_recurse:
 				cow_parent_vaddr = vaddr;
 				mapped_needs_copy = TRUE;
 			} else {
+<<<<<<< HEAD
 				vm_map_lock_read(VME_SUBMAP(entry));
 				*var_map = VME_SUBMAP(entry);
+=======
+				vm_map_lock_read(entry->object.sub_map);
+				*var_map = entry->object.sub_map;
+>>>>>>> origin/10.8
 				if((cow_sub_map_parent != map) &&
 				   (*real_map != map))
 					vm_map_unlock(map);
 			}
 		} else {
+<<<<<<< HEAD
 			vm_map_lock_read(VME_SUBMAP(entry));
 			*var_map = VME_SUBMAP(entry);	
+=======
+			vm_map_lock_read(entry->object.sub_map);
+			*var_map = entry->object.sub_map;	
+>>>>>>> origin/10.8
 			/* leave map locked if it is a target */
 			/* cow sub_map above otherwise, just  */
 			/* follow the maps down to the object */

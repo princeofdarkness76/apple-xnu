@@ -342,6 +342,7 @@ enum {
 /*
  * If NOTE_EXITSTATUS is present, provide additional info about exiting process.
  */
+<<<<<<< HEAD
 enum {
 	eNoteExitReparentedDeprecated __deprecated_enum_msg("This kqueue(2) EVFILT_PROC flag is no longer sent") = 0x00080000 
 };
@@ -370,6 +371,9 @@ enum {
 #define NOTE_EXIT_MEMORY_FCTHRASHING	0x02000000	/* jetsam condition: lowest jetsam priority proc killed due to filecache thrashing */
 
 #endif
+=======
+#define NOTE_EXIT_REPARENTED	0x00080000	/* exited while reparented */
+>>>>>>> origin/10.8
 
 /*
  * data/hint fflags for EVFILT_VM, shared with userspace.

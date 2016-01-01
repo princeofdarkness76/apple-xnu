@@ -82,6 +82,7 @@ enum {
 #define CP_DEBUG KERNEL_DEBUG_CONSTANT
 #endif
 
+<<<<<<< HEAD
 #endif
 
 #define CP_MAX_WRAPPEDKEYSIZE     128	/* The size of the largest allowed key */
@@ -91,6 +92,15 @@ enum {
 #define CP_UNLOCKED_STATE         1 	/* Device is unlocked */
 
 #define CP_MAX_STATE			  1 	/* uint8_t ; maximum # of states is 255 */
+=======
+/* 
+ * Check for this version when deciding to enable features
+ */
+#define CONTENT_PROTECTION_XATTR_NAME	"com.apple.system.cprotect"
+#define CP_NEW_MAJOR_VERS 4
+#define CP_PREV_MAJOR_VERS 2
+#define CP_MINOR_VERS 0
+>>>>>>> origin/10.8
 
 typedef struct cprotect *cprotect_t;
 typedef struct cp_wrap_func *cp_wrap_func_t;

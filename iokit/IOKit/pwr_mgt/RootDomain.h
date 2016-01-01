@@ -745,6 +745,8 @@ public:
 
     IOReturn    getSystemSleepType( uint32_t * sleepType );
 
+    IOReturn    getSystemSleepType( uint32_t * sleepType );
+
     // Handle callbacks from IOService::systemWillShutdown()
     void        acknowledgeSystemWillShutdown( IOService * from );
 
@@ -815,8 +817,11 @@ public:
                                 OSObject            *object,
                                 IOPMPowerStateIndex ps=0);
 
+<<<<<<< HEAD
     void        copyWakeReasonString( char * outBuf, size_t bufSize );
 
+=======
+>>>>>>> origin/10.8
 #if HIBERNATION
     bool        getHibernateSettings(
                     uint32_t *  hibernateMode,
@@ -983,6 +988,7 @@ private:
     unsigned int            clamshellDisabled       :1;
     unsigned int            desktopMode             :1;
     unsigned int            acAdaptorConnected      :1;
+    unsigned int            clamshellSleepDisabled  :1;
 
     unsigned int            clamshellSleepDisabled  :1;
     unsigned int            idleSleepTimerPending   :1;
@@ -1083,6 +1089,11 @@ private:
     void announcePowerSourceChange( void );
 >>>>>>> origin/10.6
 
+<<<<<<< HEAD
+=======
+    IOPMTimeline            *timeline;
+
+>>>>>>> origin/10.8
     typedef struct {
         uint32_t            pid;
         uint32_t            refcount;
@@ -1136,6 +1147,7 @@ private:
 	// IOPMrootDomain internal sleep call
     IOReturn    privateSleepSystem( uint32_t sleepReason );
     void        reportUserInput( void );
+    void        setDisableClamShellSleep( bool );
     bool        checkSystemCanSleep( IOOptionBits options = 0 );
 >>>>>>> origin/10.7
     bool        checkSystemCanSustainFullWake( void );
@@ -1275,7 +1287,12 @@ private:
 
 #if HIBERNATION
     bool        getSleepOption( const char * key, uint32_t * option );
+<<<<<<< HEAD
     bool        evaluateSystemSleepPolicy( IOPMSystemSleepParameters * p, int phase );
+=======
+    bool        evaluateSystemSleepPolicy( IOPMSystemSleepParameters * p,
+                                           int phase, uint32_t * hibMode );
+>>>>>>> origin/10.8
     void        evaluateSystemSleepPolicyEarly( void );
     void        evaluateSystemSleepPolicyFinal( void );
 #endif /* HIBERNATION */

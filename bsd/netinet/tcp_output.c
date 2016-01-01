@@ -1337,7 +1337,16 @@ after_sack_rexmit:
 	if (len) {
 		if (tp->t_flagsext & TF_FORCE)
 			goto send;
+<<<<<<< HEAD
 		if (SEQ_LT(tp->snd_nxt, tp->snd_max))
+=======
+		}
+		if (SEQ_LT(tp->snd_nxt, tp->snd_max)) {
+			if (len >= tp->t_maxseg)
+				tp->t_flags |= TF_MAXSEGSNT;
+			else
+				tp->t_flags &= ~TF_MAXSEGSNT;
+>>>>>>> origin/10.8
 			goto send;
 		if (sack_rxmit)
 			goto send;
@@ -1976,12 +1985,19 @@ send:
 			tcpstat.tcps_sndrexmitpack++;
 			tcpstat.tcps_sndrexmitbyte += len;
 			if (nstat_collect) {
+<<<<<<< HEAD
 				nstat_route_tx(inp->inp_route.ro_rt, 1,
 					len, NSTAT_TX_FLAG_RETRANSMIT);
 				INP_ADD_STAT(inp, cell, wifi, wired,
 				    txpackets, 1);
 				INP_ADD_STAT(inp, cell, wifi, wired,
 				    txbytes, len);
+=======
+				nstat_route_tx(tp->t_inpcb->inp_route.ro_rt, 1, 
+					len, NSTAT_TX_FLAG_RETRANSMIT);
+				locked_add_64(&tp->t_inpcb->inp_stat->txpackets, 1);
+				locked_add_64(&tp->t_inpcb->inp_stat->txbytes, len);
+>>>>>>> origin/10.8
 				tp->t_stat.txretransmitbytes += len;
 			}
 		} else {
@@ -1995,12 +2011,15 @@ send:
 				    txbytes, len);
 			}
 		}
+<<<<<<< HEAD
 #if MPTCP
 		if (tp->t_mpflags & TMPF_MPTCP_TRUE) {
 			tcpstat.tcps_mp_sndpacks++;
 			tcpstat.tcps_mp_sndbytes += len;
 		}
 #endif /* MPTCP */
+=======
+>>>>>>> origin/10.8
 		/*
 		 * try to use the new interface that allocates all 
 		 * the necessary mbuf hdrs under 1 mbuf lock and 
@@ -2027,12 +2046,20 @@ send:
 		m->m_data -= hdrlen;
 #else
 		m = NULL;
-#if INET6
+
+		/* minimum length we are going to allocate */
+		allocated_len = MHLEN;
  		if (MHLEN < hdrlen + max_linkhdr) {
+<<<<<<< HEAD
 		        MGETHDR(m, M_DONTWAIT, MT_HEADER);
 			if (m == NULL) {
 			        error = ENOBUFS;
 >>>>>>> origin/10.1
+=======
+			MGETHDR(m, M_DONTWAIT, MT_HEADER);
+			if (m == NULL) {
+				error = ENOBUFS;
+>>>>>>> origin/10.8
 				goto out;
 			}
  			MCLGET(m, M_DONTWAIT);
@@ -2044,6 +2071,7 @@ send:
 			m->m_data += max_linkhdr;
 			m->m_len = hdrlen;
 <<<<<<< HEAD
+<<<<<<< HEAD
 			allocated_len = MCLBYTES;
 		}
 		if (len <= allocated_len - hdrlen - max_linkhdr) {
@@ -2053,14 +2081,23 @@ send:
 				if (m == NULL) {
 					error = ENOBUFS;
 =======
+=======
+			allocated_len = MCLBYTES;
+>>>>>>> origin/10.8
 		}
-#endif
-		if (len <= MHLEN - hdrlen - max_linkhdr) {
+		if (len <= allocated_len - hdrlen - max_linkhdr) {
 		        if (m == NULL) {
+<<<<<<< HEAD
 			        MGETHDR(m, M_DONTWAIT, MT_HEADER);
 				if (m == NULL) {
 				        error = ENOBUFS;
 >>>>>>> origin/10.1
+=======
+				VERIFY(allocated_len <= MHLEN);
+				MGETHDR(m, M_DONTWAIT, MT_HEADER);
+				if (m == NULL) {
+					error = ENOBUFS;
+>>>>>>> origin/10.8
 					goto out;
 				}
 				m->m_data += max_linkhdr;

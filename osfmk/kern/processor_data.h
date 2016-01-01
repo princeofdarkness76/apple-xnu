@@ -101,10 +101,14 @@ struct processor_data {
 	unsigned long			page_grab_count;
 	void					*free_pages;
 	struct processor_sched_statistics sched_stats;
+<<<<<<< HEAD
 	uint64_t	timer_call_ttd; /* current timer call time-to-deadline */
 	uint64_t	wakeups_issued_total; /* Count of thread wakeups issued
 					       * by this processor
 					       */
+=======
+	uint64_t        timer_call_ttd; /* current timer call time-to-deadline */
+>>>>>>> origin/10.8
 };
 
 typedef struct processor_data	processor_data_t;

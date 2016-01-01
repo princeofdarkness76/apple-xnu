@@ -212,6 +212,25 @@ IOReturn RootDomainUserClient::secureSetUserAssertionLevels(
 
 IOReturn RootDomainUserClient::secureGetSystemSleepType(
     uint32_t    *outSleepType)
+<<<<<<< HEAD
+=======
+{
+    int                     admin_priv = 0;
+    IOReturn                ret;
+
+    ret = clientHasPrivilege(fOwningTask, kIOClientPrivilegeAdministrator);
+    admin_priv = (kIOReturnSuccess == ret);
+
+    if (admin_priv && fOwner) {
+        ret = fOwner->getSystemSleepType(outSleepType);
+    } else {
+        ret = kIOReturnNotPrivileged;
+    }
+    return ret;
+}
+
+IOReturn RootDomainUserClient::clientClose( void )
+>>>>>>> origin/10.8
 {
     int                     admin_priv = 0;
     IOReturn                ret;
@@ -344,10 +363,30 @@ IOReturn RootDomainUserClient::externalMethod(
 =======
             
         case kPMActivityTickle:
+<<<<<<< HEAD
             fOwner->reportUserInput( );
+=======
+            if ( fOwner->checkSystemCanSustainFullWake() )
+            {
+               fOwner->reportUserInput( );
+               fOwner->setProperty(kIOPMRootDomainWakeTypeKey, "UserActivity Assertion");
+            }
+>>>>>>> origin/10.8
             ret = kIOReturnSuccess;
             break;
-            
+
+        case kPMSetClamshellSleepState:
+            fOwner->setDisableClamShellSleep(arguments->scalarInput[0] ? true : false);
+            ret = kIOReturnSuccess;
+            break;
+
+        case kPMGetSystemSleepType:
+            if (1 == arguments->scalarOutputCount)
+            {
+                ret = this->secureGetSystemSleepType(
+                        (uint32_t *) &arguments->scalarOutput[0]);
+            }
+            break;
 /*
         case kPMMethodCopySystemTimeline:
             // intentional fallthrough

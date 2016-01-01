@@ -133,6 +133,7 @@ ipc_pset_alloc(
 	if (kr != KERN_SUCCESS) {
 		waitq_link_release(reserved_link);
 		return kr;
+<<<<<<< HEAD
 	}
 	/* pset and space are locked */
 
@@ -141,6 +142,13 @@ ipc_pset_alloc(
 	is_write_unlock(space);
 
 	waitq_link_release(reserved_link);
+=======
+	/* pset and space are locked */
+
+	pset->ips_local_name = name;
+	ipc_mqueue_init(&pset->ips_messages, TRUE /* set */);
+	is_write_unlock(space);
+>>>>>>> origin/10.8
 
 	*namep = name;
 	*psetp = pset;

@@ -384,6 +384,7 @@ extern void kernel_debug_string_simple(const char *message);
 					 */
 #define	MACH_REDISPATCH		0x16	/* "next thread" thread redispatched */
 #define	MACH_REMOTE_AST		0x17	/* AST signal issued to remote processor */
+<<<<<<< HEAD
 #define	MACH_SCHED_CHOOSE_PROCESSOR	0x18	/* Result of choose_processor */
 #define MACH_DEEP_IDLE          0x19	/* deep idle on master processor */
 /* unused                       0x1a    was MACH_SCHED_DECAY_PRIORITY */
@@ -435,6 +436,13 @@ extern void kernel_debug_string_simple(const char *message);
 #define MACH_IPC_VOUCHER_DESTROY		0x9	/* Voucher removed from global voucher hashtable */
 
 /* Codes for pmap (DBG_MACH_PMAP) */
+=======
+
+#define	MACH_SCHED_LPA_BROKEN	0x18	/* last_processor affinity broken in choose_processor */
+#define MACH_DEEP_IDLE          0x19	/* deep idle on master processor */
+
+/* Codes for pmap (DBG_MACH_PMAP) */     
+>>>>>>> origin/10.8
 #define PMAP__CREATE		0x0
 #define PMAP__DESTROY		0x1
 #define PMAP__PROTECT		0x2
@@ -584,6 +592,7 @@ extern void kernel_debug_string_simple(const char *message);
 #define DBG_DRVNAND		20	/* NAND drivers and layers */
 #define DBG_SSD			21	/* SSD */
 #define DBG_DRVSPI		22	/* SPI */
+<<<<<<< HEAD
 =======
 #define DBG_DRVGRAPHICS		18  /* Graphics */
 <<<<<<< HEAD
@@ -591,6 +600,8 @@ extern void kernel_debug_string_simple(const char *message);
 =======
 #define DBG_DRVSD			19  /* Secure Digital */
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.8
 
 /* Backwards compatibility */
 #define	DBG_DRVPOINTING		DBG_DRVHID	/* OBSOLETE: Use DBG_DRVHID instead */
@@ -702,6 +713,7 @@ extern void kernel_debug_string_simple(const char *message);
 #define DKIO_THROTTLE	0x20 /* Deprecated, still provided so fs_usage doesn't break */
 #define DKIO_PASSIVE	0x40
 #define DKIO_NOCACHE	0x80
+<<<<<<< HEAD
 #define DKIO_TIER_MASK	0xF00
 #define DKIO_TIER_SHIFT	8
 
@@ -782,6 +794,13 @@ extern void kernel_debug_string_simple(const char *message);
 
 /* Kernel Debug Sub Classes for daemons (DBG_DAEMON) */
 #define DBG_DAEMON_COREDUET			0x1
+=======
+
+/* Kernel Debug Sub Classes for Applications (DBG_APPS) */
+#define DBG_APP_LOGINWINDOW     0x03
+#define DBG_APP_SAMBA           0x80
+
+>>>>>>> origin/10.8
 
 /**********************************************************************/
 
@@ -1179,7 +1198,10 @@ extern void kdbg_trace_string(struct proc *proc, long *arg1, long *arg2, long *a
 
 extern void kdbg_dump_trace_to_file(const char *);
 void start_kern_tracing(unsigned int, boolean_t);
+<<<<<<< HEAD
 void start_kern_tracing_with_typefilter(unsigned int, boolean_t, unsigned int);
+=======
+>>>>>>> origin/10.8
 struct task;
 extern void kdbg_get_task_name(char*, int, struct task *task);
 void disable_wrap(uint32_t *old_slowcheck, uint32_t *old_flags);

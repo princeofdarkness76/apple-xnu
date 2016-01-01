@@ -937,6 +937,7 @@ out:
 >>>>>>> origin/10.1
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 	ut = get_bsdthread_info(current_thread());
 
@@ -951,6 +952,8 @@ out:
 		throttle_lowpri_io(TRUE);
 	}
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.8
 	return (error);
 }
 

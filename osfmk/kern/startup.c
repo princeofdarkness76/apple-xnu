@@ -183,6 +183,7 @@
 #include <kperf/kperf.h>
 #endif
 
+<<<<<<< HEAD
 #if HYPERVISOR
 #include <kern/hv_support.h>
 #endif
@@ -191,6 +192,8 @@
 #include <sys/version.h>
 >>>>>>> origin/10.2
 
+=======
+>>>>>>> origin/10.8
 #include <i386/pmCPU.h>
 static void		kernel_bootstrap_thread(void);
 
@@ -226,9 +229,12 @@ extern int serverperfmode;
 /* size of kernel trace buffer, disabled by default */
 unsigned int new_nkdbufs = 0;
 unsigned int wake_nkdbufs = 0;
+<<<<<<< HEAD
 unsigned int write_trace_on_panic = 0;
 unsigned int trace_typefilter = 0;
 boolean_t    trace_serial = FALSE;
+=======
+>>>>>>> origin/10.8
 
 /* mach leak logging */
 int log_leaks = 0;
@@ -291,6 +297,15 @@ kernel_bootstrap(void)
 	PE_parse_boot_argn("trace_panic", &write_trace_on_panic, sizeof(write_trace_on_panic));
 	PE_parse_boot_argn("trace_typefilter", &trace_typefilter, sizeof(trace_typefilter));
 
+<<<<<<< HEAD
+=======
+	PE_parse_boot_argn("trace_wake", &wake_nkdbufs, sizeof (wake_nkdbufs));
+
+	/* i386_vm_init already checks for this ; do it aagin anyway */
+        if (PE_parse_boot_argn("serverperfmode", &serverperfmode, sizeof (serverperfmode))) {
+                serverperfmode = 1;
+        }
+>>>>>>> origin/10.8
 	scale_setup();
 
 	kernel_bootstrap_log("vm_mem_bootstrap");
@@ -562,12 +577,16 @@ kernel_bootstrap_thread(void)
 	}
 	if (turn_on_log_leaks && !new_nkdbufs)
 		new_nkdbufs = 200000;
+<<<<<<< HEAD
 	if (trace_typefilter)
 		start_kern_tracing_with_typefilter(new_nkdbufs,
 						   FALSE,
 						   trace_typefilter);
 	else
 		start_kern_tracing(new_nkdbufs, FALSE);
+=======
+	start_kern_tracing(new_nkdbufs, FALSE);
+>>>>>>> origin/10.8
 	if (turn_on_log_leaks)
 		log_leaks = 1;
 
@@ -597,10 +616,14 @@ kernel_bootstrap_thread(void)
 #if (!defined(__i386__) && !defined(__x86_64__))
 	if (turn_on_log_leaks && !new_nkdbufs)
 		new_nkdbufs = 200000;
+<<<<<<< HEAD
 	if (trace_typefilter)
 		start_kern_tracing_with_typefilter(new_nkdbufs, FALSE, trace_typefilter);
 	else
 		start_kern_tracing(new_nkdbufs, FALSE);
+=======
+	start_kern_tracing(new_nkdbufs, FALSE);
+>>>>>>> origin/10.8
 	if (turn_on_log_leaks)
 		log_leaks = 1;
 #endif

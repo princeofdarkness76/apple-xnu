@@ -446,6 +446,7 @@ void interrupt_latency_tracker_setup(void);
 void interrupt_reset_latency_stats(void);
 void interrupt_populate_latency_stats(char *, unsigned);
 void ml_get_power_state(boolean_t *, boolean_t *);
+<<<<<<< HEAD
 
 void timer_queue_expire_local(void*);
 void timer_queue_expire_rescan(void*);
@@ -465,6 +466,8 @@ int ml_get_current_cpus(
 
 #endif /* __APPLE_API_PRIVATE */
 >>>>>>> origin/10.2
+=======
+>>>>>>> origin/10.8
 
 #endif /* XNU_KERNEL_PRIVATE */
 =======

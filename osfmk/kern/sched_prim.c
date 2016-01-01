@@ -213,9 +213,28 @@ uint32_t	sched_use_combined_fgbg_decay = 0;
 
 uint32_t	sched_decay_usage_age_factor = 1; /* accelerate 5/8^n usage aging */
 
+<<<<<<< HEAD
 /* Allow foreground to decay past default to resolve inversions */
 #define DEFAULT_DECAY_BAND_LIMIT ((BASEPRI_FOREGROUND - BASEPRI_DEFAULT) + 2)
 int 		sched_pri_decay_band_limit = DEFAULT_DECAY_BAND_LIMIT;
+=======
+/* Defaults for timer deadline profiling */
+#define TIMER_DEADLINE_TRACKING_BIN_1_DEFAULT 2000000 /* Timers with deadlines <=
+                                                        * 2ms */
+#define TIMER_DEADLINE_TRACKING_BIN_2_DEFAULT 5000000 /* Timers with deadlines
+                                                          <= 5ms */
+uint64_t timer_deadline_tracking_bin_1;
+uint64_t timer_deadline_tracking_bin_2;
+
+__attribute__((always_inline))
+static inline run_queue_t runq_for_processor(processor_t processor)
+{
+	if (sched_traditional_use_pset_runqueue)
+		return &processor->processor_set->pset_runq;
+	else
+		return &processor->runq;
+}
+>>>>>>> origin/10.8
 
 <<<<<<< HEAD
 /* Defaults for timer deadline profiling */
@@ -295,6 +314,13 @@ static thread_t	steal_processor_thread(
 static void
 sched_realtime_timebase_init(void);
 
+<<<<<<< HEAD
+=======
+static void
+sched_timer_deadline_tracking_init(void);
+
+#if defined(CONFIG_SCHED_TRADITIONAL)
+>>>>>>> origin/10.8
 static void
 sched_timer_deadline_tracking_init(void);
 
@@ -432,8 +458,12 @@ sched_init(void)
 	sched_realtime_init();
 	ast_init();
 	sched_timer_deadline_tracking_init();
+<<<<<<< HEAD
 
 <<<<<<< HEAD
+=======
+	
+>>>>>>> origin/10.8
 	SCHED(pset_init)(&pset0);
 	SCHED(processor_init)(master_processor);
 }
@@ -683,9 +713,14 @@ thread_unblock(
 	thread_t		thread,
 	wait_result_t	wresult)
 {
+<<<<<<< HEAD
 	boolean_t		ready_for_runq = FALSE;
 	thread_t		cthread = current_thread();
 	uint32_t		new_run_count;
+=======
+	boolean_t		result = FALSE;
+	thread_t		cthread = current_thread();
+>>>>>>> origin/10.8
 
 	/*
 	 *	Set wait_result.
@@ -773,6 +808,7 @@ thread_unblock(
 	 */
 	boolean_t aticontext, pidle;
 	ml_get_power_state(&aticontext, &pidle);
+<<<<<<< HEAD
 
 	if (__improbable(aticontext && !(thread_get_tag_internal(thread) & THREAD_TAG_CALLOUT))) {
 		ledger_credit(thread->t_ledger, task_ledgers.interrupt_wakeups, 1);
@@ -780,6 +816,11 @@ thread_unblock(
 
 		uint64_t ttd = PROCESSOR_DATA(current_processor(), timer_call_ttd);
 
+=======
+	if (__improbable(aticontext)) {
+		ledger_credit(thread->t_ledger, task_ledgers.interrupt_wakeups, 1);
+		uint64_t ttd = PROCESSOR_DATA(current_processor(), timer_call_ttd);
+>>>>>>> origin/10.8
 		if (ttd) {
 			if (ttd <= timer_deadline_tracking_bin_1)
 				thread->thread_timer_wakeups_bin_1++;
@@ -787,11 +828,17 @@ thread_unblock(
 				if (ttd <= timer_deadline_tracking_bin_2)
 					thread->thread_timer_wakeups_bin_2++;
 		}
+<<<<<<< HEAD
 
 		if (pidle) {
 			ledger_credit(thread->t_ledger, task_ledgers.platform_idle_wakeups, 1);
 		}
 
+=======
+		if (pidle) {
+			ledger_credit(thread->t_ledger, task_ledgers.platform_idle_wakeups, 1);
+		}
+>>>>>>> origin/10.8
 	} else if (thread_get_tag_internal(cthread) & THREAD_TAG_CALLOUT) {
 		if (cthread->callout_woken_from_icontext) {
 			ledger_credit(thread->t_ledger, task_ledgers.interrupt_wakeups, 1);
@@ -800,15 +847,30 @@ thread_unblock(
 				ledger_credit(thread->t_ledger, task_ledgers.platform_idle_wakeups, 1);
 				thread->thread_callout_platform_idle_wakeups++;
 			}
+<<<<<<< HEAD
 			
 			cthread->callout_woke_thread = TRUE;
+=======
+>>>>>>> origin/10.8
 		}
 	}
 	
 	if (thread_get_tag_internal(thread) & THREAD_TAG_CALLOUT) {
+<<<<<<< HEAD
 		thread->callout_woken_from_icontext = aticontext;
 		thread->callout_woken_from_platform_idle = pidle;
 		thread->callout_woke_thread = FALSE;
+=======
+			thread->callout_woken_from_icontext = aticontext;
+			thread->callout_woken_from_platform_idle = pidle;
+	}
+
+	/* Event should only be triggered if thread is not already running */
+	if (result == FALSE) {
+		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE,
+			MACHDBG_CODE(DBG_MACH_SCHED,MACH_MAKE_RUNNABLE) | DBG_FUNC_NONE,
+			(uintptr_t)thread_tid(thread), thread->sched_pri, thread->wait_result, 0, 0);
+>>>>>>> origin/10.8
 	}
 
 	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE,
@@ -5050,10 +5112,13 @@ processor_idle(
 
 		machine_track_platform_idle(TRUE);
 
+<<<<<<< HEAD
 =======
 	while (processor->next_thread == THREAD_NULL && processor->runq.count == 0 && rt_runq.count == 0 &&
 				(thread == THREAD_NULL || ((thread->state & (TH_WAIT|TH_SUSP)) == TH_WAIT && !thread->wake_active))) {
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.8
 		machine_idle();
 
 		machine_track_platform_idle(FALSE);
@@ -5736,3 +5801,13 @@ void thread_set_options(uint32_t thopt) {
  	thread_unlock(t);
  	splx(x);
 }
+<<<<<<< HEAD
+=======
+#endif	/* DEBUG */
+
+static void
+sched_timer_deadline_tracking_init(void) {
+	nanoseconds_to_absolutetime(TIMER_DEADLINE_TRACKING_BIN_1_DEFAULT, &timer_deadline_tracking_bin_1);
+	nanoseconds_to_absolutetime(TIMER_DEADLINE_TRACKING_BIN_2_DEFAULT, &timer_deadline_tracking_bin_2);
+}
+>>>>>>> origin/10.8

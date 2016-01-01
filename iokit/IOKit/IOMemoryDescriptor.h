@@ -64,7 +64,10 @@
 class IOMemoryMap;
 class IOMapper;
 class IOService;
+<<<<<<< HEAD
 class IODMACommand;
+=======
+>>>>>>> origin/10.8
 
 /*
  * Direction of transfer, with respect to the described memory.
@@ -124,11 +127,16 @@ enum {
     kIOMemoryAsReference	= 0x00000100,
     kIOMemoryBufferPageable	= 0x00000400,
 <<<<<<< HEAD
+<<<<<<< HEAD
     kIOMemoryMapperNone		= 0x00000800,	// Shared with Buffer MD
     kIOMemoryHostOnly           = 0x00001000,   // Never DMA accessible
 =======
     kIOMemoryDontMap		= 0x00000800,
 >>>>>>> origin/10.5
+=======
+    kIOMemoryMapperNone		= 0x00000800,	// Shared with Buffer MD
+    kIOMemoryHostOnly           = 0x00001000,   // Never DMA accessible
+>>>>>>> origin/10.8
 #ifdef XNU_KERNEL_PRIVATE
     kIOMemoryRedirected		= 0x00004000,
     kIOMemoryPreparedReadOnly	= 0x00008000,
@@ -199,6 +207,7 @@ struct IODMAMapSpecification
 	uint32_t    resvB[4];
 };
 
+<<<<<<< HEAD
 struct IODMAMapPageList
 {
     uint32_t                pageOffset;
@@ -210,11 +219,16 @@ struct IODMAMapPageList
 enum
 {
     kIODMAMapReadAccess           = 0x00000001,
+=======
+enum
+{
+>>>>>>> origin/10.8
     kIODMAMapWriteAccess          = 0x00000002,
     kIODMAMapPhysicallyContiguous = 0x00000010,
     kIODMAMapDeviceMemory         = 0x00000020,
     kIODMAMapPagingPath           = 0x00000040,
     kIODMAMapIdentityMap          = 0x00000080,
+<<<<<<< HEAD
 
     kIODMAMapPageListFullyOccupied = 0x00000100,
     kIODMAMapFixedAddress          = 0x00000200,
@@ -265,6 +279,10 @@ struct IOMDDMAWalkSegmentArgs {
 typedef UInt8 IOMDDMAWalkSegmentState[128];
 
 #endif /* KERNEL_PRIVATE */
+=======
+};
+
+>>>>>>> origin/10.8
 
 enum 
 {
@@ -421,12 +439,20 @@ typedef IOOptionBits DMACommandOps;
     IOMemoryDescriptorReserved * getKernelReserved( void );
     IOReturn dmaMap(
 	IOMapper                    * mapper,
+<<<<<<< HEAD
 	IODMACommand                * command,
 	const IODMAMapSpecification * mapSpec,
 	uint64_t                      offset,
 	uint64_t                      length,
 	uint64_t                    * mapAddress,
 	uint64_t                    * mapLength);
+=======
+	const IODMAMapSpecification * mapSpec,
+	uint64_t                      offset,
+	uint64_t                      length,
+	uint64_t                    * address,
+	ppnum_t                     * mapPages);
+>>>>>>> origin/10.8
 #endif
 	
 private:
@@ -1095,6 +1121,19 @@ public:
                                IOByteCount       * dirtyPageCount);
 #endif
 
+#ifdef XNU_KERNEL_PRIVATE
+    // Internal APIs may be made virtual at some time in the future.
+    IOReturn wireVirtual(IODirection forDirection);
+    IOReturn dmaMap(
+	IOMapper                    * mapper,
+	const IODMAMapSpecification * mapSpec,
+	uint64_t                      offset,
+	uint64_t                      length,
+	uint64_t                    * address,
+	ppnum_t                     * mapPages);
+    bool initMemoryEntries(size_t size, IOMapper * mapper);
+#endif
+
 private:
 
 #ifndef __LP64__
@@ -1103,6 +1142,11 @@ private:
     virtual void unmapFromKernel();
 #endif /* !__LP64__ */
 
+<<<<<<< HEAD
+=======
+    void *createNamedEntry();
+
+>>>>>>> origin/10.8
     // Internal
     OSData *	    _memoryEntries;
     unsigned int    _pages;

@@ -420,6 +420,7 @@ mac_vnode_notify_open(vfs_context_t ctx, struct vnode *vp, int acc_flags)
 {
 	kauth_cred_t cred;
 
+<<<<<<< HEAD
 #if SECURITY_MAC_CHECK_ENFORCE
     /* 21167099 - only check if we allow write */
     if (!mac_vnode_enforce)
@@ -427,11 +428,17 @@ mac_vnode_notify_open(vfs_context_t ctx, struct vnode *vp, int acc_flags)
 #endif
     if (!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
         return;
+=======
+	if (!mac_vnode_enforce || 
+		!mac_context_check_enforce(ctx, MAC_VNODE_ENFORCE))
+		return;
+>>>>>>> origin/10.8
 
 	cred = vfs_context_ucred(ctx);
 	MAC_PERFORM(vnode_notify_open, cred, vp, vp->v_label, acc_flags);
 }
 
+<<<<<<< HEAD
 void
 mac_vnode_notify_link(vfs_context_t ctx, struct vnode *vp,
 		      struct vnode *dvp, struct componentname *cnp)
@@ -450,6 +457,8 @@ mac_vnode_notify_link(vfs_context_t ctx, struct vnode *vp,
 	MAC_PERFORM(vnode_notify_link, cred, dvp, dvp->v_label, vp, vp->v_label, cnp);
 }
 
+=======
+>>>>>>> origin/10.8
 /*
  * Extended attribute 'name' was updated via
  * vn_setxattr() or vn_removexattr().  Allow the

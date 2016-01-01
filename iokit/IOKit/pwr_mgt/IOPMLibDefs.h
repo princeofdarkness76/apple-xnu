@@ -75,6 +75,12 @@
 >>>>>>> origin/10.6
 =======
 #define kPMActivityTickle               10
+#define kPMGetSystemSleepType           11
+#define kPMSetClamshellSleepState       12
 
+<<<<<<< HEAD
 #define kNumPMMethods                   11
 >>>>>>> origin/10.7
+=======
+#define kNumPMMethods                   13
+>>>>>>> origin/10.8

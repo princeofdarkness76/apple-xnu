@@ -49,6 +49,9 @@
  */
 enum PMLogEnum {
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.8
     kPMLogSetParent = 1,            //  1	0x05070004
     kPMLogAddChild,                 //  2	0x05070008
     kPMLogRemoveChild,              //  3	0x0507000c
@@ -75,8 +78,13 @@ enum PMLogEnum {
     kPMLogCriticalTemp,             // 24	0x05070060
     kPMLogOverrideOn,               // 25	0x05070064
     kPMLogOverrideOff,              // 26	0x05070068
+<<<<<<< HEAD
     kPMLogChangeStateForRootDomain, // 27	0x0507006c
     kPMLogCSynchronizePowerTree,    // 28	0x05070070
+=======
+    kPMLogEnqueueErr,               // 27	0x0507006c - NOT USED
+    kPMLogCollapseQueue,            // 28	0x05070070 - NOT USED
+>>>>>>> origin/10.8
     kPMLogChangeDone,               // 29	0x05070074
     kPMLogCtrlDriverTardy,          // 30	0x05070078 - controlling driver didn't acknowledge
     kPMLogIntDriverTardy,           // 31	0x0507007c - interested driver didn't acknowledge
@@ -103,6 +111,7 @@ enum PMLogEnum {
     kPMLogSetPinGroup,              // 52	0x050700d0 - NOT USED
     kPMLogIdleCancel,               // 53	0x050700d4 - device unidle during change
     kPMLogSleepWakeTracePoint,      // 54   0x050700d8 - kIOPMTracePoint markers
+<<<<<<< HEAD
     kPMLogQuiescePowerTree,         // 55   0x050700dc
 =======
     kPMLogSetParent = 1,		//  1	0x05100004
@@ -159,5 +168,7 @@ enum PMLogEnum {
     kPMLogSetPinGroup,			// 52	0x051000d0 - platform device specific gpio control
     kPMLogIdleCancel,			// 53	0x051000d4 - device unidle during change
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.8
     kIOPMlogLastEvent
 };

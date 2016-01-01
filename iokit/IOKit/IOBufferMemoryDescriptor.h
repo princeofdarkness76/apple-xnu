@@ -74,7 +74,11 @@ enum {
 >>>>>>> origin/10.5
 =======
 					| kIOMemoryClearEncrypt
+<<<<<<< HEAD
 >>>>>>> origin/10.6
+=======
+					| kIOMemoryMapperNone
+>>>>>>> origin/10.8
 };
 
 #define _IOBUFFERMEMORYDESCRIPTOR_INTASKWITHOPTIONS_		1

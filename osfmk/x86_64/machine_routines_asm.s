@@ -107,6 +107,7 @@ ENTRY(_rtc_nanotime_adjust)
 
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * uint64_t _rtc_nanotime_read(rtc_nanotime_t *rntp);
 =======
  * void _rtc_nanotime_adjust(
@@ -128,6 +129,9 @@ ENTRY(_rtc_nanotime_adjust)
 /*
  * unint64_t _rtc_nanotime_read(rtc_nanotime_t *rntp, int slow);
 >>>>>>> origin/10.6
+=======
+ * uint64_t _rtc_nanotime_read(rtc_nanotime_t *rntp);
+>>>>>>> origin/10.8
  *
  * This is the same as the commpage nanotime routine, except that it uses the
  * kernel internal "rtc_nanotime_info" data instead of the commpage data.

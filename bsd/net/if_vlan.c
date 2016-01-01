@@ -1,6 +1,7 @@
 /*
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2003-2014 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
@@ -8,6 +9,9 @@
 =======
  * Copyright (c) 2003-2010 Apple Computer, Inc. All rights reserved.
 >>>>>>> origin/10.6
+=======
+ * Copyright (c) 2003-2013 Apple Inc. All rights reserved.
+>>>>>>> origin/10.8
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 

@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+>>>>>>> origin/10.8
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -5706,12 +5710,16 @@ hfs_relocate(struct  vnode *vp, u_int32_t  blockHint, kauth_cred_t cred,
 
 	vnodetype = vnode_vtype(vp);
 	if (vnodetype != VREG) {
+<<<<<<< HEAD
 		/* Not allowed to move symlinks. */
 =======
 	int  retval, need_vinval=0;
 
 	if (vp->v_type != VREG && vp->v_type != VLNK) {
 >>>>>>> origin/10.3
+=======
+		/* Note symlinks are not allowed to be relocated */
+>>>>>>> origin/10.8
 		return (EPERM);
 	}
 	
@@ -5744,7 +5752,11 @@ hfs_relocate(struct  vnode *vp, u_int32_t  blockHint, kauth_cred_t cred,
 	if (blockHint == 0)
 		blockHint = hfsmp->nextAllocation;
 
+<<<<<<< HEAD
 	if (fp->ff_size > 0x7fffffff) {
+=======
+	if ((fp->ff_size > 0x7fffffff)) {
+>>>>>>> origin/10.8
 		return (EFBIG);
 	}
 

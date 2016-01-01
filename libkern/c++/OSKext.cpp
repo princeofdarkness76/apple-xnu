@@ -8459,6 +8459,7 @@ OSKext::copyInfo(OSArray * infoKeys)
                                   __FUNCTION__, segp->segname, segp->vmaddr,
                                   VM_KERNEL_UNSLIDE(segp->vmaddr),
                                   segp->vmsize, segp->nsects);
+<<<<<<< HEAD
                         if ( (VM_KERNEL_IS_SLID(segp->vmaddr) == false) &&
                             (VM_KERNEL_IS_KEXT(segp->vmaddr) == false) &&
                             (VM_KERNEL_IS_PRELINKTEXT(segp->vmaddr) == false) &&
@@ -8473,6 +8474,11 @@ OSKext::copyInfo(OSArray * infoKeys)
 #endif
                         segp->vmaddr = VM_KERNEL_UNSLIDE(segp->vmaddr);
                         
+=======
+#endif
+                        segp->vmaddr = VM_KERNEL_UNSLIDE(segp->vmaddr);
+
+>>>>>>> origin/10.8
                         for (secp = firstsect(segp); secp != NULL; secp = nextsect(segp, secp)) {
                             secp->addr = VM_KERNEL_UNSLIDE(secp->addr);
                         }

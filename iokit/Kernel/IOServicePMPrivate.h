@@ -225,6 +225,9 @@ private:
     IOLock *                PMLock;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.8
     unsigned int            InitialPowerChange          :1;
     unsigned int            InitialSetPowerState        :1;
     unsigned int            DeviceOverrideEnabled       :1;
@@ -233,7 +236,11 @@ private:
     unsigned int            StrictTreeOrder             :1;
     unsigned int            IdleTimerStopped            :1;
     unsigned int            AdjustPowerScheduled        :1;
+<<<<<<< HEAD
 
+=======
+    
+>>>>>>> origin/10.8
     unsigned int            IsPreChange                 :1;
     unsigned int            DriverCallBusy              :1;
     unsigned int            PCDFunctionOverride         :1;
@@ -241,6 +248,7 @@ private:
     unsigned int            HasAdvisoryDesire           :1;
     unsigned int            AdvisoryTickleUsed          :1;
     unsigned int            ResetPowerStateOnWake       :1;
+<<<<<<< HEAD
 =======
     unsigned int            InitialPowerChange:1;
     unsigned int            InitialSetPowerState:1;
@@ -256,6 +264,8 @@ private:
     unsigned int            PCDFunctionOverride:1;
     unsigned int            IdleTimerIgnored:1;
 >>>>>>> origin/10.7
+=======
+>>>>>>> origin/10.8
 
     // Time of last device activity.
     AbsoluteTime            DeviceActiveTimestamp;
@@ -338,8 +348,13 @@ private:
     uint32_t                DeviceUsablePowerState;
 
     // Protected by ActivityLock - BEGIN
+<<<<<<< HEAD
     IOPMPowerStateIndex     ActivityTicklePowerState;
     IOPMPowerStateIndex     AdvisoryTicklePowerState;
+=======
+    int                     ActivityTicklePowerState;
+    int                     AdvisoryTicklePowerState;
+>>>>>>> origin/10.8
     uint32_t                ActivityTickleCount;
     uint32_t                DeviceWasActive     : 1;
     uint32_t                AdvisoryTickled     : 1;
@@ -370,9 +385,15 @@ private:
     IOPMActions             PMActions;
 
     // Serialize IOServicePM state for debug output.
+<<<<<<< HEAD
     IOReturn gatedSerialize( OSSerialize * s ) const;
     virtual bool serialize( OSSerialize * s ) const APPLE_KEXT_OVERRIDE;
 
+=======
+    IOReturn gatedSerialize( OSSerialize * s );
+    virtual bool serialize( OSSerialize * s ) const;
+    
+>>>>>>> origin/10.8
     // PM log and trace
     void pmPrint( uint32_t event, uintptr_t param1, uintptr_t param2 ) const;
     void pmTrace( uint32_t event, uintptr_t param1, uintptr_t param2 ) const;
@@ -411,11 +432,17 @@ private:
 #define fPCDFunctionOverride        pwrMgt->PCDFunctionOverride
 #define fIdleTimerIgnored           pwrMgt->IdleTimerIgnored
 <<<<<<< HEAD
+<<<<<<< HEAD
 #define fHasAdvisoryDesire          pwrMgt->HasAdvisoryDesire
 #define fAdvisoryTickleUsed         pwrMgt->AdvisoryTickleUsed
 #define fResetPowerStateOnWake      pwrMgt->ResetPowerStateOnWake
 =======
 >>>>>>> origin/10.7
+=======
+#define fHasAdvisoryDesire          pwrMgt->HasAdvisoryDesire
+#define fAdvisoryTickleUsed         pwrMgt->AdvisoryTickleUsed
+#define fResetPowerStateOnWake      pwrMgt->ResetPowerStateOnWake
+>>>>>>> origin/10.8
 #define fDeviceActiveTimestamp      pwrMgt->DeviceActiveTimestamp
 #define fMaxPowerStateEntryTime     pwrMgt->MaxPowerStateEntryTime
 #define fMaxPowerStateExitTime      pwrMgt->MaxPowerStateExitTime
@@ -528,7 +555,10 @@ the ack timer is ticking every tenth of a second.
 #define kIOPMInitialPowerChange     0x1000  // set for initial power change
 #define kIOPMRootChangeUp           0x2000  // Root power domain change up
 #define kIOPMRootChangeDown         0x4000  // Root power domain change down
+<<<<<<< HEAD
 #define kIOPMExpireIdleTimer        0x8000  // Accelerate idle timer expiration
+=======
+>>>>>>> origin/10.8
 
 #define kIOPMRootBroadcastFlags     (kIOPMSynchronize  | \
                                      kIOPMRootChangeUp | kIOPMRootChangeDown)
@@ -538,9 +568,12 @@ the ack timer is ticking every tenth of a second.
 #define kTickleTypePowerRise        0x02
 #define kTickleTypeActivity         0x04
 #define kTickleTypeAdvisory         0x08
+<<<<<<< HEAD
 =======
 #define kIOPMPowerSuppressed        0x1000  // power suppressed for dark wake
 >>>>>>> origin/10.7
+=======
+>>>>>>> origin/10.8
 
 enum {
     kDriverCallInformPreChange,

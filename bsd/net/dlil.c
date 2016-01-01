@@ -7505,11 +7505,27 @@ sysctl_rxpoll_whiwat SYSCTL_HANDLER_ARGS
 static int
 sysctl_sndq_maxlen SYSCTL_HANDLER_ARGS
 {
+<<<<<<< HEAD
 #pragma unused(arg1, arg2)
 	int i, err;
+=======
+#pragma unused(err)
+	struct sfb_bin_fcentry *fce;
+	struct inpcb *inp;
+
+	for (;;) {
+		lck_mtx_assert(&ifnet_fclist_lock, LCK_MTX_ASSERT_OWNED);
+		while (SLIST_EMPTY(&ifnet_fclist)) {
+			(void) msleep0(&ifnet_fclist, &ifnet_fclist_lock,
+			    (PSOCK | PSPIN), "ifnet_fc_cont", 0,
+			    ifnet_fc_thread_cont);
+			/* NOTREACHED */
+		}
+>>>>>>> origin/10.8
 
 	i = if_sndq_maxlen;
 
+<<<<<<< HEAD
 	err = sysctl_handle_int(oidp, &i, 0, req);
 	if (err != 0 || req->newptr == USER_ADDR_NULL)
 		return (err);
@@ -7519,6 +7535,19 @@ sysctl_sndq_maxlen SYSCTL_HANDLER_ARGS
 
 	if_sndq_maxlen = i;
 	return (err);
+=======
+		inp = inp_fc_getinp(fce->fce_flowhash, 0);
+		if (inp == NULL) {
+			ifnet_fce_free(fce);
+			lck_mtx_lock_spin(&ifnet_fclist_lock);
+			continue;
+		}
+		inp_fc_feedback(inp);
+
+		ifnet_fce_free(fce);
+		lck_mtx_lock_spin(&ifnet_fclist_lock);
+	}
+>>>>>>> origin/10.8
 }
 
 static int

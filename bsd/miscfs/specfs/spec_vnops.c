@@ -1423,8 +1423,11 @@ static uint32_t
 throttle_timer_start(struct _throttle_io_info_t *info, boolean_t update_io_count, int wakelevel)
 {	
 	struct timeval  elapsed;
+<<<<<<< HEAD
 	struct timeval  now;
 	struct timeval  period;
+=======
+>>>>>>> origin/10.8
 	uint64_t	elapsed_msecs;
 	int		throttle_level;
 	int		level;
@@ -1670,6 +1673,7 @@ throttle_add_to_list(struct _throttle_io_info_t *info, uthread_t ut, int mylevel
 		start_timer = TRUE;
 	}
 
+<<<<<<< HEAD
 	if (insert_tail == TRUE)
 		TAILQ_INSERT_TAIL(&info->throttle_uthlist[mylevel], ut, uu_throttlelist);
 	else
@@ -1687,6 +1691,19 @@ throttle_add_to_list(struct _throttle_io_info_t *info, uthread_t ut, int mylevel
 
 				ut->uu_on_throttlelist = THROTTLE_LEVEL_NONE;
 			}
+=======
+		microuptime(&elapsed);
+		timevalsub(&elapsed, &info->throttle_last_IO_timestamp[throttle_level]);
+		elapsed_msecs = (uint64_t)elapsed.tv_sec * (uint64_t)1000 + (elapsed.tv_usec / 1000);
+
+		if (elapsed_msecs < (uint64_t)THROTTLE_WINDOW) {
+			/*
+			 * we had an I/O occur in this level within
+			 * our throttle window, so we need to
+			 * to make sure the timer continues to run
+			 */
+			break;
+>>>>>>> origin/10.8
 		}
 	}
 	return (level);
@@ -1729,6 +1746,7 @@ throttle_init_throttle_window(void)
 static void
 throttle_init_throttle_period(struct _throttle_io_info_t *info, boolean_t isssd)
 {
+<<<<<<< HEAD
 	int throttle_period_size;
 
 	/*
@@ -1738,6 +1756,43 @@ throttle_init_throttle_period(struct _throttle_io_info_t *info, boolean_t isssd)
 	 * - Boot-args
 	 * All values are specified in msecs.
 	 */
+=======
+	uthread_t       ut, utlist;
+	struct timeval	elapsed;
+	uint64_t	elapsed_msecs;
+	int		throttle_level;
+        boolean_t	update_io_count = FALSE;
+	boolean_t	need_wakeup = FALSE;
+	boolean_t	need_release = FALSE;
+
+        lck_mtx_lock(&info->throttle_lock);
+	
+	microuptime(&elapsed);
+	timevalsub(&elapsed, &info->throttle_start_IO_period_timestamp);
+	elapsed_msecs = (uint64_t)elapsed.tv_sec * (uint64_t)1000 + (elapsed.tv_usec / 1000);
+
+	if (elapsed_msecs >= (uint64_t)info->throttle_io_period) {
+		/*
+		 * we're closing out the current IO period...
+		 * if we have a waiting thread, wake it up
+		 * after we have reset the I/O window info
+		 */
+		need_wakeup = TRUE;
+	        update_io_count = TRUE;
+	}
+        if ((throttle_level = throttle_timer_start(info, update_io_count)) == THROTTLE_LEVEL_END) {
+		/*
+		 * we are now outside of the throttle window
+		 * for all throttle levels...
+		 *
+		 * the timer is not restarted in this case, so
+		 * we need to get rid of the reference we took when
+		 * we started up the timer... we can't do this
+		 * until we are entirely done playing with 'info'
+		 */
+		need_release = TRUE;
+	}
+>>>>>>> origin/10.8
 
 	/* Assign global defaults */
 	if ((isssd == TRUE) && (info->throttle_is_fusion_with_priority == 0))
@@ -2091,10 +2146,17 @@ throttle_io_will_be_throttled_internal(void * throttle_info, int * mylevel, int 
 	for (throttle_level = THROTTLE_LEVEL_START; throttle_level < thread_throttle_level; throttle_level++) {
 
 		microuptime(&elapsed);
+<<<<<<< HEAD
 		timevalsub(&elapsed, &info->throttle_window_start_timestamp[throttle_level]);
 		elapsed_msecs = (uint64_t)elapsed.tv_sec * (uint64_t)1000 + (elapsed.tv_usec / 1000);
 
 		if (elapsed_msecs < (uint64_t)throttle_windows_msecs[thread_throttle_level])
+=======
+		timevalsub(&elapsed, &info->throttle_last_IO_timestamp[throttle_level]);
+		elapsed_msecs = (uint64_t)elapsed.tv_sec * (uint64_t)1000 + (elapsed.tv_usec / 1000);
+
+		if (elapsed_msecs < (uint64_t)THROTTLE_WINDOW)
+>>>>>>> origin/10.8
 			break;
 	}
 	if (throttle_level >= thread_throttle_level) {
@@ -2484,10 +2546,17 @@ int throttle_info_io_will_be_throttled(void * throttle_info, int policy)
 	for (throttle_level = THROTTLE_LEVEL_START; throttle_level < thread_throttle_level; throttle_level++) {
 
 		microuptime(&elapsed);
+<<<<<<< HEAD
 		timevalsub(&elapsed, &info->throttle_window_start_timestamp[throttle_level]);
 		elapsed_msecs = (uint64_t)elapsed.tv_sec * (uint64_t)1000 + (elapsed.tv_usec / 1000);
 
 		if (elapsed_msecs < (uint64_t)throttle_windows_msecs[thread_throttle_level])
+=======
+		timevalsub(&elapsed, &info->throttle_last_IO_timestamp[throttle_level]);
+		elapsed_msecs = (uint64_t)elapsed.tv_sec * (uint64_t)1000 + (elapsed.tv_usec / 1000);
+
+		if (elapsed_msecs < (uint64_t)THROTTLE_WINDOW)
+>>>>>>> origin/10.8
 			break;
 	}
 	if (throttle_level >= thread_throttle_level) {

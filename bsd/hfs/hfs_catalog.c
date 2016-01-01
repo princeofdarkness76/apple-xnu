@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
 >>>>>>> origin/10.5
+=======
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+>>>>>>> origin/10.8
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -857,7 +861,11 @@ cat_lookupmangled(struct hfsmount *hfsmp, struct cat_desc *descp, int wantrsrc,
 		return (ENOENT);
 	}
 
+<<<<<<< HEAD
 	result = cat_idlookup(hfsmp, fileID, 0, 0, outdescp, attrp, forkp);
+=======
+	result = cat_idlookup(hfsmp, fileID, 0,0,  outdescp, attrp, forkp);
+>>>>>>> origin/10.8
 	if (result)
 		return (ENOENT);
 	/* It must be in the correct directory */

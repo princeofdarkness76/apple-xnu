@@ -477,6 +477,7 @@ pmap_cpu_init(void)
 		}
 	}
 <<<<<<< HEAD
+<<<<<<< HEAD
 	if (cpuid_leaf7_features() & CPUID_LEAF7_FEATURE_SMAP) {
 		boolean_t nsmap;
 		if (!PE_parse_boot_argn("-pmap_smap_disable", &nsmap, sizeof(nsmap))) {
@@ -484,13 +485,18 @@ pmap_cpu_init(void)
 			pmap_smap_enabled = TRUE;
 		}
 	}
+=======
+>>>>>>> origin/10.8
 
 	if (cdp->cpu_fixed_pmcs_enabled) {
 		boolean_t enable = TRUE;
 		cpu_pmc_control(&enable);
 	}
+<<<<<<< HEAD
 =======
 >>>>>>> origin/10.7
+=======
+>>>>>>> origin/10.8
 }
 
 static uint32_t pmap_scale_shift(void) {

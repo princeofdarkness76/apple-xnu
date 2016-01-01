@@ -131,7 +131,11 @@
 >>>>>>> origin/10.6
 =======
 #define CPUID_FEATURE_SEGLIM64  _HBit(11) /* 64-bit segment limit checking */
+<<<<<<< HEAD
 >>>>>>> origin/10.7
+=======
+#define CPUID_FEATURE_FMA       _HBit(12) /* Fused-Multiply-Add support */
+>>>>>>> origin/10.8
 #define CPUID_FEATURE_CX16      _HBit(13) /* CmpXchg16b instruction */
 #define CPUID_FEATURE_xTPR      _HBit(14) /* Send Task PRiority msgs */
 #define CPUID_FEATURE_PDCM      _HBit(15) /* Perf/Debug Capability MSR */
@@ -257,9 +261,19 @@
  * Bits returned in %ebx to a CPUID request with {%eax,%ecx} of (0x7,0x0}:
  */
 #define CPUID_LEAF7_FEATURE_RDWRFSGS _Bit(0)	/* FS/GS base read/write */
+#define CPUID_LEAF7_FEATURE_TSCOFF   _Bit(1)	/* TSC thread offset */
+#define CPUID_LEAF7_FEATURE_BMI1     _Bit(3)	/* Bit Manipulation Instrs, set 1 */
+#define CPUID_LEAF7_FEATURE_HLE      _Bit(4)	/* Hardware Lock Elision*/
+#define CPUID_LEAF7_FEATURE_AVX2     _Bit(5)	/* AVX2 Instructions */
 #define CPUID_LEAF7_FEATURE_SMEP     _Bit(7)	/* Supervisor Mode Execute Protect */
+#define CPUID_LEAF7_FEATURE_BMI2     _Bit(8)	/* Bit Manipulation Instrs, set 2 */
 #define CPUID_LEAF7_FEATURE_ENFSTRG  _Bit(9)	/* ENhanced Fast STRinG copy */
+<<<<<<< HEAD
 >>>>>>> origin/10.7
+=======
+#define CPUID_LEAF7_FEATURE_INVPCID  _Bit(10)	/* INVPCID intruction, TDB */
+#define CPUID_LEAF7_FEATURE_RTM      _Bit(11)	/* TBD */
+>>>>>>> origin/10.8
 
 /*
  * The CPUID_EXTFEATURE_XXX values define 64-bit values
@@ -474,6 +488,10 @@
 >>>>>>> origin/10.6
 =======
 #define CPUID_MODEL_IVYBRIDGE	0x3A
+#define CPUID_MODEL_HASWELL	0x3C
+#define CPUID_MODEL_HASWELL_SVR	0x3F
+#define CPUID_MODEL_HASWELL_ULT	0x45
+#define CPUID_MODEL_CRYSTALWELL	0x46
 
 >>>>>>> origin/10.7
 

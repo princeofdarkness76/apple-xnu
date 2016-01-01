@@ -1,6 +1,7 @@
 /*
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2001 Apple Computer, Inc. All rights reserved.
@@ -8,6 +9,9 @@
 =======
  * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
 >>>>>>> origin/10.6
+=======
+ * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+>>>>>>> origin/10.8
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -982,12 +986,16 @@ OSErr hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 		hfs_unlock(hfsmp->hfs_startup_cp);
 	}
 	
+<<<<<<< HEAD
 	/* 
 	 * Pick up volume name and create date 
 	 *
 	 * Acquiring the volume name should not manipulate the bitmap, only the catalog
 	 * btree and possibly the extents overflow b-tree.
 	 */
+=======
+	/* Pick up volume name and create date */
+>>>>>>> origin/10.8
 	retval = cat_idlookup(hfsmp, kHFSRootFolderID, 0, 0, &cndesc, &cnattr, NULL);
 	if (retval) {
 		if (HFS_MOUNT_DEBUG) {

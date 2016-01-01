@@ -68,6 +68,10 @@
 >>>>>>> origin/10.6
 
 #include <kern/cpu_data.h>
+<<<<<<< HEAD
+=======
+#include <kern/etimer.h>
+>>>>>>> origin/10.8
 #include <kern/machine.h>
 #include <kern/timer_queue.h>
 #include <console/serial_protos.h>
@@ -81,8 +85,11 @@
 #include <IOKit/IOHibernatePrivate.h>
 #endif
 #include <IOKit/IOPlatformExpert.h>
+<<<<<<< HEAD
 #include <sys/kdebug.h>
 
+=======
+>>>>>>> origin/10.8
 #include <sys/kdebug.h>
 
 #if CONFIG_SLEEP
@@ -91,7 +98,10 @@ extern void	acpi_wake_prot(void);
 #endif
 extern kern_return_t IOCPURunPlatformQuiesceActions(void);
 extern kern_return_t IOCPURunPlatformActiveActions(void);
+<<<<<<< HEAD
 extern kern_return_t IOCPURunPlatformHaltRestartActions(uint32_t message);
+=======
+>>>>>>> origin/10.8
 
 extern void 	fpinit(void);
 
@@ -125,7 +135,9 @@ typedef struct acpi_hibernate_callback_data acpi_hibernate_callback_data_t;
 =======
 unsigned int		save_kdebug_enable = 0;
 static uint64_t		acpi_sleep_abstime;
-
+static uint64_t		acpi_idle_abstime;
+static uint64_t		acpi_wake_abstime;
+boolean_t		deep_idle_rebase = TRUE;
 
 #if CONFIG_SLEEP
 >>>>>>> origin/10.6
@@ -168,10 +180,15 @@ acpi_hibernate(void *refcon)
 	kdebug_enable = 0;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	IOCPURunPlatformQuiesceActions();
 
 =======
 >>>>>>> origin/10.6
+=======
+	IOCPURunPlatformQuiesceActions();
+
+>>>>>>> origin/10.8
 	acpi_sleep_abstime = mach_absolute_time();
 
 	(data->func)(data->refcon);
@@ -186,9 +203,12 @@ extern void			slave_pstart(void);
 extern void			hibernate_rebuild_vm_structs(void);
 
 extern	unsigned int		wake_nkdbufs;
+<<<<<<< HEAD
 =======
 extern void		slave_pstart(void);
 >>>>>>> origin/10.6
+=======
+>>>>>>> origin/10.8
 
 void
 acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
@@ -394,6 +414,8 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 	if (lapic_probe())
 		lapic_configure();
 
+	acpi_wake_abstime = mach_absolute_time();
+
 	/* let the realtime clock reset */
 	rtc_sleep_wakeup(acpi_sleep_abstime);
 	acpi_wake_postrebase_abstime = mach_absolute_time();
@@ -401,6 +423,7 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 
 	kdebug_enable = save_kdebug_enable;
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 	if (kdebug_enable == 0) {
 		if (wake_nkdbufs) {
@@ -410,6 +433,12 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 		}
 	}
 	start = mach_absolute_time();
+=======
+	if (kdebug_enable == 0) {
+		if (wake_nkdbufs)
+			start_kern_tracing(wake_nkdbufs, TRUE);
+	}
+>>>>>>> origin/10.8
 
 	/* Reconfigure FP/SIMD unit */
 	init_fpu();
@@ -417,6 +446,7 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 
 	IOCPURunPlatformActiveActions();
 
+<<<<<<< HEAD
 #if HIBERNATION
 	if (did_hibernate) {
 		elapsed += mach_absolute_time() - start;
@@ -427,6 +457,8 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 
 <<<<<<< HEAD
 =======
+=======
+>>>>>>> origin/10.8
 	if (did_hibernate) {
 		
 		my_tsc = (now >> 32) | (now << 32);
@@ -473,9 +505,13 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 	/* Restart timer interrupts */
 	rtc_timer_start();
 
+<<<<<<< HEAD
 	/* Reconfigure FP/SIMD unit */
 	init_fpu();
 >>>>>>> origin/10.6
+=======
+
+>>>>>>> origin/10.8
 
 #if HIBERNATION
 
@@ -564,8 +600,12 @@ acpi_idle_kernel(acpi_sleep_callback func, void *refcon)
 		rtc_sleep_wakeup(acpi_idle_abstime);
 		kdebug_enable = save_kdebug_enable;
 	}
+<<<<<<< HEAD
 	acpi_wake_postrebase_abstime = mach_absolute_time();
 	assert(mach_absolute_time() >= acpi_idle_abstime);
+=======
+
+>>>>>>> origin/10.8
 	cpu_datap(master_cpu)->cpu_running = TRUE;
 
 	KERNEL_DEBUG_CONSTANT(

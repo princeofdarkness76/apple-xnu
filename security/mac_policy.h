@@ -6169,6 +6169,7 @@ struct mac_policy_ops {
  	mpo_proc_check_ledger_t			*mpo_proc_check_ledger;
 
 	mpo_vnode_notify_rename_t		*mpo_vnode_notify_rename;
+<<<<<<< HEAD
 
 	mpo_reserved_hook_t			*mpo_reserved32;
 	mpo_reserved_hook_t			*mpo_reserved33;
@@ -6208,6 +6209,23 @@ struct mac_policy_ops {
 	mpo_reserved_hook_t			*mpo_reserved8;
 	mpo_reserved_hook_t			*mpo_reserved9;
 >>>>>>> origin/10.5
+=======
+	mpo_thread_label_init_t			*mpo_thread_label_init;
+	mpo_thread_label_destroy_t		*mpo_thread_label_destroy;
+	mpo_system_check_kas_info_t	*mpo_system_check_kas_info;
+	mpo_reserved_hook_t			*mpo_reserved18;
+ 	mpo_vnode_notify_open_t			*mpo_vnode_notify_open;
+	mpo_reserved_hook_t			*mpo_reserved20;
+	mpo_reserved_hook_t			*mpo_reserved21;
+	mpo_reserved_hook_t			*mpo_reserved22;
+	mpo_reserved_hook_t			*mpo_reserved23;
+	mpo_reserved_hook_t			*mpo_reserved24;
+	mpo_reserved_hook_t			*mpo_reserved25;
+	mpo_reserved_hook_t			*mpo_reserved26;
+	mpo_reserved_hook_t			*mpo_reserved27;
+	mpo_reserved_hook_t			*mpo_reserved28;
+	mpo_reserved_hook_t			*mpo_reserved29;
+>>>>>>> origin/10.8
 };
 
 /**

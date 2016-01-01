@@ -756,12 +756,24 @@ timer_call_enter(
 #if TIMER_TRACE
 	TCE(call)->entry_time = ctime;
 #endif
+<<<<<<< HEAD
 
 	TIMER_KDEBUG_TRACE(KDEBUG_TRACE,
         	DECR_TIMER_ENTER | DBG_FUNC_END,
 		VM_KERNEL_UNSLIDE_OR_PERM(call),
 		(old_queue != NULL), deadline, queue->count, 0); 
 =======
+=======
+	call->ttd =  call->soft_deadline - ctime;
+
+#if CONFIG_DTRACE
+	DTRACE_TMR6(callout__create, timer_call_func_t, CE(call)->func,
+	timer_call_param_t, CE(call)->param0, uint32_t, call->flags,
+	    (deadline - call->soft_deadline),
+	    (call->ttd >> 32), (unsigned) (call->ttd & 0xFFFFFFFF));
+#endif
+
+>>>>>>> origin/10.8
 	queue = timer_queue_assign(deadline);
 
 	old_queue = call_entry_enqueue_deadline(call, queue, deadline);
@@ -860,8 +872,13 @@ timer_call_enter1(
 	splx(s);
 
 #if CONFIG_DTRACE
+<<<<<<< HEAD
 	DTRACE_TMR6(callout__cancel, timer_call_func_t, TCE(call)->func,
 	    timer_call_param_t, TCE(call)->param0, uint32_t, call->flags, 0,
+=======
+	DTRACE_TMR6(callout__cancel, timer_call_func_t, CE(call)->func,
+	    timer_call_param_t, CE(call)->param0, uint32_t, call->flags, 0,
+>>>>>>> origin/10.8
 	    (call->ttd >> 32), (unsigned) (call->ttd & 0xFFFFFFFF));
 #endif
 
@@ -1019,6 +1036,7 @@ timer_queue_expire_with_options(
 
 			TIMER_KDEBUG_TRACE(KDEBUG_TRACE, 
 				DECR_TIMER_CALLOUT | DBG_FUNC_START,
+<<<<<<< HEAD
 				VM_KERNEL_UNSLIDE_OR_PERM(call), VM_KERNEL_UNSLIDE(func),
 				VM_KERNEL_UNSLIDE_OR_PERM(param0),
 				VM_KERNEL_UNSLIDE_OR_PERM(param1),
@@ -1030,6 +1048,17 @@ timer_queue_expire_with_options(
 			    0, (call->ttd >> 32),
 			    (unsigned) (call->ttd & 0xFFFFFFFF), call);
 #endif
+=======
+				VM_KERNEL_UNSLIDE(func), param0, param1, 0, 0);
+
+#if CONFIG_DTRACE
+			DTRACE_TMR6(callout__start, timer_call_func_t, func,
+			    timer_call_param_t, param0, unsigned, call->flags,
+			    0, (call->ttd >> 32),
+			    (unsigned) (call->ttd & 0xFFFFFFFF));
+#endif
+
+>>>>>>> origin/10.8
 			/* Maintain time-to-deadline in per-processor data
 			 * structure for thread wakeup deadline statistics.
 			 */
@@ -1037,9 +1066,17 @@ timer_queue_expire_with_options(
 			*ttdp = call->ttd;
 			(*func)(param0, param1);
 			*ttdp = 0;
+<<<<<<< HEAD
 #if CONFIG_DTRACE
 			DTRACE_TMR4(callout__end, timer_call_func_t, func,
 			    param0, param1, call);
+=======
+
+#if CONFIG_DTRACE
+			DTRACE_TMR3(callout__end, timer_call_func_t, func,
+			    timer_call_param_t, param0, timer_call_param_t,
+			    param1);
+>>>>>>> origin/10.8
 #endif
 
 			TIMER_KDEBUG_TRACE(KDEBUG_TRACE, 

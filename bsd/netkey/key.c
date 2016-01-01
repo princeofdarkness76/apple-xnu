@@ -613,6 +613,7 @@ key_init(struct protosw *pp, struct domain *dp)
 {
 	static int key_initialized = 0;
 	int i;
+<<<<<<< HEAD
 	
 	VERIFY((pp->pr_flags & (PR_INITIALIZED|PR_ATTACHED)) == PR_ATTACHED);
 
@@ -621,6 +622,10 @@ key_init(struct protosw *pp, struct domain *dp)
 	if (key_initialized)
 		return;
 	key_initialized = 1;
+=======
+
+	_CASSERT(PFKEY_ALIGN8(sizeof(struct sadb_msg)) <= _MHLEN);
+>>>>>>> origin/10.8
 
 	sadb_mutex_grp_attr = lck_grp_attr_alloc_init();
 	sadb_mutex_grp = lck_grp_alloc_init("sadb", sadb_mutex_grp_attr);

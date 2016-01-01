@@ -683,6 +683,17 @@ ipc_port_alloc(
 
 	/* unlock space after init */
 	is_write_unlock(space);
+<<<<<<< HEAD
+=======
+
+#if CONFIG_MACF_MACH
+	task_t issuer = current_task();
+	tasklabel_lock2 (issuer, space->is_task);
+	mac_port_label_associate(&issuer->maclabel, &space->is_task->maclabel,
+			 &port->ip_label);
+	tasklabel_unlock2 (issuer, space->is_task);
+#endif
+>>>>>>> origin/10.8
 
 	*namep = name;
 	*portp = port;

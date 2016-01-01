@@ -717,9 +717,12 @@ thread_terminate_daemon(void)
 
 		task->task_timer_wakeups_bin_1 += thread->thread_timer_wakeups_bin_1;
 		task->task_timer_wakeups_bin_2 += thread->thread_timer_wakeups_bin_2;
+<<<<<<< HEAD
 		task->task_gpu_ns += ml_gpu_stat(thread);
 		
 		thread_update_qos_cpu_time(thread, FALSE);
+=======
+>>>>>>> origin/10.8
 		queue_remove(&task->threads, thread, thread_t, task_threads);
 		task->thread_count--;
 
@@ -2234,10 +2237,19 @@ thread_tid(
 	return (thread != THREAD_NULL? thread->thread_id: 0);
 }
 
+<<<<<<< HEAD
 uint16_t	thread_set_tag(thread_t th, uint16_t tag) {
 	return thread_set_tag_internal(th, tag);
 }
 uint16_t	thread_get_tag(thread_t th) {
+=======
+uint16_t
+thread_set_tag(thread_t th, uint16_t tag) {
+	return thread_set_tag_internal(th, tag);
+}
+uint16_t
+thread_get_tag(thread_t th) {
+>>>>>>> origin/10.8
 	return thread_get_tag_internal(th);
 }
 

@@ -6203,18 +6203,31 @@ retry:
 			backing_rcount = backing_object->resident_page_count;
 
 			if ( (int)backing_rcount - (int)(atop(backing_object->vo_size) - size) > (int)rcount) {
+<<<<<<< HEAD
                                 /*
+=======
+				/*
+>>>>>>> origin/10.8
 				 * we have enough pages in the backing object to guarantee that
 				 * at least 1 of them must be 'uncovered' by a resident page
 				 * in the object we're evaluating, so move on and
 				 * try to collapse the rest of the shadow chain
 				 */
+<<<<<<< HEAD
 				if (object != original_object) {
 					vm_object_unlock(object);
 				}
 				object = backing_object;
 				object_lock_type = backing_object_lock_type;
 				continue;
+=======
+                                if (object != original_object) {
+                                        vm_object_unlock(object);
+                                }
+                                object = backing_object;
+                                object_lock_type = backing_object_lock_type;
+                                continue;
+>>>>>>> origin/10.8
 			}
 
 			/*
@@ -6232,6 +6245,7 @@ retry:
 
 #if	MACH_PAGEMAP
 #define EXISTS_IN_OBJECT(obj, off, rc) \
+<<<<<<< HEAD
 	((vm_external_state_get((obj)->existence_map,	\
 				(vm_offset_t)(off))	\
 	  == VM_EXTERNAL_STATE_EXISTS) ||		\
@@ -6243,6 +6257,14 @@ retry:
 	((VM_COMPRESSOR_PAGER_STATE_GET((obj), (off))	\
 	  == VM_EXTERNAL_STATE_EXISTS) ||		\
 	 ((rc) && vm_page_lookup((obj), (off)) != VM_PAGE_NULL && (rc)--))
+=======
+	(vm_external_state_get((obj)->existence_map, \
+	 (vm_offset_t)(off)) == VM_EXTERNAL_STATE_EXISTS || \
+	 ((rc) && vm_page_lookup((obj), (off)) != VM_PAGE_NULL && (rc)--))
+#else
+#define EXISTS_IN_OBJECT(obj, off, rc) \
+	(((rc) && vm_page_lookup((obj), (off)) != VM_PAGE_NULL && (rc)--))
+>>>>>>> origin/10.8
 #endif	/* MACH_PAGEMAP */
 
 			/*
@@ -6303,6 +6325,7 @@ retry:
 					p = (vm_page_t) queue_next(&p->listq);
 
 				} while (--backing_rcount);
+
 				if (backing_rcount != 0 ) {
 					/* try and collapse the rest of the shadow chain */
 					if (object != original_object) {

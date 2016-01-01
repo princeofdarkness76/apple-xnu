@@ -272,6 +272,7 @@ static u_int32_t inp_hash_seed = 0;
 
 static int infc_cmp(const struct inpcb *, const struct inpcb *);
 
+<<<<<<< HEAD
 /* Flags used by inp_fc_getinp */
 #define	INPFC_SOLOCKED	0x1
 #define	INPFC_REMOVE	0x2
@@ -285,6 +286,24 @@ decl_lck_mtx_data(static, inp_fc_lck);
 RB_HEAD(inp_fc_tree, inpcb) inp_fc_tree;
 RB_PROTOTYPE(inp_fc_tree, inpcb, infc_link, infc_cmp);
 RB_GENERATE(inp_fc_tree, inpcb, infc_link, infc_cmp);
+=======
+static __inline int infc_cmp(const struct inpcb *,
+    const struct inpcb *);
+lck_grp_t *inp_lck_grp;
+lck_grp_attr_t *inp_lck_grp_attr;
+lck_attr_t *inp_lck_attr;
+decl_lck_mtx_data(, inp_fc_lck);
+
+RB_HEAD(inp_fc_tree, inpcb) inp_fc_tree;
+RB_PROTOTYPE(inp_fc_tree, inpcb, infc_link, infc_cmp);
+RB_GENERATE(inp_fc_tree, inpcb, infc_link, infc_cmp);
+
+/*
+ * Use this inp as a key to find an inp in the flowhash tree.
+ * Accesses to it are protected by inp_fc_lck.
+ */
+struct inpcb key_inp;
+>>>>>>> origin/10.8
 
 /*
  * Use this inp as a key to find an inp in the flowhash tree.
@@ -310,15 +329,19 @@ in_pcbinit(void)
 	lck_mtx_init(&inpcb_lock, inpcb_lock_grp, inpcb_lock_attr);
 	lck_mtx_init(&inpcb_timeout_lock, inpcb_lock_grp, inpcb_lock_attr);
 
+<<<<<<< HEAD
 	/*
 	 * Initialize data structures required to deliver
 	 * flow advisories.
 	 */
 	lck_mtx_init(&inp_fc_lck, inpcb_lock_grp, inpcb_lock_attr);
+=======
+>>>>>>> origin/10.8
 	lck_mtx_lock(&inp_fc_lck);
 	RB_INIT(&inp_fc_tree);
 	bzero(&key_inp, sizeof(key_inp));
 	lck_mtx_unlock(&inp_fc_lck);
+<<<<<<< HEAD
 }
 
 #define	INPCB_HAVE_TIMER_REQ(req)	(((req).intimer_lazy > 0) || \
@@ -552,6 +575,8 @@ in_pcbinfo_detach(struct inpcbinfo *ipi)
 	lck_mtx_unlock(&inpcb_lock);
 
 	return (error);
+=======
+>>>>>>> origin/10.8
 }
 
 /*
@@ -2414,10 +2439,17 @@ in_pcbremlists(struct inpcb *inp)
 	}
 
 	if (inp->inp_flags2 & INP2_IN_FCTREE) {
+<<<<<<< HEAD
 		inp_fc_getinp(inp->inp_flowhash, (INPFC_SOLOCKED|INPFC_REMOVE));
 		VERIFY(!(inp->inp_flags2 & INP2_IN_FCTREE));
 	}
 
+=======
+		inp_fc_getinp(inp->inp_flowhash,
+			(INPFC_SOLOCKED|INPFC_REMOVE));
+		VERIFY(!(inp->inp_flags2 & INP2_IN_FCTREE));
+	}
+>>>>>>> origin/10.8
 	inp->inp_pcbinfo->ipi_count--;
 }
 
@@ -2837,13 +2869,22 @@ try_again:
 	inp->inp_flowhash = flowhash;
 
 	/* Insert the inp into inp_fc_tree */
+<<<<<<< HEAD
 	lck_mtx_lock_spin(&inp_fc_lck);
+=======
+
+	lck_mtx_lock(&inp_fc_lck);
+>>>>>>> origin/10.8
 	tmp_inp = RB_FIND(inp_fc_tree, &inp_fc_tree, inp);
 	if (tmp_inp != NULL) {
 		/*
 		 * There is a different inp with the same flowhash.
 		 * There can be a collision on flow hash but the
+<<<<<<< HEAD
 		 * probability is low.  Let's recompute the
+=======
+		 * probability is low. Let's recompute the
+>>>>>>> origin/10.8
 		 * flowhash.
 		 */
 		lck_mtx_unlock(&inp_fc_lck);
@@ -2851,11 +2892,15 @@ try_again:
 		inp_hash_seed = RandomULong();
 		goto try_again;
 	}
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.8
 	RB_INSERT(inp_fc_tree, &inp_fc_tree, inp);
 	inp->inp_flags2 |= INP2_IN_FCTREE;
 	lck_mtx_unlock(&inp_fc_lck);
 
+<<<<<<< HEAD
 	return (flowhash);
 }
 
@@ -2869,6 +2914,9 @@ inp_flowadv(uint32_t flowhash)
 	if (inp == NULL)
 		return;
 	inp_fc_feedback(inp);
+=======
+	return flowhash;
+>>>>>>> origin/10.8
 }
 
 /*
@@ -2878,10 +2926,17 @@ static inline int
 infc_cmp(const struct inpcb *inp1, const struct inpcb *inp2)
 {
 	return (memcmp(&(inp1->inp_flowhash), &(inp2->inp_flowhash),
+<<<<<<< HEAD
 	    sizeof(inp1->inp_flowhash)));
 }
 
 static struct inpcb *
+=======
+		sizeof(inp1->inp_flowhash)));
+}
+
+struct inpcb *
+>>>>>>> origin/10.8
 inp_fc_getinp(u_int32_t flowhash, u_int32_t flags)
 {
 	struct inpcb *inp = NULL;
@@ -2904,7 +2959,10 @@ inp_fc_getinp(u_int32_t flowhash, u_int32_t flags)
 		inp->inp_flags2 &= ~INP2_IN_FCTREE;
 		return (NULL);
 	}
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.8
 	if (in_pcb_checkstate(inp, WNT_ACQUIRE, locked) == WNT_STOPUSING)
 		inp = NULL;
 	lck_mtx_unlock(&inp_fc_lck);
@@ -2912,7 +2970,11 @@ inp_fc_getinp(u_int32_t flowhash, u_int32_t flags)
 	return (inp);
 }
 
+<<<<<<< HEAD
 static void
+=======
+void
+>>>>>>> origin/10.8
 inp_fc_feedback(struct inpcb *inp)
 {
 	struct socket *so = inp->inp_socket;
@@ -2980,9 +3042,16 @@ inp_set_fc_state(struct inpcb *inp, int advcode)
 		return (0);
 
 	inp->inp_flags &= ~(INP_FLOW_CONTROLLED | INP_FLOW_SUSPENDED);
+<<<<<<< HEAD
 	if ((tmp_inp = inp_fc_getinp(inp->inp_flowhash,
 	    INPFC_SOLOCKED)) != NULL) {
 		if (in_pcb_checkstate(tmp_inp, WNT_RELEASE, 1) == WNT_STOPUSING)
+=======
+	if ((tmp_inp = inp_fc_getinp(inp->inp_flowhash, INPFC_SOLOCKED)) 
+		!= NULL) {
+		if (in_pcb_checkstate(tmp_inp, WNT_RELEASE, 1)
+			== WNT_STOPUSING)
+>>>>>>> origin/10.8
 			return (0);
 		VERIFY(tmp_inp == inp);
 		switch (advcode) {
@@ -3000,7 +3069,11 @@ inp_set_fc_state(struct inpcb *inp, int advcode)
 		}
 		return (1);
 	}
+<<<<<<< HEAD
 	return (0);
+=======
+	return(0);
+>>>>>>> origin/10.8
 }
 
 /*

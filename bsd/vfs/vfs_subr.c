@@ -5109,12 +5109,23 @@ vnode_create(int flavor, size_t size, void *data, vnode_t *vpp)
 		existing_vnode = 0;
 	}
 
+<<<<<<< HEAD
 	if (init_vnode) {
 		/* Do quick sanity check on the parameters. */
 		if ((param == NULL) || (param->vnfs_vtype == VBAD)) {
 			error = EINVAL;
 			goto error_out;
 		}
+=======
+	/* Do quick sanity check on the parameters */
+	if (param->vnfs_vtype == VBAD) {
+		return (EINVAL);
+	}
+
+#if CONFIG_TRIGGERS
+	if ((flavor == VNCREATE_TRIGGER) && (size == VNCREATE_TRIGGER_SIZE)) {
+		tinfo = (struct vnode_trigger_param *)data;
+>>>>>>> origin/10.8
 
 #if CONFIG_TRIGGERS
 		if ((flavor == VNCREATE_TRIGGER) && (size == VNCREATE_TRIGGER_SIZE)) {
@@ -6403,6 +6414,10 @@ vauth_file_ingroup(vauth_ctx vcp, int *ismember, int idontknow)
 		}
 	}
 	error = vnode_authorize(vp, NULL, action, ctx);
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.8
 #if NAMEDSTREAMS
 	if (error == EACCES) {
 		/*
@@ -6412,11 +6427,19 @@ vauth_file_ingroup(vauth_ctx vcp, int *ismember, int idontknow)
 		 * then it should be authorized.
 		 */
 		if (vnode_isshadow(vp) && vnode_isnamedstream (vp)) {
+<<<<<<< HEAD
 			error = vnode_verifynamedstream(vp);
 		}
 	}
 #endif
 
+=======
+			error = vnode_verifynamedstream(vp, ctx);
+		}
+	}
+#endif
+	
+>>>>>>> origin/10.8
 	return error;
 }
 

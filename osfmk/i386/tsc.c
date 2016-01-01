@@ -262,6 +262,7 @@ tsc_init(void)
 	busFreq = EFI_FSB_frequency();
 
 	switch (cpuid_cpufamily()) {
+	case CPUFAMILY_INTEL_HASWELL:
 	case CPUFAMILY_INTEL_IVYBRIDGE:
 	case CPUFAMILY_INTEL_SANDYBRIDGE:
 	case CPUFAMILY_INTEL_WESTMERE:
@@ -315,9 +316,14 @@ tsc_init(void)
 		panic("tsc_init: EFI not supported!\n");
 	}
 
+<<<<<<< HEAD
 	kprintf(" BUS: Frequency = %6d.%04dMHz, "
 		"cvtt2n = %08X.%08X, cvtn2t = %08X.%08X, "
 		"cvtInt = %08X.%08X\n",
+=======
+	kprintf(" BUS: Frequency = %6d.%06dMHz, "
+		"cvtt2n = %08X.%08X, cvtn2t = %08X.%08X\n",
+>>>>>>> origin/10.8
 		(uint32_t)(busFreq / Mega),
 		(uint32_t)(busFreq % Mega), 
 		(uint32_t)(busFCvtt2n >> 32), (uint32_t)busFCvtt2n,
@@ -359,10 +365,14 @@ tsc_init(void)
 			tscFCvtt2n = busFCvtt2n / tscGranularity;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 		tscFreq = ((1 * Giga)  << 32) / tscFCvtt2n;
 		tscFCvtn2t = 0xFFFFFFFFFFFFFFFFULL / tscFCvtt2n;
 =======
 	kprintf(" TSC: Frequency = %6d.%04dMHz, "
+=======
+	kprintf(" TSC: Frequency = %6d.%06dMHz, "
+>>>>>>> origin/10.8
 		"cvtt2n = %08X.%08X, cvtn2t = %08X.%08X, gran = %lld%s\n",
 		(uint32_t)(tscFreq / Mega),
 		(uint32_t)(tscFreq % Mega), 

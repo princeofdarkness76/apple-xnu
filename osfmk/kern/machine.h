@@ -114,7 +114,10 @@ extern void machine_idle(void);
 
 extern void machine_track_platform_idle(boolean_t);
 
+<<<<<<< HEAD
 /* Signals a processor to bring it out of idle */
+=======
+>>>>>>> origin/10.8
 extern void machine_signal_idle(
 					processor_t         processor);
 

@@ -9521,12 +9521,23 @@ exchangedata (__unused proc_t p, struct exchangedata_args *uap, __unused int32_t
 		goto out;
 	}
 
+<<<<<<< HEAD
 	/* If they're not files, return an error */
 	if ( (vnode_isreg(fvp) == 0) || (vnode_isreg(svp) == 0)) {
+=======
+	/*
+	 * if the two vnodes are not files, return an error.
+	 */
+	if ( (vnode_isreg(svp) == 0) || (vnode_isreg(fvp) == 0) ) {
+>>>>>>> origin/10.8
 		error = EINVAL;
 		goto out;
 	}
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.8
 #if CONFIG_MACF
 	error = mac_vnode_check_exchangedata(ctx,
 	    fvp, svp);

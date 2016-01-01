@@ -521,10 +521,13 @@ extern unsigned int	vm_page_pageable_external_count;
 extern
 unsigned int	vm_page_xpmapped_external_count;	/* How many pages are mapped executable? */
 extern
+<<<<<<< HEAD
 unsigned int	vm_page_external_count;	/* How many pages are file-backed? */
 extern
 unsigned int	vm_page_internal_count;	/* How many pages are anonymous? */
 extern
+=======
+>>>>>>> origin/10.8
 unsigned int	vm_page_wire_count;		/* How many pages are wired? */
 extern
 unsigned int	vm_page_wire_count_initial;	/* How many pages wired at startup */

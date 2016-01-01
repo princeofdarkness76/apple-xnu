@@ -220,6 +220,7 @@ kern_return_t pmCPUExitHalt(int cpu);
 kern_return_t pmCPUExitHaltToOff(int cpu);
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 uint32_t pmTimerQueueMigrate(int);
 =======
 >>>>>>> origin/10.5
@@ -227,6 +228,9 @@ uint32_t pmTimerQueueMigrate(int);
 void thread_tell_urgency(int urgency, uint64_t rt_period, uint64_t rt_deadline);
 void active_rt_threads(boolean_t active);
 >>>>>>> origin/10.6
+=======
+uint32_t pmTimerQueueMigrate(int);
+>>>>>>> origin/10.8
 
 #define PM_HALT_NORMAL		0		/* normal halt path */
 #define PM_HALT_DEBUG		1		/* debug code wants to halt */
@@ -255,9 +259,12 @@ pmLCPUtoProcessor(int lcpu);
 x86_pkg_t *
 pmGetPkgRoot(void);
 
+<<<<<<< HEAD
 =======
 extern int idlehalt;
 >>>>>>> origin/10.5
+=======
+>>>>>>> origin/10.8
 
 /******************************************************************************
  *

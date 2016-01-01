@@ -360,6 +360,8 @@ struct thread_call {
 	thread_call_priority_t		tc_pri;
 	uint32_t			tc_flags;
 	int32_t				tc_refs;
+
+	uint64_t			ttd; /* Time to deadline at creation */
 }; 
 =======
 extern boolean_t	thread_call_is_delayed(

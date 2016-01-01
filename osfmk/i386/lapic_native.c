@@ -117,7 +117,11 @@ legacy_init(void)
 		result = vm_map_find_space(kernel_map,
 					   &lapic_vbase64,
 					   round_page(LAPIC_SIZE), 0,
+<<<<<<< HEAD
 					   VM_MAKE_TAG(VM_KERN_MEMORY_IOKIT), &entry);
+=======
+					   VM_MAKE_TAG(VM_MEMORY_IOKIT), &entry);
+>>>>>>> origin/10.8
 		/* Convert 64-bit vm_map_offset_t to "pointer sized" vm_offset_t
 		 */
 		lapic_vbase = (vm_offset_t) lapic_vbase64;

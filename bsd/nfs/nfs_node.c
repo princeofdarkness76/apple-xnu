@@ -170,7 +170,11 @@ nfs_case_insensitive(mount_t mp)
 	int answer = 0;
 	int skip = 0;
 	
+<<<<<<< HEAD
 	if (nfs_mount_gone(nmp)) {
+=======
+	if (nmp == NULL) {
+>>>>>>> origin/10.8
 		return (0);
 	}
 	
@@ -308,6 +312,7 @@ loop:
 			 * Update the vnode if the name/and or the parent has
 			 * changed. We need to do this so that if getattrlist is
 			 * called asking for ATTR_CMN_NAME, that the "most"
+<<<<<<< HEAD
 			 * correct name is being returned. In addition for
 			 * monitored vnodes we need to kick the vnode out of the
 			 * name cache. We do this so that if there are hard
@@ -325,6 +330,26 @@ loop:
 			 * namei/lookup to resolve the name, because its not in
 			 * the cache we end up here. We need to update the name
 			 * so Finder will get the name it called us with.
+=======
+			 * correct name is being returned if we're not making an
+			 * entry. In addition for monitored vnodes we need to
+			 * kick the vnode out of the name cache. We do this so
+			 * that if there are hard links in the same directory
+			 * the link will not be found and a lookup will get us
+			 * here to return the name of the current link. In
+			 * addition by removing the name from the name cache the
+			 * old name will not be found after a rename done on
+			 * another client or the server.  The principle reason
+			 * to do this is because Finder is asking for
+			 * notifications on a directory.  The directory changes,
+			 * Finder gets notified, reads the directory (which we
+			 * have purged) and for each entry returned calls
+			 * getattrlist with the name returned from
+			 * readdir. gettattrlist has to call namei/lookup to
+			 * resolve the name, because its not in the cache we end
+			 * up here. We need to update the name so Finder will
+			 * get the name it called us with.
+>>>>>>> origin/10.8
 			 *
 			 * We had an imperfect solution with respect to case
 			 * sensitivity.  There is a test that is run in
@@ -366,7 +391,11 @@ loop:
 			 * ATTR_CMN_NAME</rant>
 			 */
 			if (dnp && cnp && (vp != NFSTOV(dnp))) {
+<<<<<<< HEAD
 				int update_flags = (vnode_ismonitored((NFSTOV(dnp)))) ? VNODE_UPDATE_CACHE : 0;
+=======
+				int update_flags = vnode_ismonitored((NFSTOV(dnp))) ? VNODE_UPDATE_CACHE : 0;
+>>>>>>> origin/10.8
 				int (*cmp)(const char *s1, const char *s2, size_t n);
 
 				cmp = nfs_case_insensitive(mp) ? strncasecmp : strncmp;
@@ -377,11 +406,16 @@ loop:
 					update_flags |= VNODE_UPDATE_NAME;
 				if (vnode_parent(vp) != NFSTOV(dnp))
 					update_flags |= VNODE_UPDATE_PARENT;
+<<<<<<< HEAD
 				if (update_flags) {
 					NFS_NODE_DBG("vnode_update_identity old name %s new name %*s\n",
 						     vp->v_name, cnp->cn_namelen, cnp->cn_nameptr ? cnp->cn_nameptr : "");
 					vnode_update_identity(vp, NFSTOV(dnp), cnp->cn_nameptr, cnp->cn_namelen, 0, update_flags);
 				}
+=======
+				if (update_flags)
+					vnode_update_identity(vp, NFSTOV(dnp), cnp->cn_nameptr, cnp->cn_namelen, 0, update_flags);
+>>>>>>> origin/10.8
 			}
 
 			*npp = np;

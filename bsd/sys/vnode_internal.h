@@ -481,8 +481,13 @@ errno_t  vnode_getnamedstream(vnode_t, vnode_t *, const char *, enum nsoperation
 errno_t  vnode_makenamedstream(vnode_t, vnode_t *, const char *, int, vfs_context_t);
 errno_t  vnode_removenamedstream(vnode_t, vnode_t, const char *, int, vfs_context_t);
 errno_t  vnode_flushnamedstream(vnode_t vp, vnode_t svp, vfs_context_t context);
+<<<<<<< HEAD
 errno_t  vnode_relenamedstream(vnode_t vp, vnode_t svp);
 errno_t  vnode_verifynamedstream (vnode_t vp);
+=======
+errno_t  vnode_relenamedstream(vnode_t vp, vnode_t svp, vfs_context_t context);
+errno_t  vnode_verifynamedstream (vnode_t vp, vfs_context_t ctx);
+>>>>>>> origin/10.8
 #endif
 
 
