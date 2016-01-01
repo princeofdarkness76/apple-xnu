@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -383,10 +394,46 @@ udp_input(struct mbuf *m, int iphlen)
 	/*
 	 * Checksum extended UDP header and data.
 	 */
+<<<<<<< HEAD
 	if (udp_input_checksum(m, uh, iphlen, len))
 		goto bad;
 
 	isbroadcast = in_broadcast(ip->ip_dst, ifp);
+=======
+	if (uh->uh_sum) {
+		if (m->m_pkthdr.csum_flags & CSUM_DATA_VALID) {
+			if (m->m_pkthdr.csum_flags & CSUM_PSEUDO_HDR)
+				uh->uh_sum = m->m_pkthdr.csum_data;
+			else
+				goto doudpcksum;
+			uh->uh_sum ^= 0xffff;
+		} else {
+			char b[9];
+doudpcksum:
+			*(uint32_t*)&b[0] = *(uint32_t*)&((struct ipovly *)ip)->ih_x1[0];
+			*(uint32_t*)&b[4] = *(uint32_t*)&((struct ipovly *)ip)->ih_x1[4];
+			*(uint8_t*)&b[8] = *(uint8_t*)&((struct ipovly *)ip)->ih_x1[8];
+			
+			bzero(((struct ipovly *)ip)->ih_x1, 9);
+			((struct ipovly *)ip)->ih_len = uh->uh_ulen;
+			uh->uh_sum = in_cksum(m, len + sizeof (struct ip));
+			
+			*(uint32_t*)&((struct ipovly *)ip)->ih_x1[0] = *(uint32_t*)&b[0];
+			*(uint32_t*)&((struct ipovly *)ip)->ih_x1[4] = *(uint32_t*)&b[4];
+			*(uint8_t*)&((struct ipovly *)ip)->ih_x1[8] = *(uint8_t*)&b[8];
+		}
+		if (uh->uh_sum) {
+			udpstat.udps_badsum++;
+			m_freem(m);
+			KERNEL_DEBUG(DBG_FNC_UDP_INPUT | DBG_FUNC_END, 0,0,0,0,0);
+			return;
+		}
+	}
+#ifndef __APPLE__
+	 else
+		udpstat.udps_nosum++;
+#endif
+>>>>>>> origin/10.2
 
 	if (IN_MULTICAST(ntohl(ip->ip_dst.s_addr)) || isbroadcast) {
 		int reuse_sock = 0, mcast_delivered = 0;

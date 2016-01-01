@@ -1,12 +1,17 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2001 Apple Computer, Inc. All rights reserved.
 >>>>>>> origin/10.1
+=======
+ * Copyright (c) 2000-2002 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.2
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -18,6 +23,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -250,6 +265,7 @@ int nfs3_getquota(struct nfsmount *, vfs_context_t, uid_t, int, struct dqblk *);
 int nfs4_getquota(struct nfsmount *, vfs_context_t, uid_t, int, struct dqblk *);
 #endif
 
+<<<<<<< HEAD
 struct nfs_funcs nfs3_funcs = {
 	nfs3_mount,
 	nfs3_update_statfs,
@@ -332,6 +348,8 @@ nfs_vfs_init(__unused struct vfsconf *vfsp)
 	/* init request list mutex */
 	nfs_request_grp = lck_grp_alloc_init("nfs_request", LCK_GRP_ATTR_NULL);
 	nfs_request_mutex = lck_mtx_alloc_init(nfs_request_grp, LCK_ATTR_NULL);
+=======
+>>>>>>> origin/10.2
 
 	/* initialize NFS request list */
 	TAILQ_INIT(&nfs_reqq);
@@ -997,7 +1015,13 @@ nfs_mountroot(void)
 	mount_t mppriv = NULL;
 	vnode_t vppriv = NULL;
 #endif /* NO_MOUNT_PRIVATE */
+<<<<<<< HEAD
 	int v3, sotype;
+=======
+	int v3;
+
+	procp = current_proc(); /* XXX */
+>>>>>>> origin/10.2
 
 	/*
 	 * Call nfs_boot_init() to fill in the nfs_diskless struct.
@@ -1063,7 +1087,23 @@ tryagain:
 		}
 	}
 
+<<<<<<< HEAD
 	ctx = vfs_context_kernel();
+=======
+	/* try NFSv3 first, if that fails then try NFSv2 */
+	v3 = 1;
+
+tryagain:
+	error = nfs_boot_getfh(&nd, procp, v3);
+	if (error) {
+		if (v3) {
+			printf("nfs_boot_getfh(v3) failed with %d, trying v2...\n", error);
+			v3 = 0;
+			goto tryagain;
+		}
+		panic("nfs_boot_getfh(v2) failed with %d\n", error);
+	}
+>>>>>>> origin/10.2
 
 	/*
 	 * Create the root mount point.
@@ -1084,6 +1124,7 @@ tryagain:
 #else
 	if ((error = nfs_mount_diskless(&nd.nd_root, "/", MNT_ROOTFS, &vp, &mp, ctx)))
 #endif /* NO_MOUNT_PRIVATE */
+<<<<<<< HEAD
 	{
 		if (v3) {
 			if (sotype == SOCK_STREAM) {
@@ -1103,6 +1144,14 @@ tryagain:
 			printf("NFS root mount (v2,UDP) failed with error %d, giving up...\n", error);
 		}
 		panic("NFS root mount failed with error %d, check configuration: %s\n", error, PE_boot_args());
+=======
+		if (v3) {
+			printf("nfs_mount_diskless(v3) failed with %d, trying v2...\n", error);
+			v3 = 0;
+			goto tryagain;
+		}
+		panic("nfs_mount_diskless root failed with %d\n", error);
+>>>>>>> origin/10.2
 	}
 	}
 	printf("root on %s\n", nd.nd_root.ndm_mntfrom);
@@ -1114,6 +1163,7 @@ tryagain:
 #if !defined(NO_MOUNT_PRIVATE)
 	if (nd.nd_private.ndm_saddr.sin_addr.s_addr) {
 	    error = nfs_mount_diskless_private(&nd.nd_private, "/private",
+<<<<<<< HEAD
 					       0, &vppriv, &mppriv, ctx);
 	    if (error)
 		panic("NFS /private mount failed with error %d, check configuration: %s\n", error, PE_boot_args());
@@ -1121,16 +1171,33 @@ tryagain:
 
 	    vfs_unbusy(mppriv);
 	    mount_list_add(mppriv);
+=======
+					       NULL, &vppriv, &mppriv);
+	    if (error) {
+		panic("nfs_mount_diskless private failed with %d\n", error);
+	    }
+	    printf("private on %s\n", (char *)&nd.nd_private.ndm_host);
+	    
+	    simple_lock(&mountlist_slock);
+	    CIRCLEQ_INSERT_TAIL(&mountlist, mppriv, mnt_list);
+	    simple_unlock(&mountlist_slock);
+	    vfs_unbusy(mppriv, procp);
+>>>>>>> origin/10.2
 	}
 
 #endif /* NO_MOUNT_PRIVATE */
 
+<<<<<<< HEAD
 	if (nd.nd_root.ndm_mntfrom)
 		FREE_ZONE(nd.nd_root.ndm_mntfrom, MAXPATHLEN, M_NAMEI);
 	if (nd.nd_root.ndm_path)
 		FREE_ZONE(nd.nd_root.ndm_path, MAXPATHLEN, M_NAMEI);
 	if (nd.nd_private.ndm_mntfrom)
 		FREE_ZONE(nd.nd_private.ndm_mntfrom, MAXPATHLEN, M_NAMEI);
+=======
+	if (nd.nd_root.ndm_path)
+		FREE_ZONE(nd.nd_root.ndm_path, MAXPATHLEN, M_NAMEI);
+>>>>>>> origin/10.2
 	if (nd.nd_private.ndm_path)
 		FREE_ZONE(nd.nd_private.ndm_path, MAXPATHLEN, M_NAMEI);
 
@@ -1168,6 +1235,7 @@ nfs_mount_diskless(
 		return (error);
 	}
 
+<<<<<<< HEAD
 	mp->mnt_flag |= mntflag;
 	if (!(mntflag & MNT_RDONLY))
 		mp->mnt_flag &= ~MNT_RDONLY;
@@ -1270,6 +1338,28 @@ nfs_mount_diskless(
 	if (error) {
 		printf("nfs_mount_diskless: error %d assembling mount args\n", error);
 		xb_cleanup(&xb);
+=======
+	/* Initialize mount args. */
+	bzero((caddr_t) &args, sizeof(args));
+	args.addr     = (struct sockaddr *)&ndmntp->ndm_saddr;
+	args.addrlen  = args.addr->sa_len;
+	args.sotype   = SOCK_DGRAM;
+	args.fh       = ndmntp->ndm_fh;
+	args.fhsize   = ndmntp->ndm_fhlen;
+	args.hostname = ndmntp->ndm_host;
+	args.flags    = NFSMNT_RESVPORT;
+	if (ndmntp->ndm_nfsv3)
+		args.flags |= NFSMNT_NFSV3;
+
+	MGET(m, M_DONTWAIT, MT_SONAME);
+	bcopy((caddr_t)args.addr, mtod(m, caddr_t), 
+				(m->m_len = args.addr->sa_len));
+	if ((error = mountnfs(&args, mp, m, mntname, args.hostname, vpp))) {
+		printf("nfs_mountroot: mount %s failed: %d", mntname, error);
+		mp->mnt_vfc->vfc_refcount--;
+		vfs_unbusy(mp, procp);
+		_FREE_ZONE(mp, sizeof (struct mount), M_MOUNT);
+>>>>>>> origin/10.2
 		return (error);
 	}
 	/* grab the assembled buffer */
@@ -1430,6 +1520,7 @@ nfs_mount_diskless_private(
 	strncpy(mp->mnt_vfsstat.f_fstypename, vfsp->vfc_name, MFSNAMELEN-1);
 	vp->v_mountedhere = mp;
 	mp->mnt_vnodecovered = vp;
+<<<<<<< HEAD
 	vp = NULLVP;
 	mp->mnt_vfsstat.f_owner = kauth_cred_getuid(kauth_cred_get());
 	(void) copystr(mntname, mp->mnt_vfsstat.f_mntonname, MAXPATHLEN - 1, 0);
@@ -1463,6 +1554,33 @@ nfs_mount_diskless_private(
 			p++;
 		while (*p && (*p == '/'))
 			p++;
+=======
+	mp->mnt_stat.f_owner = procp->p_ucred->cr_uid;
+	(void) copystr(mntname, mp->mnt_stat.f_mntonname, MNAMELEN - 1, 0);
+	(void) copystr(ndmntp->ndm_host, mp->mnt_stat.f_mntfromname, MNAMELEN - 1, 0);
+
+	/* Initialize mount args. */
+	bzero((caddr_t) &args, sizeof(args));
+	args.addr     = (struct sockaddr *)&ndmntp->ndm_saddr;
+	args.addrlen  = args.addr->sa_len;
+	args.sotype   = SOCK_DGRAM;
+	args.fh       = ndmntp->ndm_fh;
+	args.fhsize   = ndmntp->ndm_fhlen;
+	args.hostname = ndmntp->ndm_host;
+	args.flags    = NFSMNT_RESVPORT;
+	if (ndmntp->ndm_nfsv3)
+		args.flags |= NFSMNT_NFSV3;
+
+	MGET(m, M_DONTWAIT, MT_SONAME);
+	bcopy((caddr_t)args.addr, mtod(m, caddr_t), 
+				(m->m_len = args.addr->sa_len));
+	if ((error = mountnfs(&args, mp, m, mntname, args.hostname, &vp))) {
+		printf("nfs_mountroot: mount %s failed: %d", mntname, error);
+		mp->mnt_vfc->vfc_refcount--;
+		vfs_unbusy(mp, procp);
+		_FREE_ZONE(mp, sizeof (struct mount), M_MOUNT);
+		return (error);
+>>>>>>> origin/10.2
 	}
 
 	/* convert address to universal address string */

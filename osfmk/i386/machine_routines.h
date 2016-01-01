@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -90,6 +101,47 @@ vm_offset_t
 ml_static_ptovirt(
 	vm_offset_t);
 
+/* PCI config cycle probing */
+boolean_t ml_probe_read(
+	vm_offset_t paddr,
+	unsigned int *val);
+
+/* Read physical address byte */
+unsigned int ml_phys_read_byte(
+	vm_offset_t paddr);
+
+/* Read physical address half word */
+unsigned int ml_phys_read_half(
+	vm_offset_t paddr);
+
+/* Read physical address word*/
+unsigned int ml_phys_read(
+	vm_offset_t paddr);
+unsigned int ml_phys_read_word(
+	vm_offset_t paddr);
+
+/* Read physical address double word */
+unsigned long long ml_phys_read_double(
+	vm_offset_t paddr);
+
+/* Write physical address byte */
+void ml_phys_write_byte(
+	vm_offset_t paddr, unsigned int data);
+
+/* Write physical address half word */
+void ml_phys_write_half(
+	vm_offset_t paddr, unsigned int data);
+
+/* Write physical address word */
+void ml_phys_write(
+	vm_offset_t paddr, unsigned int data);
+void ml_phys_write_word(
+	vm_offset_t paddr, unsigned int data);
+
+/* Write physical address double word */
+void ml_phys_write_double(
+	vm_offset_t paddr, unsigned long long data);
+
 void ml_static_mfree(
 	vm_offset_t,
 	vm_size_t);
@@ -102,6 +154,7 @@ vm_offset_t ml_static_malloc(
 vm_offset_t ml_vtophys(
 	vm_offset_t vaddr);
 
+<<<<<<< HEAD
 vm_size_t ml_nofault_copy(
 	vm_offset_t virtsrc, vm_offset_t virtdst, vm_size_t size);
 
@@ -130,6 +183,26 @@ extern uint32_t idle_entry_timer_processing_hdeadline_threshold;
 #else
 #define TCOAL_DEBUG(x, a, b, c, d, e) do { } while(0)
 #endif /* TCOAL_INSTRUMENT */
+=======
+/* Struct for ml_cpu_get_info */
+struct ml_cpu_info {
+	unsigned long		vector_unit;
+	unsigned long		cache_line_size;
+	unsigned long		l1_icache_size;
+	unsigned long		l1_dcache_size;
+	unsigned long		l2_settings;
+	unsigned long		l2_cache_size;
+	unsigned long		l3_settings;
+	unsigned long		l3_cache_size;
+};
+
+typedef struct ml_cpu_info ml_cpu_info_t;
+
+/* Get processor info */
+void ml_cpu_get_info(ml_cpu_info_t *cpu_info);
+
+#endif /* __APPLE_API_UNSTABLE */
+>>>>>>> origin/10.2
 
 #if	defined(PEXPERT_KERNEL_PRIVATE) || defined(MACH_KERNEL_PRIVATE)
 /* IO memory map services */
@@ -273,10 +346,18 @@ void ml_thread_policy(
 #define MACHINE_NETWORK_WORKLOOP		0x00000001
 #define MACHINE_NETWORK_NETISR			0x00000002
 
+<<<<<<< HEAD
+=======
+/* Initialize the maximum number of CPUs */
+void ml_init_max_cpus(
+	unsigned long max_cpus);
+
+>>>>>>> origin/10.2
 /* Return the maximum number of CPUs set by ml_init_max_cpus() */
 int ml_get_max_cpus(
 	void);
 
+<<<<<<< HEAD
 /*
  * The following are in pmCPU.c not machine_routines.c.
  */
@@ -354,6 +435,13 @@ boolean_t ml_recent_wake(void);
 
 extern uint64_t reportphyreaddelayabs;
 extern uint32_t reportphyreadosbt;
+=======
+/* Return the current number of CPUs */
+int ml_get_current_cpus(
+	void);
+
+#endif /* __APPLE_API_PRIVATE */
+>>>>>>> origin/10.2
 
 #endif /* XNU_KERNEL_PRIVATE */
 #endif /* _I386_MACHINE_ROUTINES_H_ */

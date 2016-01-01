@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -1095,12 +1106,20 @@ task_deallocate(
 	if (task->task_io_stats)
 		kfree(task->task_io_stats, sizeof(struct io_stat_info));
 
+<<<<<<< HEAD
 	/*
 	 *	Give the machine dependent code a chance
 	 *	to perform cleanup before ripping apart
 	 *	the task.
 	 */
 	machine_task_terminate(task);
+=======
+	if(task->dynamic_working_set)
+		tws_hash_destroy((tws_hash_t)task->dynamic_working_set);
+
+
+	eml_task_deallocate(task);
+>>>>>>> origin/10.2
 
 	ipc_task_terminate(task);
 
@@ -1603,6 +1622,18 @@ task_terminate_internal(
 			     task->map->min_offset,
 			     task->map->max_offset, VM_MAP_NO_FLAGS);
 
+<<<<<<< HEAD
+=======
+	shared_region_mapping_dealloc(task->system_shared_region);
+
+	/*
+	 * Flush working set here to avoid I/O in reaper thread
+	 */
+	if(task->dynamic_working_set)
+		tws_hash_ws_flush((tws_hash_t)
+				task->dynamic_working_set);
+
+>>>>>>> origin/10.2
 	/*
 	 * We no longer need to guard against being aborted, so restore
 	 * the previous interruptible state.

@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -290,9 +301,29 @@ hfs_lookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp, int
 		 * directory has not been removed, then can consider
 		 * allowing file to be created.
 		 */
+<<<<<<< HEAD
 		if ((nameiop == CREATE || nameiop == RENAME) &&
 		    (flags & ISLASTCN) &&
 		    !(ISSET(dcp->c_flag, C_DELETED | C_NOEXISTS))) {
+=======
+		if ((nameiop == CREATE || nameiop == RENAME ||
+		    (nameiop == DELETE &&
+		    (ap->a_cnp->cn_flags & DOWHITEOUT) &&
+		    (ap->a_cnp->cn_flags & ISWHITEOUT))) &&
+		    (flags & ISLASTCN)) {
+			/*
+			 * Access for write is interpreted as allowing
+			 * creation of files in the directory.
+			 */
+			retval = VOP_ACCESS(dvp, VWRITE, cred, cnp->cn_proc);
+			if (retval) {
+				goto exit;
+			}
+		
+			cnp->cn_flags |= SAVENAME;
+			if (!(flags & LOCKPARENT))
+				VOP_UNLOCK(dvp, 0, p);
+>>>>>>> origin/10.2
 			retval = EJUSTRETURN;
 			goto exit;
 		}

@@ -317,7 +317,11 @@ esp4_input(m, off)
 		goto noreplaycheck;
 	siz = (((*sumalgo->sumsiz)(sav) + 3) & ~(4 - 1));
 	if (m->m_pkthdr.len < off + ESPMAXLEN + siz) {
+<<<<<<< HEAD
 		IPSEC_STAT_INCREMENT(ipsecstat.in_inval);
+=======
+		ipsecstat.in_inval++;
+>>>>>>> origin/10.2
 		goto bad;
 	}
 	if (AH_MAXSUMSIZE < siz) {
@@ -947,7 +951,11 @@ esp6_input(struct mbuf **mp, int *offp, int proto)
 		goto noreplaycheck;
 	siz = (((*sumalgo->sumsiz)(sav) + 3) & ~(4 - 1));
 	if (m->m_pkthdr.len < off + ESPMAXLEN + siz) {
+<<<<<<< HEAD
 		IPSEC_STAT_INCREMENT(ipsecstat.in_inval);
+=======
+		ipsecstat.in_inval++;
+>>>>>>> origin/10.2
 		goto bad;
 	}
 	if (AH_MAXSUMSIZE < siz) {

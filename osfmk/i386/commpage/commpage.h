@@ -1,11 +1,20 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2003-2012 Apple Inc. All rights reserved.
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+=======
+ * Copyright (c) 2003 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+>>>>>>> origin/10.2
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
+<<<<<<< HEAD
  * compliance with the License. The rights granted to you under the License
  * may not be used to create, or enable the creation or redistribution of,
  * unlawful or unlicensed copies of an Apple operating system, or to
@@ -14,6 +23,11 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -23,12 +37,17 @@
  * Please see the License for the specific language governing rights and
  * limitations under the License.
  * 
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 
 #ifndef _I386_COMMPAGE_H
 #define _I386_COMMPAGE_H
 
+<<<<<<< HEAD
 #ifndef	__ASSEMBLER__
 #include <stdint.h>
 #include <mach/boolean.h>
@@ -153,5 +172,8 @@ extern	uint32_t	commpage_is_in_pfz32(uint32_t);
 extern	uint32_t	commpage_is_in_pfz64(addr64_t);
 
 #endif	/* __ASSEMBLER__ */
+=======
+/* we don't have a comm page on Intel, yet */
+>>>>>>> origin/10.2
 
 #endif /* _I386_COMMPAGE_H */

@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -146,10 +157,16 @@ SYSCTL_INT(_net_inet_tcp, OID_AUTO, slowstart_flightsize,
 	CTLFLAG_RW | CTLFLAG_LOCKED,&ss_fltsz, 1,
 	"Slow start flight size");
 
+<<<<<<< HEAD
 int ss_fltsz_local = 8; /* starts with eight segments max */
 SYSCTL_INT(_net_inet_tcp, OID_AUTO, local_slowstart_flightsize,
 	CTLFLAG_RW | CTLFLAG_LOCKED, &ss_fltsz_local, 1,
 	"Slow start flight size for local networks");
+=======
+int ss_fltsz_local = 4; /* starts with four segments max */
+SYSCTL_INT(_net_inet_tcp, OID_AUTO, local_slowstart_flightsize, CTLFLAG_RW,
+	&ss_fltsz_local, 1, "Slow start flight size for local networks");
+>>>>>>> origin/10.2
 
 int	tcp_do_tso = 1;
 SYSCTL_INT(_net_inet_tcp, OID_AUTO, tso, CTLFLAG_RW | CTLFLAG_LOCKED,
@@ -295,6 +312,7 @@ extern int ipsec_bypass;
 #endif
 
 extern int slowlink_wsize;	/* window correction for slow links */
+<<<<<<< HEAD
 #if IPFIREWALL
 extern int fw_enable; 		/* firewall check for packet chaining */
 extern int fw_bypass; 		/* firewall check: disable packet chaining if there is rules */
@@ -489,6 +507,8 @@ check_heuristic:
 	if (!tcp_heuristic_do_ecn(tp))
 		tp->ecn_flags &= ~TE_ENABLE_ECN;
 }
+=======
+>>>>>>> origin/10.2
 
 /*
  * Tcp output routine: figure out what should be sent and send it.
@@ -774,10 +794,16 @@ again:
 		tcp_sack_adjust(tp);
 	sendalot = 0;
 	off = tp->snd_nxt - tp->snd_una;
+<<<<<<< HEAD
 	sendwin = min(tp->snd_wnd, tp->snd_cwnd);
 
 	if (tp->t_flags & TF_SLOWLINK && slowlink_wsize > 0)
 		sendwin = min(sendwin, slowlink_wsize);
+=======
+	win = min(tp->snd_wnd, tp->snd_cwnd);
+	if (tp->t_flags & TF_SLOWLINK && slowlink_wsize > 0)
+		win = min(win, slowlink_wsize);
+>>>>>>> origin/10.2
 
 	flags = tcp_outflags[tp->t_state];
 	/*
@@ -1076,6 +1102,20 @@ after_sack_rexmit:
 				tcp_setpersist(tp);
 		}
 	}
+<<<<<<< HEAD
+=======
+	if (len > tp->t_maxseg) {
+		len = tp->t_maxseg;
+		sendalot = 1;
+	}
+	if (SEQ_LT(tp->snd_nxt + len, tp->snd_una + so->so_snd.sb_cc))
+		flags &= ~TH_FIN;
+
+	if (tp->t_flags & TF_SLOWLINK && slowlink_wsize > 0 )	/* Clips window size for slow links */
+		win = min(sbspace(&so->so_rcv), slowlink_wsize);
+	else
+		win = sbspace(&so->so_rcv);
+>>>>>>> origin/10.2
 
 	/*
 	 * Automatic sizing of send socket buffer. Increase the send
@@ -2176,6 +2216,7 @@ send:
 	 * Calculate receive window.  Don't shrink window,
 	 * but avoid silly window syndrome.
 	 */
+<<<<<<< HEAD
 	if (recwin < (int32_t)(so->so_rcv.sb_hiwat / 4) && recwin < (int)tp->t_maxseg)
 		recwin = 0;
 	if (recwin < (int32_t)(tp->rcv_adv - tp->rcv_nxt))
@@ -2217,6 +2258,23 @@ send:
 		tp->t_flags |= TF_RXWIN0SENT;
 	else
 		tp->t_flags &= ~TF_RXWIN0SENT;
+=======
+	if (win < (long)(so->so_rcv.sb_hiwat / 4) && win < (long)tp->t_maxseg)
+		win = 0;
+	if (win < (long)(tp->rcv_adv - tp->rcv_nxt))
+		win = (long)(tp->rcv_adv - tp->rcv_nxt);
+	if (tp->t_flags & TF_SLOWLINK && slowlink_wsize > 0) {
+		if (win > (long)slowlink_wsize) 
+			win = slowlink_wsize;
+		th->th_win = htons((u_short) (win>>tp->rcv_scale));
+	}
+	else {
+
+		if (win > (long)TCP_MAXWIN << tp->rcv_scale)
+		win = (long)TCP_MAXWIN << tp->rcv_scale;
+		th->th_win = htons((u_short) (win>>tp->rcv_scale));
+	}
+>>>>>>> origin/10.2
 	if (SEQ_GT(tp->snd_up, tp->snd_nxt)) {
 		th->th_urp = htons((u_short)(tp->snd_up - tp->snd_nxt));
 		th->th_flags |= TH_URG;

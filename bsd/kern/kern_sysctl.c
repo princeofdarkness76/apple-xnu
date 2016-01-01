@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -128,8 +139,23 @@
 #include <IOKit/IOPlatformExpert.h>
 #include <pexpert/pexpert.h>
 
+<<<<<<< HEAD
 #include <machine/machine_routines.h>
 #include <machine/exec.h>
+=======
+#if __ppc__
+#include <ppc/machine_routines.h>
+#endif
+
+sysctlfn kern_sysctl;
+#ifdef DEBUG
+sysctlfn debug_sysctl;
+#endif
+extern sysctlfn vm_sysctl;
+extern sysctlfn vfs_sysctl;
+extern sysctlfn net_sysctl;
+extern sysctlfn cpu_sysctl;
+>>>>>>> origin/10.2
 
 #include <vm/vm_protos.h>
 #include <vm/vm_pageout.h>
@@ -329,10 +355,31 @@ extern int sugid_coredump;
 extern int do_count_syscalls;
 #endif
 
+<<<<<<< HEAD
 #ifdef INSECURE
 int securelevel = -1;
 #else
 int securelevel;
+=======
+	switch (name[0]) {
+	case CTL_KERN:
+		fn = kern_sysctl;
+		if ((name[1] != KERN_VNODE) && (name[1] != KERN_FILE) 
+			&& (name[1] != KERN_PROC))
+			dolock = 0;
+		break;
+	case CTL_VM:
+		fn = vm_sysctl;
+		break;
+                
+	case CTL_VFS:
+		fn = vfs_sysctl;
+		break;
+#ifdef DEBUG
+	case CTL_DEBUG:
+		fn = debug_sysctl;
+		break;
+>>>>>>> origin/10.2
 #endif
 
 STATIC int
@@ -458,6 +505,7 @@ sysctl_sched_stats_enable(__unused struct sysctl_oid *oidp, __unused void *arg1,
 	return set_sched_stats_active(active);
 }
 
+<<<<<<< HEAD
 SYSCTL_PROC(_kern, OID_AUTO, sched_stats_enable, CTLFLAG_LOCKED | CTLFLAG_WR, 0, 0, sysctl_sched_stats_enable, "-", "");
 
 extern uint32_t sched_debug_flags;
@@ -538,6 +586,9 @@ SYSCTL_PROC(_kern, KERN_COUNT_SYSCALLS, count_syscalls, CTLTYPE_NODE|CTLFLAG_RD 
 	"");
 #endif	/* COUNT_SYSCALLS */
 
+=======
+#ifdef DEBUG
+>>>>>>> origin/10.2
 /*
  * The following sysctl_* functions should not be used
  * any more, as they can only cope with callers in

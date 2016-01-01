@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -187,6 +198,7 @@ SYSCTL_INT(_net_inet_tcp, OID_AUTO, drop_synfin,
     "Drop TCP packets with SYN+FIN set");
 #endif
 
+<<<<<<< HEAD
 SYSCTL_NODE(_net_inet_tcp, OID_AUTO, reass, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
     "TCP Segment Reassembly Queue");
 
@@ -299,6 +311,14 @@ u_int32_t tcp_now;
 struct timeval tcp_uptime;	/* uptime when tcp_now was last updated */
 lck_spin_t *tcp_uptime_lock;	/* Used to sychronize updates to tcp_now */
 
+=======
+__private_extern__ int slowlink_wsize = 8192;
+SYSCTL_INT(_net_inet_tcp, OID_AUTO, slowlink_wsize, CTLFLAG_RW,
+	&slowlink_wsize, 0, "Maximum advertised window size for slowlink");
+
+
+u_long tcp_now;
+>>>>>>> origin/10.2
 struct inpcbhead tcb;
 #define	tcb6	tcb  /* for KAME src sync over BSD*'s */
 struct inpcbinfo tcbinfo;
@@ -1053,6 +1073,7 @@ tcp_sbrcv_reserve(struct tcpcb *tp, struct sockbuf *sbrcv,
 		/* Again check the limit set by the advertised 
 		 * window scale 
 		 */
+<<<<<<< HEAD
 		sbrcv->sb_idealsize = min(sbrcv->sb_idealsize, 
 			TCP_MAXWIN << tp->rcv_scale);
 	}
@@ -1069,6 +1090,15 @@ tcp_sbrcv_grow(struct tcpcb *tp, struct sockbuf *sbrcv,
 {
 	struct socket *so = sbrcv->sb_so;
 	
+=======
+		if (IN6_IS_ADDR_UNSPECIFIED(&ip6->ip6_src)) {
+			/* XXX stat */
+			goto drop;
+		}
+	} else
+#endif /* INET6 */
+	{
+>>>>>>> origin/10.2
 	/*
 	 * Do not grow the receive socket buffer if
 	 * - auto resizing is disabled, globally or on this socket
@@ -1198,6 +1228,7 @@ tcp_sbrcv_trim(struct tcpcb *tp, struct sockbuf *sbrcv) {
 		 */
 		u_int32_t leave = max(advwin, (sbrcv->sb_idealsize >> 4));
 
+<<<<<<< HEAD
 		/* Sometimes leave can be zero, in that case leave at least
  		 * a few segments worth of space.
 		 */
@@ -1228,6 +1259,26 @@ tcp_sbsnd_trim(struct sockbuf *sbsnd) {
 		u_int32_t trim = 0;
 		if (sbsnd->sb_cc <= sbsnd->sb_idealsize) {
 			trim = sbsnd->sb_hiwat - sbsnd->sb_idealsize;
+=======
+	if (m->m_pkthdr.csum_flags & CSUM_DATA_VALID) {
+		if (apple_hwcksum_rx && (m->m_pkthdr.csum_flags & CSUM_TCP_SUM16)) {
+			u_short pseudo;
+			char b[9];
+			*(uint32_t*)&b[0] = *(uint32_t*)&ipov->ih_x1[0];
+			*(uint32_t*)&b[4] = *(uint32_t*)&ipov->ih_x1[4];
+			*(uint8_t*)&b[8] = *(uint8_t*)&ipov->ih_x1[8];
+			
+			bzero(ipov->ih_x1, sizeof(ipov->ih_x1));
+			ipov->ih_len = (u_short)tlen;
+			HTONS(ipov->ih_len);
+			pseudo = in_cksum(m, sizeof (struct ip));
+			
+			*(uint32_t*)&ipov->ih_x1[0] = *(uint32_t*)&b[0];
+			*(uint32_t*)&ipov->ih_x1[4] = *(uint32_t*)&b[4];
+			*(uint8_t*)&ipov->ih_x1[8] = *(uint8_t*)&b[8];
+			
+			th->th_sum = in_addword(pseudo, (m->m_pkthdr.csum_data & 0xFFFF));
+>>>>>>> origin/10.2
 		} else {
 			trim = sbsnd->sb_hiwat - sbsnd->sb_cc;
 		}
@@ -1378,6 +1429,7 @@ tcp_bad_rexmt_restore_state(struct tcpcb *tp, struct tcphdr *th)
 		tp->snd_cwnd = fsize + min(acked, tp->snd_cwnd);
 		
 	} else {
+<<<<<<< HEAD
 		tp->snd_cwnd = tp->snd_cwnd_prev;
 		tp->snd_ssthresh = tp->snd_ssthresh_prev;
 		if (tp->t_flags & TF_WASFRECOVERY)
@@ -1428,10 +1480,14 @@ tcp_bad_rexmt_check(struct tcpcb *tp, struct tcphdr *th, struct tcpopt *to)
 	    && tp->t_tlphighrxt > 0
 	    && SEQ_GEQ(th->th_ack, tp->t_tlphighrxt)
 	    && !tcp_detect_bad_rexmt(tp, th, to, tp->t_tlpstart)) {
+=======
+		char b[9];
+>>>>>>> origin/10.2
 		/*
 		 * check DSACK information also to make sure that
 		 * the TLP was indeed needed
 		 */
+<<<<<<< HEAD
 		if (tcp_rxtseg_dsack_for_tlp(tp)) {
 			/*
 			 * received a DSACK to indicate that TLP was
@@ -1461,6 +1517,21 @@ tcp_bad_rexmt_check(struct tcpcb *tp, struct tcphdr *th, struct tcpopt *to)
 		tcp_bad_rexmt_restore_state(tp, th);
 		tcp_ccdbg_trace(tp, th, TCP_CC_DSACK_BAD_REXMT);
 		tcp_rxtseg_clean(tp);
+=======
+		*(uint32_t*)&b[0] = *(uint32_t*)&ipov->ih_x1[0];
+		*(uint32_t*)&b[4] = *(uint32_t*)&ipov->ih_x1[4];
+		*(uint8_t*)&b[8] = *(uint8_t*)&ipov->ih_x1[8];
+		
+		len = sizeof (struct ip) + tlen;
+		bzero(ipov->ih_x1, sizeof(ipov->ih_x1));
+		ipov->ih_len = (u_short)tlen;
+		HTONS(ipov->ih_len);
+		th->th_sum = in_cksum(m, len);
+		
+		*(uint32_t*)&ipov->ih_x1[0] = *(uint32_t*)&b[0];
+		*(uint32_t*)&ipov->ih_x1[4] = *(uint32_t*)&b[4];
+		*(uint8_t*)&ipov->ih_x1[8] = *(uint8_t*)&b[8];
+>>>>>>> origin/10.2
 	}
 out:
 	tp->t_flagsext &= ~(TF_SENT_TLPROBE);
@@ -1873,6 +1944,7 @@ tcp_input(m, off0)
 	/* Re-initialization for later version check */
 	ip->ip_v = IPVERSION;
 #endif
+<<<<<<< HEAD
 	ip_ecn = (ip->ip_tos & IPTOS_ECN_MASK);
 
 	DTRACE_TCP5(receive, struct mbuf *, m, struct inpcb *, NULL,
@@ -1882,6 +1954,8 @@ tcp_input(m, off0)
 		(((ip->ip_src.s_addr & 0xffff) << 16) | (ip->ip_dst.s_addr & 0xffff)),
 		  th->th_seq, th->th_ack, th->th_win);
 
+=======
+>>>>>>> origin/10.2
 	}
 
 	/*
@@ -2778,6 +2852,7 @@ findpcb:
 				 * this is a pure ack for outstanding data.
 				 */
 				++tcpstat.tcps_predack;
+<<<<<<< HEAD
 
 				tcp_bad_rexmt_check(tp, th, &to),
 
@@ -2786,6 +2861,26 @@ findpcb:
 
 				VERIFY(SEQ_GEQ(th->th_ack, tp->snd_una));
 				acked = BYTES_ACKED(th, tp);
+=======
+				/*
+				 * "bad retransmit" recovery
+				 */
+				if (tp->t_rxtshift == 1 &&
+				    tcp_now < tp->t_badrxtwin) { 
+					tp->snd_cwnd = tp->snd_cwnd_prev;
+					tp->snd_ssthresh =
+					    tp->snd_ssthresh_prev;
+					tp->snd_nxt = tp->snd_max;
+					tp->t_badrxtwin = 0;
+				}
+				if (((to.to_flag & TOF_TS) != 0) && (to.to_tsecr != 0)) /* Makes sure we already have a TS */
+					tcp_xmit_timer(tp,
+					    tcp_now - to.to_tsecr + 1);
+				else if (tp->t_rtttime &&
+					    SEQ_GT(th->th_ack, tp->t_rtseq))
+					tcp_xmit_timer(tp, tp->t_rtttime);
+				acked = th->th_ack - tp->snd_una;
+>>>>>>> origin/10.2
 				tcpstat.tcps_rcvackpack++;
 				tcpstat.tcps_rcvackbyte += acked;
 				
@@ -3146,8 +3241,43 @@ findpcb:
 		}
 #endif /* INET6 */
 
+<<<<<<< HEAD
 		/* reset the incomp processing flag */
 		so->so_flags &= ~(SOF_INCOMP_INPROGRESS);
+=======
+			/*
+			 * Limit the `virtual advertised window' to TCP_MAXWIN
+			 * here.  Even if we requested window scaling, it will
+			 * become effective only later when our SYN is acked.
+			 */
+			if (tp->t_flags & TF_SLOWLINK && slowlink_wsize > 0) /* clip window size for for slow link */
+				tp->rcv_adv += min(tp->rcv_wnd, slowlink_wsize);
+			else 
+				tp->rcv_adv += min(tp->rcv_wnd, TCP_MAXWIN);
+			tcpstat.tcps_connects++;
+			soisconnected(so);
+			tp->t_timer[TCPT_KEEP] = tcp_keepinit;
+			dropsocket = 0;		/* committed to socket */
+			tcpstat.tcps_accepts++;
+			goto trimthenstep6;
+		    }
+		/* else do standard 3-way handshake */
+		} else {
+		    /*
+		     * No CC option, but maybe CC.NEW:
+		     *   invalidate cached value.
+		     */
+		     taop->tao_cc = 0;
+		}
+		/*
+		 * TAO test failed or there was no CC option,
+		 *    do a standard 3-way handshake.
+		 */
+		tp->t_flags |= TF_ACKNOW;
+		tp->t_state = TCPS_SYN_RECEIVED;
+		tp->t_timer[TCPT_KEEP] = tcp_keepinit;
+		dropsocket = 0;		/* committed to socket */
+>>>>>>> origin/10.2
 		tcpstat.tcps_accepts++;
 		if ((thflags & (TH_ECE | TH_CWR)) == (TH_ECE | TH_CWR)) {
 			/* ECN-setup SYN */
@@ -4356,8 +4486,25 @@ process_ACK:
 		 */
 		tcp_bad_rexmt_check(tp, th, &to);
 
+<<<<<<< HEAD
 		/* Recalculate the RTT */
 		tcp_compute_rtt(tp, &to, th);
+=======
+		/*
+		 * If we have a timestamp reply, update smoothed
+		 * round trip time.  If no timestamp is present but
+		 * transmit timer is running and timed sequence
+		 * number was acked, update smoothed round trip time.
+		 * Since we now have an rtt measurement, cancel the
+		 * timer backoff (cf., Phil Karn's retransmit alg.).
+		 * Recompute the initial retransmit timer.
+		 * Also makes sure we have a valid time stamp in hand
+		 */
+		if (((to.to_flag & TOF_TS) != 0) && (to.to_tsecr != 0))
+			tcp_xmit_timer(tp, tcp_now - to.to_tsecr + 1);
+		else if (tp->t_rtttime && SEQ_GT(th->th_ack, tp->t_rtseq))
+			tcp_xmit_timer(tp, tp->t_rtttime);
+>>>>>>> origin/10.2
 
 		/*
 		 * If all outstanding data is acked, stop retransmit
@@ -4444,6 +4591,7 @@ process_ACK:
 			tp->snd_wnd -= acked;
 			ourfinisacked = 0;
 		}
+<<<<<<< HEAD
 		/* detect una wraparound */
 		if ( !IN_FASTRECOVERY(tp) &&
 		    SEQ_GT(tp->snd_una, tp->snd_recover) &&
@@ -4454,6 +4602,8 @@ process_ACK:
 		    SEQ_GEQ(th->th_ack, tp->snd_recover))
 			EXIT_FASTRECOVERY(tp);
 
+=======
+>>>>>>> origin/10.2
 		tp->snd_una = th->th_ack;
 		if (SACK_ENABLED(tp)) {
 			if (SEQ_GT(tp->snd_una, tp->snd_recover))
@@ -4461,6 +4611,7 @@ process_ACK:
 		}
 		if (SEQ_LT(tp->snd_nxt, tp->snd_una))
 			tp->snd_nxt = tp->snd_una;
+<<<<<<< HEAD
 		if (!SLIST_EMPTY(&tp->t_rxt_segments) &&
 		    !TCP_DSACK_SEQ_IN_WINDOW(tp, tp->t_dsack_lastuna,
 		    tp->snd_una))
@@ -4473,6 +4624,8 @@ process_ACK:
 		 * sowwakeup must happen after snd_una, et al. are updated so that
 		 * the sequence numbers are in sync with so_snd
 		 */
+=======
+>>>>>>> origin/10.2
 		sowwakeup(so);
 
 		switch (tp->t_state) {
@@ -5517,10 +5670,16 @@ tcp_mss(tp, offer, input_ifscope)
 	ifp = rt->rt_ifp;
 	/*
 	 * Slower link window correction:
+<<<<<<< HEAD
 	 * If a value is specificied for slowlink_wsize use it for
 	 * PPP links believed to be on a serial modem (speed <128Kbps).
 	 * Excludes 9600bps as it is the default value adversized
 	 * by pseudo-devices over ppp.
+=======
+	 * If a value is specificied for slowlink_wsize use it for PPP links
+	 * believed to be on a serial modem (speed <128Kbps). Excludes 9600bps as
+	 * it is the default value adversized by pseudo-devices over ppp.
+>>>>>>> origin/10.2
 	 */
 	if (ifp->if_type == IFT_PPP && slowlink_wsize > 0 && 
 	    ifp->if_baudrate > 9600 && ifp->if_baudrate <= 128000) {
@@ -5721,8 +5880,12 @@ tcp_mssopt(tp)
 #if INET6
 			isipv6 ? tcp_v6mssdflt :
 #endif /* INET6 */
+<<<<<<< HEAD
 			tcp_mssdflt);
 	}
+=======
+			tcp_mssdflt;
+>>>>>>> origin/10.2
 	/*
 	 * Slower link window correction:
 	 * If a value is specificied for slowlink_wsize use it for PPP links

@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -374,11 +385,36 @@ machine_signal_idle(
 }
 
 void
+<<<<<<< HEAD
 machine_signal_idle_deferred(
 	__unused processor_t processor)
 {
 	panic("Unimplemented");
 }
+=======
+ml_cpu_get_info(ml_cpu_info_t *cpu_info)
+{
+}
+
+void
+ml_init_max_cpus(unsigned long max_cpus)
+{
+}
+
+int
+ml_get_max_cpus(void)
+{
+	return(machine_info.max_cpus);
+}
+
+int
+ml_get_current_cpus(void)
+{
+ 	return machine_info.avail_cpus;
+}
+
+/* Stubs for pc tracing mechanism */
+>>>>>>> origin/10.2
 
 void
 machine_signal_idle_cancel(

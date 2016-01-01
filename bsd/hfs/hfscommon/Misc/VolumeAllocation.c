@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -685,6 +696,7 @@ static void hfs_unmap_alloc_extent(struct hfsmount *hfsmp, u_int32_t startingBlo
 ;________________________________________________________________________________
 */
 
+<<<<<<< HEAD
 __private_extern__ void
 hfs_trim_callback(void *arg, uint32_t extent_count, const dk_extent_t *extents)
 {
@@ -700,6 +712,21 @@ hfs_trim_callback(void *arg, uint32_t extent_count, const dk_extent_t *extents)
 		startBlock = (extents[i].offset - hfsmp->hfsPlusIOPosOffset) / hfsmp->blockSize;
 		numBlocks = extents[i].length / hfsmp->blockSize;
 		(void) add_free_extent_cache(hfsmp, startBlock, numBlocks);
+=======
+	if (bp) {
+		if (dirty) {
+			// XXXdbg
+			struct hfsmount *hfsmp = VCBTOHFS(vcb);
+			
+			if (hfsmp->jnl) {
+				journal_modify_block_end(hfsmp->jnl, bp);
+			} else {
+				bdwrite(bp);
+			}
+		} else {
+			brelse(bp);
+		}
+>>>>>>> origin/10.2
 	}
 
 	if (hfs_kdebug_allocation & HFSDBG_UNMAP_ENABLED)
@@ -818,9 +845,24 @@ CheckUnmappedBytes (struct hfsmount *hfsmp, uint64_t blockno, uint64_t numblocks
 __private_extern__
 u_int32_t ScanUnmapBlocks (struct hfsmount *hfsmp) 
 {
+<<<<<<< HEAD
 	u_int32_t blocks_scanned = 0;
 	int error = 0;
 	struct jnl_trim_list trimlist;
+=======
+	OSErr			err;
+	register UInt32	block;			//	current block number
+	register UInt32	currentWord;	//	Pointer to current word within bitmap block
+	register UInt32	bitMask;		//	Word with given bits already set (ready to OR in)
+	register UInt32	wordsLeft;		//	Number of words left in this bitmap block
+    UInt32			*buffer = NULL;
+    UInt32			*currCache = NULL;
+	UInt32  blockRef;
+	UInt32  bitsPerBlock;
+	UInt32  wordsPerBlock;
+	Boolean dirty = false;
+	struct hfsmount *hfsmp = VCBTOHFS(vcb);
+>>>>>>> origin/10.2
 
 	if (hfs_kdebug_allocation & HFSDBG_UNMAP_ENABLED) {
 		KERNEL_DEBUG_CONSTANT(HFSDBG_UNMAP_SCAN | DBG_FUNC_START, hfsmp->hfs_raw_dev, 0, 0, 0, 0);
@@ -892,7 +934,27 @@ u_int32_t ScanUnmapBlocks (struct hfsmount *hfsmp)
 		hfs_validate_summary(hfsmp);
 		printf("HFS: Summary validation complete on %s\n", hfsmp->vcbVN);
 	}
+<<<<<<< HEAD
 #endif
+=======
+	
+	// XXXdbg
+	if (hfsmp->jnl) {
+		journal_modify_block_start(hfsmp->jnl, (struct buf *)blockRef);
+	}
+
+	//
+	//	Allocate all of the consecutive blocks
+	//
+	while ((currentWord & bitMask) == 0) {
+		//	Allocate this block
+		currentWord |= bitMask;
+		
+		//	Move to the next block.  If no more, then exit.
+		++block;
+		if (block == endingBlock)
+			break;
+>>>>>>> origin/10.2
 
 	if (hfs_kdebug_allocation & HFSDBG_UNMAP_ENABLED) {
 		KERNEL_DEBUG_CONSTANT(HFSDBG_UNMAP_SCAN | DBG_FUNC_END, error, hfsmp->hfs_raw_dev, 0, 0, 0);
@@ -901,6 +963,7 @@ u_int32_t ScanUnmapBlocks (struct hfsmount *hfsmp)
 	return error;
 }
 
+<<<<<<< HEAD
 static void add_to_reserved_list(hfsmount_t *hfsmp, uint32_t start, 
 								 uint32_t count, int list, 
 								 struct rl_entry **reservation)
@@ -914,6 +977,17 @@ static void add_to_reserved_list(hfsmount_t *hfsmp, uint32_t start,
 						   rl_link, next_range) {
 			if (++nranges > 3)
 				hfs_release_reserved(hfsmp, range, HFS_TENTATIVE_BLOCKS);
+=======
+				// XXXdbg
+				if (hfsmp->jnl) {
+					journal_modify_block_start(hfsmp->jnl, (struct buf *)blockRef);
+				}
+				
+				wordsLeft = wordsPerBlock;
+			}
+			
+			currentWord = SWAP_BE32 (*buffer);
+>>>>>>> origin/10.2
 		}
 	}
 
@@ -1210,10 +1284,36 @@ OSErr hfs_block_alloc_int(hfsmount_t *hfsmp,
 		}
 	}
 
+<<<<<<< HEAD
 	if (ISSET(flags, HFS_ALLOC_TRY_HARD)) {
 		err = hfs_alloc_try_hard(hfsmp, extent, maxBlocks, flags);
 		if (err)
 			goto exit;
+=======
+Inputs:
+	vcb				Pointer to volume where space is to be allocated
+	startingBlock	First block number to mark as allocated
+	numBlocks		Number of blocks to mark as allocated
+_______________________________________________________________________
+*/
+static OSErr BlockMarkAllocated(
+	ExtendedVCB		*vcb,
+	UInt32			startingBlock,
+	register UInt32	numBlocks)
+{
+	OSErr			err;
+	register UInt32	*currentWord;	//	Pointer to current word within bitmap block
+	register UInt32	wordsLeft;		//	Number of words left in this bitmap block
+	register UInt32	bitMask;		//	Word with given bits already set (ready to OR in)
+	UInt32			firstBit;		//	Bit index within word of first bit to allocate
+	UInt32			numBits;		//	Number of bits in word to allocate
+	UInt32			*buffer = NULL;
+	UInt32  blockRef;
+	UInt32  bitsPerBlock;
+	UInt32  wordsPerBlock;
+	// XXXdbg
+	struct hfsmount *hfsmp = VCBTOHFS(vcb);
+>>>>>>> origin/10.2
 
 		goto mark_allocated;
 	}
@@ -1240,6 +1340,14 @@ OSErr hfs_block_alloc_int(hfsmount_t *hfsmp,
 	if (startingBlock >= hfsmp->allocLimit) {
 		startingBlock = 0; /* overflow so start at beginning */
 	}
+<<<<<<< HEAD
+=======
+	
+	// XXXdbg
+	if (hfsmp->jnl) {
+		journal_modify_block_start(hfsmp->jnl, (struct buf *)blockRef);
+	}
+>>>>>>> origin/10.2
 
 	//
 	//	If the request must be contiguous, then find a sequence of free blocks
@@ -1425,7 +1533,18 @@ mark_allocated:
 				HFS_UPDATE_NEXT_ALLOCATION(hfsmp, extent->startBlock);
 			}
 
+<<<<<<< HEAD
 			(void) remove_free_extent_cache(hfsmp, extent->startBlock, extent->blockCount);
+=======
+			// XXXdbg
+			if (hfsmp->jnl) {
+				journal_modify_block_start(hfsmp->jnl, (struct buf *)blockRef);
+			}
+
+			//	Readjust currentWord and wordsLeft
+			currentWord = buffer;
+			wordsLeft = wordsPerBlock;
+>>>>>>> origin/10.2
 		}
 
 		if (ISSET(flags, HFS_ALLOC_USE_TENTATIVE)) {
@@ -1458,6 +1577,7 @@ mark_allocated:
 		MarkVCBDirty(hfsmp);
 		hfs_unlock_mount(hfsmp);
 
+<<<<<<< HEAD
 		hfs_generate_volume_notifications(hfsmp);
 
 		if (ISSET(flags, HFS_ALLOC_TENTATIVE)) {
@@ -1466,6 +1586,16 @@ mark_allocated:
 		} else if (ISSET(flags, HFS_ALLOC_LOCKED)) {
 			add_to_reserved_list(hfsmp, extent->startBlock, extent->blockCount, 
 								 1, ap->reservation_out);
+=======
+			// XXXdbg
+			if (hfsmp->jnl) {
+				journal_modify_block_start(hfsmp->jnl, (struct buf *)blockRef);
+			}
+			
+			//	Readjust currentWord and wordsLeft
+			currentWord = buffer;
+			wordsLeft = wordsPerBlock;
+>>>>>>> origin/10.2
 		}
 
 		if (ISSET(flags, HFS_ALLOC_IGNORE_TENTATIVE)) {
@@ -1600,12 +1730,36 @@ OSErr BlockDeallocate (
 		return 0;
 
 	OSErr			err;
+<<<<<<< HEAD
 	struct hfsmount *hfsmp;
 	hfsmp = VCBTOHFS(vcb);
+=======
+	register UInt32	*currentWord;	//	Pointer to current word within bitmap block
+	register UInt32	wordsLeft;		//	Number of words left in this bitmap block
+	register UInt32	bitMask;		//	Word with given bits already set (ready to OR in)
+	UInt32			firstBit;		//	Bit index within word of first bit to allocate
+	UInt32			numBits;		//	Number of bits in word to allocate
+	UInt32			*buffer = NULL;
+	UInt32  blockRef;
+	UInt32  bitsPerBlock;
+	UInt32  wordsPerBlock;
+    // XXXdbg
+	struct hfsmount *hfsmp = VCBTOHFS(vcb);
+>>>>>>> origin/10.2
 
 	if (hfs_kdebug_allocation & HFSDBG_ALLOC_ENABLED)
 		KERNEL_DEBUG_CONSTANT(HFSDBG_BLOCK_DEALLOCATE | DBG_FUNC_START, firstBlock, numBlocks, flags, 0, 0);
 
+<<<<<<< HEAD
+=======
+	err = ReadBitmapBlock(vcb, startingBlock, &buffer, &blockRef);
+	if (err != noErr) goto Exit;
+	// XXXdbg
+	if (hfsmp->jnl) {
+		journal_modify_block_start(hfsmp->jnl, (struct buf *)blockRef);
+	}
+
+>>>>>>> origin/10.2
 	//
 	//	If no blocks to deallocate, then exit early
 	//
@@ -1633,7 +1787,19 @@ OSErr BlockDeallocate (
 
 	(void) hfs_release_summary (hfsmp, firstBlock, numBlocks);
 
+<<<<<<< HEAD
 	err = BlockMarkFreeInternal(vcb, firstBlock, numBlocks, true);
+=======
+			// XXXdbg
+			if (hfsmp->jnl) {
+				journal_modify_block_start(hfsmp->jnl, (struct buf *)blockRef);
+			}
+
+			//	Readjust currentWord and wordsLeft
+			currentWord = buffer;
+			wordsLeft = wordsPerBlock;
+		}
+>>>>>>> origin/10.2
 
 	if (err) {
 		goto Exit;
@@ -1651,7 +1817,25 @@ OSErr BlockDeallocate (
 		vcb->freeBlocks += numBlocks;
 	}
 
+<<<<<<< HEAD
 	vcb->hfs_freed_block_count += numBlocks;
+=======
+			// XXXdbg
+			if (hfsmp->jnl) {
+				journal_modify_block_start(hfsmp->jnl, (struct buf *)blockRef);
+			}
+			
+			//	Readjust currentWord and wordsLeft
+			currentWord = buffer;
+			wordsLeft = wordsPerBlock;
+		}
+#if DEBUG_BUILD
+		if ((*currentWord & SWAP_BE32 (bitMask)) != SWAP_BE32 (bitMask)) {
+			panic("BlockMarkFree: blocks not allocated!");
+		}
+#endif
+		*currentWord &= SWAP_BE32 (~bitMask);			//	clear the bits in the bitmap
+>>>>>>> origin/10.2
 
 	if (vcb->nextAllocation == (firstBlock + numBlocks)) {
 		HFS_UPDATE_NEXT_ALLOCATION(vcb, (vcb->nextAllocation - numBlocks));

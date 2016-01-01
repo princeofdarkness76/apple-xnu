@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -78,6 +89,7 @@ __inline__ int hfs_checkdeleted (struct cnode *cp) {
  * 
  * Returns non-zero on failure. 0 on success 
  */
+<<<<<<< HEAD
 int hfs_set_backingstore (struct vnode *vp, int val) {
 	struct cnode *cp = NULL;
 	int err = 0;
@@ -99,6 +111,25 @@ int hfs_set_backingstore (struct vnode *vp, int val) {
 	else {
 		cp->c_flag &= ~C_BACKINGSTORE;
 	}
+=======
+__private_extern__
+int
+hfs_inactive(ap)
+	struct vop_inactive_args /* {
+		struct vnode *a_vp;
+	} */ *ap;
+{
+	struct vnode *vp = ap->a_vp;
+	struct cnode *cp = VTOC(vp);
+	struct hfsmount *hfsmp = VTOHFS(vp);
+	struct proc *p = ap->a_p;
+	struct timeval tv;
+	int error = 0;
+	int recycle = 0;
+	int forkcount = 0;
+	int truncated = 0;
+	int started_tr = 0, grabbed_lock = 0;
+>>>>>>> origin/10.2
 
 	/* unlock everything */
 	hfs_unlock (cp);
@@ -228,6 +259,7 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 		hfs_filedone(vp, ctx, 0);
 	}
 
+<<<<<<< HEAD
 	/* 
 	 * Remove any directory hints or cached origins
 	 */
@@ -236,6 +268,18 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 	}
 	if (cp->c_flag & C_HARDLINK) {
 		hfs_relorigins(cp);
+=======
+	/* If needed, get rid of any fork's data for a deleted file */
+	if ((cp->c_flag & C_DELETED) &&
+	    vp->v_type == VREG &&
+	    (VTOF(vp)->ff_blocks != 0)) {			
+		error = VOP_TRUNCATE(vp, (off_t)0, IO_NDELAY, NOCRED, p);
+		truncated = 1;
+		// have to do this to prevent the lost ubc_info panic
+		SET(cp->c_flag, C_TRANSIT);
+		recycle = 1;
+		if (error) goto out;
+>>>>>>> origin/10.2
 	}
 
 	/*
@@ -275,6 +319,7 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 		 * D) not the last fork, vp == c_rsrc_vp
 		 *	Don't enter the block below, just clean up vnode and push it out of core.
 		 */
+<<<<<<< HEAD
 	
 		if ((v_type == VREG || v_type == VLNK) && 
 				((forkcount == 1) || (!VNODE_IS_RSRC(vp)))) {
@@ -343,6 +388,26 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 					hfs_end_transaction(hfsmp);
 					started_tr = false;
 				}
+=======
+		SET(cp->c_flag, C_TRANSIT);
+		cp->c_flag &= ~C_DELETED;
+		cp->c_rdev = 0;
+		
+		// XXXdbg
+		hfs_global_shared_lock_acquire(hfsmp);
+		grabbed_lock = 1;
+		if (hfsmp->jnl) {
+		    if (journal_start_transaction(hfsmp->jnl) != 0) {
+				error = EINVAL;
+				goto out;
+		    }
+		    started_tr = 1;
+		}
+
+		/* Lock catalog b-tree */
+		error = hfs_metafilelocking(hfsmp, kHFSCatalogFileID, LK_EXCLUSIVE, p);
+		if (error) goto out;
+>>>>>>> origin/10.2
 
 			}
 			
@@ -544,6 +609,7 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 
 	hfs_update(vp, reclaim ? HFS_UPDATE_FORCE : 0);
 
+<<<<<<< HEAD
 	/*
 	 * Since we are about to finish what might be an inactive call, propagate
 	 * any remaining modified or touch bits from the cnode to the vnode.  This
@@ -570,6 +636,11 @@ out:
         hfs_end_transaction(hfsmp);
         started_tr = false;
     }
+=======
+#if QUOTA
+		(void)hfs_chkiq(cp, -1, NOCRED, 0);
+#endif /* QUOTA */
+>>>>>>> origin/10.2
 
 	return error;
 }
@@ -638,6 +709,7 @@ hfs_vnop_inactive(struct vnop_inactive_args *ap)
 		error = 0;
 		goto inactive_done;
 	}
+<<<<<<< HEAD
 	
 	if ((v_type == VREG || v_type == VLNK)) {
 		hfs_lock_truncate(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT);
@@ -698,6 +770,24 @@ hfs_filedone(struct vnode *vp, vfs_context_t context,
 	blks = leof / blocksize;
 	if (((off_t)blks * (off_t)blocksize) != leof)
 		blks++;
+=======
+
+	if (cp->c_flag & (C_ACCESS | C_CHANGE | C_MODIFIED | C_UPDATE)) {
+		tv = time;
+		VOP_UPDATE(vp, &tv, &tv, 0);
+	}
+out:
+	// XXXdbg - have to do this because a goto could have come here
+	if (started_tr) {
+	    journal_end_transaction(hfsmp->jnl);
+	    started_tr = 0;
+	}
+	if (grabbed_lock) {
+		hfs_global_shared_lock_release(hfsmp);
+	}
+
+	VOP_UNLOCK(vp, 0, p);
+>>>>>>> origin/10.2
 	/*
 	 * Shrink the peof to the smallest size neccessary to contain the leof.
 	 */
@@ -821,12 +911,30 @@ hfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 	/* 
 	 * If there was only one active fork then we can release the cnode.
 	 */
+<<<<<<< HEAD
 	if (reclaim_cnode) {
 		hfs_chashwakeup(hfsmp, cp, H_ALLOC | H_TRANSIT);
 		hfs_unlock(cp);
 		hfs_reclaim_cnode(hfsmp, cp);
 	} 
 	else  {
+=======
+	if (altfp == NULL) {
+#if QUOTA
+		for (i = 0; i < MAXQUOTAS; i++) {
+			if (cp->c_dquot[i] != NODQUOT) {
+				dqreclaim(vp, cp->c_dquot[i]);
+				cp->c_dquot[i] = NODQUOT;
+			}
+		}
+#endif /* QUOTA */
+		/* 
+		 * Free any left over directory indices
+		 */
+		if (vp->v_type == VDIR)
+			hfs_relnamehints(cp);
+
+>>>>>>> origin/10.2
 		/* 
 		 * cnode in use.  If it is a directory, it could have 
 		 * no live forks. Just release the lock.
@@ -958,6 +1066,7 @@ hfs_getnewvnode(
 	
 #ifdef HFS_CHECK_LOCK_ORDER
 	/*
+<<<<<<< HEAD
 	 * The only case where it's permissible to hold the parent cnode
 	 * lock is during a create operation (hfs_makenode) or when
 	 * we don't need the cnode lock (GNV_SKIPLOCK).
@@ -966,6 +1075,42 @@ hfs_getnewvnode(
 	    (flags & (GNV_CREATE | GNV_SKIPLOCK)) == 0 &&
 	    VTOC(dvp)->c_lockowner == current_thread()) {
 		panic("hfs_getnewvnode: unexpected hold of parent cnode %p", VTOC(dvp));
+=======
+	 * Check the hash for an active cnode
+	 */
+	cp = hfs_chashget(dev, cnid, wantrsrc, &vp, &rvp);
+	if (cp != NULL) {
+		/* hide open files that have been deleted */
+		if ((hfsmp->hfs_private_metadata_dir != 0)
+		&&  (cp->c_parentcnid == hfsmp->hfs_private_metadata_dir)
+		&&  (cp->c_nlink == 0)) {
+			retval = ENOENT;
+			goto exit;
+		}
+
+		/* Hide private journal files */
+		if (hfsmp->jnl &&
+			(cp->c_parentcnid == kRootDirID) &&
+			((cp->c_cnid == hfsmp->hfs_jnlfileid) ||
+			(cp->c_cnid == hfsmp->hfs_jnlinfoblkid))) {
+		    retval = ENOENT;
+			goto exit;
+		}
+	 
+		if (wantrsrc && rvp != NULL) {
+			vp = rvp;
+			rvp = NULL;
+			goto done;
+		}
+		if (!wantrsrc && vp != NULL) {
+			/* Hardlinks need an updated catalog descriptor */
+			if (descp && cp->c_flag & C_HARDLINK) {
+				replace_desc(cp, descp);
+			}
+			/* We have a vnode so we're done. */
+			goto done;
+		}
+>>>>>>> origin/10.2
 	}
 #endif /* HFS_CHECK_LOCK_ORDER */
 

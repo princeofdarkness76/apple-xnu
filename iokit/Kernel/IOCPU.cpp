@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -507,6 +518,7 @@ bool IOCPU::start(IOService *provider)
   gIOCPUs->setObject(this);
   
   // Correct the bus, cpu and timebase frequencies in the device tree.
+<<<<<<< HEAD
   if (gPEClockFrequencyInfo.bus_frequency_hz < 0x100000000ULL) {
     busFrequency = OSData::withBytesNoCopy((void *)&gPEClockFrequencyInfo.bus_clock_rate_hz, 4);
   } else {
@@ -522,6 +534,25 @@ bool IOCPU::start(IOService *provider)
   }
   provider->setProperty("clock-frequency", cpuFrequency);
   cpuFrequency->release();
+=======
+  if (gPEClockFrequencyInfo.bus_frequency_hz < 0x100000000ULL) 
+    busFrequency = OSData::withBytesNoCopy((void *)((char *)&gPEClockFrequencyInfo.bus_frequency_hz + 4), 4);
+  else
+    busFrequency = OSData::withBytesNoCopy((void *)&gPEClockFrequencyInfo.bus_clock_rate_hz, 8);
+  provider->setProperty("bus-frequency", busFrequency);
+  busFrequency->release();
+    
+  if (gPEClockFrequencyInfo.cpu_frequency_hz < 0x100000000ULL) 
+    cpuFrequency = OSData::withBytesNoCopy((void *)((char *)&gPEClockFrequencyInfo.cpu_frequency_hz + 4), 4);
+  else
+    cpuFrequency = OSData::withBytesNoCopy((void *)&gPEClockFrequencyInfo.cpu_clock_rate_hz, 8);
+  provider->setProperty("clock-frequency", cpuFrequency);
+  cpuFrequency->release();
+  
+  timebaseFrequency = OSData::withBytesNoCopy((void *)&gPEClockFrequencyInfo.timebase_frequency_hz, 4);
+  provider->setProperty("timebase-frequency", timebaseFrequency);
+  timebaseFrequency->release();
+>>>>>>> origin/10.2
   
   timebaseFrequency = OSData::withBytesNoCopy((void *)&gPEClockFrequencyInfo.timebase_frequency_hz, 4);
   provider->setProperty("timebase-frequency", timebaseFrequency);

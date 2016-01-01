@@ -4,6 +4,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -15,6 +16,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -1457,6 +1468,7 @@ IOReturn IODTNVRAM::readNVRAMPropertyType1(IORegistryEntry *entry,
     if (nvPath == 0)
       nvPath = startPtr;
     else if (nvName == 0)
+<<<<<<< HEAD
       nvName = (const char *) startPtr;
     else {
       IORegistryEntry * compareEntry = IORegistryEntry::fromPath((const char *) nvPath, gIODTPlane);
@@ -1484,6 +1496,27 @@ IOReturn IODTNVRAM::readNVRAMPropertyType1(IORegistryEntry *entry,
       err = kIOReturnSuccess;
     else
       err = kIOReturnNoMemory;
+=======
+      nvName = start;
+    else {
+      IORegistryEntry * compareEntry = IORegistryEntry::fromPath((const char *) nvPath, gIODTPlane);
+      if (entry == compareEntry) {
+        if (compareEntry)
+          compareEntry->release();
+	*name = OSSymbol::withCString((const char *) nvName);
+	*value = unescapeBytesToData(start, where - start - 1);
+	if ((*name != 0) && (*value != 0))
+	  err = kIOReturnSuccess;
+	else
+	  err = kIOReturnNoMemory;
+	break;
+      }
+      if (compareEntry)
+        compareEntry->release();
+      nvPath = nvName = 0;
+    }
+    start = where;
+>>>>>>> origin/10.2
   }
   return err;
 }
@@ -1528,6 +1561,7 @@ IOReturn IODTNVRAM::writeNVRAMPropertyType1(IORegistryEntry *entry,
       if (nvPath == 0)
         nvPath = startPtr;
       else if (nvName == 0)
+<<<<<<< HEAD
         nvName = (const char *) startPtr;
       else {
         IORegistryEntry * compareEntry = IORegistryEntry::fromPath((const char *) nvPath, gIODTPlane);
@@ -1545,6 +1579,23 @@ IOReturn IODTNVRAM::writeNVRAMPropertyType1(IORegistryEntry *entry,
         }
         nvPath = 0;
         nvName = 0;
+=======
+        nvName = start;
+      else {
+        IORegistryEntry * compareEntry = IORegistryEntry::fromPath((const char *) nvPath, gIODTPlane);
+        if (entry == compareEntry) {
+          if (compareEntry)
+             compareEntry->release();
+           // delete old property (nvPath -> where)
+           data = OSData::withBytes(propStart, nvPath - propStart);
+           if (data)
+             ok &= data->appendBytes(where, end - where);
+	   break;
+        }
+        if (compareEntry)
+          compareEntry->release();
+        nvPath = nvName = 0;
+>>>>>>> origin/10.2
       }
         
       startPtr = wherePtr;

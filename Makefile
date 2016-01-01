@@ -229,8 +229,20 @@ COMP_SUBDIRS_X86_64H = $(ALL_SUBDIRS)
 COMP_SUBDIRS_ARM = $(ALL_SUBDIRS)
 COMP_SUBDIRS_ARM64 = $(ALL_SUBDIRS)
 
+<<<<<<< HEAD
 INSTTEXTFILES_SUBDIRS =	\
 	bsd
+=======
+COMP_SUBDIRS = $(ALL_SUBDIRS)
+
+INST_SUBDIRS =	\
+	libkern	\
+	libsa   \
+	iokit	\
+	osfmk	\
+	bsd	\
+	config
+>>>>>>> origin/10.2
 
 include $(MakeInc_kernel)
 include $(MakeInc_rule)

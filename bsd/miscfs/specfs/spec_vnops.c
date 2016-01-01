@@ -7,6 +7,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -18,6 +19,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -726,7 +737,46 @@ spec_select(struct vnop_select_args *ap)
 	}
 }
 
+<<<<<<< HEAD
 static int filt_specattach(struct knote *kn);
+=======
+	if (vp->v_type == VCHR)
+		return (0);
+	/*
+	 * Flush all dirty buffers associated with a block device.
+	 */
+loop:
+	s = splbio();
+	for (bp = vp->v_dirtyblkhd.lh_first; bp; bp = nbp) {
+		nbp = bp->b_vnbufs.le_next;
+		// XXXdbg - don't flush locked blocks.  they may be journaled.
+		if ((bp->b_flags & B_BUSY) || (bp->b_flags & B_LOCKED))
+			continue;
+		if ((bp->b_flags & B_DELWRI) == 0)
+			panic("spec_fsync: not dirty");
+		bremfree(bp);
+		bp->b_flags |= B_BUSY;
+		splx(s);
+		bawrite(bp);
+		goto loop;
+	}
+	if (ap->a_waitfor == MNT_WAIT) {
+		while (vp->v_numoutput) {
+			vp->v_flag |= VBWAIT;
+			tsleep((caddr_t)&vp->v_numoutput, PRIBIO + 1, "spec_fsync", 0);
+		}
+#if DIAGNOSTIC
+		if (vp->v_dirtyblkhd.lh_first) {
+			vprint("spec_fsync: dirty", vp);
+			splx(s);
+			goto loop;
+		}
+#endif
+	}
+	splx(s);
+	return (0);
+}
+>>>>>>> origin/10.2
 
 int
 spec_kqfilter(vnode_t vp, struct knote *kn)

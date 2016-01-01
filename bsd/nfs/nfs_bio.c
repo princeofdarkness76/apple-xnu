@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -199,7 +210,8 @@ nfs_buf_timer(__unused void *param0, __unused void *param1)
 		return;
 =======
 	register struct nfsnode *np = VTONFS(vp);
-	register int biosize, diff, i;
+	register int biosize, i;
+	off_t diff;
 	struct buf *bp = 0, *rabp;
 	struct vattr vattr;
 	struct proc *p;
@@ -313,7 +325,26 @@ nfs_buf_freeup(int timer)
 		}
 >>>>>>> origin/10.1
 
+<<<<<<< HEAD
 	TAILQ_INIT(&nfsbuffreeup);
+=======
+		/*
+		 * If the block is in the cache and has the required data
+		 * in a valid region, just copy it out.
+		 * Otherwise, get the block and write back/read in,
+		 * as required.
+		 */
+again:
+		bufsize = biosize;
+		if ((off_t)(lbn + 1) * biosize > np->n_size && 
+		    (off_t)(lbn + 1) * biosize - np->n_size < biosize) {
+			bufsize = np->n_size - (off_t)lbn * biosize;
+			bufsize = (bufsize + DEV_BSIZE - 1) & ~(DEV_BSIZE - 1);
+		}
+		bp = nfs_getcacheblk(vp, lbn, bufsize, p, operation);
+		if (!bp)
+			return (EINTR);
+>>>>>>> origin/10.2
 
 	lck_mtx_lock(nfs_buf_mutex);
 
@@ -993,6 +1024,7 @@ nfs_buf_upl_check(struct nfsbuf *bp)
 			bp = getblk(vp, bn, size, 0, 2 * hz, operation);
 >>>>>>> origin/10.1
 		}
+<<<<<<< HEAD
 		NBPGVALID_SET(bp,i);
 		if (upl_dirty_page(pl, i))
 			NBPGDIRTY_SET(bp, i);
@@ -1008,6 +1040,15 @@ nfs_buf_upl_check(struct nfsbuf *bp)
 	}
 	FSDBG(539, bp, fileoffset, bp->nb_valid, bp->nb_dirty);
 	FSDBG(539, bp->nb_validoff, bp->nb_validend, bp->nb_dirtyoff, bp->nb_dirtyend);
+=======
+	} else
+		bp = getblk(vp, bn, size, 0, 0, operation);
+
+	if( vp->v_type == VREG)
+		bp->b_blkno = ((off_t)bn * biosize) / DEV_BSIZE;
+
+	return (bp);
+>>>>>>> origin/10.2
 }
 
 /*

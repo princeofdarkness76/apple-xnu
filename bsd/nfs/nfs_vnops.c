@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -9873,8 +9884,8 @@ again:
 #if 0
 		/* (removed for UBC) */
 		bufsize = biosize;
-		if ((lbn + 1) * biosize > np->n_size) {
-			bufsize = np->n_size - lbn * biosize;
+		if ((off_t)(lbn + 1) * biosize > np->n_size) {
+			bufsize = np->n_size - (off_t)lbn * biosize;
 			bufsize = (bufsize + DEV_BSIZE - 1) & ~(DEV_BSIZE - 1);
 		}
 #endif
@@ -10034,7 +10045,11 @@ nfs_vnop_blktooff(
 		return (ENXIO);
 	biosize = nmp->nm_biosize;
 
+<<<<<<< HEAD
 	*ap->a_offset = (off_t)(ap->a_lblkno * biosize);
+=======
+	*ap->a_offset = (off_t)ap->a_lblkno *  biosize;
+>>>>>>> origin/10.2
 
 	return (0);
 }

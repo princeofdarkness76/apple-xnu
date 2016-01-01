@@ -1,12 +1,21 @@
 
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
+=======
+ * Copyright (c) 2000-2002 Apple Computer, Inc. All rights reserved.
+ *
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+>>>>>>> origin/10.2
  * 
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
+<<<<<<< HEAD
  * compliance with the License. The rights granted to you under the License
  * may not be used to create, or enable the creation or redistribution of,
  * unlawful or unlicensed copies of an Apple operating system, or to
@@ -15,6 +24,11 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -24,7 +38,11 @@
  * Please see the License for the specific language governing rights and
  * limitations under the License.
  * 
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /*
  * This header contains the structures and function prototypes
@@ -36,11 +54,15 @@
 #define _SYS_VFS_JOURNAL_H_
 
 #include <sys/appleapiopts.h>
+<<<<<<< HEAD
 #include <sys/cdefs.h>
+=======
+>>>>>>> origin/10.2
 
 #ifdef __APPLE_API_UNSTABLE
 
 #include <sys/types.h>
+<<<<<<< HEAD
 #include <kern/locks.h>
 #include <sys/disk.h>
 
@@ -60,11 +82,20 @@ typedef struct block_info {
 	struct buf *bp;
     } u;
 } __attribute__((__packed__)) block_info;
+=======
+
+typedef struct block_info {
+    off_t       bnum;                // block # on the file system device
+    size_t      bsize;               // in bytes
+    struct buf *bp;
+} block_info;
+>>>>>>> origin/10.2
 
 typedef struct block_list_header {
     u_int16_t   max_blocks;          // max number of blocks in this chunk
     u_int16_t   num_blocks;          // number of valid block numbers in block_nums
     int32_t     bytes_used;          // how many bytes of this tbuffer are used
+<<<<<<< HEAD
     uint32_t     checksum;            // on-disk: checksum of this header and binfo[0]
     int32_t     flags;               // check-checksums, initial blhdr, etc
     block_info  binfo[1];            // so we can reference them by name
@@ -84,6 +115,16 @@ struct jnl_trim_list {
 
 typedef void (*jnl_trim_callback_t)(void *arg, uint32_t extent_count, const dk_extent_t *extents);
 
+=======
+    int32_t     checksum;            // on-disk: checksum of this header and binfo[0]
+    int32_t     pad;                 // pad out to 16 bytes
+    block_info  binfo[1];            // so we can reference them by name
+} block_list_header;
+
+
+struct journal;
+
+>>>>>>> origin/10.2
 typedef struct transaction {
     int                 tbuffer_size;  // in bytes
     char               *tbuffer;       // memory copy of the transaction
@@ -96,10 +137,13 @@ typedef struct transaction {
     off_t               journal_end;   // where in the journal this transaction ends
     struct journal     *jnl;           // ptr back to the journal structure
     struct transaction *next;          // list of tr's (either completed or to be free'd)
+<<<<<<< HEAD
     uint32_t            sequence_num;
 	struct jnl_trim_list trim;
     boolean_t		delayed_header_write;
 	boolean_t       flush_on_completion; //flush transaction immediately upon txn end.
+=======
+>>>>>>> origin/10.2
 } transaction;
 
 
@@ -114,14 +158,20 @@ typedef struct journal_header {
     volatile off_t end;           // zero-based byte offset of where free space begins
     off_t          size;          // size in bytes of the entire journal
     int32_t        blhdr_size;    // size in bytes of each block_list_header in the journal
+<<<<<<< HEAD
     uint32_t        checksum;
     int32_t        jhdr_size;     // block size (in bytes) of the journal header
     uint32_t       sequence_num;  // NEW FIELD: a monotonically increasing value assigned to all txn's
+=======
+    int32_t        checksum;
+    int32_t        jhdr_size;     // block size (in bytes) of the journal header
+>>>>>>> origin/10.2
 } journal_header;
 
 #define JOURNAL_HEADER_MAGIC  0x4a4e4c78   // 'JNLx'
 #define ENDIAN_MAGIC          0x12345678
 
+<<<<<<< HEAD
 //
 // we only checksum the original size of the journal_header to remain
 // backwards compatible.  the size of the original journal_heade is
@@ -130,6 +180,8 @@ typedef struct journal_header {
 //
 #define JOURNAL_HEADER_CKSUM_SIZE  (offsetof(struct journal_header, sequence_num))
 
+=======
+>>>>>>> origin/10.2
 #define OLD_JOURNAL_HEADER_MAGIC  0x4a484452   // 'JHDR'
 
 
@@ -137,6 +189,7 @@ typedef struct journal_header {
  * In memory structure about the journal.
  */
 typedef struct journal {
+<<<<<<< HEAD
     lck_mtx_t           jlock;             // protects the struct journal data
     lck_mtx_t		flock;             // serializes flushing of journal
 	lck_rw_t            trim_lock;         // protects the async_trim field, below
@@ -148,12 +201,19 @@ typedef struct journal {
 
     struct vnode       *fsdev;             // vnode of the file system device
     struct mount       *fsmount;           // mount of the file system
+=======
+    struct vnode       *jdev;              // vnode of the device where the journal lives
+    off_t               jdev_offset;       // byte offset to the start of the journal
+
+    struct vnode       *fsdev;             // vnode of the file system device
+>>>>>>> origin/10.2
     
     void              (*flush)(void *arg); // fs callback to flush meta data blocks
     void               *flush_arg;         // arg that's passed to flush()
 
     int32_t             flags;
     int32_t             tbuffer_size;      // default transaction buffer size
+<<<<<<< HEAD
     boolean_t		flush_aborted;
     boolean_t		flushing;
     boolean_t		asyncIO;
@@ -174,6 +234,12 @@ typedef struct journal {
     off_t               max_read_size;
     off_t               max_write_size;
 
+=======
+
+    char               *header_buf;        // in-memory copy of the journal header
+    journal_header     *jhdr;              // points to the first byte of header_buf
+
+>>>>>>> origin/10.2
     transaction        *cur_tr;            // for group-commit
     transaction        *completed_trs;     // out-of-order transactions that completed
     transaction        *active_tr;         // for nested transactions
@@ -182,38 +248,55 @@ typedef struct journal {
 
     transaction        *tr_freeme;         // transaction structs that need to be free'd
 
+<<<<<<< HEAD
     volatile off_t      active_start;      // the active start that we only keep in memory
     lck_mtx_t           old_start_lock;    // protects the old_start
     volatile off_t      old_start[16];     // this is how we do lazy start update
 
     int                 last_flush_err;    // last error from flushing the cache
     uint32_t            flush_counter;     // a monotonically increasing value assigned on track cache flush
+=======
+	volatile off_t      active_start;      // the active start that we only keep in memory
+	simple_lock_data_t  old_start_lock;    // guard access
+	volatile off_t      old_start[16];     // this is how we do lazy start update
+
+    semaphore_t         jsem;
+>>>>>>> origin/10.2
 } journal;
 
 /* internal-only journal flags (top 16 bits) */
 #define JOURNAL_CLOSE_PENDING     0x00010000
 #define JOURNAL_INVALID           0x00020000
+<<<<<<< HEAD
 #define JOURNAL_FLUSHCACHE_ERR    0x00040000   // means we already printed this err
 #define JOURNAL_NEED_SWAP         0x00080000   // swap any data read from disk
 #define JOURNAL_DO_FUA_WRITES     0x00100000   // do force-unit-access writes
 #define JOURNAL_USE_UNMAP         0x00200000   // device supports UNMAP (TRIM)
 #define JOURNAL_FEATURE_BARRIER   0x00400000   // device supports barrier-only flush
 
+=======
+>>>>>>> origin/10.2
 
 /* journal_open/create options are always in the low-16 bits */
 #define JOURNAL_OPTION_FLAGS_MASK 0x0000ffff
 
+<<<<<<< HEAD
 __BEGIN_DECLS
+=======
+>>>>>>> origin/10.2
 /*
  * Prototypes.
  */
 
 /*
+<<<<<<< HEAD
  * Call journal_init() to initialize the journaling code (sets up lock attributes)
  */
 void      journal_init(void);
 
 /*
+=======
+>>>>>>> origin/10.2
  * Call journal_create() to create a new journal.  You only
  * call this once, typically at file system creation time.
  *
@@ -248,8 +331,12 @@ journal *journal_create(struct vnode *jvp,
 						int32_t       flags,
 						int32_t       tbuffer_size,
 						void        (*flush)(void *arg),
+<<<<<<< HEAD
 						void         *arg,
 						struct mount *fsmount);
+=======
+						void         *arg);
+>>>>>>> origin/10.2
 
 /*
  * Call journal_open() when mounting an existing file system
@@ -269,6 +356,7 @@ journal  *journal_open(struct vnode *jvp,
 					   int32_t       flags,
 					   int32_t       tbuffer_size,
 					   void        (*flush)(void *arg),
+<<<<<<< HEAD
 					   void         *arg,
 					   struct mount *fsmount);
 
@@ -284,13 +372,20 @@ int journal_is_clean(struct vnode *jvp,
 		     struct vnode *fsvp,
                      size_t        min_fs_block_size);
 
+=======
+					   void         *arg);
+>>>>>>> origin/10.2
 
 /*
  * Call journal_close() just before your file system is unmounted.
  * It flushes any outstanding transactions and makes sure the
  * journal is in a consistent state.
  */
+<<<<<<< HEAD
 void      journal_close(journal *journalp);
+=======
+void      journal_close(journal *journal);
+>>>>>>> origin/10.2
 
 /*
  * flags for journal_create/open.  only can use 
@@ -318,15 +413,19 @@ void      journal_close(journal *journalp);
  * then call journal_kill_block().  This will mark it so
  * that the journal does not play it back (effectively
  * dropping it).
+<<<<<<< HEAD
  *
  * journal_trim_add_extent() marks a range of bytes on the device which should
  * be trimmed (invalidated, unmapped).  journal_trim_remove_extent() marks a
  * range of bytes which should no longer be trimmed.  Accumulated extents
  * will be trimmed when the transaction is flushed to the on-disk journal.
+=======
+>>>>>>> origin/10.2
  */
 int   journal_start_transaction(journal *jnl);
 int   journal_modify_block_start(journal *jnl, struct buf *bp);
 int   journal_modify_block_abort(journal *jnl, struct buf *bp);
+<<<<<<< HEAD
 int   journal_modify_block_end(journal *jnl, struct buf *bp, void (*func)(struct buf *bp, void *arg), void *arg);
 int   journal_kill_block(journal *jnl, struct buf *bp);
 #ifdef BSD_KERNEL_PRIVATE
@@ -376,6 +475,14 @@ int journal_relocate(journal *jnl, off_t offset, off_t journal_size, int32_t tbu
 uint32_t journal_current_txn(journal *jnl);
 
 __END_DECLS
+=======
+int   journal_modify_block_end(journal *jnl, struct buf *bp);
+int   journal_kill_block(journal *jnl, struct buf *bp);
+int   journal_end_transaction(journal *jnl);
+
+int   journal_active(journal *jnl);
+int   journal_flush(journal *jnl);
+>>>>>>> origin/10.2
 
 #endif /* __APPLE_API_UNSTABLE */
 #endif /* !_SYS_VFS_JOURNAL_H_ */

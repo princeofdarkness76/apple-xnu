@@ -12,9 +12,21 @@
  * circumvent, violate, or enable the circumvention or violation of, any
  * terms of an Apple operating system software license agreement.
  * 
+<<<<<<< HEAD
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  * 
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -1233,9 +1245,111 @@ mremap_encrypted(__unused struct proc *p, struct mremap_encrypted_args *uap, __u
     }
 
 #if 0
+<<<<<<< HEAD
     kprintf("%s vpath %s cryptid 0x%08x cputype 0x%08x cpusubtype 0x%08x range 0x%016llx size 0x%016llx\n",
             __FUNCTION__, vpath, cryptid, cputype, cpusubtype, (uint64_t)user_addr, (uint64_t)user_size);
 #endif
+=======
+	extern int print_map_addr;
+#endif /* 0 */
+
+	/*
+	 *	Find the inode; verify that it's a regular file.
+	 */
+
+	err = fdgetf(p, fd, &fp);
+	if (err)
+		return(err);
+	
+	if (fp->f_type != DTYPE_VNODE)
+		return(KERN_INVALID_ARGUMENT);
+
+	if (!(fp->f_flag & FREAD))
+		return (KERN_PROTECTION_FAILURE);
+
+	vp = (struct vnode *)fp->f_data;
+
+	if (vp->v_type != VREG)
+		return (KERN_INVALID_ARGUMENT);
+
+	if (offset & PAGE_MASK_64) {
+		printf("map_fd: file offset not page aligned(%d : %s)\n",p->p_pid, p->p_comm);
+		return (KERN_INVALID_ARGUMENT);
+	}
+	map_size = round_page(size);
+
+	/*
+	 * Allow user to map in a zero length file.
+	 */
+	if (size == 0)
+		return (KERN_SUCCESS);
+	/*
+	 *	Map in the file.
+	 */
+	UBCINFOCHECK("map_fd_funneled", vp);
+	pager = (void *) ubc_getpager(vp);
+	if (pager == NULL)
+		return (KERN_FAILURE);
+
+
+	my_map = current_map();
+
+	result = vm_map_64(
+			my_map,
+			&map_addr, map_size, (vm_offset_t)0, TRUE,
+			pager, offset, TRUE,
+			VM_PROT_DEFAULT, VM_PROT_ALL,
+			VM_INHERIT_DEFAULT);
+	if (result != KERN_SUCCESS)
+		return (result);
+
+
+	if (!findspace) {
+		vm_offset_t	dst_addr;
+		vm_map_copy_t	tmp;
+
+		if (copyin(va, &dst_addr, sizeof (dst_addr))	||
+					trunc_page(dst_addr) != dst_addr) {
+			(void) vm_map_remove(
+					my_map,
+					map_addr, map_addr + map_size,
+					VM_MAP_NO_FLAGS);
+			return (KERN_INVALID_ADDRESS);
+		}
+
+		result = vm_map_copyin(
+				my_map,
+				map_addr, map_size, TRUE,
+				&tmp);
+		if (result != KERN_SUCCESS) {
+			
+			(void) vm_map_remove(
+					my_map,
+					map_addr, map_addr + map_size,
+					VM_MAP_NO_FLAGS);
+			return (result);
+		}
+
+		result = vm_map_copy_overwrite(
+					my_map,
+					dst_addr, tmp, FALSE);
+		if (result != KERN_SUCCESS) {
+			vm_map_copy_discard(tmp);
+			return (result);
+		}
+	} else {
+		if (copyout(&map_addr, va, sizeof (map_addr))) {
+			(void) vm_map_remove(
+					my_map,
+					map_addr, map_addr + map_size,
+					VM_MAP_NO_FLAGS);
+			return (KERN_INVALID_ADDRESS);
+		}
+	}
+
+	ubc_setcred(vp, current_proc());
+	ubc_map(vp);
+>>>>>>> origin/10.2
 
     /* set up decrypter first */
     crypt_file_data_t crypt_data = {

@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -183,6 +194,7 @@
 #define M_IGMP		90
 #define M_JNL_JNL   91  /* Journaling: "struct journal" */
 #define M_JNL_TR    92  /* Journaling: "struct transaction" */ 
+<<<<<<< HEAD
 #define	M_SPECINFO	93	/* special file node */
 #define M_KQUEUE	94	/* kqueue */
 #define	M_HFSDIRHINT	95	/* HFS directory hint */
@@ -236,6 +248,108 @@
 #endif /* BSD_KERNEL_PRIVATE */
 
 #ifdef BSD_KERNEL_PRIVATE
+=======
+
+#define	M_LAST		93	/* Must be last type + 1 */
+
+/* Strings corresponding to types of memory */
+/* Must be in synch with the #defines above */
+#define	INITKMEMNAMES { \
+	"free",		/* 0 M_FREE */ \
+	"mbuf",		/* 1 M_MBUF */ \
+	"devbuf",	/* 2 M_DEVBUF */ \
+	"socket",	/* 3 M_SOCKET */ \
+	"pcb",		/* 4 M_PCB */ \
+	"routetbl",	/* 5 M_RTABLE */ \
+	"hosttbl",	/* 6 M_HTABLE */ \
+	"fragtbl",	/* 7 M_FTABLE */ \
+	"zombie",	/* 8 M_ZOMBIE */ \
+	"ifaddr",	/* 9 M_IFADDR */ \
+	"soopts",	/* 10 M_SOOPTS */ \
+	"soname",	/* 11 M_SONAME */ \
+	"namei",	/* 12 M_NAMEI */ \
+	"gprof",	/* 13 M_GPROF */ \
+	"ioctlops",	/* 14 M_IOCTLOPS */ \
+	"mapmem",	/* 15 M_MAPMEM */ \
+	"cred",		/* 16 M_CRED */ \
+	"pgrp",		/* 17 M_PGRP */ \
+	"session",	/* 18 M_SESSION */ \
+	"iov",		/* 19 M_IOV */ \
+	"mount",	/* 20 M_MOUNT */ \
+	"fhandle",	/* 21 M_FHANDLE */ \
+	"NFS req",	/* 22 M_NFSREQ */ \
+	"NFS mount",	/* 23 M_NFSMNT */ \
+	"NFS node",	/* 24 M_NFSNODE */ \
+	"vnodes",	/* 25 M_VNODE */ \
+	"namecache",	/* 26 M_CACHE */ \
+	"UFS quota",	/* 27 M_DQUOT */ \
+	"UFS mount",	/* 28 M_UFSMNT */ \
+	"shm",		/* 29 M_SHM */ \
+	"VM map",	/* 30 M_VMMAP */ \
+	"VM mapent",	/* 31 M_VMMAPENT */ \
+	"VM object",	/* 32 M_VMOBJ */ \
+	"VM objhash",	/* 33 M_VMOBJHASH */ \
+	"VM pmap",	/* 34 M_VMPMAP */ \
+	"VM pvmap",	/* 35 M_VMPVENT */ \
+	"VM pager",	/* 36 M_VMPAGER */ \
+	"VM pgdata",	/* 37 M_VMPGDATA */ \
+	"file",		/* 38 M_FILE */ \
+	"file desc",	/* 39 M_FILEDESC */ \
+	"lockf",	/* 40 M_LOCKF */ \
+	"proc",		/* 41 M_PROC */ \
+	"subproc",	/* 42 M_SUBPROC */ \
+	"LFS segment",	/* 43 M_SEGMENT */ \
+	"LFS node",	/* 44 M_LFSNODE */ \
+	"FFS node",	/* 45 M_FFSNODE */ \
+	"MFS node",	/* 46 M_MFSNODE */ \
+	"NQNFS Lease",	/* 47 M_NQLEASE */ \
+	"NQNFS Host",	/* 48 M_NQMHOST */ \
+	"Export Host",	/* 49 M_NETADDR */ \
+	"NFS srvsock",	/* 50 M_NFSSVC */ \
+	"NFS uid",	/* 51 M_NFSUID */ \
+	"NFS daemon",	/* 52 M_NFSD */ \
+	"ip_moptions",	/* 53 M_IPMOPTS */ \
+	"in_multi",	/* 54 M_IPMADDR */ \
+	"ether_multi",	/* 55 M_IFMADDR */ \
+	"mrt",		/* 56 M_MRTABLE */ \
+	"ISOFS mount",	/* 57 M_ISOFSMNT */ \
+	"ISOFS node",	/* 58 M_ISOFSNODE */ \
+	"NFSV3 srvdesc",/* 59 M_NFSRVDESC */ \
+	"NFSV3 diroff",	/* 60 M_NFSDIROFF */ \
+	"NFSV3 bigfh",	/* 61 M_NFSBIGFH */ \
+	"MSDOSFS mount",/* 62 M_MSDOSFSMNT */ \
+	"MSDOSFS fat",	/* 63 M_MSDOSFSFAT */ \
+	"MSDOSFS node",	/* 64 M_MSDOSFSNODE */ \
+	"ttys",		/* 65 M_TTYS */ \
+	"exec",		/* 66 M_EXEC */ \
+	"miscfs mount",	/* 67 M_MISCFSMNT */ \
+	"miscfs node",	/* 68 M_MISCFSNODE */ \
+	"adosfs mount",	/* 69 M_ADOSFSMNT */ \
+	"adosfs node",	/* 70 M_ADOSFSNODE */ \
+	"adosfs anode",	/* 71 M_ANODE */ \
+	"buf hdrs",	/* 72 M_BUFHDR */ \
+	"ofile tabl",	/* 73 M_OFILETABL */ \
+	"mbuf clust",	/* 74 M_MCLUST */ \
+	"HFS mount",	/* 75 M_HFSMNT */ \
+	"HFS node",	/* 76 M_HFSNODE */ \
+	"HFS fork",	/* 77 M_HFSFORK */ \
+	"VOLFS mount", 	/* 78 M_VOLFSMNT */ \
+	"VOLFS node", 	/* 79 M_VOLFSNODE */ \
+	"temp",		/* 80 M_TEMP */ \
+	"key mgmt",	/* 81 M_SECA */ \
+	"DEVFS",	/* 82 M_DEVFS */ \
+	"IpFw/IpAcct",	/* 83 M_IPFW */ \
+	"UDF node",	/* 84 M_UDFNODE */ \
+	"UDF mount",	/* 85 M_UDFMNT */ \
+	"IPv6 NDP",	/* 86 M_IP6NDP */ \
+	"IPv6 options",	/* 87 M_IP6OPT */ \
+	"IPv6 Misc",	/* 88 M_IP6MISC */\
+	"TCP Segment Q",/* 89 M_TSEGQ */\
+	"IGMP state",	/* 90 M_IGMP */\
+	"Journal",    /* 91 M_JNL_JNL */\
+	"Transaction"    /* 92 M_JNL_TR */\
+}
+>>>>>>> origin/10.2
 
 #if KMEMSTATS
 struct kmemstats {

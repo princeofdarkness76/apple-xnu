@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -106,6 +117,8 @@
 #include <nfs/nfsproto.h>
 #include <nfs/nfsnode.h>
 #include <nfs/nfsmount.h>
+
+#include <vfs/vfs_journal.h>
 
 #include <vfs/vfs_journal.h>
 
@@ -335,6 +348,7 @@ struct kmzones {
 } kmzones[M_LAST] = {
 #define	SOS(sname)	sizeof (struct sname)
 #define SOX(sname)	-1
+<<<<<<< HEAD
 	{ -1,		0, FALSE },			/* 0 M_FREE */
 	{ MSIZE,	KMZ_CREATEZONE, FALSE },	/* 1 M_MBUF */
 	{ 0,		KMZ_MALLOC, FALSE },		/* 2 M_DEVBUF */
@@ -518,6 +532,107 @@ struct kmzones {
 	{ 0,		KMZ_MALLOC, FALSE },		/* 122 M_FD_VN_DATA */
 	{ 0,		KMZ_MALLOC, FALSE },		/* 123 M_FD_DIRBUF */
 	{ 0,		KMZ_MALLOC, FALSE },		/* 124 M_NETAGENT */
+=======
+	-1,		0,			/* 0 M_FREE */
+	MSIZE,		KMZ_CREATEZONE,		/* 1 M_MBUF */
+	0,		KMZ_MALLOC,		/* 2 M_DEVBUF */
+	SOS(socket),	KMZ_CREATEZONE,		/* 3 M_SOCKET */
+	SOS(inpcb),	KMZ_LOOKUPZONE,		/* 4 M_PCB */
+	M_MBUF,		KMZ_SHAREZONE,		/* 5 M_RTABLE */
+	M_MBUF,		KMZ_SHAREZONE,		/* 6 M_HTABLE */
+	M_MBUF,		KMZ_SHAREZONE,		/* 7 M_FTABLE */
+	SOS(rusage),	KMZ_CREATEZONE,		/* 8 M_ZOMBIE */
+	0,		KMZ_MALLOC,		/* 9 M_IFADDR */
+	M_MBUF,		KMZ_SHAREZONE,		/* 10 M_SOOPTS */
+	0,		KMZ_MALLOC,		/* 11 M_SONAME */
+	MAXPATHLEN,	KMZ_CREATEZONE,		/* 12 M_NAMEI */
+	0,		KMZ_MALLOC,		/* 13 M_GPROF */
+	0,		KMZ_MALLOC,		/* 14 M_IOCTLOPS */
+	0,		KMZ_MALLOC,		/* 15 M_MAPMEM */
+	SOS(ucred),	KMZ_CREATEZONE,		/* 16 M_CRED */
+	SOS(pgrp),	KMZ_CREATEZONE,		/* 17 M_PGRP */
+	SOS(session),	KMZ_CREATEZONE,		/* 18 M_SESSION */
+	SOS(iovec),	KMZ_LOOKUPZONE,		/* 19 M_IOV */
+	SOS(mount),	KMZ_CREATEZONE,		/* 20 M_MOUNT */
+	0,		KMZ_MALLOC,		/* 21 M_FHANDLE */
+	SOS(nfsreq),	KMZ_CREATEZONE,		/* 22 M_NFSREQ */
+	SOS(nfsmount),	KMZ_CREATEZONE,		/* 23 M_NFSMNT */
+	SOS(nfsnode),	KMZ_CREATEZONE,		/* 24 M_NFSNODE */
+	SOS(vnode),	KMZ_CREATEZONE,		/* 25 M_VNODE */
+	SOS(namecache),	KMZ_CREATEZONE,		/* 26 M_CACHE */
+	SOX(dquot),	KMZ_LOOKUPZONE,		/* 27 M_DQUOT */
+	SOX(ufsmount),	KMZ_LOOKUPZONE,		/* 28 M_UFSMNT */
+	0,		KMZ_MALLOC,		/* 29 M_CGSUM */
+	0,		KMZ_MALLOC,		/* 30 M_VMMAP */
+	0,		KMZ_MALLOC,		/* 31 M_VMMAPENT */
+	0,		KMZ_MALLOC,		/* 32 M_VMOBJ */
+	0,		KMZ_MALLOC,		/* 33 M_VMOBJHASH */
+	0,		KMZ_MALLOC,		/* 34 M_VMPMAP */
+	0,		KMZ_MALLOC,		/* 35 M_VMPVENT */
+	0,		KMZ_MALLOC,		/* 36 M_VMPAGER */
+	0,		KMZ_MALLOC,		/* 37 M_VMPGDATA */
+	SOS(file),	KMZ_CREATEZONE,		/* 38 M_FILE */
+	SOS(filedesc),	KMZ_CREATEZONE,		/* 39 M_FILEDESC */
+	SOX(lockf),	KMZ_CREATEZONE,		/* 40 M_LOCKF */
+	SOS(proc),	KMZ_CREATEZONE,		/* 41 M_PROC */
+	SOS(pcred),	KMZ_CREATEZONE,		/* 42 M_SUBPROC */
+	0,		KMZ_MALLOC,		/* 43 M_SEGMENT */
+	M_FFSNODE,	KMZ_SHAREZONE,		/* 44 M_LFSNODE */
+	SOS(inode),	KMZ_CREATEZONE,		/* 45 M_FFSNODE */
+	M_FFSNODE,	KMZ_SHAREZONE,		/* 46 M_MFSNODE */
+	SOS(nqlease),	KMZ_CREATEZONE,		/* 47 M_NQLEASE */
+	SOS(nqm),	KMZ_CREATEZONE,		/* 48 M_NQMHOST */
+	0,		KMZ_MALLOC,		/* 49 M_NETADDR */
+	SOX(nfssvc_sock),
+			KMZ_CREATEZONE,		/* 50 M_NFSSVC */
+	SOS(nfsuid),	KMZ_CREATEZONE,		/* 51 M_NFSUID */
+	SOX(nfsrvcache),
+			KMZ_CREATEZONE,		/* 52 M_NFSD */
+	SOX(ip_moptions),
+			KMZ_LOOKUPZONE,		/* 53 M_IPMOPTS */
+	SOX(in_multi),	KMZ_LOOKUPZONE,		/* 54 M_IPMADDR */
+	SOX(ether_multi),
+			KMZ_LOOKUPZONE,		/* 55 M_IFMADDR */
+	SOX(mrt),	KMZ_CREATEZONE,		/* 56 M_MRTABLE */
+	SOX(iso_mnt),	KMZ_LOOKUPZONE,		/* 57 M_ISOFSMNT */
+	SOS(iso_node),	KMZ_CREATEZONE,		/* 58 M_ISOFSNODE */
+	SOS(nfsrv_descript),
+			KMZ_CREATEZONE,		/* 59 M_NFSRVDESC */
+	SOS(nfsdmap),	KMZ_CREATEZONE,		/* 60 M_NFSDIROFF */
+	SOS(fhandle),	KMZ_LOOKUPZONE,		/* 61 M_NFSBIGFH */
+	0,		KMZ_MALLOC,		/* 62 M_MSDOSFSMNT */
+	0,		KMZ_MALLOC,		/* 63 M_MSDOSFSFAT */
+	0,		KMZ_MALLOC,		/* 64 M_MSDOSFSNODE */
+	SOS(tty),	KMZ_CREATEZONE,		/* 65 M_TTYS */
+	0,		KMZ_MALLOC,		/* 66 M_EXEC */
+	0,		KMZ_MALLOC,		/* 67 M_MISCFSMNT */
+	0,		KMZ_MALLOC,		/* 68 M_MISCFSNODE */
+	0,		KMZ_MALLOC,		/* 69 M_ADOSFSMNT */
+	0,		KMZ_MALLOC,		/* 70 M_ADOSFSNODE */
+	0,		KMZ_MALLOC,		/* 71 M_ANODE */
+	SOX(buf),	KMZ_CREATEZONE,		/* 72 M_BUFHDR */
+	(NDFILE * OFILESIZE),
+			KMZ_CREATEZONE,		/* 73 M_OFILETABL */
+	MCLBYTES,	KMZ_CREATEZONE,		/* 74 M_MCLUST */
+	SOX(hfsmount),	KMZ_LOOKUPZONE,		/* 75 M_HFSMNT */
+	SOS(cnode),	KMZ_CREATEZONE,		/* 76 M_HFSNODE */
+	SOS(filefork),	KMZ_CREATEZONE,		/* 77 M_HFSFORK */
+	SOX(volfs_mntdata),	KMZ_LOOKUPZONE,		/* 78 M_VOLFSMNT */
+	SOS(volfs_vndata),	KMZ_CREATEZONE,		/* 79 M_VOLFSNODE */
+	0,		KMZ_MALLOC,		/* 80 M_TEMP */
+	0,		KMZ_MALLOC,		/* 81 M_SECA */
+	0,		KMZ_MALLOC,		/* 82 M_DEVFS */
+	0,		KMZ_MALLOC,		/* 83 M_IPFW */
+	0,		KMZ_MALLOC,		/* 84 M_UDFNODE */
+	0,		KMZ_MALLOC,		/* 85 M_UDFMOUNT */
+	0,		KMZ_MALLOC,		/* 86 M_IP6NDP */
+	0,		KMZ_MALLOC,		/* 87 M_IP6OPT */
+	0,		KMZ_MALLOC,		/* 88 M_IP6MISC */
+	0,		KMZ_MALLOC,		/* 89 M_TSEGQ */
+	0,		KMZ_MALLOC,		/* 90 M_IGMP */
+	SOS(journal),     KMZ_CREATEZONE,     /* 91 M_JNL_JNL */
+	SOS(transaction), KMZ_CREATEZONE,     /* 92 M_JNL_TR */
+>>>>>>> origin/10.2
 #undef	SOS
 #undef	SOX
 };
@@ -533,7 +648,11 @@ kmeminit(void)
 	struct kmzones	*kmz;
 
 	if ((sizeof(kmzones)/sizeof(kmzones[0])) != (sizeof(memname)/sizeof(memname[0]))) {
+<<<<<<< HEAD
 		panic("kmeminit: kmzones has %lu elements but memname has %lu\n",
+=======
+		panic("kmeminit: kmzones has %d elements but memname has %d\n",
+>>>>>>> origin/10.2
 			  (sizeof(kmzones)/sizeof(kmzones[0])), (sizeof(memname)/sizeof(memname[0])));
 	}
 

@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -700,6 +711,7 @@ vnode_iterate(mount_t mp, int flags, int (*callout)(struct vnode *, void *),
 	int vid, retval;
 	int ret = 0;
 
+<<<<<<< HEAD
 	mount_lock(mp);
 
 	vnode_iterate_setup(mp);
@@ -737,6 +749,60 @@ vnode_iterate(mount_t mp, int flags, int (*callout)(struct vnode *, void *),
 		        /*
 			 * we're reloading the filesystem
 			 * cast out any inactive vnodes...
+=======
+	if (flags & V_SAVE) {
+		if (error = VOP_FSYNC(vp, cred, MNT_WAIT, p)) {
+			return (error);
+		}
+
+		// XXXdbg - if there are dirty bufs, wait for 'em if they're busy
+		for (bp=vp->v_dirtyblkhd.lh_first; bp; bp=nbp) {
+		    nbp = bp->b_vnbufs.le_next;
+		    if (ISSET(bp->b_flags, B_BUSY)) {
+			SET(bp->b_flags, B_WANTED);
+			tsleep((caddr_t)bp, slpflag | (PRIBIO + 1), "vinvalbuf", 0);
+			nbp = vp->v_dirtyblkhd.lh_first;
+		    } else {
+			panic("vinvalbuf: dirty buf (vp 0x%x, bp 0x%x)", vp, bp);
+		    }
+		}
+	}
+
+	for (;;) {
+		if ((blist = vp->v_cleanblkhd.lh_first) && (flags & V_SAVEMETA))
+			while (blist && blist->b_lblkno < 0)
+				blist = blist->b_vnbufs.le_next;
+		if (!blist && (blist = vp->v_dirtyblkhd.lh_first) &&
+		    (flags & V_SAVEMETA))
+			while (blist && blist->b_lblkno < 0)
+				blist = blist->b_vnbufs.le_next;
+		if (!blist)
+			break;
+
+		for (bp = blist; bp; bp = nbp) {
+			nbp = bp->b_vnbufs.le_next;
+			if ((flags & V_SAVEMETA) && bp->b_lblkno < 0)
+				continue;
+			s = splbio();
+			if (ISSET(bp->b_flags, B_BUSY)) {
+				SET(bp->b_flags, B_WANTED);
+				error = tsleep((caddr_t)bp,
+					slpflag | (PRIBIO + 1), "vinvalbuf",
+					slptimeo);
+				splx(s);
+				if (error) {
+					return (error);
+				}
+				break;
+			}
+			bremfree(bp);
+			SET(bp->b_flags, B_BUSY);
+			splx(s);
+			/*
+			 * XXX Since there are no node locks for NFS, I believe
+			 * there is a slight chance that a delayed write will
+			 * occur while sleeping just above, so check for it.
+>>>>>>> origin/10.2
 			 */
 		        if (vnode_reload(vp)) {
 			        /* vnode will be recycled on the refcount drop */
@@ -744,6 +810,17 @@ vnode_iterate(mount_t mp, int flags, int (*callout)(struct vnode *, void *),
 				mount_lock(mp);
 			    	continue;
 			}
+<<<<<<< HEAD
+=======
+
+			if (bp->b_flags & B_LOCKED) {
+				panic("vinvalbuf: bp @ 0x%x is locked!\n", bp);
+				break;
+			} else {
+				SET(bp->b_flags, B_INVAL);
+			}
+			brelse(bp);
+>>>>>>> origin/10.2
 		}
 
 		retval = callout(vp, arg);

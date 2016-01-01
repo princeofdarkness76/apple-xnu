@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -640,6 +651,7 @@ errno_t	buf_setupl(buf_t, upl_t, uint32_t);
 buf_t	buf_clone(buf_t, int, int, void (*)(buf_t, void *), void *);
 
 
+<<<<<<< HEAD
 /*!
  @function buf_create_shadow
  @abstract Create a shadow buffer with optional private storage and an optional callback.
@@ -684,6 +696,22 @@ buf_t 	buf_alloc(vnode_t);
  @return void.
  */
 void	buf_free(buf_t);
+=======
+/* cluster_io definitions for use with io bufs */
+#define b_uploffset  b_bufsize
+#define b_trans_head b_freelist.tqe_prev
+#define b_trans_next b_freelist.tqe_next
+#define b_real_bp    b_saveaddr
+#define b_iostate    b_rcred
+
+/* journaling uses this cluster i/o field for its own
+ * purposes because meta data buf's should never go
+ * through the clustering code.
+ */
+#define b_transaction b_vectorlist
+
+   
+>>>>>>> origin/10.2
 
 /*
 <<<<<<< HEAD
@@ -722,7 +750,7 @@ void	buf_free(buf_t);
 #define	B_WRITE		0x00000000	/* Write buffer (pseudo flag). */
 #define	B_WRITEINPROG	0x01000000	/* Write in progress. */
 #define	B_HDRALLOC	0x02000000	/* zone allocated buffer header */
-#define	B_UNUSED1	0x04000000	/* Unused bit */
+#define	B_NORELSE	0x04000000	/* don't brelse() in bwrite() */
 #define B_NEED_IODONE   0x08000000
 								/* need to do a biodone on the */
 								/* real_bp associated with a cluster_io */

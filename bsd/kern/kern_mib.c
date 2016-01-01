@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -82,9 +93,16 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
+<<<<<<< HEAD
 #include <sys/file_internal.h>
 #include <sys/vnode.h>
 #include <sys/unistd.h>
+=======
+#include <sys/file.h>
+#include <sys/vnode.h>
+#include <sys/unistd.h>
+#include <sys/buf.h>
+>>>>>>> origin/10.2
 #include <sys/ioctl.h>
 #include <sys/namei.h>
 #include <sys/tty.h>
@@ -97,6 +115,7 @@
 #include <mach/vm_param.h>
 #include <kern/task.h>
 #include <vm/vm_kern.h>
+<<<<<<< HEAD
 #include <vm/vm_map.h>
 #include <vm/vm_protos.h>
 #include <mach/host_info.h>
@@ -105,6 +124,13 @@
 extern vm_map_t bsd_pageable_map;
 
 #include <sys/mount_internal.h>
+=======
+#include <mach/host_info.h>
+
+extern vm_map_t bsd_pageable_map;
+
+#include <sys/mount.h>
+>>>>>>> origin/10.2
 #include <sys/kdebug.h>
 
 #include <IOKit/IOPlatformExpert.h>
@@ -113,6 +139,7 @@ extern vm_map_t bsd_pageable_map;
 #include <machine/machine_routines.h>
 #include <machine/cpu_capabilities.h>
 
+<<<<<<< HEAD
 #include <mach/mach_host.h>		/* for host_info() */
 
 #if defined(__i386__) || defined(__x86_64__)
@@ -133,6 +160,10 @@ static uint64_t	cacheconfig[10], cachesize[10];
 static int	packages;
 
 SYSCTL_NODE(, 0,	  sysctl, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
+=======
+
+SYSCTL_NODE(, 0,	  sysctl, CTLFLAG_RW, 0,
+>>>>>>> origin/10.2
 	"Sysctl internal magic");
 SYSCTL_NODE(, CTL_KERN,	  kern,   CTLFLAG_RW|CTLFLAG_LOCKED, 0,
 	"High kernel, proc, limits &c");
@@ -158,6 +189,7 @@ SYSCTL_NODE(, CTL_USER,	  user,   CTLFLAG_RW|CTLFLAG_LOCKED, 0,
  */
 
 #define CTLHW_RETQUAD	(1 << 31)
+<<<<<<< HEAD
 #define CTLHW_LOCAL	(1 << 30)
 
 #define HW_LOCAL_CPUTHREADTYPE	(1 | CTLHW_LOCAL)
@@ -166,12 +198,15 @@ SYSCTL_NODE(, CTL_USER,	  user,   CTLFLAG_RW|CTLFLAG_LOCKED, 0,
 #define HW_LOCAL_LOGICALCPU	(4 | CTLHW_LOCAL)
 #define HW_LOCAL_LOGICALCPUMAX	(5 | CTLHW_LOCAL)
 
+=======
+>>>>>>> origin/10.2
 
 /*
  * Supporting some variables requires us to do "real" work.  We 
  * gather some of that here.
  */
 static int
+<<<<<<< HEAD
 sysctl_hw_generic(__unused struct sysctl_oid *oidp, __unused void *arg1,
 	int arg2, struct sysctl_req *req)
 {
@@ -183,6 +218,16 @@ sysctl_hw_generic(__unused struct sysctl_oid *oidp, __unused void *arg1,
 	host_basic_info_data_t hinfo;
 	kern_return_t kret;
 	mach_msg_type_number_t count = HOST_BASIC_INFO_COUNT;
+=======
+sysctl_hw_generic SYSCTL_HANDLER_ARGS
+{
+	char dummy[65];
+	int  epochTemp;
+	extern int vm_page_wire_count;
+	ml_cpu_info_t cpu_info;
+	int val, doquad;
+	long long qval;
+>>>>>>> origin/10.2
 
 	/*
 	 * Test and mask off the 'return quad' flag.
@@ -193,9 +238,12 @@ sysctl_hw_generic(__unused struct sysctl_oid *oidp, __unused void *arg1,
 
 	ml_cpu_get_info(&cpu_info);
 
+<<<<<<< HEAD
 #define BSD_HOST 1
 	kret = host_info((host_t)BSD_HOST, HOST_BASIC_INFO, (host_info_t)&hinfo, &count);
 
+=======
+>>>>>>> origin/10.2
 	/*
 	 * Handle various OIDs.
 	 *
@@ -204,6 +252,7 @@ sysctl_hw_generic(__unused struct sysctl_oid *oidp, __unused void *arg1,
 	 */
 	switch (arg2) {
 	case HW_NCPU:
+<<<<<<< HEAD
 		if (kret == KERN_SUCCESS) {
 			return(SYSCTL_RETURN(req, hinfo.max_cpus));
 		} else {
@@ -246,6 +295,35 @@ sysctl_hw_generic(__unused struct sysctl_oid *oidp, __unused void *arg1,
 		qval = (long long)val;
 		break;
 	}
+=======
+		{
+		host_basic_info_data_t hinfo;
+		kern_return_t kret;
+		int count = HOST_BASIC_INFO_COUNT;
+#define BSD_HOST 1
+
+			kret = host_info(BSD_HOST, HOST_BASIC_INFO, &hinfo, &count);
+			if (kret == KERN_SUCCESS) {
+				return(SYSCTL_RETURN(req, hinfo.max_cpus));
+			} else {
+				return(EINVAL);
+			}
+		}
+	case HW_AVAILCPU:
+		{
+		host_basic_info_data_t hinfo;
+		kern_return_t kret;
+		int count = HOST_BASIC_INFO_COUNT;
+#define BSD_HOST 1
+
+			kret = host_info(BSD_HOST, HOST_BASIC_INFO, &hinfo, &count);
+			if (kret == KERN_SUCCESS) {
+				return(SYSCTL_RETURN(req, hinfo.avail_cpus));
+			} else {
+				return(EINVAL);
+			}
+		}
+>>>>>>> origin/10.2
 	case HW_CACHELINE:
 		val = cpu_info.cache_line_size;
 		qval = (long long)val;
@@ -298,10 +376,15 @@ sysctl_hw_generic(__unused struct sysctl_oid *oidp, __unused void *arg1,
 		if (epochTemp == -1)
 			return(EINVAL);
 		return(SYSCTL_RETURN(req, epochTemp));
+<<<<<<< HEAD
 	case HW_VECTORUNIT: {
 		int vector = cpu_info.vector_unit == 0? 0 : 1;
 		return(SYSCTL_RETURN(req, vector));
 	}
+=======
+	case HW_VECTORUNIT:
+		return(SYSCTL_RETURN(req, cpu_info.vector_unit));
+>>>>>>> origin/10.2
 	case HW_L2SETTINGS:
 		if (cpu_info.l2_cache_size == 0xFFFFFFFF)
 			return(EINVAL);
@@ -322,6 +405,7 @@ sysctl_hw_generic(__unused struct sysctl_oid *oidp, __unused void *arg1,
 	return(SYSCTL_RETURN(req, val));
 }
 
+<<<<<<< HEAD
 /* hw.pagesize and hw.tbfrequency are expected as 64 bit values */
 static int
 sysctl_pagesize
@@ -381,6 +465,30 @@ SYSCTL_PROC    (_hw, OID_AUTO, l3cachesize, CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_
 SYSCTL_PROC(_hw, OID_AUTO, tbfrequency, CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, 0, 0, sysctl_tbfrequency, "Q", "");
 SYSCTL_QUAD    (_hw, HW_MEMSIZE, memsize, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &max_mem, "");
 SYSCTL_INT     (_hw, OID_AUTO, packages, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &packages, 0, "");
+=======
+/*
+ * hw.* MIB variables.
+ */
+SYSCTL_PROC    (_hw, HW_NCPU, ncpu, CTLTYPE_INT  | CTLFLAG_RD | CTLFLAG_KERN, 0, HW_NCPU, sysctl_hw_generic, "I", "");
+SYSCTL_PROC    (_hw, HW_AVAILCPU, activecpu, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN, 0, HW_AVAILCPU, sysctl_hw_generic, "I", "");
+SYSCTL_INT     (_hw, HW_BYTEORDER, byteorder, CTLFLAG_RD | CTLFLAG_KERN, NULL, BYTE_ORDER, "");
+SYSCTL_INT     (_hw, OID_AUTO, cputype, CTLFLAG_RD | CTLFLAG_KERN, &machine_slot[0].cpu_type, 0, "");
+SYSCTL_INT     (_hw, OID_AUTO, cpusubtype, CTLFLAG_RD | CTLFLAG_KERN, &machine_slot[0].cpu_subtype, 0, "");
+SYSCTL_INT2QUAD(_hw, OID_AUTO, pagesize, CTLFLAG_RD | CTLFLAG_KERN, &page_size, "");
+SYSCTL_QUAD    (_hw, OID_AUTO, busfrequency, CTLFLAG_RD | CTLFLAG_KERN, &gPEClockFrequencyInfo.bus_frequency_hz, "");
+SYSCTL_QUAD    (_hw, OID_AUTO, busfrequency_min, CTLFLAG_RD | CTLFLAG_KERN, &gPEClockFrequencyInfo.bus_frequency_min_hz, "");
+SYSCTL_QUAD    (_hw, OID_AUTO, busfrequency_max, CTLFLAG_RD | CTLFLAG_KERN, &gPEClockFrequencyInfo.bus_frequency_max_hz, "");
+SYSCTL_QUAD    (_hw, OID_AUTO, cpufrequency, CTLFLAG_RD | CTLFLAG_KERN, &gPEClockFrequencyInfo.cpu_frequency_hz, "");
+SYSCTL_QUAD    (_hw, OID_AUTO, cpufrequency_min, CTLFLAG_RD | CTLFLAG_KERN, &gPEClockFrequencyInfo.cpu_frequency_min_hz, "");
+SYSCTL_QUAD    (_hw, OID_AUTO, cpufrequency_max, CTLFLAG_RD | CTLFLAG_KERN, &gPEClockFrequencyInfo.cpu_frequency_max_hz, "");
+SYSCTL_PROC    (_hw, OID_AUTO, cachelinesize, CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_KERN, 0, HW_CACHELINE | CTLHW_RETQUAD, sysctl_hw_generic, "Q", "");
+SYSCTL_PROC    (_hw, OID_AUTO, l1icachesize, CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_KERN, 0, HW_L1ICACHESIZE | CTLHW_RETQUAD, sysctl_hw_generic, "Q", "");
+SYSCTL_PROC    (_hw, OID_AUTO, l1dcachesize, CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_KERN, 0, HW_L1DCACHESIZE | CTLHW_RETQUAD, sysctl_hw_generic, "Q", "");
+SYSCTL_PROC    (_hw, OID_AUTO, l2cachesize, CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_KERN, 0, HW_L2CACHESIZE | CTLHW_RETQUAD, sysctl_hw_generic, "Q", "");
+SYSCTL_PROC    (_hw, OID_AUTO, l3cachesize, CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_KERN, 0, HW_L3CACHESIZE | CTLHW_RETQUAD, sysctl_hw_generic, "Q", "");
+SYSCTL_INT2QUAD(_hw, OID_AUTO, tbfrequency, CTLFLAG_RD | CTLFLAG_KERN, &gPEClockFrequencyInfo.timebase_frequency_hz, "");
+SYSCTL_QUAD    (_hw, HW_MEMSIZE, memsize, CTLFLAG_RD | CTLFLAG_KERN, &max_mem, "");
+>>>>>>> origin/10.2
 
 /*
  * Optional features can register nodes below hw.optional.
@@ -390,9 +498,21 @@ SYSCTL_INT     (_hw, OID_AUTO, packages, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOC
  * 0.  If the feature is present and its use is advised, the node should 
  * return 1.
  */
+<<<<<<< HEAD
 SYSCTL_NODE(_hw, OID_AUTO, optional, CTLFLAG_RW|CTLFLAG_LOCKED, NULL, "optional features");
 
 SYSCTL_INT(_hw_optional, OID_AUTO, floatingpoint, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, (int *)NULL, 1, "");	/* always set */
+=======
+SYSCTL_NODE(_hw, OID_AUTO, optional, CTLFLAG_RW, NULL, "optional features");
+
+SYSCTL_INT(_hw_optional, OID_AUTO, floatingpoint, CTLFLAG_RD | CTLFLAG_KERN, 0, 1, "");	/* always set */
+
+/*
+ * Export of _cpu_capabilities to userspace, consumed by the pthread code
+ * only.
+ */
+SYSCTL_INT(_hw, OID_AUTO, _cpu_capabilities, CTLFLAG_RD, &_cpu_capabilities, 0, "");
+>>>>>>> origin/10.2
 
 /*
  * Deprecated variables.  These are supported for backwards compatibility
@@ -406,6 +526,7 @@ SYSCTL_INT(_hw_optional, OID_AUTO, floatingpoint, CTLFLAG_RD | CTLFLAG_KERN | CT
  *
  * The *_compat nodes are *NOT* visible within the kernel.
  */
+<<<<<<< HEAD
 SYSCTL_PROC(_hw, HW_PAGESIZE,     pagesize_compat, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, 0, HW_PAGESIZE, sysctl_hw_generic, "I", "");
 SYSCTL_COMPAT_INT (_hw, HW_BUS_FREQ,     busfrequency_compat, CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, &gPEClockFrequencyInfo.bus_clock_rate_hz, 0, "");
 SYSCTL_COMPAT_INT (_hw, HW_CPU_FREQ,     cpufrequency_compat, CTLFLAG_RD | CTLFLAG_MASKED | CTLFLAG_LOCKED, &gPEClockFrequencyInfo.cpu_clock_rate_hz, 0, "");
@@ -465,6 +586,25 @@ SYSCTL_PROC(_hw_optional, OID_AUTO, sgx,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN
 #error Unsupported arch
 #endif /* !__i386__ && !__x86_64 && !__arm__ && ! __arm64__ */
 
+=======
+SYSCTL_INT (_hw, HW_PAGESIZE,     pagesize_compat, CTLFLAG_RD | CTLFLAG_MASKED, &page_size, 0, "");
+SYSCTL_INT (_hw, HW_BUS_FREQ,     busfrequency_compat, CTLFLAG_RD | CTLFLAG_MASKED, &gPEClockFrequencyInfo.bus_clock_rate_hz, 0, "");
+SYSCTL_INT (_hw, HW_CPU_FREQ,     cpufrequency_compat, CTLFLAG_RD | CTLFLAG_MASKED, &gPEClockFrequencyInfo.cpu_clock_rate_hz, 0, "");
+SYSCTL_PROC(_hw, HW_CACHELINE,    cachelinesize_compat, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED, 0, HW_CACHELINE, sysctl_hw_generic, "I", "");
+SYSCTL_PROC(_hw, HW_L1ICACHESIZE, l1icachesize_compat, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED, 0, HW_L1ICACHESIZE, sysctl_hw_generic, "I", "");
+SYSCTL_PROC(_hw, HW_L1DCACHESIZE, l1dcachesize_compat, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED, 0, HW_L1DCACHESIZE, sysctl_hw_generic, "I", "");
+SYSCTL_PROC(_hw, HW_L2CACHESIZE,  l2cachesize_compat, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED, 0, HW_L2CACHESIZE, sysctl_hw_generic, "I", "");
+SYSCTL_PROC(_hw, HW_L3CACHESIZE,  l3cachesize_compat, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED, 0, HW_L3CACHESIZE, sysctl_hw_generic, "I", "");
+SYSCTL_INT (_hw, HW_TB_FREQ,      tbfrequency_compat, CTLFLAG_RD | CTLFLAG_MASKED, &gPEClockFrequencyInfo.timebase_frequency_hz, 0, "");
+SYSCTL_PROC(_hw, HW_MACHINE,      machine, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MASKED, 0, HW_MACHINE, sysctl_hw_generic, "A", "");
+SYSCTL_PROC(_hw, HW_MODEL,        model, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MASKED, 0, HW_MODEL, sysctl_hw_generic, "A", "");
+SYSCTL_INT (_hw, HW_PHYSMEM,      physmem, CTLFLAG_RD | CTLFLAG_MASKED, &mem_size, 0, "");
+SYSCTL_PROC(_hw, HW_USERMEM,      usermem, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED, 0, HW_USERMEM,	sysctl_hw_generic, "I", "");
+SYSCTL_PROC(_hw, HW_EPOCH,        epoch, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED, 0, HW_EPOCH, sysctl_hw_generic, "I", "");
+SYSCTL_PROC(_hw, HW_VECTORUNIT,   vectorunit, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED, 0, HW_VECTORUNIT, sysctl_hw_generic, "I", "");
+SYSCTL_PROC(_hw, HW_L2SETTINGS,   l2settings, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED, 0, HW_L2SETTINGS, sysctl_hw_generic, "I", "");
+SYSCTL_PROC(_hw, HW_L3SETTINGS,   l3settings, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_MASKED, 0, HW_L3SETTINGS, sysctl_hw_generic, "I", "");
+>>>>>>> origin/10.2
 
 /******************************************************************************
  * Generic MIB initialisation.
@@ -475,6 +615,7 @@ SYSCTL_PROC(_hw_optional, OID_AUTO, sgx,	CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_KERN
 void
 sysctl_mib_init(void)
 {
+<<<<<<< HEAD
 	cputype = cpu_type();
 	cpusubtype = cpu_subtype();
 	cputhreadtype = cpu_threadtype();
@@ -484,6 +625,9 @@ sysctl_mib_init(void)
 #error Unsupported arch
 #endif
 
+=======
+	
+>>>>>>> origin/10.2
 	/*
 	 * Populate the optional portion of the hw.* MIB.
 	 *
@@ -491,6 +635,7 @@ sysctl_mib_init(void)
 	 *     that actually directly relate to the functions in
 	 *     question.
 	 */
+<<<<<<< HEAD
 
 	if (cputhreadtype != CPU_THREADTYPE_NONE) {
 		sysctl_register_oid(&sysctl__hw_cputhreadtype);
@@ -521,5 +666,90 @@ sysctl_mib_init(void)
 #else
 #error unknown architecture
 #endif /* !__i386__ && !__x86_64 && !__arm__ && !__arm64__ */
+=======
+#ifdef __ppc__
+	{
+		static int altivec_flag = -1;
+		static SYSCTL_INT(_hw_optional, OID_AUTO, altivec, CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, &altivec_flag, 0, "");
+
+		if (_cpu_capabilities & kHasAltivec) {
+			altivec_flag = 1;
+			sysctl_register_oid(&sysctl__hw_optional_altivec);
+		}
+	}
+	{
+		static int graphicsops_flag = -1;
+		static SYSCTL_INT(_hw_optional, OID_AUTO, graphicsops, CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, &graphicsops_flag, 0, "");
+
+		if (_cpu_capabilities & kHasGraphicsOps) {
+			graphicsops_flag = 1;
+			sysctl_register_oid(&sysctl__hw_optional_graphicsops);
+		}		
+	}
+	{
+		static int x64bitops_flag = -1;
+		static SYSCTL_INT(_hw_optional, OID_AUTO, 64bitops, CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, &x64bitops_flag, 0, "");
+
+		if (_cpu_capabilities & k64Bit) {
+			x64bitops_flag = 1;
+			sysctl_register_oid(&sysctl__hw_optional_64bitops);
+		}		
+	}
+	{
+		static int fsqrt_flag = -1;
+		static SYSCTL_INT(_hw_optional, OID_AUTO, fsqrt, CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, &fsqrt_flag, 0, "");
+
+		if (_cpu_capabilities & kHasFsqrt) {
+			fsqrt_flag = 1;
+			sysctl_register_oid(&sysctl__hw_optional_fsqrt);
+		}		
+	}
+	{
+		static int stfiwx_flag = -1;
+		static SYSCTL_INT(_hw_optional, OID_AUTO, stfiwx, CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, &stfiwx_flag, 0, "");
+
+		if (_cpu_capabilities & kHasStfiwx) {
+			stfiwx_flag = 1;
+			sysctl_register_oid(&sysctl__hw_optional_stfiwx);
+		}		
+	}
+	{
+		static int dcba_flag = -1;
+		static SYSCTL_INT(_hw_optional, OID_AUTO, dcba, CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, &dcba_flag, 0, "");
+
+		if (_cpu_capabilities & kDcbaAvailable)
+			dcba_flag = 0;
+		if (_cpu_capabilities & kDcbaRecommended)
+			dcba_flag = 1;
+		if (dcba_flag >= 0)
+			sysctl_register_oid(&sysctl__hw_optional_dcba);
+	}
+	{
+		static int datastreams_flag = -1;
+		static SYSCTL_INT(_hw_optional, OID_AUTO, datastreams, CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, &datastreams_flag, 0, "");
+
+		if (_cpu_capabilities & kDataStreamsAvailable)
+			datastreams_flag = 0;
+		if (_cpu_capabilities & kDataStreamsRecommended)
+			datastreams_flag = 1;
+		if (datastreams_flag >= 0)
+			sysctl_register_oid(&sysctl__hw_optional_datastreams);
+	}
+	{
+		static int dcbtstreams_flag = -1;
+		static SYSCTL_INT(_hw_optional, OID_AUTO, dcbtstreams, CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, &dcbtstreams_flag, 0, "");
+
+		if (_cpu_capabilities & kDcbtStreamsAvailable)
+			dcbtstreams_flag = 0;
+		if (_cpu_capabilities & kDcbtStreamsRecommended)
+			dcbtstreams_flag = 1;
+		if (dcbtstreams_flag >= 0)
+			sysctl_register_oid(&sysctl__hw_optional_dcbtstreams);
+	}
+#else
+# warning we do not support this platform yet
+#endif /* __ppc__ */
+
+>>>>>>> origin/10.2
 
 }

@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -35,6 +46,7 @@
 =======
 const char * gIOKernelKmods =
 "{
+<<<<<<< HEAD
 <<<<<<< HEAD
     'com.apple.kernel'                         = '1.3.7';
     'com.apple.kernel.bsd'                     = '1.0.7';
@@ -63,6 +75,18 @@ const char * gIOKernelKmods =
     'com.apple.iokit.ApplePlatformFamily'      = '1.0';
     'com.apple.driver.AppleNMI'                = '1.0';
 >>>>>>> origin/10.1
+=======
+    'com.apple.kernel'                         = '6.8';
+    'com.apple.kernel.bsd'                     = '6.8';
+    'com.apple.kernel.iokit'                   = '6.8';
+    'com.apple.kernel.libkern'                 = '6.8';
+    'com.apple.kernel.mach'                    = '6.8';
+    'com.apple.iokit.IOADBFamily'              = '6.8';
+    'com.apple.iokit.IONVRAMFamily'            = '6.8';
+    'com.apple.iokit.IOSystemManagementFamily' = '6.8';
+    'com.apple.iokit.ApplePlatformFamily'      = '6.8';
+    'com.apple.driver.AppleNMI'                = '6.8';
+>>>>>>> origin/10.2
 }";
 
 >>>>>>> origin/10.0

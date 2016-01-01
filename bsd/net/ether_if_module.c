@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -640,6 +651,24 @@ ether_demux(ifnet_t ifp, mbuf_t m, char *frame_header,
             m->m_flags |= M_BCAST;
         else
             m->m_flags |= M_MCAST;
+    } else {
+        /*
+         * When the driver is put into promiscuous mode we may receive unicast
+         * frames that are not intended for our interfaces.  They are filtered
+         * here to keep them from traveling further up the stack to code that
+         * is not expecting them or prepared to deal with them.  In the near
+         * future, the filtering done here will be moved even further down the
+         * stack into the IONetworkingFamily, preventing even interface
+         * filter NKE's from receiving promiscuous packets.  Please use BPF.
+         */
+        #define ETHER_CMP(x, y) ( ((u_int16_t *) x)[0] != ((u_int16_t *) y)[0] || \
+                                  ((u_int16_t *) x)[1] != ((u_int16_t *) y)[1] || \
+                                  ((u_int16_t *) x)[2] != ((u_int16_t *) y)[2] )
+    
+        if (ETHER_CMP(eh->ether_dhost, ((struct arpcom *) ifp)->ac_enaddr)) {
+            m_freem(m);
+            return EJUSTRETURN;
+        }
     }
     
     data = mtod(m, u_int8_t*);

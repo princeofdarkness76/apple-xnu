@@ -7,6 +7,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -18,6 +19,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -917,6 +928,7 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 			error =  fo_ioctl(fp, TIOCSPGRP, (caddr_t)&tmp, &context);
 			goto out;
 		}
+<<<<<<< HEAD
 
 		if (tmp <= 0) {
 			tmp = -tmp;
@@ -928,6 +940,15 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 			}
 			tmp = (int)p1->p_pgrpid;
 			proc_rele(p1);
+=======
+		if ((long)uap->arg <= 0) {
+			uap->arg = (int)(-(long)(uap->arg));
+		} else {
+			struct proc *p1 = pfind((long)uap->arg);
+			if (p1 == 0)
+				return (ESRCH);
+			uap->arg = (int)p1->p_pgrp->pg_id;
+>>>>>>> origin/10.2
 		}
 		error =  fo_ioctl(fp, (int)TIOCSPGRP, (caddr_t)&tmp, &context);
 		goto out;
@@ -1408,7 +1429,14 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 		vp = (struct vnode *)fp->f_data;
 		proc_fdunlock(p);
 
+<<<<<<< HEAD
 		if ( (error = vnode_getwithref(vp)) == 0 ) {
+=======
+		if (error = copyin((caddr_t)uap->arg,
+					(caddr_t)&ra_struct, sizeof (ra_struct)))
+			return(error);
+		return (VOP_IOCTL(vp, 1, (caddr_t)&ra_struct, 0, fp->f_cred, p));
+>>>>>>> origin/10.2
 
 		        *retval = vnode_isnocache(vp);
 
@@ -1427,6 +1455,7 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 			goto out;
 		}
 		vp = (struct vnode *)fp->f_data;
+<<<<<<< HEAD
 		proc_fdunlock(p);
 
 		if ( (error = vnode_getwithref(vp)) == 0 ) {
@@ -1439,6 +1468,18 @@ fcntl_nocancel(proc_t p, struct fcntl_nocancel_args *uap, int32_t *retval)
 			        vnode_clear_openevt(vp);
 
 			(void)vnode_put(vp);
+=======
+		if (vp->v_tag != VT_HFS)	/* XXX */
+			error = EINVAL;
+		else {
+			/* lock the vnode and call VOP_IOCTL to handle the I/O */
+			error = vn_lock(vp, LK_EXCLUSIVE|LK_RETRY, p);
+			if (error)
+				return (error);
+			error = VOP_IOCTL(vp, (uap->cmd == F_WRITEBOOTSTRAP) ? 3 : 2,
+					(caddr_t)&fbt_struct, 0, fp->f_cred, p);
+			VOP_UNLOCK(vp,0,p);
+>>>>>>> origin/10.2
 		}
 		goto outdrop;
 
@@ -4642,6 +4683,7 @@ fg_free(struct fileglob *fg)
 		fg->fg_vn_data = NULL;
 	}
 
+<<<<<<< HEAD
 	if (IS_VALID_CRED(fg->fg_cred)) {
 		kauth_cred_unref(&fg->fg_cred);
 	}
@@ -4656,7 +4698,12 @@ fg_free(struct fileglob *fg)
 
 	fp->f_count = 0;
 
+=======
+>>>>>>> origin/10.2
 	nfiles--;
+	memset(fp, 0xff, sizeof *fp);
+	fp->f_count = (short)0xffff;
+
 	FREE_ZONE(fp, sizeof *fp, M_FILE);
 >>>>>>> origin/10.1
 }
@@ -5672,12 +5719,20 @@ fg_ref(struct fileproc * fp)
 void
 fg_drop(struct fileproc * fp)
 {
+<<<<<<< HEAD
 	struct fileglob *fg;
 
 	fg = fp->f_fglob;
 	lck_mtx_lock_spin(&fg->fg_lock);
 	fg->fg_count--;
 	lck_mtx_unlock(&fg->fg_lock);
+=======
+	if (fp->f_count == (short)0xffff)
+		return (-1);
+	if (++fp->f_count <= 0)
+		panic("fref: f_count");
+	return ((int)fp->f_count);
+>>>>>>> origin/10.2
 }
 
 #if SOCKETS
@@ -5696,6 +5751,7 @@ fg_drop(struct fileproc * fp)
 boolean_t
 fg_insertuipc_mark(struct fileglob * fg)
 {
+<<<<<<< HEAD
 	boolean_t insert = FALSE;
 
 	lck_mtx_lock_spin(&fg->fg_lock);
@@ -5714,6 +5770,13 @@ fg_insertuipc_mark(struct fileglob * fg)
 	}
 	lck_mtx_unlock(&fg->fg_lock);
 	return (insert);
+=======
+	if (fp->f_count == (short)0xffff)
+		panic("frele: stale");
+	if (--fp->f_count < 0)
+		panic("frele: count < 0");
+	return ((int)fp->f_count);
+>>>>>>> origin/10.2
 }
 
 /*
@@ -5975,6 +6038,7 @@ file_issendable(proc_t p, struct fileproc *fp)
 struct fileproc *
 fileproc_alloc_init(__unused void *arg)
 {
+<<<<<<< HEAD
 	struct fileproc *fp;
 
 	MALLOC_ZONE(fp, struct fileproc *, sizeof (*fp), M_FILEPROC, M_WAITOK);
@@ -5982,6 +6046,11 @@ fileproc_alloc_init(__unused void *arg)
 		bzero(fp, sizeof (*fp));
 
 	return (fp);
+=======
+	if (fp->f_count == (short)0xffff)
+		panic("fcount: stale");
+	return ((int)fp->f_count);
+>>>>>>> origin/10.2
 }
 
 void

@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -120,8 +131,16 @@ TAILQ_HEAD(dqfreelist, dquot) dqfreelist;
 TAILQ_HEAD(dqdirtylist, dquot) dqdirtylist;
 
 
+<<<<<<< HEAD
 static int  dqlookup(struct quotafile *, u_int32_t, struct	dqblk *, u_int32_t *);
 static int  dqsync_locked(struct dquot *dq);
+=======
+/*
+ * Dquot dirty orphans list.
+ */
+TAILQ_HEAD(dqdirtylist, dquot) dqdirtylist;
+
+>>>>>>> origin/10.2
 
 static void qf_lock(struct quotafile *);
 static void qf_unlock(struct quotafile *);
@@ -185,6 +204,7 @@ dqhashinit(void)
 
 	TAILQ_INIT(&dqfreelist);
 	TAILQ_INIT(&dqdirtylist);
+<<<<<<< HEAD
 	dqhashtbl = hashinit(desiredvnodes, M_DQUOT, &dqhash);
 out:
 	dq_list_unlock();
@@ -400,6 +420,8 @@ dqfileinit(struct quotafile *qfp)
 	qfp->qf_qflags = 0;
 
 	lck_mtx_init(&qfp->qf_lock, qf_lck_grp, qf_lck_attr);
+=======
+>>>>>>> origin/10.2
 }
 
 
@@ -560,12 +582,17 @@ relookup:
 		 * Cache hit with no references.  Take
 		 * the structure off the free list.
 		 */
+<<<<<<< HEAD
 		if (dq->dq_cnt++ == 0) {
+=======
+		if (dq->dq_cnt == 0) {
+>>>>>>> origin/10.2
 			if (dq->dq_flags & DQ_MOD)
 				TAILQ_REMOVE(&dqdirtylist, dq, dq_freelist);
 			else
 				TAILQ_REMOVE(&dqfreelist, dq, dq_freelist);
 		}
+<<<<<<< HEAD
 		dq_unlock_internal(dq);
 
 		if (fdq != NULL) {
@@ -588,6 +615,9 @@ relookup:
 			 */
 		        _FREE(ndq, M_DQUOT);
 		}
+=======
+		DQREF(dq);
+>>>>>>> origin/10.2
 		*dqp = dq;
 
 		return (0);
@@ -919,6 +949,7 @@ dqreclaim(struct dquot *dq)
 }
 
 /*
+<<<<<<< HEAD
  * Update a quota file's orphaned disk quotas.
  */
 void
@@ -993,6 +1024,58 @@ dqsync(struct dquot *dq)
 }
 
 
+=======
+ * Release a reference to a dquot but don't do any I/O.
+ */
+void
+dqreclaim(vp, dq)
+	struct vnode *vp;
+	register struct dquot *dq;
+{
+	if (dq == NODQUOT)
+		return;
+
+	if (--dq->dq_cnt > 0)
+		return;
+
+	if (dq->dq_flags & DQ_MOD)
+		TAILQ_INSERT_TAIL(&dqdirtylist, dq, dq_freelist);
+	else
+		TAILQ_INSERT_TAIL(&dqfreelist, dq, dq_freelist);
+}
+
+/*
+ * Update a quota file's orphaned disk quotas.
+ */
+void
+dqsync_orphans(qfp)
+	struct quotafile *qfp;
+{
+	struct dquot *dq;
+
+  loop:
+	TAILQ_FOREACH(dq, &dqdirtylist, dq_freelist) {
+		if ((dq->dq_flags & DQ_MOD) == 0)
+			panic("dqsync_orphans: dirty dquot isn't");
+		if (dq->dq_cnt != 0)
+			panic("dqsync_orphans: dquot in use");
+
+		if (dq->dq_qfile == qfp) {
+			TAILQ_REMOVE(&dqdirtylist, dq, dq_freelist);
+
+			dq->dq_cnt++;
+			(void) dqsync(NULLVP, dq);
+			dq->dq_cnt--;
+
+			if ((dq->dq_cnt == 0) && (dq->dq_flags & DQ_MOD) == 0)
+				TAILQ_INSERT_TAIL(&dqfreelist, dq, dq_freelist);
+
+			goto loop;
+		}
+	}
+}
+
+>>>>>>> origin/10.2
 /*
  * Update the disk quota in the quota file.
  */

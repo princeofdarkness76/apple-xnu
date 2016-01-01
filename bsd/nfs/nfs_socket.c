@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -1029,6 +1040,10 @@ nfs_connect_search_socket_connect(struct nfsmount *nmp, struct nfs_socket *nso, 
 		if (error) {
 			FSDBG(530, myrep->r_xid, myrep, nmp, error);
 			nfs_rcvunlock(&nmp->nm_flag);
+
+			/* Bailout asap if nfsmount struct gone (unmounted). */
+			if (!myrep->r_nmp || !nmp->nm_so)
+				return (ECONNABORTED);
 
 			/*
 			 * Ignore routing errors on connectionless protocols??
@@ -6443,6 +6458,7 @@ nfsrv_rephead(
 	struct nfsm_chain *nmrepp,
 	size_t siz)
 {
+<<<<<<< HEAD
 	mbuf_t mrep;
 	u_int32_t *tl;
 	struct nfsm_chain nmrep;
@@ -6453,6 +6469,19 @@ nfsrv_rephead(
 		siz = 0;
 
 =======
+=======
+	register int *flagp;
+	int slpflag, slptimeo = 0;
+
+	/* make sure we still have our mountpoint */
+	if (!rep->r_nmp) {
+		if (rep->r_mrep != NULL)
+			return (EALREADY);
+		return (ECONNABORTED);
+	}
+
+	flagp = &rep->r_nmp->nm_flag;
+>>>>>>> origin/10.2
 	FSDBG_TOP(534, rep->r_xid, rep, rep->r_nmp, *flagp);
 	if (*flagp & NFSMNT_INT)
 		slpflag = PCATCH;
@@ -6787,11 +6816,19 @@ dorecs:
 int
 nfsrv_getstream(struct nfsrv_sock *slp, int waitflag)
 {
+<<<<<<< HEAD
 	mbuf_t m;
 	char *cp1, *cp2, *mdata;
 	int len, mlen, error;
 	mbuf_t om, m2, recm;
 	u_int32_t recmark;
+=======
+	register struct mbuf *m, **mpp;
+	register char *cp1, *cp2;
+	register int len;
+	struct mbuf *om, *m2, *recm;
+	u_long recmark;
+>>>>>>> origin/10.2
 
 	if (slp->ns_flag & SLP_GETSTREAM)
 		panic("nfs getstream");

@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -58,16 +69,24 @@ struct hfs_mount_args {
 	mode_t	hfs_mask;		/* mask to be applied for hfs perms  (standard HFS only) */
 	u_int32_t hfs_encoding;	/* encoding for this volume (standard HFS only) */
 	struct	timezone hfs_timezone;	/* user time zone info (standard HFS only) */
+<<<<<<< HEAD
 	int		flags;			/* mounting flags, see below */
 	int     journal_tbuffer_size;   /* size in bytes of the journal transaction buffer */
 	int		journal_flags;          /* flags to pass to journal_open/create */
 	int		journal_disable;        /* don't use journaling (potentially dangerous) */
+=======
+	int	flags;			/* mounting flags, see below */
+	int     journal_tbuffer_size;   /* size in bytes of the journal transaction buffer */
+	int	journal_flags;          /* flags to pass to journal_open/create */
+	int	journal_disable;        /* don't use journaling (potentially dangerous) */
+>>>>>>> origin/10.2
 };
 
 #define HFSFSMNT_NOXONFILES	0x1	/* disable execute permissions for files */
 #define HFSFSMNT_WRAPPER	0x2	/* mount HFS wrapper (if it exists) */
 #define HFSFSMNT_EXTENDED_ARGS  0x4     /* indicates new fields after "flags" are valid */
 
+<<<<<<< HEAD
 /*
  * Sysctl values for HFS
  */
@@ -81,6 +100,8 @@ struct hfs_mount_args {
 #define HFS_REPLAY_JOURNAL	0x6a6e6c72
 #define HFS_ENABLE_RESIZE_DEBUG 4	/* enable debug code for volume resizing */
 
+=======
+>>>>>>> origin/10.2
 #endif /* __APPLE_API_UNSTABLE */
 
 #endif /* ! _HFS_MOUNT_H_ */

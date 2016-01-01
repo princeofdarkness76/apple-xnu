@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -541,6 +552,7 @@ mount_common(char *fstypename, vnode_t pvp, vnode_t vp,
 		}
 		mp = vp->v_mount;
 
+<<<<<<< HEAD
 		/* unmount in progress return error */
 		mount_lock_spin(mp);
 		if (mp->mnt_lflag & MNT_LUNMOUNT) {
@@ -551,12 +563,19 @@ mount_common(char *fstypename, vnode_t pvp, vnode_t vp,
 		mount_unlock(mp);
 		lck_rw_lock_exclusive(&mp->mnt_rwlock);
 		is_rwlock_locked = TRUE;
+=======
+		if (vfs_busy(mp, LK_NOWAIT, 0, p)) {
+			vput(vp);
+			return (EBUSY);
+		}
+>>>>>>> origin/10.2
 		/*
 		 * We only allow the filesystem to be reloaded if it
 		 * is currently mounted read-only.
 		 */
 		if ((flags & MNT_RELOAD) &&
 		    ((mp->mnt_flag & MNT_RDONLY) == 0)) {
+<<<<<<< HEAD
 			error = ENOTSUP;
 			goto out1;
 		}
@@ -580,13 +599,27 @@ mount_common(char *fstypename, vnode_t pvp, vnode_t vp,
 		}
 #endif /* CONFIG_IMGSRC_ACCESS */
 
+=======
+		        vfs_unbusy(mp, p);
+			vput(vp);
+			return (EOPNOTSUPP);	/* Needs translation */
+		}
+>>>>>>> origin/10.2
 		/*
 		 * Only root, or the user that did the original mount is
 		 * permitted to update it.
 		 */
+<<<<<<< HEAD
 		if (mp->mnt_vfsstat.f_owner != kauth_cred_getuid(vfs_context_ucred(ctx)) &&
 		    (error = suser(vfs_context_ucred(ctx), &p->p_acflag))) {
 			goto out1;
+=======
+		if (mp->mnt_stat.f_owner != p->p_ucred->cr_uid &&
+		    (error = suser(p->p_ucred, &p->p_acflag))) {
+		        vfs_unbusy(mp, p);
+			vput(vp);
+			return (error);
+>>>>>>> origin/10.2
 		}
 #if CONFIG_MACF
 		error = mac_mount_check_remount(ctx, mp);
@@ -598,6 +631,7 @@ mount_common(char *fstypename, vnode_t pvp, vnode_t vp,
 		 * For non-root users, silently enforce MNT_NOSUID and MNT_NODEV,
 		 * and MNT_NOEXEC if mount point is already MNT_NOEXEC.
 		 */
+<<<<<<< HEAD
 		if ((!kernelmount) && suser(vfs_context_ucred(ctx), NULL)) {
 			flags |= MNT_NOSUID | MNT_NODEV;
 			if (mp->mnt_flag & MNT_NOEXEC)
@@ -610,6 +644,25 @@ mount_common(char *fstypename, vnode_t pvp, vnode_t vp,
 		mp->mnt_flag |= flags & (MNT_RELOAD | MNT_FORCE | MNT_UPDATE);
 
 		vfsp = mp->mnt_vtable;
+=======
+		if (p->p_ucred->cr_uid != 0) {
+			if (uap->flags & MNT_EXPORTED) {
+			        vfs_unbusy(mp, p);
+				vput(vp);
+				return (EPERM);
+			}
+			uap->flags |= MNT_NOSUID | MNT_NODEV;
+			if (mp->mnt_flag & MNT_NOEXEC)
+				uap->flags |= MNT_NOEXEC;
+		}
+		flag = mp->mnt_flag;
+
+		mp->mnt_flag |=
+		    uap->flags & (MNT_RELOAD | MNT_FORCE | MNT_UPDATE);
+
+		VOP_UNLOCK(vp, 0, p);
+
+>>>>>>> origin/10.2
 		goto update;
 	}
 	/*
@@ -872,9 +925,16 @@ update:
 	/*
 	 * Mount the filesystem.
 	 */
+<<<<<<< HEAD
 	error = VFS_MOUNT(mp, device_vnode, fsmountargs, ctx);
 
 	if (flags & MNT_UPDATE) {
+=======
+	error = VFS_MOUNT(mp, uap->path, uap->data, &nd, p);
+
+	if (uap->flags & MNT_UPDATE) {
+		vrele(vp);
+>>>>>>> origin/10.2
 		if (mp->mnt_kern_flag & MNTK_WANTRDWR)
 			mp->mnt_flag &= ~MNT_RDONLY;
 		mp->mnt_flag &=~
@@ -922,6 +982,7 @@ update:
 		vp->v_mountedhere =mp;
 		simple_unlock(&vp->v_interlock);
 		simple_lock(&mountlist_slock);
+
 		CIRCLEQ_INSERT_TAIL(&mountlist, mp, mnt_list);
 		simple_unlock(&mountlist_slock);
 		checkdirs(vp);
@@ -1288,6 +1349,7 @@ authorize_devpath_and_update_mntfromname(mount_t mp, user_addr_t devpath, vnode_
 		goto out;
 	}
 
+<<<<<<< HEAD
 	error = vnode_getwithref(realdevvp);
 	if (error != 0) {
 		IMGSRC_DEBUG("Coudn't get iocount on device.\n");
@@ -1298,6 +1360,18 @@ authorize_devpath_and_update_mntfromname(mount_t mp, user_addr_t devpath, vnode_
 		IMGSRC_DEBUG("Wrong dev_t.\n");
 		error = ENXIO;
 		goto out1;
+=======
+	/* increment the operations count */
+	if (!error)
+		vfs_nummntops++;
+
+	CIRCLEQ_REMOVE(&mountlist, mp, mnt_list);
+	if ((coveredvp = mp->mnt_vnodecovered) != NULLVP) {
+		coveredvp->v_mountedhere = (struct mount *)0;
+		simple_unlock(&mountlist_slock);
+		vrele(coveredvp);
+		simple_lock(&mountlist_slock);
+>>>>>>> origin/10.2
 	}
 
 	strlcpy(mp->mnt_vfsstat.f_mntfromname, nd.ni_cnd.cn_pnbuf, MAXPATHLEN);

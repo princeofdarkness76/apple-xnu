@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -112,7 +123,15 @@
 #include <IOKit/IOPlatformExpert.h>
 #include <IOKit/IOHibernatePrivate.h>
 
+<<<<<<< HEAD
 #include <pexpert/i386/efi.h>
+=======
+vm_size_t	mem_size = 0;
+uint64_t	max_mem;
+vm_offset_t	first_addr = 0;	/* set by start.s - keep out of bss */
+vm_offset_t	first_avail = 0;/* first after page tables */
+vm_offset_t	last_addr;
+>>>>>>> origin/10.2
 
 #include <kern/thread.h>
 #include <kern/sched.h>
@@ -916,8 +935,20 @@ Debugger(
 	 * as a quiet way into the debugger.
 	 */
 
+<<<<<<< HEAD
 	if (panicstr) {
 		disable_preemption();
+=======
+	if (mem_size != 0) {
+	    if (mem_size < (last_addr) - bios_hole_size)
+		last_addr = mem_size + bios_hole_size;
+	}
+
+	first_addr = round_page(first_addr);
+	last_addr = trunc_page(last_addr);
+	mem_size = last_addr - bios_hole_size;
+	max_mem = mem_size;
+>>>>>>> origin/10.2
 
 /* Issue an I/O port read if one has been requested - this is an event logic
  * analyzers can use as a trigger point.

@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -182,6 +193,7 @@ hfs_chkdq(cp, change, cred, flags)
 		return (0);
 	}
 	p = current_proc();
+<<<<<<< HEAD
 	/*
 	 * This use of proc_ucred() is safe because kernproc credential never
 	 * changes.
@@ -189,6 +201,11 @@ hfs_chkdq(cp, change, cred, flags)
 	if (!IS_VALID_CRED(cred))
 		cred = proc_ucred(kernproc);
 	if (suser(cred, NULL) || proc_forcequota(p)) {
+=======
+	if (cred == NOCRED)
+		cred = kernproc->p_ucred;
+	if ((cred->cr_uid != 0) || (p->p_flag & P_FORCEQUOTA)) {
+>>>>>>> origin/10.2
 		for (i = 0; i < MAXQUOTAS; i++) {
 			if ((dq = cp->c_dquot[i]) == NODQUOT)
 				continue;
@@ -202,12 +219,21 @@ hfs_chkdq(cp, change, cred, flags)
 		for (i = 0; i < MAXQUOTAS; i++) {
 			if ((dq = cp->c_dquot[i]) == NODQUOT)
 				continue;
+<<<<<<< HEAD
 			dqlock(dq);
 
 			dq->dq_curbytes += change;
 			dq->dq_flags |= DQ_MOD;
 
 			dqunlock(dq);
+=======
+			while (dq->dq_flags & DQ_LOCK) {
+				dq->dq_flags |= DQ_WANT;
+				sleep((caddr_t)dq, PINOD+1);
+			}
+			dq->dq_curbytes += change;
+			dq->dq_flags |= DQ_MOD;
+>>>>>>> origin/10.2
 		}
 	}
 	return (error);
@@ -236,9 +262,16 @@ hfs_chkdqchg(cp, change, cred, type)
 	 */
 	if (ncurbytes >= dq->dq_bhardlimit && dq->dq_bhardlimit) {
 		if ((dq->dq_flags & DQ_BLKS) == 0 &&
+<<<<<<< HEAD
 		    cp->c_uid == kauth_cred_getuid(cred)) {
 #if 0	
 			printf("\nhfs: write failed, %s disk limit reached\n",
+=======
+		    cp->c_uid == cred->cr_uid) {
+#if 0	
+			printf("\n%s: write failed, %s disk limit reached\n",
+			    vp->v_mount->mnt_stat.f_mntonname,
+>>>>>>> origin/10.2
 			    quotatypes[type]);
 #endif
 			dq->dq_flags |= DQ_BLKS;
@@ -256,11 +289,20 @@ hfs_chkdqchg(cp, change, cred, type)
 
 		microuptime(&tv);
 		if (dq->dq_curbytes < dq->dq_bsoftlimit) {
+<<<<<<< HEAD
 			dq->dq_btime = tv.tv_sec +
 			    VTOHFS(vp)->hfs_qfiles[type].qf_btime;
 #if 0
 			if (cp->c_uid == kauth_cred_getuid(cred))
 				printf("\nhfs: warning, %s %s\n",
+=======
+			dq->dq_btime = time.tv_sec +
+			    VFSTOHFS(vp->v_mount)->hfs_qfiles[type].qf_btime;
+#if 0
+			if (cp->c_uid == cred->cr_uid)
+				printf("\n%s: warning, %s %s\n",
+				    vp->v_mount->mnt_stat.f_mntonname,
+>>>>>>> origin/10.2
 				    quotatypes[type], "disk quota exceeded");
 #endif
 			dqunlock(dq);
@@ -269,9 +311,16 @@ hfs_chkdqchg(cp, change, cred, type)
 		}
 		if (tv.tv_sec > (time_t)dq->dq_btime) {
 			if ((dq->dq_flags & DQ_BLKS) == 0 &&
+<<<<<<< HEAD
 			    cp->c_uid == kauth_cred_getuid(cred)) {
 #if 0
 				printf("\nhfs: write failed, %s %s\n",
+=======
+			    cp->c_uid == cred->cr_uid) {
+#if 0
+				printf("\n%s: write failed, %s %s\n",
+				    vp->v_mount->mnt_stat.f_mntonname,
+>>>>>>> origin/10.2
 				    quotatypes[type],
 				    "disk quota exceeded for too long");
 #endif
@@ -327,6 +376,7 @@ hfs_chkiq(cp, change, cred, flags)
 		return (0);
 	}
 	p = current_proc();
+<<<<<<< HEAD
 	/*
 	 * This use of proc_ucred() is safe because kernproc credential never
 	 * changes.
@@ -334,6 +384,11 @@ hfs_chkiq(cp, change, cred, flags)
 	if (!IS_VALID_CRED(cred))
 		cred = proc_ucred(kernproc);
 	if (suser(cred, NULL) || proc_forcequota(p)) {
+=======
+	if (cred == NOCRED)
+		cred = kernproc->p_ucred;
+	if ((cred->cr_uid != 0) || (p->p_flag & P_FORCEQUOTA)) {
+>>>>>>> origin/10.2
 		for (i = 0; i < MAXQUOTAS; i++) {
 			if ((dq = cp->c_dquot[i]) == NODQUOT)
 				continue;
@@ -347,6 +402,7 @@ hfs_chkiq(cp, change, cred, flags)
 		for (i = 0; i < MAXQUOTAS; i++) {
 			if ((dq = cp->c_dquot[i]) == NODQUOT)
 				continue;
+<<<<<<< HEAD
 			dqlock(dq);
 
 			dq->dq_curinodes += change;
@@ -415,6 +471,17 @@ int hfs_isiqchg_allowed(dq, hfsmp, change, cred, type, uid)
 	dqunlock(dq);
 
 	return (0);
+=======
+			while (dq->dq_flags & DQ_LOCK) {
+				dq->dq_flags |= DQ_WANT;
+				sleep((caddr_t)dq, PINOD+1);
+			}
+			dq->dq_curinodes += change;
+			dq->dq_flags |= DQ_MOD;
+		}
+	}
+	return (error);
+>>>>>>> origin/10.2
 }
 
 
@@ -441,9 +508,16 @@ hfs_chkiqchg(cp, change, cred, type)
 	 */
 	if (ncurinodes >= dq->dq_ihardlimit && dq->dq_ihardlimit) {
 		if ((dq->dq_flags & DQ_INODS) == 0 &&
+<<<<<<< HEAD
 		    cp->c_uid == kauth_cred_getuid(cred)) {
 #if 0
 			printf("\nhfs: write failed, %s cnode limit reached\n",
+=======
+		    cp->c_uid == cred->cr_uid) {
+#if 0
+			printf("\n%s: write failed, %s cnode limit reached\n",
+			    vp->v_mount->mnt_stat.f_mntonname,
+>>>>>>> origin/10.2
 			    quotatypes[type]);
 #endif
 			dq->dq_flags |= DQ_INODS;
@@ -461,11 +535,20 @@ hfs_chkiqchg(cp, change, cred, type)
 		
 		microuptime(&tv);
 		if (dq->dq_curinodes < dq->dq_isoftlimit) {
+<<<<<<< HEAD
 			dq->dq_itime = tv.tv_sec +
 			    VTOHFS(vp)->hfs_qfiles[type].qf_itime;
 #if 0
 			if (cp->c_uid == kauth_cred_getuid(cred))
 				printf("\nhfs: warning, %s %s\n",
+=======
+			dq->dq_itime = time.tv_sec +
+			    VFSTOHFS(vp->v_mount)->hfs_qfiles[type].qf_itime;
+#if 0
+			if (cp->c_uid == cred->cr_uid)
+				printf("\n%s: warning, %s %s\n",
+				    vp->v_mount->mnt_stat.f_mntonname,
+>>>>>>> origin/10.2
 				    quotatypes[type], "cnode quota exceeded");
 #endif
 			dqunlock(dq);
@@ -474,9 +557,16 @@ hfs_chkiqchg(cp, change, cred, type)
 		}
 		if (tv.tv_sec > (time_t)dq->dq_itime) {
 			if ((dq->dq_flags & DQ_INODS) == 0 &&
+<<<<<<< HEAD
 			    cp->c_uid == kauth_cred_getuid(cred)) {
 #if 0
 				printf("\nhfs: write failed, %s %s\n",
+=======
+			    cp->c_uid == cred->cr_uid) {
+#if 0
+				printf("\n%s: write failed, %s %s\n",
+				    vp->v_mount->mnt_stat.f_mntonname,
+>>>>>>> origin/10.2
 				    quotatypes[type],
 				    "cnode quota exceeded for too long");
 #endif
@@ -663,17 +753,25 @@ hfs_quotaoff(__unused struct proc *p, struct mount *mp, register int type)
 	 */
 	if (!dqisinitialized())
 		return (0);
+<<<<<<< HEAD
 
 	qfp = &hfsmp->hfs_qfiles[type];
 	
 	if ( (qf_get(qfp, QTF_CLOSING)) )
 	        return (0);
 	qvp = qfp->qf_vp;
+=======
+	hfsmp->hfs_qfiles[type].qf_qflags |= QTF_CLOSING;
+>>>>>>> origin/10.2
 
 	/*
 	 * Sync out any orpaned dirty dquot entries.
 	 */
+<<<<<<< HEAD
 	dqsync_orphans(qfp);
+=======
+	dqsync_orphans(&hfsmp->hfs_qfiles[type]);
+>>>>>>> origin/10.2
 
 	/*
 	 * Search vnodes associated with this mount point,
@@ -970,8 +1068,52 @@ hfs_qsync(mp)
 	 * the vnode will be
 	 * properly referenced and unreferenced around the callback
 	 */
+<<<<<<< HEAD
 	vnode_iterate(mp, 0, hfs_qsync_callback, (void *)NULL);
 
+=======
+	simple_lock(&mntvnode_slock);
+again:
+	for (vp = mp->mnt_vnodelist.lh_first; vp != NULL; vp = nextvp) {
+		if (vp->v_mount != mp)
+			goto again;
+
+		nextvp = vp->v_mntvnodes.le_next;
+		simple_lock(&vp->v_interlock);
+		simple_unlock(&mntvnode_slock);
+
+		error = vget(vp, LK_EXCLUSIVE | LK_NOWAIT | LK_INTERLOCK, p);
+		if (error) {
+			simple_lock(&mntvnode_slock);
+			if (error == ENOENT)
+				goto again;
+			continue;
+		}
+
+		// Make sure that this is really an hfs vnode.
+		//
+		if (   vp->v_mount != mp
+			|| vp->v_type == VNON
+			|| vp->v_tag != VT_HFS
+			|| VTOC(vp) == NULL) {
+			
+			vput(vp);
+			simple_lock(&mntvnode_slock);
+			goto again;
+		}
+
+		for (i = 0; i < MAXQUOTAS; i++) {
+			dq = VTOC(vp)->c_dquot[i];
+			if (dq != NODQUOT && (dq->dq_flags & DQ_MOD))
+				dqsync(vp, dq);
+		}
+		vput(vp);
+		simple_lock(&mntvnode_slock);
+		if (vp->v_mntvnodes.le_next != nextvp)
+			goto again;
+	}
+	simple_unlock(&mntvnode_slock);
+>>>>>>> origin/10.2
 	return (0);
 }
 

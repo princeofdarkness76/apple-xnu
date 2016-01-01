@@ -3,19 +3,22 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -178,8 +181,12 @@ resetexc:
 .L_handler600:
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
+<<<<<<< HEAD
 			mfsprg	r13,1							/* Get the exception save area */
 			li		r11,T_ALIGNMENT					/* Set 'rupt code */
+=======
+			li		r11,T_ALIGNMENT|T_FAM			/* Set 'rupt code */
+>>>>>>> origin/10.2
 			b		.L_exception_entry				/* Join common... */
 
 /*
@@ -190,8 +197,12 @@ resetexc:
 .L_handler700:
 			mtsprg	2,r13							/* Save R13 */
 			mtsprg	3,r11							/* Save R11 */
+<<<<<<< HEAD
 			mfsprg	r13,1							/* Get the exception save area */
 			li		r11,T_PROGRAM					/* Set 'rupt code */
+=======
+			li		r11,T_PROGRAM|T_FAM				/* Set 'rupt code */
+>>>>>>> origin/10.2
 			b		.L_exception_entry				/* Join common... */
 
 /*
@@ -290,19 +301,19 @@ xxxx1:
 			mfsprg	r13,0							; Get the per_proc_area
 			beq-	uftInKern						; We are in the kernel...
 			
+			lwz		r13,spcFlags(r13)				; Get the special flags
+			rlwimi	r13,r13,runningVMbit+1,31,31	; Move VM flag after the 3 blue box flags
+			mtcrf	1,r13							; Set BB and VMM flags in CR7
+			bt-		31,ufpVM						; fast paths running VM ...
 			cmplwi	cr5,r0,0x7FF2					; Ultra fast path cthread info call?
 			cmpwi	cr6,r0,0x7FF3					; Ultra fast path facility status?
 			cror	cr1_eq,cr5_lt,cr6_gt			; Set true if not 0x7FF2 and not 0x7FF3 and not negative
-			lwz		r13,spcFlags(r13)				; Get the special flags
 			bt-		cr1_eq,notufp					; Exit if we can not be ultra fast...
 			
-			rlwimi	r13,r13,runningVMbit+1,31,31	; Move VM flag after the 3 blue box flags
 			not.	r0,r0							; Flip bits and kind of subtract 1			
-			mtcrf	1,r13							; Set BB and VMM flags in CR7
 
 			cmplwi	cr1,r0,1						; Is this a bb fast path?
 			not		r0,r0							; Restore to entry state			
-			bt-		31,notufp						; No fast paths if running VM (assume not)...
 			bf-		bbNoMachSCbit,ufpUSuft			; We are not running BlueBox...
 			bgt		cr1,notufp						; This can not be a bb ufp...
 #if 0
@@ -340,8 +351,12 @@ isvecfp:	lwz		r3,spcFlags(r3)					; Get the facility status
 			rfi										; Bail back...
 ;
 notufp:		mtcrf	0xFF,r11						; Restore the used CRs
+<<<<<<< HEAD
 			li		r11,T_SYSTEM_CALL				; Set interrupt code
 			mfsprg	r13,1							; Get the exception save area 
+=======
+			li		r11,T_SYSTEM_CALL|T_FAM			; Set interrupt code
+>>>>>>> origin/10.2
 			b		.L_exception_entry				; Join common...
 			
 uftInKern:	cmplwi	r0,0x7FF4						; Ultra fast path loadMSR?
@@ -386,8 +401,12 @@ uftInKern:	cmplwi	r0,0x7FF4						; Ultra fast path loadMSR?
 			bne+	specbrtr						; Yeah...
 
 notspectr:	mtcr	r11								; Restore CR
+<<<<<<< HEAD
 			mfsprg	r13,1							; Get the savearea	
 			li		r11,T_TRACE						; Set interrupt code
+=======
+			li		r11,T_TRACE|T_FAM				; Set interrupt code
+>>>>>>> origin/10.2
 			b		.L_exception_entry				; Join common...
 
 ;
@@ -847,6 +866,22 @@ VMXhandler:
 			li		r11,T_RUNMODE_TRACE				/* Set 'rupt code */
 			b		.L_exception_entry				/* Join common... */
 
+
+/*
+ *	Filter Ultra Fast Path syscalls for VMM
+ */
+ufpVM:
+			cmpwi	cr6,r0,0x6004					; Is it vmm_dispatch
+			bne		cr6,notufp						; Exit If not
+			cmpwi	cr5,r3,kvmmResumeGuest			; Compare r3 with kvmmResumeGuest
+			cmpwi	cr6,r3,kvmmSetGuestRegister		; Compare r3 with kvmmSetGuestRegister
+			cror	cr1_eq,cr5_lt,cr6_gt			; Set true if out of VMM Fast syscall range
+			bt-		cr1_eq,notufp					; Exit if out of range
+			rlwinm	r13,r13,1+FamVMmodebit,30,31	; Extract FamVMenabit and FamVMmodebit
+			cmpwi	cr0,r13,3						; Are FamVMena and FamVMmode set
+			bne+	notufp							; Exit if not in FAM
+			b		EXT(vmm_ufp)					; Ultra Fast Path syscall
+
 /*
  * .L_exception_entry(type)
  *
@@ -923,10 +958,33 @@ notsleep:	stw		r2,saver2(r13)					; Save this one
 ;
 ;			Remember, we are setting up CR6 with feature flags
 ;
-skipz1:		lwz		r1,pfAvailable(r2)				; Get the CPU features flags			
+skipz1:		
+			andi.	r1,r11,T_FAM					; Check FAM bit	
 			stw		r3,saver3(r13)					; Save this one
-			mtcrf	0xE0,r1							; Put the features flags (that we care about) in the CR
+<<<<<<< HEAD
+=======
 			stw		r4,saver4(r13)					; Save this one
+			andc	r11,r11,r1						; Clear FAM bit
+			beq+	noFAM							; Is it FAM intercept
+			mfsrr1	r3								; Load srr1
+			rlwinm.	r3,r3,0,MSR_PR_BIT,MSR_PR_BIT	; Are we trapping from supervisor state?
+			beq+	noFAM							; From supervisor state
+			lwz		r1,spcFlags(r2)					; Load spcFlags 
+			rlwinm	r1,r1,1+FamVMmodebit,30,31		; Extract FamVMenabit and FamVMmodebit
+			cmpwi	cr0,r1,2						; Check FamVMena set without FamVMmode
+			bne+	noFAM							; Can this context be FAM intercept
+			lwz		r4,FAMintercept(r2)				; Load exceptions mask to intercept
+			srwi	r1,r11,2						; divide r11 by 4
+			lis		r3,0x8000						; Set r3 to 0x80000000
+			srw		r1,r3,r1						; Set bit for current exception
+			and.	r1,r1,r4						; And current exception with the intercept mask
+			beq+	noFAM							; Is it FAM intercept
+			b		EXT(vmm_fam_handler)
+noFAM:
+			lwz		r1,pfAvailable(r2)				; Get the CPU features flags			
+			la		r3,savesrr0(r13)				; Point to the last line
+>>>>>>> origin/10.2
+			mtcrf	0xE0,r1							; Put the features flags (that we care about) in the CR
 			stw		r6,saver6(r13)					; Save this one
 			crmove	featSMP,pfSMPcapb				; See if we have a PIR
 			stw		r8,saver8(r13)					; Save this one
@@ -1689,10 +1747,31 @@ DSIorISI:
 			lwz		r0,savesrr1(r13)				; Get the MSR in use at exception time
 			mfsprg	r2, 0							/* Get back per_proc */
 			cmplwi	cr1,r3,T_IN_VAIN				; Was it handled?
+<<<<<<< HEAD
 			andi.	r4,r0,lo16(MASK(MSR_RI))		; See if the recover bit is on
 			mr		r11,r3							/* Make sure we can find this later */
 			beq+	cr1,EatRupt						; Yeah, just blast back to the user... 
 			andc	r0,r0,r4						; Remove the recover bit
+=======
+			rlwinm.	r4,r0,0,MSR_PR_BIT,MSR_PR_BIT	; Are we trapping from supervisor state?
+			mr		r11,r3							; Put interrupt code back into the right register
+			beq+	cr1,EatRupt						; Yeah, just blast back to the user... 
+			beq-	NoFamPf
+			lwz		r1,spcFlags(r2)					; Load spcFlags
+            rlwinm	r1,r1,1+FamVMmodebit,30,31		; Extract FamVMenabit and FamVMmodebit
+            cmpi	cr0,r1,2						; Check FamVMena set without FamVMmode
+			bne-	cr0,NoFamPf
+            lwz		r6,FAMintercept(r2)				; Load exceptions mask to intercept
+			srwi	r1,r11,2						; divide r11 by 4
+            lis		r5,0x8000						; Set r5 to 0x80000000
+            srw		r1,r5,r1						; Set bit for current exception
+            and.	r1,r1,r6						; And current exception with the intercept mask
+            beq+	NoFamPf							; Is it FAM intercept
+			bl		EXT(vmm_fam_pf_handler)
+			b		EatRupt
+NoFamPf:
+			andi.	r4,r0,lo16(MASK(MSR_RI))		; See if the recover bit is on
+>>>>>>> origin/10.2
 			beq+	PassUp							; Not on, normal case...
 			lwz		r4,savesrr0(r13)				; Get the failing instruction address
 			lwz		r5,savecr(r13)					; Get the condition register

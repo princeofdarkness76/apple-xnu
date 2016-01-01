@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -1484,7 +1495,63 @@ done:
 		 (void *)VM_KERNEL_ADDRPERM(current_thread()),
 		 p->p_pid, p->p_comm));
 
+<<<<<<< HEAD
 	return error;
+=======
+	if (bsd_search_page_cache_data_base(names_vp, names_buf, app_name, 
+			(unsigned int) vattr.va_mtime.tv_sec,  
+			vattr.va_fileid, &profile, &profile_size) == 0) {
+		/* profile is an offset in the profile data base */
+		/* It is zero if no profile data was found */
+		
+		if(profile_size == 0) {
+			*buffer = NULL;
+			*buf_size = 0;
+			VOP_UNLOCK(names_vp, 0, p);
+			VOP_UNLOCK(data_vp, 0, p);
+			bsd_close_page_cache_files(uid_files);
+			thread_funnel_set(kernel_flock, funnel_state);
+			return 0;
+		}
+		ret = (vm_offset_t)(kmem_alloc(kernel_map, buffer, profile_size));
+		if(ret) {
+			VOP_UNLOCK(names_vp, 0, p);
+			VOP_UNLOCK(data_vp, 0, p);
+			bsd_close_page_cache_files(uid_files);
+			thread_funnel_set(kernel_flock, funnel_state);
+			return ENOMEM;
+		}
+		*buf_size = profile_size;
+		while(profile_size) {
+			error = vn_rdwr(UIO_READ, data_vp, 
+				(caddr_t) *buffer, profile_size, 
+				profile, UIO_SYSSPACE, IO_NODELOCKED, 
+				p->p_ucred, &resid, p);
+			if((error) || (profile_size == resid)) {
+				VOP_UNLOCK(names_vp, 0, p);
+				VOP_UNLOCK(data_vp, 0, p);
+				bsd_close_page_cache_files(uid_files);
+				kmem_free(kernel_map, (vm_offset_t)*buffer, profile_size);
+				thread_funnel_set(kernel_flock, funnel_state);
+				return EINVAL;
+			}
+		        profile += profile_size - resid;
+			profile_size = resid;
+		}
+		VOP_UNLOCK(names_vp, 0, p);
+		VOP_UNLOCK(data_vp, 0, p);
+		bsd_close_page_cache_files(uid_files);
+		thread_funnel_set(kernel_flock, funnel_state);
+		return 0;
+	} else {
+		VOP_UNLOCK(names_vp, 0, p);
+		VOP_UNLOCK(data_vp, 0, p);
+		bsd_close_page_cache_files(uid_files);
+		thread_funnel_set(kernel_flock, funnel_state);
+		return EINVAL;
+	}
+	
+>>>>>>> origin/10.2
 }
 
 int
@@ -1552,8 +1619,89 @@ shared_region_map_and_slide_np(
 		return kr;
 	}
 
+<<<<<<< HEAD
 done:
 	return kr;
+=======
+	ele_total = database->number_of_profiles;
+	
+	*profile = 0;
+	*profile_size = 0;
+	while(ele_total) {
+		/* note: code assumes header + n*ele comes out on a page boundary */
+		if(((local_buf == 0) && (sizeof(struct profile_names_header) + 
+			(ele_total * sizeof(struct profile_element))) 
+					> (PAGE_SIZE * 4)) ||
+			((local_buf != 0) && 
+				(ele_total * sizeof(struct profile_element))
+					 > (PAGE_SIZE * 4))) {
+			extended_list = ele_total;
+			if(element == (struct profile_element *)
+				((vm_offset_t)database->element_array + 
+						(vm_offset_t)database)) {
+				ele_total = ((PAGE_SIZE * 4)/sizeof(struct profile_element)) - 1;
+			} else {
+				ele_total = (PAGE_SIZE * 4)/sizeof(struct profile_element);
+			}
+			extended_list -= ele_total;
+		}
+		for (i=0; i<ele_total; i++) {
+			if((mod_date == element[i].mod_date) 
+					&& (inode == element[i].inode)) {
+				if(strncmp(element[i].name, app_name, 12) == 0) {
+					*profile = element[i].addr;
+					*profile_size = element[i].size;
+					if(local_buf != NULL) {
+						kmem_free(kernel_map, 
+							(vm_offset_t)local_buf, 4 * PAGE_SIZE);
+					}
+					return 0;
+				}
+			}
+		}
+		if(extended_list == 0)
+			break;
+		if(local_buf == NULL) {
+			ret = kmem_alloc(kernel_map,
+               	 		(vm_offset_t *)&local_buf, 4 * PAGE_SIZE);
+			if(ret != KERN_SUCCESS) {
+				return ENOMEM;
+			}
+		}
+		element = (struct profile_element *)local_buf;
+		ele_total = extended_list;
+		extended_list = 0;
+		file_off +=  4 * PAGE_SIZE;
+		if((ele_total * sizeof(struct profile_element)) > 
+							(PAGE_SIZE * 4)) {
+			size = PAGE_SIZE * 4;
+		} else {
+			size = ele_total * sizeof(struct profile_element);
+		}
+		resid_off = 0;
+		while(size) {
+			error = vn_rdwr(UIO_READ, vp, 
+				(caddr_t)(local_buf + resid_off),
+				size, file_off + resid_off, UIO_SYSSPACE, 
+				IO_NODELOCKED, p->p_ucred, &resid, p);
+			if((error) || (size == resid)) {
+				if(local_buf != NULL) {
+					kmem_free(kernel_map, 
+						(vm_offset_t)local_buf, 
+						4 * PAGE_SIZE);
+				}
+				return EINVAL;
+			}
+			resid_off += size-resid;
+			size = resid;
+		}
+	}
+	if(local_buf != NULL) {
+		kmem_free(kernel_map, 
+			(vm_offset_t)local_buf, 4 * PAGE_SIZE);
+	}
+	return 0;
+>>>>>>> origin/10.2
 }
 
 /* sysctl overflow room */

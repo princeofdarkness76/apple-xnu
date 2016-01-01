@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -503,6 +514,9 @@ OSStatus	BTSearchRecord		(FCB						*filePtr,
 	{
 		return	paramErr;
 	}
+
+	node.buffer = nil;
+	node.blockHeader = nil;
 
 	node.buffer = nil;
 	node.blockHeader = nil;
@@ -1359,9 +1373,12 @@ OSStatus	BTInsertRecord		(FCB						*filePtr,
 								btreePtr->firstLeafNode		= insertNodeNum;
 								btreePtr->lastLeafNode		= insertNodeNum;
 
+<<<<<<< HEAD
 								err = UpdateNode (btreePtr, &nodeRec, 0, kLockTransaction);
 								M_ExitOnError (err);
 
+=======
+>>>>>>> origin/10.2
 								M_BTreeHeaderDirty (btreePtr);
 
 								goto Success;
@@ -1549,6 +1566,10 @@ OSStatus	BTReplaceRecord		(FCB						*filePtr,
 		M_ExitOnError (err);
 	}
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.2
 	// XXXdbg
 	ModifyBlockStart(btreePtr->fileRefNum, &nodeRec);
 								
@@ -1636,7 +1657,11 @@ BTUpdateRecord(FCB *filePtr, BTreeIterator *iterator,
 				// XXXdbg
 				ModifyBlockStart(btreePtr->fileRefNum, &nodeRec);
 								
+<<<<<<< HEAD
 				err = callBackProc(keyPtr, recordPtr, callBackState);
+=======
+				err = callBackProc(keyPtr, recordPtr, recordLen, callBackState);
+>>>>>>> origin/10.2
 				M_ExitOnError (err);
 
 				err = UpdateNode (btreePtr, &nodeRec, 0, 0);
@@ -1671,7 +1696,11 @@ BTUpdateRecord(FCB *filePtr, BTreeIterator *iterator,
 	// XXXdbg
 	ModifyBlockStart(btreePtr->fileRefNum, &nodeRec);
 								
+<<<<<<< HEAD
 	err = callBackProc(keyPtr, recordPtr, callBackState);
+=======
+	err = callBackProc(keyPtr, recordPtr, recordLen, callBackState);
+>>>>>>> origin/10.2
 	M_ExitOnError (err);
 
 	err = UpdateNode (btreePtr, &nodeRec, 0, 0);
@@ -2121,3 +2150,62 @@ BTSetUserData(FCB *filePtr, void * dataPtr, int dataSize)
 	return	(err);
 }
 
+/*-------------------------------------------------------------------------------
+Routine:	BTCheckFreeSpace
+
+Function:	Makes sure there is enough free space so that a tree operation
+            will succeed.
+
+Input:		fcb	- pointer file control block
+
+Output:		none
+
+Result:		noErr			- success
+            
+-------------------------------------------------------------------------------*/
+
+__private_extern__
+OSStatus	BTCheckFreeSpace		(FCB					*filePtr)
+{
+	BTreeControlBlockPtr	btreePtr;
+	int 					nodesNeeded, err = noErr;
+
+
+	M_ReturnErrorIf (filePtr == nil, 	paramErr);
+
+	btreePtr = (BTreeControlBlockPtr) filePtr->fcbBTCBPtr;
+	
+	REQUIRE_FILE_LOCK(btreePtr->fileRefNum, true);
+
+	M_ReturnErrorIf (btreePtr == nil,	fsBTInvalidFileErr);
+
+	// XXXdbg this is highly conservative but so much better than
+	//        winding up with turds on your disk.
+	//
+	nodesNeeded = (btreePtr->treeDepth + 1) * 10;
+	
+	if (btreePtr->freeNodes < nodesNeeded) {
+		err = ExtendBTree(btreePtr, nodesNeeded + btreePtr->totalNodes - btreePtr->freeNodes);
+	}
+
+	return err;
+}
+
+
+__private_extern__
+OSStatus	BTHasContiguousNodes	(FCB	 				*filePtr)
+{
+	BTreeControlBlockPtr	btreePtr;
+	int 					nodesNeeded, err = noErr;
+
+
+	M_ReturnErrorIf (filePtr == nil, 	paramErr);
+
+	btreePtr = (BTreeControlBlockPtr) filePtr->fcbBTCBPtr;
+	
+	REQUIRE_FILE_LOCK(btreePtr->fileRefNum, true);
+
+	M_ReturnErrorIf (btreePtr == nil,	fsBTInvalidFileErr);
+
+	return NodesAreContiguous(FCBTOVCB(filePtr), filePtr, btreePtr->nodeSize);
+}

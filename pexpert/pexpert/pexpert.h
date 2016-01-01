@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -127,6 +138,7 @@ struct clock_frequency_info_t {
   unsigned long long cpu_frequency_hz;
   unsigned long long cpu_frequency_min_hz;
   unsigned long long cpu_frequency_max_hz;
+<<<<<<< HEAD
   unsigned long long prf_frequency_hz;
   unsigned long long prf_frequency_min_hz;
   unsigned long long prf_frequency_max_hz;
@@ -134,6 +146,8 @@ struct clock_frequency_info_t {
   unsigned long long mem_frequency_min_hz;
   unsigned long long mem_frequency_max_hz;
   unsigned long long fix_frequency_hz;
+=======
+>>>>>>> origin/10.2
 };
 
 typedef struct clock_frequency_info_t clock_frequency_info_t;

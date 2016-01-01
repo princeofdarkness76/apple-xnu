@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -134,7 +145,12 @@ extern void iokit_release_port_send( ipc_port_t port );
 
 extern kern_return_t iokit_switch_object_port( ipc_port_t port, io_object_t obj, ipc_kobject_type_t type );
 
+<<<<<<< HEAD
 #include <mach/mach_traps.h>
+=======
+extern kern_return_t iokit_switch_object_port( ipc_port_t port, io_object_t obj, ipc_kobject_type_t type );
+
+>>>>>>> origin/10.2
 #include <vm/vm_map.h>
 
 } /* extern "C" */
@@ -337,6 +353,10 @@ void IOUserClient::destroyUserReferences( OSObject * obj )
     }
     obj->release();
     IOUnlock( gIOObjectPortLock);
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.2
 }
 
 mach_port_name_t IOMachPort::makeSendRightForTask( task_t task,
@@ -516,6 +536,7 @@ iokit_client_died( io_object_t obj, ipc_port_t /* port */,
     if( !IOMachPort::noMoreSendersForObject( obj, type, mscount ))
 	return( kIOReturnNotReady );
 
+<<<<<<< HEAD
     if( IKOT_IOKIT_CONNECT == type)
     {
 	if( (client = OSDynamicCast( IOUserClient, obj ))) {
@@ -530,6 +551,13 @@ iokit_client_died( io_object_t obj, ipc_port_t /* port */,
 	else if( (notify = OSDynamicCast( IOUserNotification, obj )))
 	    notify->setNotification( 0 );
     }
+=======
+    if( (IKOT_IOKIT_CONNECT == type)
+     && (client = OSDynamicCast( IOUserClient, obj )))
+	client->clientDied();
+    if( (map = OSDynamicCast( IOMemoryMap, obj )))
+	map->taskDied();
+>>>>>>> origin/10.2
 
     return( kIOReturnSuccess );
 }

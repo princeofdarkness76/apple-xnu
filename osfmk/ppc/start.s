@@ -3,51 +3,64 @@
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * The contents of this file constitute Original Code as defined in and
- * are subject to the Apple Public Source License Version 1.1 (the
- * "License").  You may not use this file except in compliance with the
- * License.  Please obtain a copy of the License at
- * http://www.apple.com/publicsource and read it before using this file.
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
  * 
- * This Original Code and all software distributed under the License are
- * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+ * The Original Code and all software distributed under the License are
+ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
- * License for the specific language governing rights and limitations
- * under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+ * Please see the License for the specific language governing rights and
+ * limitations under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
 /*
  * @OSF_COPYRIGHT@
  */
+
+#define __APPLE_API_PRIVATE
+
 #include <cpus.h>
 #include <mach_kdb.h>
 #include <mach_kdp.h>
 #include <mach_kgdb.h>
 #include <ppc/asm.h>
 #include <ppc/proc_reg.h>
+<<<<<<< HEAD
+=======
+#include <ppc/spec_reg.h>
+#include <machine/cpu_capabilities.h>
+>>>>>>> origin/10.2
 #include <mach/ppc/vm_param.h>
 #include <assym.s>
 	
-#define ptFilter 0
-#define ptVersion 4
-#define ptRevision 6
-#define ptFeatures 8
-#define ptInitRout 12
-#define ptRptdProc 16
-#define ptTempMax 20
-#define ptTempThr 24
-#define ptLineSize 28
-#define ptl1iSize 32
-#define ptl1dSize 36
-#define ptSize 40
+#define ptFilter	0
+#define ptVersion	4
+#define ptRevision	6
+#define ptFeatures	8
+#define ptCPUCap	12
+#define ptInitRout	16
+#define ptRptdProc	20
+#define ptTempMax	24
+#define ptTempThr	28
+#define ptLineSize	32
+#define ptl1iSize	36
+#define ptl1dSize	40
+#define ptSize		44
 
 #define bootCPU 10
 #define firstInit 9
 #define firstBoot 8
 
+<<<<<<< HEAD
 /* Defines for PVRs */
 #define PROCESSOR_VERSION_601		1
 #define PROCESSOR_VERSION_603		3
@@ -61,6 +74,8 @@
 #define PROCESSOR_VERSION_7450		0x8000	/* ? */
 #define PROCESSOR_VERSION_7455		0x8001	/* ? */
 
+=======
+>>>>>>> origin/10.2
 /*
  * Interrupt and bootup stack for initial processor
  */
@@ -108,6 +123,7 @@ EXT(debstackptr):
 	.long	EXT(debstack)+KERNEL_STACK_SIZE-FM_SIZE
 
 #endif /* MACH_KDP || MACH_KDB */
+
 
 /*
  * All CPUs start here.
@@ -160,7 +176,11 @@ ENTRY(_start,TAG_NO_FRAME_USED)
 			ori		r20,r20,LOW_ADDR(fwdisplock)		; Get address of the firmware display lock
 			stw		r19,0(r20)							; Make sure the lock is free
 			
-allstart:	mr		r31,r3								; Save away arguments
+allstart:
+			mr		r31,r3								; Save away arguments
+
+			crand	firstBoot,bootCPU,firstInit			; Indicate if we are on the initial first processor startup
+
 			lis		r23,hi16(EXT(per_proc_info))		; Set base per_proc
 			ori		r23,r23,lo16(EXT(per_proc_info))	; Set base per_proc
 
@@ -221,7 +241,7 @@ nextPVR:	lwz		r28,ptFilter(r26)					; Get the filter
 donePVR:	lwz		r20,ptInitRout(r26)					; Grab the special init routine
 			mtlr	r20									; Setup to call the init
 
-			bf		firstInit,notFirst					; Not first boot, go...
+			bf		firstBoot,notFirst					; Not first boot, go...
 			
 ;			
 ;			The following code just does a general initialization of the features just
@@ -231,6 +251,10 @@ donePVR:	lwz		r20,ptInitRout(r26)					; Grab the special init routine
 ;			We are just setting defaults.   The specific initialization code will modify these
 ;			if necessary. 
 ;			
+			lis		r13,hi16(EXT(_cpu_capabilities))	; Get the address of _cpu_capabilities
+			ori		r13,r13,lo16(EXT(_cpu_capabilities))
+			lwz		r17,ptCPUCap(r26)					; Get the default cpu capabilities
+			stw		r17, 0(r13)							; Save the default value in _cpu_capabilities
 			
 			lwz		r17,ptFeatures(r26)					; Pick up the features
 			
@@ -273,7 +297,6 @@ cpyFeat:	subi	r9,r9,1								; Count word
 
 doOurInit:	
 			mr.		r20,r20								; See if initialization routine
-			crand	firstBoot,bootCPU,firstInit			; Indicate if we are on the initial first processor startup
 			bnelrl										; Do the initialization
 			
 			ori		r17,r17,lo16(pfValid)				; Set the valid bit
@@ -488,6 +511,58 @@ init750CX:
 			b	init750								; Join common...
 
 
+<<<<<<< HEAD
+=======
+;			750FX
+
+init750FX:
+			bf	firstBoot, init750FXnb
+			mfspr	r11, hid1
+			stw	r11, pfHID1(r30)						; Save the HID1 value
+			b	init750
+
+init750FXnb:
+			lwz	r13, pfHID0(r30)						; Get HID0
+			lwz	r11, pfHID1(r30)						; Get HID1
+
+			rlwinm.	r0, r11, 0, hid1ps, hid1ps					; Isolate the hid1ps bit
+			beq	init750FXnb2							; Clear BTIC if hid1ps set
+			rlwinm	r13, r13, 0, btic+1, btic-1					; Clear the BTIC bit
+
+init750FXnb2:
+			sync
+			mtspr	hid0, r13							; Set the HID
+			isync
+			sync
+
+			rlwinm  r12, r11, 0, hid1ps+1, hid1ps-1					; Select PLL0
+			mtspr	hid1, r12							; Restore PLL config
+			mftb	r13								; Wait 5000 ticks (> 200 us)
+
+init750FXnbloop:
+			mftb	r14
+			sub	r14, r14, r13
+			cmpli	cr0, r14, 5000
+			ble	init750FXnbloop
+			mtspr	hid1, r11							; Select the desired PLL
+			blr
+
+;			750FX vers 2.0 or later
+init750FXV2:
+			bf	firstBoot, init750FXV2nb					; Wake from sleep
+
+			mfspr	r11, hid2
+			stw	r11, pfHID2(r30)						; Save the HID2 value
+			b	init750FX							; Continue with 750FX init
+
+init750FXV2nb:
+			lwz	r13, pfHID2(r30)						; Get HID2
+			rlwinm	r13, r13, 0, hid2vmin+1, hid2vmin-1				; Clear the vmin bit
+			mtspr	hid2, r13							; Restore HID2 value
+			sync									; Wait for it to be done
+			b	init750FX
+
+>>>>>>> origin/10.2
 ;			7400
 
 init7400:	bf		firstBoot,i7400nb					; Do different if not initial boot...
@@ -515,6 +590,7 @@ i7400hl2:	lis		r14,hi16(256*1024)					; Base L2 size
 			stw		r11,pfMSSCR0(r30)					; Save the MSSCR0 value
 			mfspr	r11,msscr1							; Get the msscr1 register
 			stw		r11,pfMSSCR1(r30)					; Save the MSSCR1 value
+
 			blr											; Return...
 			
 i7400nb:
@@ -555,10 +631,18 @@ init745X:
 			bne+	init745Xhl2							; Yes...
 			rlwinm	r17,r17,0,pfL2b+1,pfL2b-1			; No L2, turn off feature
 			
-init745Xhl2:	lis		r14,hi16(256*1024)					; Base L2 size
+init745Xhl2:
+			mfpvr	r14									; Get processor version
+			rlwinm	r14,r14,16,16,31					; Isolate processor version
+			cmpli	cr0, r14, PROCESSOR_VERSION_7457
+			lis		r14,hi16(512*1024)					; 512KB L2
+			beq	init745Xhl2_2
+
+			lis		r14,hi16(256*1024)					; Base L2 size
 			rlwinm	r15,r13,22,12,13					; Convert to 256k, 512k, or 768k
 			add		r14,r14,r15							; Add in minimum
-			
+
+init745Xhl2_2:
 			stw		r13,pfl2crOriginal(r30)					; Shadow the L2CR
 			stw		r13,pfl2cr(r30)						; Shadow the L2CR
 			stw		r14,pfl2Size(r30)					; Set the L2 size
@@ -605,6 +689,7 @@ init745Xfin:
 			stw		r11,pfLDSTDB(r30)					; Save the LDSTDB value
 			mfspr	r11,pir								; Get the pir register
 			stw		r11,pfBootConfig(r30)					; Save the BootConfig value
+
 			blr											; Return....
 
 
@@ -663,6 +748,7 @@ init7450done:
 ;	.short	ptVersion		- Version code from PVR.  Always start with 0 which is default
 ;	.short	ptRevision		- Revision code from PVR. A zero value denotes the generic attributes if not specific
 ;	.long	ptFeatures		- Available features
+;	.long	ptCPUCap		- Default value for _cpu_capabilities
 ;	.long	ptInitRout		- Initilization routine.  Can modify any of the other attributes.
 ;	.long	ptRptdProc		- Processor type reported
 ;	.long	ptTempMax		- Maximum operating temprature
@@ -674,126 +760,37 @@ init7450done:
 	.align	2
 processor_types:
 
-	
-;	601 (generic)
-
-	.align	2
-	.long	0xFFFF0000		; All revisions
-	.short	PROCESSOR_VERSION_601
-	.short	0
-	.long	pfFloat | pfSMPcap | pfL1i | pfL1d
-	.long	0
-	.long	CPU_SUBTYPE_POWERPC_ALL
-	.long	0
-	.long	0
-	.long	32
-	.long	32*1024
-	.long	32*1024
-	
-;	603 (generic)
-
-	.align	2
-	.long	0xFFFF0000		; All revisions
-	.short	PROCESSOR_VERSION_603
-	.short	0
-	.long	pfFloat | pfL1i | pfL1d
-	.long	0
-	.long	CPU_SUBTYPE_POWERPC_603
-	.long	0
-	.long	0
-	.long	32
-	.long	32*1024
-	.long	32*1024
-	
-;	603e (generic)
-
-	.align	2
-	.long	0xFFFF0000		; All revisions
-	.short	PROCESSOR_VERSION_603e
-	.short	0
-	.long	pfFloat | pfL1i | pfL1d
-	.long	0
-	.long	CPU_SUBTYPE_POWERPC_603e
-	.long	0
-	.long	0
-	.long	32
-	.long	32*1024
-	.long	32*1024
-	
-;	604 (generic)
-
-	.align	2
-	.long	0xFFFF0000		; All revisions
-	.short	PROCESSOR_VERSION_604
-	.short	0
-	.long	pfFloat | pfSMPcap | pfL1i | pfL1d
-	.long	0
-	.long	CPU_SUBTYPE_POWERPC_604
-	.long	0
-	.long	0
-	.long	32
-	.long	32*1024
-	.long	32*1024
-	
-;	604e (generic)
-
-	.align	2
-	.long	0xFFFF0000		; All revisions
-	.short	PROCESSOR_VERSION_604e
-	.short	0
-	.long	pfFloat | pfSMPcap | pfL1i | pfL1d
-	.long	0
-	.long	CPU_SUBTYPE_POWERPC_604e
-	.long	0
-	.long	0
-	.long	32
-	.long	32*1024
-	.long	32*1024
-	
-;	604ev (generic)
-
-	.align	2
-	.long	0xFFFF0000		; All revisions
-	.short	PROCESSOR_VERSION_604ev
-	.short	0
-	.long	pfFloat | pfSMPcap | pfL1i | pfL1d
-	.long	0
-	.long	CPU_SUBTYPE_POWERPC_604e
-	.long	0
-	.long	0
-	.long	32
-	.long	32*1024
-	.long	32*1024
-
 ;       750 (ver 2.2)
 
-        .align  2
-        .long   0xFFFFFFFF              ; Exact match
-        .short  PROCESSOR_VERSION_750
-        .short  0x4202
-        .long   pfFloat | pfCanSleep | pfCanNap | pfCanDoze | pfL1i | pfL1d | pfL2
-        .long   init750
-        .long   CPU_SUBTYPE_POWERPC_750
-        .long   105
-        .long   90
-        .long   32
-        .long   32*1024
-        .long   32*1024
+	.align  2
+	.long   0xFFFFFFFF              ; Exact match
+	.short  PROCESSOR_VERSION_750
+	.short  0x4202
+	.long   pfFloat | pfCanSleep | pfCanNap | pfCanDoze | pfL1i | pfL1d | pfL2
+	.long   kCache32 | kHasGraphicsOps | kHasStfiwx
+	.long   init750
+	.long   CPU_SUBTYPE_POWERPC_750
+	.long   105
+	.long   90
+	.long   32
+	.long   32*1024
+	.long   32*1024
 
 ;       750CX (ver 2.x)
 
-        .align  2
-        .long   0xFFFF0F00              ; 2.x vers
-        .short  PROCESSOR_VERSION_750
-        .short  0x0200
-        .long   pfFloat | pfCanSleep | pfCanNap | pfCanDoze | pfL1i | pfL1d | pfL2
-        .long   init750CX
-        .long   CPU_SUBTYPE_POWERPC_750
-        .long   105
-        .long   90
-        .long   32
-        .long   32*1024
-        .long   32*1024
+	.align  2
+	.long   0xFFFF0F00              ; 2.x vers
+	.short  PROCESSOR_VERSION_750
+	.short  0x0200
+	.long   pfFloat | pfCanSleep | pfCanNap | pfCanDoze | pfL1i | pfL1d | pfL2
+	.long   kCache32 | kHasGraphicsOps | kHasStfiwx
+	.long   init750CX
+	.long   CPU_SUBTYPE_POWERPC_750
+	.long   105
+	.long   90
+	.long   32
+	.long   32*1024
+	.long   32*1024
 	
 ;	750 (generic)
 
@@ -802,6 +799,7 @@ processor_types:
 	.short	PROCESSOR_VERSION_750
 	.short	0
 	.long	pfFloat | pfCanSleep | pfCanNap | pfCanDoze | pfThermal | pfL1i | pfL1d | pfL2
+	.long   kCache32 | kHasGraphicsOps | kHasStfiwx
 	.long	init750
 	.long	CPU_SUBTYPE_POWERPC_750
 	.long	105
@@ -810,7 +808,58 @@ processor_types:
 	.long	32*1024
 	.long	32*1024
 	
+<<<<<<< HEAD
 
+=======
+;       750FX (ver 1.x)
+
+	.align  2
+	.long   0xFFFF0F00              ; 1.x vers
+	.short  PROCESSOR_VERSION_750FX
+	.short  0x0100
+	.long   pfFloat | pfCanSleep | pfCanNap | pfCanDoze | pfSlowNap | pfNoMuMMCK | pfL1i | pfL1d | pfL2
+	.long   kCache32 | kHasGraphicsOps | kHasStfiwx
+	.long   init750FX
+	.long   CPU_SUBTYPE_POWERPC_750
+	.long   105
+	.long   90
+	.long   32
+	.long   32*1024
+	.long   32*1024
+	
+;       750FX (generic)
+
+	.align  2
+	.long   0xFFFF0000              ; All revisions
+	.short  PROCESSOR_VERSION_750FX
+	.short  0
+	.long   pfFloat | pfCanSleep | pfCanNap | pfCanDoze | pfSlowNap | pfNoMuMMCK | pfL1i | pfL1d | pfL2
+	.long   kCache32 | kHasGraphicsOps | kHasStfiwx
+	.long   init750FXV2
+	.long   CPU_SUBTYPE_POWERPC_750
+	.long   105
+	.long   90
+	.long   32
+	.long   32*1024
+	.long   32*1024
+	
+;	7400 (ver 2.0 - ver 2.7)
+
+	.align	2
+	.long	0xFFFFFFF8		; All revisions
+	.short	PROCESSOR_VERSION_7400
+	.short	0x0200
+	.long	pfFloat | pfAltivec | pfSMPcap | pfCanSleep | pfCanNap | pfCanDoze | pfThermal | pfL1i | pfL1d | pfL1fa | pfL2 | pfL2fa
+	.long   kHasAltivec | kCache32 | kDcbaAvailable | kDataStreamsAvailable | kHasGraphicsOps | kHasStfiwx
+	.long	init7400v2_7
+	.long	CPU_SUBTYPE_POWERPC_7400
+	.long	105
+	.long	90
+	.long	32
+	.long	32*1024
+	.long	32*1024
+	
+>>>>>>> origin/10.2
 ;	7400 (generic)
 
 	.align	2
@@ -818,6 +867,7 @@ processor_types:
 	.short	PROCESSOR_VERSION_7400
 	.short	0
 	.long	pfFloat | pfAltivec | pfSMPcap | pfCanSleep | pfCanNap | pfCanDoze | pfThermal | pfL1i | pfL1d | pfL1fa | pfL2 | pfL2fa
+	.long   kHasAltivec | kCache32 | kDcbaAvailable | kDataStreamsRecommended | kDataStreamsAvailable | kHasGraphicsOps | kHasStfiwx
 	.long	init7400
 	.long	CPU_SUBTYPE_POWERPC_7400
 	.long	105
@@ -833,6 +883,7 @@ processor_types:
 	.short	PROCESSOR_VERSION_7400
 	.short	0x1101
 	.long	pfFloat | pfAltivec | pfSMPcap | pfCanSleep | pfCanNap | pfCanDoze | pfL1i | pfL1d | pfL1fa | pfL2 | pfL2fa
+	.long   kHasAltivec | kCache32 | kDcbaAvailable | kDataStreamsRecommended | kDataStreamsAvailable | kHasGraphicsOps | kHasStfiwx
 	.long	init7410
 	.long	CPU_SUBTYPE_POWERPC_7400
 	.long	105
@@ -848,6 +899,7 @@ processor_types:
 	.short	PROCESSOR_VERSION_7410
 	.short	0
 	.long	pfFloat | pfAltivec | pfSMPcap | pfCanSleep | pfCanNap | pfCanDoze | pfL1i | pfL1d | pfL1fa | pfL2 | pfL2fa
+	.long   kHasAltivec | kCache32 | kDcbaAvailable | kDataStreamsRecommended | kDataStreamsAvailable | kHasGraphicsOps | kHasStfiwx
 	.long	init7410
 	.long	CPU_SUBTYPE_POWERPC_7400
 	.long	105
@@ -862,7 +914,12 @@ processor_types:
 	.long	0xFFFFFF00		; Just revisions 1.xx
 	.short	PROCESSOR_VERSION_7450
 	.short	0x0100
+<<<<<<< HEAD
 	.long	pfFloat | pfAltivec | pfSMPcap | pfCanSleep | pfNoMSRir | pfLClck | pfL1i | pfL1d | pfL2 | pfL2fa | pfL2i | pfL3 | pfL3fa
+=======
+	.long	pfFloat | pfAltivec | pfSMPcap | pfCanSleep | pfNoMSRir | pfNoL2PFNap | pfLClck | pfL1i | pfL1d | pfL2 | pfL2fa | pfL2i | pfL3 | pfL3fa
+	.long   kHasAltivec | kCache32 | kDcbaAvailable | kDataStreamsRecommended | kDataStreamsAvailable | kHasGraphicsOps | kHasStfiwx
+>>>>>>> origin/10.2
 	.long	init7450
 	.long	CPU_SUBTYPE_POWERPC_7450
 	.long	105
@@ -877,7 +934,12 @@ processor_types:
 	.long	0xFFFFFFFF		; Just revision 2.0
 	.short	PROCESSOR_VERSION_7450
 	.short	0x0200
+<<<<<<< HEAD
 	.long	pfFloat | pfAltivec | pfSMPcap | pfCanSleep | pfNoMSRir | pfLClck | pfL1i | pfL1d | pfL2 | pfL2fa | pfL2i | pfL3 | pfL3fa
+=======
+	.long	pfFloat | pfAltivec | pfSMPcap | pfCanSleep | pfNoMSRir | pfNoL2PFNap | pfLClck | pfL1i | pfL1d | pfL2 | pfL2fa | pfL2i | pfL3 | pfL3fa
+	.long   kHasAltivec | kCache32 | kDcbaAvailable | kDataStreamsRecommended | kDataStreamsAvailable | kHasGraphicsOps | kHasStfiwx
+>>>>>>> origin/10.2
 	.long	init7450
 	.long	CPU_SUBTYPE_POWERPC_7450
 	.long	105
@@ -892,7 +954,12 @@ processor_types:
 	.long	0xFFFF0000		; All other revisions
 	.short	PROCESSOR_VERSION_7450
 	.short	0
+<<<<<<< HEAD
 	.long	pfFloat | pfAltivec | pfSMPcap | pfCanSleep | pfWillNap | pfNoMSRir | pfLClck | pfL1i | pfL1d | pfL2 | pfL2fa | pfL2i | pfL3 | pfL3fa
+=======
+	.long	pfFloat | pfAltivec | pfSMPcap | pfCanSleep | pfWillNap | pfNoMSRir | pfNoL2PFNap | pfLClck | pfL1i | pfL1d | pfL2 | pfL2fa | pfL2i | pfL3 | pfL3fa
+	.long   kHasAltivec | kCache32 | kDcbaAvailable | kDataStreamsRecommended | kDataStreamsAvailable | kHasGraphicsOps | kHasStfiwx
+>>>>>>> origin/10.2
 	.long	init7450
 	.long	CPU_SUBTYPE_POWERPC_7450
 	.long	105
@@ -907,7 +974,12 @@ processor_types:
 	.long	0xFFFFFF00		; Just revisions 1.xx
 	.short	PROCESSOR_VERSION_7455
 	.short	0x0100
+<<<<<<< HEAD
 	.long	pfFloat | pfAltivec | pfSMPcap | pfCanSleep | pfNoMSRir | pfLClck | pfL1i | pfL1d | pfL2 | pfL2fa | pfL2i | pfL3 | pfL3fa
+=======
+	.long	pfFloat | pfAltivec | pfSMPcap | pfCanSleep | pfNoMSRir | pfNoL2PFNap | pfLClck | pfL1i | pfL1d | pfL2 | pfL2fa | pfL2i | pfL3 | pfL3fa
+	.long   kHasAltivec | kCache32 | kDcbaAvailable | kDataStreamsRecommended | kDataStreamsAvailable | kHasGraphicsOps | kHasStfiwx
+>>>>>>> origin/10.2
 	.long	init745X
 	.long	CPU_SUBTYPE_POWERPC_7450
 	.long	105
@@ -922,7 +994,12 @@ processor_types:
 	.long	0xFFFFFFFF		; Just revision 2.0
 	.short	PROCESSOR_VERSION_7455
 	.short	0x0200
+<<<<<<< HEAD
 	.long	pfFloat | pfAltivec | pfSMPcap | pfCanSleep | pfWillNap | pfNoMSRir | pfLClck | pfL1i | pfL1d | pfL2 | pfL2fa | pfL2i | pfL3 | pfL3fa
+=======
+	.long	pfFloat | pfAltivec | pfSMPcap | pfCanSleep | pfWillNap | pfNoMSRir | pfNoL2PFNap | pfLClck | pfL1i | pfL1d | pfL2 | pfL2fa | pfL2i | pfL3 | pfL3fa
+	.long   kHasAltivec | kCache32 | kDcbaAvailable | kDataStreamsRecommended | kDataStreamsAvailable | kHasGraphicsOps | kHasStfiwx
+>>>>>>> origin/10.2
 	.long	init745X
 	.long	CPU_SUBTYPE_POWERPC_7450
 	.long	105
@@ -937,7 +1014,28 @@ processor_types:
 	.long	0xFFFF0000		; All other revisions
 	.short	PROCESSOR_VERSION_7455
 	.short	0
+<<<<<<< HEAD
 	.long	pfFloat | pfAltivec | pfSMPcap | pfCanSleep | pfCanNap | pfNoMSRir | pfLClck | pfL1i | pfL1d | pfL2 | pfL2fa | pfL2i | pfL3 | pfL3fa
+=======
+	.long	pfFloat | pfAltivec | pfSMPcap | pfCanSleep | pfCanNap | pfNoMSRir | pfNoL2PFNap | pfLClck | pfL1i | pfL1d | pfL2 | pfL2fa | pfL2i | pfL3 | pfL3fa
+	.long   kHasAltivec | kCache32 | kDcbaAvailable | kDataStreamsRecommended | kDataStreamsAvailable | kHasGraphicsOps | kHasStfiwx
+	.long	init745X
+	.long	CPU_SUBTYPE_POWERPC_7450
+	.long	105
+	.long	90
+	.long	32
+	.long	32*1024
+	.long	32*1024
+
+;	7457
+
+	.align	2
+	.long	0xFFFF0000		; All other revisions
+	.short	PROCESSOR_VERSION_7457
+	.short	0
+	.long	pfFloat | pfAltivec | pfSMPcap | pfCanSleep | pfCanNap | pfNoMSRir | pfNoL2PFNap | pfLClck | pfL1i | pfL1d | pfL2 | pfL2fa | pfL2i | pfL3 | pfL3fa
+	.long   kHasAltivec | kCache32 | kDcbaAvailable | kDataStreamsRecommended | kDataStreamsAvailable | kHasGraphicsOps | kHasStfiwx
+>>>>>>> origin/10.2
 	.long	init745X
 	.long	CPU_SUBTYPE_POWERPC_7450
 	.long	105
@@ -953,6 +1051,7 @@ processor_types:
 	.short	0
 	.short	0
 	.long	pfFloat | pfL1i | pfL1d
+	.long   kCache32 | kHasGraphicsOps | kHasStfiwx
 	.long	0
 	.long	CPU_SUBTYPE_POWERPC_ALL
 	.long	105

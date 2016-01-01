@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -60,6 +71,8 @@
 #include <kern/thread_call.h>
 
 #include <kern/locks.h>
+
+#include <vfs/vfs_journal.h>
 
 #include <vfs/vfs_journal.h>
 
@@ -121,8 +134,72 @@ extern struct timezone gTimeZone;
  * superuser may continue to allocate blocks.
  */
 #define HFS_MINFREE		1
+<<<<<<< HEAD
 #define HFS_MAXRESERVE		((u_int64_t)(250*1024*1024))
 #define HFS_BT_MAXRESERVE	((u_int64_t)(10*1024*1024))
+=======
+#define HFS_MAXRESERVE		(u_int64_t)(250*1024*1024)
+
+/* Internal Data structures*/
+
+struct vcb_t {
+    u_int16_t 			vcbSigWord;
+    int16_t 			vcbAtrb;
+    int16_t			vcbFlags;
+    int16_t 			vcbspare;
+    u_int32_t 			vcbJinfoBlock;
+
+    u_int32_t 			vcbCrDate;
+    u_int32_t 			vcbLsMod;
+    u_int32_t 			vcbVolBkUp;
+
+    int32_t 			vcbFilCnt;
+    int32_t 			vcbDirCnt;
+    u_int32_t 			blockSize;	/* size of allocation blocks */
+    u_int32_t 			totalBlocks;	/* total allocation blocks */
+    u_int32_t 			freeBlocks;	/* free allocation blocks */
+    u_int32_t 			nextAllocation;	/* start of next allocation search */
+    int32_t 			vcbClpSiz;
+    u_int32_t 			vcbNxtCNID;
+	u_int32_t 		vcbCNIDGen;
+	int32_t 		vcbWrCnt;
+
+    int32_t 			vcbFndrInfo[8];
+
+    u_int64_t 			encodingsBitmap;	/* HFS Plus only */
+
+    u_int16_t 			vcbNmFls;		/* HFS only */
+    u_int16_t 			vcbNmRtDirs;		/* HFS only */
+    int16_t 			vcbVBMSt;		/* HFS only */
+    int16_t 			vcbAlBlSt;		/* HFS only */
+
+    struct vnode *		extentsRefNum;
+    struct vnode *		catalogRefNum;
+    struct vnode *		allocationsRefNum;
+
+    u_int8_t		 	vcbVN[256];		/* volume name in UTF-8 */
+    u_int32_t	 		volumeNameEncodingHint;
+    u_int32_t 			hfsPlusIOPosOffset;	/* Disk block where HFS+ starts */
+    u_int32_t 			vcbVBMIOSize;		/* volume bitmap I/O size */
+
+    /* cache of largest known free extents */
+    u_int32_t			vcbFreeExtCnt;
+    HFSPlusExtentDescriptor vcbFreeExt[kMaxFreeExtents];
+
+    u_int32_t		reserveBlocks;		/* free block reserve */
+    u_int32_t		loanedBlocks;		/* blocks on loan for delayed allocations */
+
+    u_int32_t 			localCreateDate;	/* creation times for HFS+ volumes are in local time */
+    simple_lock_data_t	vcbSimpleLock;		/* simple lock to allow concurrent access to vcb data */
+};
+typedef struct vcb_t ExtendedVCB;
+
+
+#define kHFS_DamagedVolume  0x1	/* This volume has errors, unmount dirty */
+
+/* XXX */
+#define MARK_VOLUMEDAMAGED(fcb) 
+>>>>>>> origin/10.2
 
 /*
  * The system distinguishes between the desirable low-disk
@@ -149,8 +226,16 @@ extern struct timezone gTimeZone;
 
 /* This structure describes the HFS specific mount structure data. */
 typedef struct hfsmount {
+<<<<<<< HEAD
 	u_int32_t     hfs_flags;              /* see below */
 
+=======
+	u_int8_t			hfs_fs_ronly;			/* Whether this was mounted as read-initially  */
+	u_int8_t			hfs_unknownpermissions;	/* Whether this was mounted with MNT_UNKNOWNPERMISSIONS */
+	u_int8_t			hfs_media_writeable;
+	u_int8_t			hfs_orphans_cleaned;
+	
+>>>>>>> origin/10.2
 	/* Physical Description */
 	u_int32_t     hfs_logical_block_size;	/* Logical block size of the disk as reported by ioctl(DKIOCGETBLOCKSIZE), always a multiple of 512 */
 	daddr64_t     hfs_logical_block_count;  /* Number of logical blocks on the disk, as reported by ioctl(DKIOCGETBLOCKCOUNT) */
@@ -275,6 +360,7 @@ typedef struct hfsmount {
  
 	/* Quota variables: */
 	struct quotafile	hfs_qfiles[MAXQUOTAS];    /* quota files */
+<<<<<<< HEAD
 
 	/* Journaling variables: */
 	struct journal      *jnl;           // the journal for this volume (if one exists)
@@ -413,6 +499,58 @@ typedef struct hfsmount {
 	// These lists are not sorted like a range list usually is
 	struct rl_head hfs_reserved_ranges[2];
 } hfsmount_t;
+=======
+
+	// XXXdbg
+	void                *jnl;           // the journal for this volume (if one exists)
+	struct vnode        *jvp;           // device where the journal lives (may be equal to devvp)
+	u_int32_t            jnl_start;     // start block of the journal file (so we don't delete it)
+	u_int32_t            hfs_jnlfileid;
+	u_int32_t            hfs_jnlinfoblkid;
+    volatile int         readers;
+	volatile int         blocker;
+} hfsmount_t;
+
+#define hfs_private_metadata_dir	hfs_privdir_desc.cd_cnid
+
+#define hfs_global_shared_lock_acquire(hfsmp)    \
+    do { \
+       if (hfsmp->blocker) { \
+	       tsleep((caddr_t)&hfsmp->blocker, PRIBIO, "journal_blocker", 0); \
+           continue; \
+	   } \
+	   hfsmp->readers++; \
+       break; \
+	} while (1)
+
+#define hfs_global_shared_lock_release(hfsmp)    \
+    do { \
+	    hfsmp->readers--; \
+	    if (hfsmp->readers == 0) { \
+	        wakeup((caddr_t)&hfsmp->readers); \
+        } \
+    } while (0)
+
+#define hfs_global_exclusive_lock_acquire(hfsmp) \
+    do { \
+       if (hfsmp->blocker) { \
+	       tsleep((caddr_t)&hfsmp->blocker, PRIBIO, "journal_blocker", 0); \
+           continue; \
+	   } \
+       if (hfsmp->readers != 0) { \
+	       tsleep((caddr_t)&hfsmp->readers, PRIBIO, "journal_enable/disble", 0); \
+           continue; \
+       } \
+       hfsmp->blocker = 1; \
+       break; \
+	} while (1)
+     
+#define hfs_global_exclusive_lock_release(hfsmp) \
+    hfsmp->blocker = 0; \
+	wakeup((caddr_t)&hfsmp->blocker)
+
+#define MAXHFSVNODELEN		31
+>>>>>>> origin/10.2
 
 /*
  * HFS_META_DELAY is a duration (in usecs) used for triggering the 
@@ -657,18 +795,32 @@ enum { kHFSPlusMaxFileNameBytes = kHFSPlusMaxFileNameChars * 3 };
 /*
  * Various ways to acquire an HFS mount point pointer:
  */
+<<<<<<< HEAD
 #define VTOHFS(VP)  ((struct hfsmount *)vfs_fsprivate(vnode_mount((VP))))
 #define	VFSTOHFS(MP)  ((struct hfsmount *)vfs_fsprivate((MP)))
 #define VCBTOHFS(VCB) (VCB)
 #define FCBTOHFS(FCB)  ((struct hfsmount *)vfs_fsprivate(vnode_mount((FCB)->ff_cp->c_vp)))
+=======
+#define VTOHFS(VP) ((struct hfsmount *)((VP)->v_mount->mnt_data))
+#define	VFSTOHFS(MP) ((struct hfsmount *)(MP)->mnt_data)	
+#define VCBTOHFS(VCB) (((struct vfsVCB *)(VCB))->vcb_hfsmp)
+#define FCBTOHFS(FCB) ((struct hfsmount *)(FCB)->ff_cp->c_vp->v_mount->mnt_data)
+>>>>>>> origin/10.2
 
 /*
  * Various ways to acquire a VCB (legacy) pointer:
  */
+<<<<<<< HEAD
 #define VTOVCB(VP)       VTOHFS(VP)
 #define VFSTOVCB(MP)     VFSTOHFS(MP)
 #define HFSTOVCB(HFSMP)  (HFSMP)
 #define FCBTOVCB(FCB)    FCBTOHFS(FCB)
+=======
+#define VTOVCB(VP) (&(((struct hfsmount *)((VP)->v_mount->mnt_data))->hfs_vcb.vcb_vcb))
+#define VFSTOVCB(MP) (&(((struct hfsmount *)(MP)->mnt_data)->hfs_vcb.vcb_vcb))
+#define HFSTOVCB(HFSMP) (&(HFSMP)->hfs_vcb.vcb_vcb)
+#define FCBTOVCB(FCB) (&(((struct hfsmount *)((FCB)->ff_cp->c_vp->v_mount->mnt_data))->hfs_vcb.vcb_vcb))
+>>>>>>> origin/10.2
 
 
 #define E_NONE	0
@@ -721,8 +873,13 @@ enum { kHFSPlusMaxFileNameBytes = kHFSPlusMaxFileNameChars * 3 };
 #define IOBYTEOFFSETFORBYTE(STARTINGBYTE, BLOCKSIZEINBYTES) ((STARTINGBYTE) - (IOBLKNOFORBYTE((STARTINGBYTE), (BLOCKSIZEINBYTES)) * (BLOCKSIZEINBYTES)))
 
 
+<<<<<<< HEAD
 #define HFS_PRI_SECTOR(blksize)    (1024 / (blksize))
 #define HFS_PRI_OFFSET(blksize)    ((blksize) > 1024 ? 1024 : 0)
+=======
+extern void hfs_remove_orphans(struct hfsmount *);
+
+>>>>>>> origin/10.2
 
 #define HFS_ALT_SECTOR(blksize, blkcnt)  (((blkcnt) - 1) - (512 / (blksize)))
 #define HFS_ALT_OFFSET(blksize)          ((blksize) > 1024 ? (blksize) - 1024 : 0)
@@ -821,7 +978,13 @@ u_int32_t to_hfs_time(time_t bsd_time);
 ******************************************************************************/
 u_int32_t hfs_pickencoding(const u_int16_t *src, int len);
 
+<<<<<<< HEAD
 u_int32_t hfs_getencodingbias(void);
+=======
+extern int hfs_btsync(struct vnode *vp, int sync_transaction);
+// used as a callback by the journaling code
+extern void hfs_sync_metadata(void *arg);
+>>>>>>> origin/10.2
 
 void hfs_setencodingbias(u_int32_t bias);
 
@@ -836,9 +999,19 @@ int hfs_relconverter (u_int32_t encoding);
 OSErr	hfs_MountHFSVolume(struct hfsmount *hfsmp, HFSMasterDirectoryBlock *mdb,
 		struct proc *p);
 OSErr	hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
+<<<<<<< HEAD
 		off_t embeddedOffset, off_t disksize, struct proc *p);
 OSStatus  GetInitializedVNode(struct hfsmount *hfsmp, struct vnode **tmpvnode);
 >>>>>>> origin/10.1
+=======
+		off_t embeddedOffset, u_int64_t disksize, struct proc *p, void *args);
+
+extern int     hfs_early_journal_init(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
+							   void *_args, int embeddedOffset, int mdb_offset,
+							   HFSMasterDirectoryBlock *mdbp, struct ucred *cred);
+extern u_long  GetFileInfo(ExtendedVCB *vcb, u_int32_t dirid, char *name,
+					struct cat_attr *fattr, struct cat_fork *forkinfo);
+>>>>>>> origin/10.2
 
 int hfs_getconverter(u_int32_t encoding, hfs_to_unicode_func_t *get_unicode,
 		     unicode_to_hfs_func_t *get_hfsname);
@@ -1091,6 +1264,7 @@ extern int hfs_btsync(struct vnode *vp, int sync_transaction);
 
 extern void replace_desc(struct cnode *cp, struct cat_desc *cdp);
 
+<<<<<<< HEAD
 extern int hfs_vgetrsrc(struct hfsmount *hfsmp, struct vnode *vp,
 						struct vnode **rvpp);
 
@@ -1181,6 +1355,10 @@ extern int hfs_isrbtree_active (struct hfsmount *hfsmp);
  ******************************************************************************/
 extern errno_t hfs_get_fsinfo(struct hfsmount *hfsmp, void *a_data);
 extern void hfs_fsinfo_data_add(struct hfs_fsinfo_data *fsinfo, uint64_t entry);
+=======
+extern int hfs_namecmp(const char *, size_t, const char *, size_t);
+
+>>>>>>> origin/10.2
 
 #endif /* __APPLE_API_PRIVATE */
 #endif /* KERNEL */

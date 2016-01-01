@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -149,6 +160,17 @@ typedef struct
 #define DK_CORESTORAGE_ENABLE_HOTFILES          0x00000002
 #define DK_CORESTORAGE_PIN_YOUR_SWAPFILE        0x00000004
 
+<<<<<<< HEAD
+=======
+#define DKIOCGETMAXBLOCKCOUNTREAD    _IOR('d', 64, u_int64_t)
+#define DKIOCGETMAXBLOCKCOUNTWRITE   _IOR('d', 65, u_int64_t)
+#define DKIOCGETMAXBYTECOUNTREAD         _IOR('d', 70, u_int64_t)
+#define DKIOCGETMAXBYTECOUNTWRITE        _IOR('d', 71, u_int64_t)
+#define DKIOCGETMAXSEGMENTCOUNTREAD  _IOR('d', 66, u_int64_t)
+#define DKIOCGETMAXSEGMENTCOUNTWRITE _IOR('d', 67, u_int64_t)
+#define DKIOCGETMAXSEGMENTBYTECOUNTREAD  _IOR('d', 68, u_int64_t)
+#define DKIOCGETMAXSEGMENTBYTECOUNTWRITE _IOR('d', 69, u_int64_t)
+>>>>>>> origin/10.2
 
 #ifdef KERNEL
 #ifdef PRIVATE

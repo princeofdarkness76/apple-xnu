@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -287,7 +298,14 @@ struct vfs_attr {
 #define	MNT_NODEV	0x00000010	/* don't interpret special files */
 #define	MNT_UNION	0x00000020	/* union with underlying filesystem */
 #define	MNT_ASYNC	0x00000040	/* file system written asynchronously */
+<<<<<<< HEAD
 #define	MNT_CPROTECT	0x00000080	/* file system supports content protection */
+=======
+#define MNT_DONTBROWSE	0x00100000	/* file system is not appropriate path to user data */
+#define MNT_UNKNOWNPERMISSIONS 0x00200000 /* no known mapping for uid/gid in permissions information on disk */
+#define MNT_AUTOMOUNTED 0x00400000	/* filesystem was mounted by automounter */
+#define MNT_JOURNALED   0x00800000  /* filesystem is journaled */
+>>>>>>> origin/10.2
 
 /*
  * NFS export related mount flags.
@@ -333,9 +351,13 @@ struct vfs_attr {
 			MNT_ASYNC	| MNT_EXPORTED	| MNT_QUARANTINE | \
 			MNT_LOCAL	| MNT_QUOTA | \
 			MNT_ROOTFS	| MNT_DOVOLFS	| MNT_DONTBROWSE | \
+<<<<<<< HEAD
 			MNT_IGNORE_OWNERSHIP | MNT_AUTOMOUNTED | MNT_JOURNALED | \
 			MNT_NOUSERXATTR | MNT_DEFWRITE	| MNT_MULTILABEL | \
 			MNT_NOATIME | MNT_CPROTECT)
+=======
+			MNT_UNKNOWNPERMISSIONS | MNT_AUTOMOUNTED | MNT_JOURNALED | MNT_FIXEDSCRIPTENCODING )
+>>>>>>> origin/10.2
 /*
  * External filesystem command modifier flags.
  * Unmount can use the MNT_FORCE flag.

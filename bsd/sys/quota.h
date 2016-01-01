@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -355,6 +366,7 @@ void	dqhashinit(void);
 void	dqinit(void);
 int	dqisinitialized(void);
 void	dqref(struct dquot *);
+<<<<<<< HEAD
 void	dqrele(struct dquot *);
 void	dqreclaim(struct dquot *);
 int	dqsync(struct dquot *);
@@ -366,6 +378,12 @@ int	qf_get(struct quotafile *, int type);
 void	qf_put(struct quotafile *, int type);
 
 __private_extern__ void  munge_dqblk(struct dqblk *dqblkp, struct user_dqblk *user_dqblkp, boolean_t to64);
+=======
+void	dqrele(struct vnode *, struct dquot *);
+void	dqreclaim(struct vnode *, struct dquot *);
+int	dqsync(struct vnode *, struct dquot *);
+void	dqsync_orphans(struct quotafile *);
+>>>>>>> origin/10.2
 __END_DECLS
 #endif /* XNU_KERNEL_PRIVATE */
 

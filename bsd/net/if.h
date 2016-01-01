@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
  *
+<<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
  * This file contains Original Code and/or Modifications of Original Code
@@ -15,6 +16,19 @@
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
  *
+=======
+ * @APPLE_LICENSE_HEADER_START@
+ * 
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+ * 
+>>>>>>> origin/10.2
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,8 +36,13 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
+<<<<<<< HEAD
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+=======
+ * 
+ * @APPLE_LICENSE_HEADER_END@
+>>>>>>> origin/10.2
  */
 /*
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -156,6 +175,7 @@ struct if_clonereq32 {
 #define	IFF_ALTPHYS	IFF_LINK2	/* use alternate physical connection */
 #define	IFF_MULTICAST	0x8000		/* supports multicast */
 
+<<<<<<< HEAD
 #ifdef PRIVATE
 /* extended flags definitions:  (all bits reserved for internal/future use) */
 #define	IFEF_AUTOCONFIGURING	0x00000001	/* allow BOOTP/DHCP replies to enter */
@@ -199,6 +219,15 @@ struct if_clonereq32 {
 	IFEF_AWDL)
 #endif /* XNU_KERNEL_PRIVATE */
 #endif /* PRIVATE */
+=======
+#if KERNEL_PRIVATE
+/* extended flags definitions:  (all bits are reserved for internal/future use) */
+#define IFEF_AUTOCONFIGURING	0x1
+#define IFEF_DVR_REENTRY_OK	0x20	/* When set, driver may be reentered from its own thread */
+#define IFEF_INUSE	0x40000000 /* DLIL ifnet recycler, ifnet in use */
+#define IFEF_REUSE	0x20000000 /* DLIL ifnet recycler, ifnet is not new */
+#endif /* KERNEL_PRIVATE */
+>>>>>>> origin/10.2
 
 #ifdef KERNEL_PRIVATE
 /*

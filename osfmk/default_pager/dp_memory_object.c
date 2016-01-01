@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -801,8 +812,13 @@ dp_memory_object_data_return(
 	if ((vs->vs_seqno != vs->vs_next_seqno++)
 			|| (vs->vs_readers)
 			|| (vs->vs_xfer_pending)) {
+<<<<<<< HEAD
 		upl_t		upl;
 		unsigned int	page_list_count = 0;
+=======
+		upl_t	upl;
+		int	page_list_count = 0;
+>>>>>>> origin/10.2
 
 		vs->vs_next_seqno--;
                 VS_UNLOCK(vs);

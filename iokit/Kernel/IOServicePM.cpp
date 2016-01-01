@@ -3,6 +3,7 @@
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +15,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -748,6 +759,11 @@ void IOService::handlePMstop( IOPMRequest * request )
         }
         iter->release();
     }
+<<<<<<< HEAD
+=======
+
+    theNub->release();
+>>>>>>> origin/10.2
 
     // Remove all interested drivers from the list, including the power
     // controlling driver.
@@ -770,8 +786,17 @@ void IOService::handlePMstop( IOPMRequest * request )
         PM_UNLOCK();
     }
 
+<<<<<<< HEAD
     // Clear idle period to prevent idleTimerExpired() from servicing
     // idle timer expirations.
+=======
+    // Perhaps the departing child was holding up idle or system sleep - we need to re-evaluate our
+    // childrens' requests. Clear and re-calculate our kIOPMChildClamp and kIOPMChildClamp2 bits.
+    rebuildChildClampBits();
+
+    computeDesiredState();				// this may be different now
+    changeState();					// change state if we can now tolerate lower power
+>>>>>>> origin/10.2
 
     fIdleTimerPeriod = 0;
     if (fIdleTimer && thread_call_cancel(fIdleTimer))
@@ -1118,11 +1143,62 @@ IOReturn IOService::registerPowerDriver(
         return kIOReturnBadArgument;
     }
 
+<<<<<<< HEAD
     if (!powerDriver || !powerDriver->initialized)
     {
         OUR_PMLog(kPMLogControllingDriverErr4, 0, 0);
         return kIOReturnBadArgument;
     }
+=======
+//*********************************************************************************
+// rebuildChildClampBits
+//
+// The ChildClamp bits (kIOPMChildClamp & kIOPMChildClamp2) in our capabilityFlags
+// indicate that one of our children (or grandchildren or great-grandchildren or ...)
+// doesn't support idle or system sleep in its current state. Since we don't track the
+// origin of each bit, every time any child changes state we have to clear these bits 
+// and rebuild them.
+//*********************************************************************************
+
+void IOService::rebuildChildClampBits(void)
+{
+    unsigned long	i;
+    OSIterator *	iter;
+    OSObject *		next;
+    IOPowerConnection *	connection;
+    
+    
+    // A child's desires has changed.  We need to rebuild the child-clamp bits in our
+    // power state array.  Start by clearing the bits in each power state.
+    
+    for ( i = 0; i < pm_vars->theNumberOfPowerStates; i++ ) {
+        pm_vars->thePowerStates[i].capabilityFlags &= ~(kIOPMChildClamp | kIOPMChildClamp2);
+    }
+
+    // Now loop through the children.  When we encounter the calling child, save
+    // the computed state as this child's desire.  And while we're at it, set the ChildClamp bits
+    // in any of our states that some child has requested with clamp on.
+
+    iter = getChildIterator(gIOPowerPlane);
+
+    if ( iter ) 
+    {
+        while ( (next = iter->getNextObject()) ) 
+        {
+            if ( (connection = OSDynamicCast(IOPowerConnection,next)) ) 
+            {
+                if ( connection->getPreventIdleSleepFlag() )
+                    pm_vars->thePowerStates[connection->getDesiredDomainState()].capabilityFlags |= kIOPMChildClamp;
+                if ( connection->getPreventSystemSleepFlag() )
+                    pm_vars->thePowerStates[connection->getDesiredDomainState()].capabilityFlags |= kIOPMChildClamp2;
+            }
+        }
+        iter->release();
+    }
+
+}
+
+>>>>>>> origin/10.2
 
     if (powerStates[0].version > kIOPMPowerStateVersion2)
     {
@@ -1187,6 +1263,7 @@ IOReturn IOService::registerPowerDriver(
         request->fArg1 = (void *) powerStatesCopy;
         request->fArg2 = (void *) numberOfStates;
 
+<<<<<<< HEAD
         submitPMRequest( request );
         return kIOReturnSuccess;
     }
@@ -1194,6 +1271,33 @@ IOReturn IOService::registerPowerDriver(
 
     if (powerStatesCopy)
         IODelete(powerStatesCopy, IOPMPSEntry, numberOfStates);
+=======
+    // Now loop through the children.  When we encounter the calling child, save
+    // the computed state as this child's desire.
+    iter = getChildIterator(gIOPowerPlane);
+
+    if ( iter ) {
+        while ( (next = iter->getNextObject()) ) {
+            if ( (connection = OSDynamicCast(IOPowerConnection,next)) ) {
+                if ( connection == whichChild ) {
+                    connection->setDesiredDomainState(computedState);
+                    connection->setPreventIdleSleepFlag(desiredState & kIOPMPreventIdleSleep);
+                    connection->setPreventSystemSleepFlag(desiredState & kIOPMPreventSystemSleep);
+                    connection->setChildHasRequestedPower();
+                }
+            }
+        }
+        iter->release();
+    }
+
+    // Since a child's power requirements may have changed, clear and rebuild 
+    // kIOPMChildClamp and kIOPMChildClamp2 (idle and system sleep clamps)
+    rebuildChildClampBits();
+        
+    IOLockUnlock(pm_vars->childLock);
+    
+    computeDesiredState();				// this may be different now
+>>>>>>> origin/10.2
 
     return error;
 }
@@ -3371,6 +3475,53 @@ void IOService::idleTimerExpired( void )
 
 void IOService::PM_idle_timer_expiration( void )
 {
+<<<<<<< HEAD
+=======
+    OSIterator *	iter;
+    OSObject *		next;
+    IOPowerConnection *	connection;
+    IOService *		parent;
+    unsigned long	ourRequest = pm_vars->thePowerStates[requestedState].inputPowerRequirement;
+
+    if ( pm_vars->thePowerStates[requestedState].capabilityFlags & (kIOPMChildClamp | kIOPMPreventIdleSleep) ) {
+        ourRequest |= kIOPMPreventIdleSleep;
+    }
+    if ( pm_vars->thePowerStates[requestedState].capabilityFlags & (kIOPMChildClamp2 | kIOPMPreventSystemSleep) ) {
+        ourRequest |= kIOPMPreventSystemSleep;
+    }
+    
+    // is this a new desire?
+    if ( priv->previousRequest == ourRequest )
+    {	
+        // no, the parent knows already, just return
+        return IOPMNoErr;				
+    }
+
+    if (  priv->we_are_root ) {
+        return IOPMNoErr;
+    }
+    priv->previousRequest =  ourRequest;
+
+    iter = getParentIterator(gIOPowerPlane);
+
+    if ( iter ) {
+        while ( (next = iter->getNextObject()) ) {
+            if ( (connection = OSDynamicCast(IOPowerConnection,next)) ) {
+                parent = (IOService *)connection->copyParentEntry(gIOPowerPlane);
+                if ( parent ) {
+                    if ( parent->requestPowerDomainState(ourRequest,connection,IOPMLowestState)!= IOPMNoErr ) {
+                        pm_vars->thePlatform->PMLog(pm_vars->ourName,PMlogRequestDenied,
+                                                                (unsigned long)priv->previousRequest,0);
+                    }
+                    parent->release();
+                }
+            }
+        }
+        iter->release();
+    }
+
+    return IOPMNoErr;
+>>>>>>> origin/10.2
 }
 
 //*********************************************************************************

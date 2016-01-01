@@ -1,8 +1,13 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 1999-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 1999-2002 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.2
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
+<<<<<<< HEAD
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -14,6 +19,16 @@
  * 
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
+=======
+ * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * 
+ * This file contains Original Code and/or Modifications of Original Code
+ * as defined in and that are subject to the Apple Public Source License
+ * Version 2.0 (the 'License'). You may not use this file except in
+ * compliance with the License. Please obtain a copy of the License at
+ * http://www.opensource.apple.com/apsl/ and read it before using this
+ * file.
+>>>>>>> origin/10.2
  * 
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
@@ -204,10 +219,76 @@ cs_find_md(uint8_t type)
 	return NULL;
 }
 
+<<<<<<< HEAD
 union cs_hash_union {
 	SHA1_CTX		sha1ctxt;
 	SHA256_CTX		sha256ctx;
 };
+=======
+/*
+ * Serialize the requests to the VM
+ * Returns:
+ *		0	-	Failure
+ *		1	-	Sucessful in acquiring the lock
+ *		2	-	Sucessful in acquiring the lock recursively
+ *				do not call ubc_unbusy()
+ *				[This is strange, but saves 4 bytes in struct ubc_info]
+ */
+static int
+ubc_busy(struct vnode *vp)
+{
+	register struct ubc_info	*uip;
+
+	if (!UBCINFOEXISTS(vp))
+		return (0);
+
+	uip = vp->v_ubcinfo;
+
+	while (ISSET(uip->ui_flags, UI_BUSY)) {
+
+		if (uip->ui_owner == (void *)current_thread())
+			return (2);
+
+		SET(uip->ui_flags, UI_WANTED);
+		(void) tsleep((caddr_t)&vp->v_ubcinfo, PINOD, "ubcbusy", 0);
+
+		if (!UBCINFOEXISTS(vp))
+			return (0);
+	}
+	uip->ui_owner = (void *)current_thread();
+
+	SET(uip->ui_flags, UI_BUSY);
+
+	return (1);
+}
+
+static void
+ubc_unbusy(struct vnode *vp)
+{
+	register struct ubc_info	*uip;
+
+	if (!UBCINFOEXISTS(vp)) {
+		wakeup((caddr_t)&vp->v_ubcinfo);
+		return;
+	}
+	uip = vp->v_ubcinfo;
+	CLR(uip->ui_flags, UI_BUSY);
+	uip->ui_owner = (void *)NULL;
+
+	if (ISSET(uip->ui_flags, UI_WANTED)) {
+		CLR(uip->ui_flags, UI_WANTED);
+		wakeup((caddr_t)&vp->v_ubcinfo);
+	}
+}
+
+/*
+ *	Initialization of the zone for Unified Buffer Cache.
+ */
+__private_extern__ void
+ubc_init()
+{
+	int	i;
+>>>>>>> origin/10.2
 
 
 /*
@@ -249,6 +330,7 @@ CS_CodeDirectory *findCodeDirectory(
 		cd = (const CS_CodeDirectory *) embedded;
 	}
 
+<<<<<<< HEAD
 	if (cd &&
 	    cs_valid_range(cd, cd + 1, lower_bound, upper_bound) &&
 	    cs_valid_range(cd, (const char *) cd + ntohl(cd->length),
@@ -262,6 +344,22 @@ CS_CodeDirectory *findCodeDirectory(
 	    
 	    ntohl(cd->magic) == CSMAGIC_CODEDIRECTORY) {
 		return cd;
+=======
+	uip = vp->v_ubcinfo;
+	if ((uip == UBC_INFO_NULL) || (uip == UBC_NOINFO)) {
+		ubc_unlock(vp);
+		uip = (struct ubc_info *) zalloc(ubc_info_zone);
+		uip->ui_pager = MEMORY_OBJECT_NULL;
+		uip->ui_control = MEMORY_OBJECT_CONTROL_NULL;
+		uip->ui_flags = UI_INITED;
+		uip->ui_vnode = vp;
+		uip->ui_ucred = NOCRED;
+		uip->ui_refcount = 1;
+		uip->ui_size = 0;
+		uip->ui_mapped = 0;
+		uip->ui_owner = (void *)NULL;
+		ubc_lock(vp);
+>>>>>>> origin/10.2
 	}
 
 	// not found or not a valid code directory
@@ -397,9 +495,30 @@ cs_validate_codedirectory(const CS_CodeDirectory *cd, size_t length)
 	if (cd->hashSize != hashtype->cs_cd_size)
 		return EBADEXEC;
 
+<<<<<<< HEAD
 
 	if (length < ntohl(cd->hashOffset))
 		return EBADEXEC;
+=======
+void
+ubc_info_deallocate(struct ubc_info *uip)
+{
+
+	assert(uip->ui_refcount > 0);
+
+    if (uip->ui_refcount-- == 1) {
+		struct vnode *vp;
+
+		vp = uip->ui_vnode;
+		if (ISSET(uip->ui_flags, UI_WANTED)) {
+			CLR(uip->ui_flags, UI_WANTED);
+			wakeup((caddr_t)&vp->v_ubcinfo);
+		}
+
+		ubc_info_free(uip);
+	}
+}
+>>>>>>> origin/10.2
 
 	/* check that nSpecialSlots fits in the buffer in front of hashOffset */
 	if (ntohl(cd->hashOffset) / hashtype->cs_size < ntohl(cd->nSpecialSlots))
@@ -503,6 +622,7 @@ cs_validate_blob(const CS_GenericBlob *blob, size_t length)
  * Returns:	0			Success
  *		EBADEXEC		Invalid code signature
  */
+<<<<<<< HEAD
 
 static int
 cs_validate_csblob(const uint8_t *addr, size_t length,
@@ -510,6 +630,24 @@ cs_validate_csblob(const uint8_t *addr, size_t length,
 {
 	const CS_GenericBlob *blob = (const CS_GenericBlob *)(const void *)addr;
 	int error;
+=======
+int
+ubc_uncache(struct vnode *vp)
+{
+	kern_return_t kret;
+	struct ubc_info *uip;
+	int    recursed;
+	memory_object_control_t control;
+	memory_object_perf_info_data_t   perf;
+
+	if (!UBCINFOEXISTS(vp))
+		return (0);
+
+	if ((recursed = ubc_busy(vp)) == 0)
+		return (0);
+
+	uip = vp->v_ubcinfo;
+>>>>>>> origin/10.2
 
 	*rcd = NULL;
 
@@ -526,9 +664,19 @@ cs_validate_csblob(const uint8_t *addr, size_t length,
 		if (length < sizeof(CS_SuperBlob))
 			return EBADEXEC;
 
+<<<<<<< HEAD
 		/* check that the array of BlobIndex fits in the rest of the data */
 		if ((length - sizeof(CS_SuperBlob)) / sizeof(CS_BlobIndex) < count)
 			return EBADEXEC;
+=======
+	if (kret != KERN_SUCCESS) {
+		printf("ubc_uncache: memory_object_change_attributes_named "
+			"kret = %d", kret);
+		if (recursed == 1)
+			ubc_unbusy(vp);
+		return (0);
+	}
+>>>>>>> origin/10.2
 
 		/* now check each BlobIndex */
 		for (n = 0; n < count; n++) {
@@ -536,8 +684,15 @@ cs_validate_csblob(const uint8_t *addr, size_t length,
 			if (length < ntohl(blobIndex->offset))
 				return EBADEXEC;
 
+<<<<<<< HEAD
 			const CS_GenericBlob *subBlob =
 				(const CS_GenericBlob *)(const void *)(addr + ntohl(blobIndex->offset));
+=======
+	if (recursed == 1)
+		ubc_unbusy(vp);
+	return (1);
+}
+>>>>>>> origin/10.2
 
 			size_t subLength = length - ntohl(blobIndex->offset);
 
@@ -700,6 +855,7 @@ csblob_get_entitlements(struct cs_blob *csblob, void **out_start, size_t *out_le
 __private_extern__ void
 ubc_init(void)
 {
+<<<<<<< HEAD
 	int	i;
 
 	i = (vm_size_t) sizeof (struct ubc_info);
@@ -708,8 +864,23 @@ ubc_init(void)
 
 	zone_change(ubc_info_zone, Z_NOENCRYPT, TRUE);
 }
+=======
+	struct ubc_info *uip;
+	int    recursed;
+	memory_object_control_t control;
+
+	if (UBCINVALID(vp))
+		return (0);
+
+	if ((recursed = ubc_busy(vp)) == 0)
+		return (0);
+
+	uip = vp->v_ubcinfo;
+	control = uip->ui_control;
+>>>>>>> origin/10.2
 
 
+<<<<<<< HEAD
 /*
  * ubc_info_init
  *
@@ -722,6 +893,33 @@ ubc_init(void)
  *	vnode_size:???			Other error from vnode_getattr
  *
  */
+=======
+		/*
+		 * Take a temporary reference on the ubc info so that it won't go
+		 * away during our recovery attempt.
+		 */
+		ubc_lock(vp);
+		uip->ui_refcount++;
+		ubc_unlock(vp);
+		if (memory_object_recover_named(control, TRUE) == KERN_SUCCESS) {
+			SET(uip->ui_flags, UI_HASOBJREF);
+		} else {
+			control = MEMORY_OBJECT_CONTROL_NULL;
+		}
+		if (recursed == 1)
+			ubc_unbusy(vp);
+		ubc_info_deallocate(uip);
+
+	} else {
+		if (recursed == 1)
+			ubc_unbusy(vp);
+	}
+
+	return (control);
+}
+
+/* Set the pager */
+>>>>>>> origin/10.2
 int
 ubc_info_init(struct vnode *vp)
 {
@@ -1272,12 +1470,18 @@ int
 ubc_setthreadcred(struct vnode *vp, proc_t p, thread_t thread)
 {
 	struct ubc_info *uip;
+<<<<<<< HEAD
 	kauth_cred_t credp;
 	struct uthread  *uthread = get_bsdthread_info(thread);
+=======
+	int    recursed;
+	memory_object_control_t object;
+>>>>>>> origin/10.2
 
 	if (!UBCINFOEXISTS(vp))
 		return (1); 
 
+<<<<<<< HEAD
 	vnode_lock(vp);
 
 	uip = vp->v_ubcinfo;
@@ -1347,6 +1551,37 @@ ubc_setcred(struct vnode *vp, proc_t p)
 	} 
 	vnode_unlock(vp);
 
+=======
+	if ((recursed = ubc_busy(vp)) == 0) {
+		/* must be invalid or dying vnode */
+		assert(UBCINVALID(vp) ||
+			((vp->v_flag & VXLOCK) || (vp->v_flag & VTERMINATE)));
+		return (0);
+	}
+
+	uip = vp->v_ubcinfo;
+	assert(uip->ui_control != MEMORY_OBJECT_CONTROL_NULL);
+
+	ubc_lock(vp);
+	uip->ui_refcount++;
+	ubc_unlock(vp);
+
+	if (!ISSET(uip->ui_flags, UI_HASOBJREF)) {
+		if (memory_object_recover_named(uip->ui_control, TRUE)
+			!= KERN_SUCCESS) {
+			if (recursed == 1)
+				ubc_unbusy(vp);
+			ubc_info_deallocate(uip);
+			return (0);
+		}
+		SET(uip->ui_flags, UI_HASOBJREF);
+	}
+	if (recursed == 1)
+		ubc_unbusy(vp);
+
+	assert(uip->ui_refcount > 0);
+
+>>>>>>> origin/10.2
 	return (1);
 }
 
@@ -3175,17 +3410,29 @@ ubc_cs_blob_get(
 	cpu_type_t	cputype,
 	off_t		offset)
 {
+<<<<<<< HEAD
 	struct ubc_info	*uip;
 	struct cs_blob	*blob;
 	off_t offset_in_blob;
+=======
+	struct ubc_info *uip;
+	int    recursed;
+	memory_object_control_t control;
+	kern_return_t kret = KERN_FAILURE;
+>>>>>>> origin/10.2
 
 	vnode_lock_spin(vp);
 
+<<<<<<< HEAD
 	if (! UBCINFOEXISTS(vp)) {
 		blob = NULL;
 		goto out;
 	}
 
+=======
+	if ((recursed = ubc_busy(vp)) == 0)
+		return (0);
+>>>>>>> origin/10.2
 	uip = vp->v_ubcinfo;
 	for (blob = uip->cs_blobs;
 	     blob != NULL;
@@ -3203,10 +3450,26 @@ ubc_cs_blob_get(
 		}
 	}
 
+<<<<<<< HEAD
 out:
 	vnode_unlock(vp);
 
 	return blob;
+=======
+	/* can not release held or mapped vnodes */
+	if (ISSET(uip->ui_flags, UI_HASOBJREF) && 
+		(uip->ui_refcount == 1) && !uip->ui_mapped) {
+		control = uip->ui_control;
+		assert(control);
+		CLR(uip->ui_flags, UI_HASOBJREF);
+		kret = memory_object_release_name(control,
+				MEMORY_OBJECT_RESPECT_CACHE);
+	}
+
+	if (recursed == 1)
+		ubc_unbusy(vp);
+	return ((kret != KERN_SUCCESS) ? 0 : 1);
+>>>>>>> origin/10.2
 }
 
 static void

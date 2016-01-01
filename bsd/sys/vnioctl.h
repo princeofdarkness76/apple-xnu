@@ -139,5 +139,11 @@ struct vn_ioctl_32 {
 #define VN_DONTCLUSTER	0x10	/* Don't cluster */
 #define VN_RESERVE	0x20	/* Pre-reserve swap */
 
+<<<<<<< HEAD
+=======
+#endif /* __APPLE_API_PRIVATE */
+
+#endif /* KERNEL_PRIVATE */
+>>>>>>> origin/10.2
 
 #endif	/* _SYS_VNIOCTL_H_*/
