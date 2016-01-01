@@ -1950,9 +1950,15 @@ sosend(struct socket *so, struct sockaddr *addr, struct uio *uio,
     struct mbuf *top, struct mbuf *control, int flags)
 {
 	struct mbuf **mp;
+<<<<<<< HEAD
 	struct mbuf *m, *freelist = NULL;
 	user_ssize_t space, len, resid, orig_resid;
 	int clen = 0, error, dontroute, mlen, sendflags;
+=======
+	register struct mbuf *m, *freelist = NULL;
+	register long space, len, resid;
+	int clen = 0, error, s, dontroute, mlen, sendflags;
+>>>>>>> origin/10.1
 	int atomic = sosendallatonce(so) || top;
 	int sblocked = 0;
 	struct proc *p = current_proc();
@@ -2044,6 +2050,7 @@ sosend(struct socket *so, struct sockaddr *addr, struct uio *uio,
 			goto release;
 
 		mp = &top;
+<<<<<<< HEAD
 		if (so->so_flags & SOF_ENABLE_MSGS)
 			space = msgq_sbspace(so, control);
 		else
@@ -2283,6 +2290,111 @@ sosend(struct socket *so, struct sockaddr *addr, struct uio *uio,
 
 				if (error)
 					goto release;
+=======
+		space -= clen;
+
+		do {
+		    if (uio == NULL) {
+			/*
+			 * Data is prepackaged in "top".
+			 */
+			resid = 0;
+			if (flags & MSG_EOR)
+				top->m_flags |= M_EOR;
+		    } else {
+		        boolean_t 	dropped_funnel = FALSE;
+			int             chainlength;
+			int             bytes_to_copy;
+
+			bytes_to_copy = min(resid, space);
+
+			if (sosendminchain > 0) {
+			    if (bytes_to_copy >= sosendminchain) {
+			        dropped_funnel = TRUE;
+			        (void)thread_funnel_set(network_flock, FALSE);
+			    }
+			    chainlength = 0;
+			} else
+			    chainlength = sosendmaxchain;
+
+			do {
+
+			if (bytes_to_copy >= MINCLSIZE) {
+			  if ((m = freelist) == NULL) {
+			        int num_needed;
+				int hdrs_needed = 0;
+				
+				if (top == 0)
+				    hdrs_needed = 1;
+				num_needed = bytes_to_copy / MCLBYTES;
+
+				if ((bytes_to_copy - (num_needed * MCLBYTES)) >= MINCLSIZE)
+				    num_needed++;
+
+			        if ((freelist = m_getpackets(num_needed, hdrs_needed, M_WAIT)) == NULL)
+				    goto getpackets_failed;
+				m = freelist;
+			    }
+			    freelist = m->m_next;
+			    m->m_next = NULL;
+
+			    mlen = MCLBYTES;
+			    len = min(mlen, bytes_to_copy);
+			} else {
+getpackets_failed:
+			    if (top == 0) {
+				MGETHDR(m, M_WAIT, MT_DATA);
+				mlen = MHLEN;
+				m->m_pkthdr.len = 0;
+				m->m_pkthdr.rcvif = (struct ifnet *)0;
+			    } else {
+				MGET(m, M_WAIT, MT_DATA);
+				mlen = MLEN;
+			    }
+			    len = min(mlen, bytes_to_copy);
+			    /*
+			     * For datagram protocols, leave room
+			     * for protocol headers in first mbuf.
+			     */
+			    if (atomic && top == 0 && len < mlen)
+			        MH_ALIGN(m, len);
+			}
+			chainlength += len;
+			
+			space -= len;
+
+			error = uiomove(mtod(m, caddr_t), (int)len, uio);
+
+			resid = uio->uio_resid;
+			
+			m->m_len = len;
+			*mp = m;
+			top->m_pkthdr.len += len;
+			if (error) 
+			    break;
+			mp = &m->m_next;
+			if (resid <= 0) {
+				if (flags & MSG_EOR)
+					top->m_flags |= M_EOR;
+				break;
+			}
+			bytes_to_copy = min(resid, space);
+
+		    } while (space > 0 && (chainlength < sosendmaxchain || atomic || resid < MINCLSIZE));
+
+		    if (dropped_funnel == TRUE)
+			(void)thread_funnel_set(network_flock, TRUE);
+		    if (error)
+			goto release;
+		    }
+            
+		    if (flags & (MSG_HOLD|MSG_SEND))
+		    {	/* Enqueue for later, go away if HOLD */
+			register struct mbuf *mb1;
+			if (so->so_temp && (flags & MSG_FLUSH))
+			{	m_freem(so->so_temp);
+				so->so_temp = NULL;
+>>>>>>> origin/10.1
 			}
 
 			if (flags & (MSG_HOLD|MSG_SEND)) {
@@ -2316,6 +2428,7 @@ sosend(struct socket *so, struct sockaddr *addr, struct uio *uio,
 			 * understands this flag and nothing left to
 			 * send then use PRU_SEND_EOF instead of PRU_SEND.
 			 */
+<<<<<<< HEAD
 			sendflags = (flags & MSG_OOB) ? PRUS_OOB :
 			    ((flags & MSG_EOF) &&
 			    (so->so_proto->pr_flags & PR_IMPLOPCL) &&
@@ -2336,6 +2449,29 @@ sosend(struct socket *so, struct sockaddr *addr, struct uio *uio,
 						clen = 0;
 						control = NULL;
 						top = NULL;
+=======
+			((flags & MSG_EOF) &&
+			 (so->so_proto->pr_flags & PR_IMPLOPCL) &&
+			 (resid <= 0)) ?
+				PRUS_EOF :
+			/* If there is more to send set PRUS_MORETOCOME */
+			(resid > 0 && space > 0) ? PRUS_MORETOCOME : 0;
+		    while (kp)
+		    {	if (kp->e_soif && kp->e_soif->sf_sosend)
+			{	error = (*kp->e_soif->sf_sosend)(so, &addr,
+								 &uio, &top,
+								 &control,
+								 &sendflags,
+								 kp);
+				if (error)
+				{	splx(s);
+					if (error == EJUSTRETURN)
+					{	sbunlock(&so->so_snd);
+					
+					        if (freelist)
+						        m_freem_list(freelist);     
+						return(0);
+>>>>>>> origin/10.1
 					}
 					goto release;
 				}
@@ -2394,10 +2530,15 @@ out:
 		m_freem(top);
 	if (control != NULL)
 		m_freem(control);
+<<<<<<< HEAD
 	if (freelist != NULL)
 		m_freem_list(freelist);
 	if (control_copy != NULL)
 		m_freem(control_copy);
+=======
+	if (freelist)
+	        m_freem_list(freelist);     
+>>>>>>> origin/10.1
 
 	/*
 	 * One write has been done. This was enough. Get back to "normal"
@@ -2424,6 +2565,7 @@ out:
  * (control mbuf) for atomic protocols
  */
 int
+<<<<<<< HEAD
 sosend_list(struct socket *so, struct uio **uioarray, u_int uiocnt, int flags)
 {
 	struct mbuf *m, *freelist = NULL;
@@ -2437,6 +2579,31 @@ sosend_list(struct socket *so, struct uio **uioarray, u_int uiocnt, int flags)
 	struct mbuf *top = NULL;
 	uint16_t headroom = 0;
 	boolean_t bigcl;
+=======
+soreceive(so, psa, uio, mp0, controlp, flagsp)
+	register struct socket *so;
+	struct sockaddr **psa;
+	struct uio *uio;
+	struct mbuf **mp0;
+	struct mbuf **controlp;
+	int *flagsp;
+{
+	register struct mbuf *m, **mp;
+	register struct mbuf *free_list, *ml;
+	register int flags, len, error, s, offset;
+	struct protosw *pr = so->so_proto;
+	struct mbuf *nextrecord;
+	int moff, type = 0;
+	int orig_resid = uio->uio_resid;
+	struct kextcb *kp;
+	
+	KERNEL_DEBUG(DBG_FNC_SORECEIVE | DBG_FUNC_START,
+		     so,
+		     uio->uio_resid,
+		     so->so_rcv.sb_cc,
+		     so->so_rcv.sb_lowat,
+		     so->so_rcv.sb_hiwat);
+>>>>>>> origin/10.1
 
 	KERNEL_DEBUG((DBG_FNC_SOSEND_LIST | DBG_FUNC_START), so, uiocnt,
 	    so->so_snd.sb_cc, so->so_snd.sb_lowat, so->so_snd.sb_hiwat);
@@ -2912,6 +3079,7 @@ soreceive_ctl(struct socket *so, struct mbuf **controlp, int flags,
 		if (nextrecord == NULL)
 			sb_rcv->sb_lastrecord = m;
 	}
+<<<<<<< HEAD
 
 	SBLASTRECORDCHK(&so->so_rcv, "soreceive ctl");
 	SBLASTMBUFCHK(&so->so_rcv, "soreceive ctl");
@@ -2923,6 +3091,52 @@ soreceive_ctl(struct socket *so, struct mbuf **controlp, int flags,
 		cm->m_next = NULL;
 		cmsg_type = mtod(cm, struct cmsghdr *)->cmsg_type;
 
+=======
+	if (m) {
+		if ((flags & MSG_PEEK) == 0)
+			m->m_nextpkt = nextrecord;
+		type = m->m_type;
+		if (type == MT_OOBDATA)
+			flags |= MSG_OOB;
+	}
+	moff = 0;
+	offset = 0;
+
+	free_list = m;
+	ml = (struct mbuf *)0;
+
+	while (m && uio->uio_resid > 0 && error == 0) {
+		if (m->m_type == MT_OOBDATA) {
+			if (type != MT_OOBDATA)
+				break;
+		} else if (type == MT_OOBDATA)
+			break;
+#if 0
+/*
+ * This assertion needs rework.  The trouble is Appletalk is uses many
+ * mbuf types (NOT listed in mbuf.h!) which will trigger this panic.
+ * For now just remove the assertion...  CSM 9/98
+ */
+		else
+		    KASSERT(m->m_type == MT_DATA || m->m_type == MT_HEADER,
+			("receive 3"));
+#endif
+               /*
+                * Make sure to allways set MSG_OOB event when getting 
+                * out of band data inline.
+                */
+		if ((so->so_options & SO_WANTOOBFLAG) != 0 &&
+                    (so->so_options & SO_OOBINLINE) != 0 && 
+                    (so->so_state & SS_RCVATMARK) != 0) {
+		    flags |= MSG_OOB;
+                }
+		so->so_state &= ~SS_RCVATMARK;
+		len = uio->uio_resid;
+		if (so->so_oobmark && len > so->so_oobmark - offset)
+			len = so->so_oobmark - offset;
+		if (len > m->m_len - moff)
+			len = m->m_len - moff;
+>>>>>>> origin/10.1
 		/*
 		 * Call the protocol to externalize SCM_RIGHTS message
 		 * and return the modified message to the caller upon
@@ -2930,6 +3144,7 @@ soreceive_ctl(struct socket *so, struct mbuf **controlp, int flags,
 		 * returned unmodified to the caller.  Note that we
 		 * only get into this loop if MSG_PEEK is not set.
 		 */
+<<<<<<< HEAD
 		if (pr->pr_domain->dom_externalize != NULL &&
 		    cmsg_type == SCM_RIGHTS) {
 			/*
@@ -2942,6 +3157,41 @@ soreceive_ctl(struct socket *so, struct mbuf **controlp, int flags,
 			socket_unlock(so, 0);
 			error = (*pr->pr_domain->dom_externalize)(cm);
 			socket_lock(so, 0);
+=======
+		if (mp == 0) {
+			splx(s);
+			error = uiomove(mtod(m, caddr_t) + moff, (int)len, uio);
+			s = splnet();
+			if (error)
+				goto release;
+		} else
+			uio->uio_resid -= len;
+		if (len == m->m_len - moff) {
+			if (m->m_flags & M_EOR)
+				flags |= MSG_EOR;
+			if (flags & MSG_PEEK) {
+				m = m->m_next;
+				moff = 0;
+			} else {
+				nextrecord = m->m_nextpkt;
+				sbfree(&so->so_rcv, m);
+				if (mp) {
+					*mp = m;
+					mp = &m->m_next;
+					so->so_rcv.sb_mb = m = m->m_next;
+					*mp = (struct mbuf *)0;
+				} else {
+				        m->m_nextpkt = 0;
+				        if (ml != 0) 
+                                            ml->m_next = m;
+                                        ml = m;
+					so->so_rcv.sb_mb = m = m->m_next;
+                                        ml->m_next = 0;
+				}
+				if (m)
+					m->m_nextpkt = nextrecord;
+			}
+>>>>>>> origin/10.1
 		} else {
 			error = 0;
 		}
@@ -5873,6 +6123,7 @@ filt_soread(struct knote *kn, long hint)
 		 * for kqueue read filter. This allows to call listen()
 		 * after registering the kqueue EVFILT_READ.
 		 */
+<<<<<<< HEAD
 
 		kn->kn_data = so->so_qlen;
 		isempty = ! TAILQ_EMPTY(&so->so_comp);
@@ -5912,7 +6163,33 @@ filt_soread(struct knote *kn, long hint)
 			if ((hint & SO_FILT_HINT_LOCKED) == 0)
 				socket_unlock(so, 1);
 			return (1);
+=======
+		while (flags & MSG_WAITALL && m == 0 && uio->uio_resid > 0 &&
+		    !sosendallatonce(so) && !nextrecord) {
+			if (so->so_error || so->so_state & SS_CANTRCVMORE)
+				break;
+
+			if (ml) {
+				m_freem_list(free_list);
+			}
+			error = sbwait(&so->so_rcv);
+			if (error) {
+				sbunlock(&so->so_rcv);
+				splx(s);
+				KERNEL_DEBUG(DBG_FNC_SORECEIVE | DBG_FUNC_END, 0,0,0,0,0);
+				return (0);
+			}
+			m = so->so_rcv.sb_mb;
+			if (m) {
+				nextrecord = m->m_nextpkt;
+				free_list = m;
+			}
+			ml = (struct mbuf *)0;
+>>>>>>> origin/10.1
 		}
+	}
+	if (ml) {
+	        m_freem_list(free_list);
 	}
 
 	if ((so->so_state & SS_CANTRCVMORE)

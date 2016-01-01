@@ -33,6 +33,7 @@
 #include <IOKit/pwr_mgt/IOPM.h>
 #include <IOKit/IOTypes.h>
 #include <IOKit/IOReturn.h>
+<<<<<<< HEAD
 #include <IOKit/IOService.h>
 
 enum {
@@ -166,6 +167,16 @@ enum {
  * Dictionary conforming to the OS X 10.0-10.4 
  * </pre>
  */
+=======
+#include "IOPM.h"
+
+class ApplePMU;
+
+const unsigned long kSecondsPerHour = (60*60);
+const unsigned long kTenMinutesInSeconds = (10 * 60);
+
+// our battery (power source) object
+>>>>>>> origin/10.1
 
 class IOPMPowerSource : public IOService
 {

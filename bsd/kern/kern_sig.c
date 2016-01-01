@@ -217,6 +217,7 @@ sigaltstack_kern_to_user64(struct kern_sigaltstack *in, struct user64_sigaltstac
 static void
 sigaltstack_user32_to_kern(struct user32_sigaltstack *in, struct kern_sigaltstack *out)
 {
+<<<<<<< HEAD
 	out->ss_flags	= in->ss_flags;
 	out->ss_size	= in->ss_size;
 	out->ss_sp		= CAST_USER_ADDR_T(in->ss_sp);
@@ -244,6 +245,32 @@ sigaction_kern_to_user64(struct kern_sigaction *in, struct user64_sigaction *out
 	out->__sigaction_u.__sa_handler = in->__sigaction_u.__sa_handler;
 	out->sa_mask = in->sa_mask;
 	out->sa_flags = in->sa_flags;
+=======
+int error = 0;
+#if SIGNAL_DEBUG
+#ifdef __ppc__
+        {
+            int register sp, *fp, numsaved; 
+ 
+            __asm__ volatile("mr %0,r1" : "=r" (sp));
+
+            fp = (int *)*((int *)sp);
+            for (numsaved = 0; numsaved < 3; numsaved++) {
+                p->lockpc[numsaved] = fp[2];
+                if ((int)fp <= 0)
+                        break;
+                fp = (int *)*fp;
+            }
+        }
+#endif /* __ppc__ */       
+#endif /* SIGNAL_DEBUG */
+
+siglock_retry:
+	error = lockmgr(&p->signal_lock, LK_EXCLUSIVE, 0, (struct proc *)0);
+	if (error == EINTR)
+		goto siglock_retry;
+	return(error);
+>>>>>>> origin/10.1
 }
 
 static void
@@ -1790,9 +1817,13 @@ psignal_internal(proc_t p, task_t task, thread_t thread, int flavor, int signum)
 	int mask;
 	struct uthread *uth;
 	kern_return_t kret;
+<<<<<<< HEAD
 	uid_t r_uid;
 	proc_t pp;
 	kauth_cred_t my_cred;
+=======
+	int sw_funnel = 0;
+>>>>>>> origin/10.1
 
 	if ((u_int)signum >= NSIG || signum == 0)
 		panic("psignal: bad signal number %d", signum);
@@ -1806,17 +1837,25 @@ psignal_internal(proc_t p, task_t task, thread_t thread, int flavor, int signum)
         }
 #endif /* SIGNAL_DEBUG */
 
+<<<<<<< HEAD
 	/* catch unexpected initproc kills early for easier debuggging */
 	if (signum == SIGKILL && p == initproc)
 		panic_plain("unexpected SIGKILL of %s %s",
 		            (p->p_name[0] != '\0' ? p->p_name : "initproc"),
 		            ((p->p_csflags & CS_KILLED) ? "(CS_KILLED)" : ""));
 
+=======
+	if (thread_funnel_get() == (funnel_t *)network_flock) {
+		sw_funnel = 1;
+		thread_funnel_switch(NETWORK_FUNNEL, KERNEL_FUNNEL);
+	}
+>>>>>>> origin/10.1
 	/*
 	 *	We will need the task pointer later.  Grab it now to
 	 *	check for a zombie process.  Also don't send signals
 	 *	to kernel internal tasks.
 	 */
+<<<<<<< HEAD
 	if (flavor & PSIG_VFORK) {
 		sig_task = task;
 		sig_thread = thread;
@@ -1837,7 +1876,13 @@ psignal_internal(proc_t p, task_t task, thread_t thread, int flavor, int signum)
 	}
 
 	if ((sig_task == TASK_NULL) || is_kerneltask(sig_task))
+=======
+	if (((sig_task = p->task) == TASK_NULL)  || is_kerneltask(sig_task)) {
+		if (sw_funnel)
+			thread_funnel_switch(KERNEL_FUNNEL, NETWORK_FUNNEL);
+>>>>>>> origin/10.1
 		return;
+	}
 
 	/*
 	 * do not send signals to the process that has the thread
@@ -1846,6 +1891,7 @@ psignal_internal(proc_t p, task_t task, thread_t thread, int flavor, int signum)
 	 * also no need to send a signal to a process that is in the middle
 	 * of being torn down.
 	 */
+<<<<<<< HEAD
 	if (ISSET(sig_proc->p_flag, P_REBOOT) || ISSET(sig_proc->p_lflag, P_LEXIT)) {
 		DTRACE_PROC3(signal__discard, thread_t, sig_thread, proc_t, sig_proc, int, signum);
 		return;
@@ -1857,6 +1903,13 @@ psignal_internal(proc_t p, task_t task, thread_t thread, int flavor, int signum)
 
 	if ((flavor & PSIG_LOCKED)== 0)
 		proc_signalstart(sig_proc, 0);
+=======
+	if (ISSET(p->p_flag, P_REBOOT)) {
+		if (sw_funnel)
+			thread_funnel_switch(KERNEL_FUNNEL, NETWORK_FUNNEL);
+		return;
+	}
+>>>>>>> origin/10.1
 
 	/* Don't send signals to a process that has ignored them. */
 	if (((flavor & PSIG_VFORK) == 0) && ((sig_proc->p_lflag & P_LTRACED) == 0) && (sig_proc->p_sigignore & mask)) {
@@ -1888,6 +1941,7 @@ psignal_internal(proc_t p, task_t task, thread_t thread, int flavor, int signum)
 			/* deliver to any willing thread */
 			kret = get_signalthread(sig_proc, signum, &sig_thread);
 		}
+<<<<<<< HEAD
 	} else if (flavor & PSIG_THREAD) {
 		/* If successful return with ast set */
 		kret = check_actforsig(sig_task, sig_thread, 1);
@@ -1900,6 +1954,11 @@ psignal_internal(proc_t p, task_t task, thread_t thread, int flavor, int signum)
 		DTRACE_PROC3(signal__discard, thread_t, sig_thread, proc_t, sig_proc, int, signum);
 		proc_unlock(sig_proc);
 		goto sigout_unlocked;
+=======
+		if (sw_funnel)
+			thread_funnel_switch(KERNEL_FUNNEL, NETWORK_FUNNEL);
+		return;
+>>>>>>> origin/10.1
 	}
 
 	uth = get_bsdthread_info(sig_thread);
@@ -2233,10 +2292,22 @@ runlocked:
 sigout_locked:
 	proc_unlock(sig_proc);
 
+<<<<<<< HEAD
 sigout_unlocked:
 	if ((flavor & PSIG_LOCKED)== 0) {
 		proc_signalend(sig_proc, 0);
 	}
+=======
+	/*
+	 *	Wake up the thread if it is interruptible.
+	 */
+	thread_abort_safely(sig_thread_act);
+psigout:
+	if (withlock) 
+		signal_unlock(p);
+	if (sw_funnel)
+		thread_funnel_switch(KERNEL_FUNNEL, NETWORK_FUNNEL);
+>>>>>>> origin/10.1
 }
 
 void

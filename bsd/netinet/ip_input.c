@@ -812,6 +812,7 @@ ip_input_dispatch_chain(struct mbuf *m)
 			ip->ip_len -= hlen;
 		}
 	}
+<<<<<<< HEAD
 }
 
 static void
@@ -822,6 +823,18 @@ ip_input_setdst_chain(struct mbuf *m, uint32_t ifindex, struct in_ifaddr *ia)
 	while (tmp_mbuf) {
 		ip_setdstifaddr_info(tmp_mbuf, ifindex, ia);
 		tmp_mbuf = mbuf_nextpkt(tmp_mbuf);
+=======
+	if (m->m_pkthdr.len > ip->ip_len) {
+		/* Invalidate hwcksuming */
+		m->m_pkthdr.csum_flags = 0;
+		m->m_pkthdr.csum_data = 0;
+
+		if (m->m_len == m->m_pkthdr.len) {
+			m->m_len = ip->ip_len;
+			m->m_pkthdr.len = ip->ip_len;
+		} else
+			m_adj(m, ip->ip_len - m->m_pkthdr.len);
+>>>>>>> origin/10.1
 	}
 }
 

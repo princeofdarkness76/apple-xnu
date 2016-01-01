@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2001 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.1
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -64,12 +68,15 @@
  * SUCH DAMAGE.
  *
  *	@(#)kern_descrip.c	8.8 (Berkeley) 2/14/95
+<<<<<<< HEAD
  */
 /*
  * NOTICE: This file was modified by SPARTA, Inc. in 2006 to introduce
  * support for mandatory and extensible security protections.  This notice
  * is included in support of clause 2.2 (b) of the Apple Public License,
  * Version 2.0.
+=======
+>>>>>>> origin/10.1
  */
 
 #include <sys/param.h>
@@ -333,7 +340,10 @@ proc_fdunlock(proc_t p)
 int
 getdtablesize(proc_t p, __unused struct getdtablesize_args *uap, int32_t *retval)
 {
+<<<<<<< HEAD
 	proc_fdlock_spin(p);
+=======
+>>>>>>> origin/10.1
 	*retval = min((int)p->p_rlimit[RLIMIT_NOFILE].rlim_cur, maxfiles);
 	proc_fdunlock(p);
 
@@ -344,6 +354,7 @@ getdtablesize(proc_t p, __unused struct getdtablesize_args *uap, int32_t *retval
 void
 procfdtbl_reservefd(struct proc * p, int fd)
 {
+<<<<<<< HEAD
 	p->p_fd->fd_ofiles[fd] = NULL;
         p->p_fd->fd_ofileflags[fd] |= UF_RESERVED;
 }
@@ -371,6 +382,10 @@ procfdtbl_waitfd(struct proc * p, int fd)
 {
         p->p_fd->fd_ofileflags[fd] |= UF_RESVWAIT;
 	msleep(&p->p_fd, &p->p_fdmlock, PRIBIO, "ftbl_waitfd", NULL);
+=======
+	*retval = min((int)p->p_rlimit[RLIMIT_NOFILE].rlim_cur, NOFILE);
+	return (0);
+>>>>>>> origin/10.1
 }
 
 
@@ -613,6 +628,11 @@ startover:
 			goto closeit;
 		}
 	} else {
+<<<<<<< HEAD
+=======
+		struct file **fpp;
+		char flags;
+>>>>>>> origin/10.1
 closeit:
 		while ((fdp->fd_ofileflags[new] & UF_RESERVED) == UF_RESERVED)  {
 				fp_drop(p, old, fp, 1);
@@ -623,6 +643,7 @@ closeit:
 				goto startover;
 		}
 
+<<<<<<< HEAD
 		if ((fdp->fd_ofiles[new] != NULL) &&
 		    ((error = fp_lookup(p, new, &nfp, 1)) == 0)) {
 			fp_drop(p, old, fp, 1);
@@ -645,6 +666,10 @@ closeit:
 				panic("dup2: no ref on fileproc %d", new);
 #endif
 			procfdtbl_reservefd(p, new);
+=======
+			*fpp = NULL;
+			(void) closef(fp, p);
+>>>>>>> origin/10.1
 		}
 
 #if DIAGNOSTIC
@@ -4620,12 +4645,20 @@ fg_free(struct fileglob *fg)
 	if (IS_VALID_CRED(fg->fg_cred)) {
 		kauth_cred_unref(&fg->fg_cred);
 	}
+<<<<<<< HEAD
 	lck_mtx_destroy(&fg->fg_lock, file_lck_grp);
 
 #if CONFIG_MACF
 	mac_file_label_destroy(fg);
 #endif
 	FREE_ZONE(fg, sizeof *fg, M_FILEGLOB);
+=======
+
+	fp->f_count = 0;
+
+	nfiles--;
+	FREE_ZONE(fp, sizeof *fp, M_FILE);
+>>>>>>> origin/10.1
 }
 
 
@@ -4926,7 +4959,12 @@ fdcopy(proc_t p, vnode_t uth_cdir)
 				*fpp = NULL;
 				*flags = 0;
 			}
+<<<<<<< HEAD
 	}
+=======
+	} else
+		(void) memset(newfdp->fd_ofiles, 0, i * OFILESIZE);
+>>>>>>> origin/10.1
 
 	proc_fdunlock(p);
 	return (newfdp);
@@ -4951,14 +4989,21 @@ void
 fdfree(proc_t p)
 {
 	struct filedesc *fdp;
+<<<<<<< HEAD
 	struct fileproc *fp;
 	int i;
+=======
+	struct file **fpp;
+	int i;
+	struct vnode *tvp;
+>>>>>>> origin/10.1
 
 	proc_fdlock(p);
 
 	if (p == kernproc || NULL == (fdp = p->p_fd)) {
 	        proc_fdunlock(p);
 		return;
+<<<<<<< HEAD
 	}
 
 	extern struct filedesc filedesc0;
@@ -5005,6 +5050,26 @@ fdfree(proc_t p)
 		FREE(fdp->fd_knhash, M_KQUEUE);
 
 	FREE_ZONE(fdp, sizeof(*fdp), M_FILEDESC);
+=======
+	p->p_fd = NULL;
+	if (fdp->fd_nfiles > 0) {
+		fpp = fdp->fd_ofiles;
+		for (i = fdp->fd_lastfile; i-- >= 0; fpp++)
+			if (*fpp)
+				(void) closef(*fpp, p);
+		FREE_ZONE(fdp->fd_ofiles,
+				fdp->fd_nfiles * OFILESIZE, M_OFILETABL);
+	}
+	tvp = fdp->fd_cdir;
+	fdp->fd_cdir = NULL;
+	vrele(tvp);
+	if (fdp->fd_rdir) {
+		tvp = fdp->fd_rdir;
+		fdp->fd_rdir = NULL;
+		vrele(tvp);
+	}
+	FREE_ZONE(fdp, sizeof *fdp, M_FILEDESC);
+>>>>>>> origin/10.1
 }
 
 /*

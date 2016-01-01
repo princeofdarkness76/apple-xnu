@@ -37,6 +37,7 @@
 #include <sys/appleapiopts.h>
 
 
+
 struct sockaddr_ndrv
 {
     unsigned char snd_len;
@@ -48,9 +49,15 @@ struct sockaddr_ndrv
  * Support for user-mode protocol handlers
  */
 
+<<<<<<< HEAD
 #define NDRV_DEMUXTYPE_ETHERTYPE	4
 #define	NDRV_DEMUXTYPE_SAP			5
 #define NDRV_DEMUXTYPE_SNAP			6
+=======
+#define NDRV_DEMUXTYPE_ETHERTYPE	DLIL_DESC_ETYPE2
+#define	NDRV_DEMUXTYPE_SAP			DLIL_DESC_SAP
+#define NDRV_DEMUXTYPE_SNAP			DLIL_DESC_SNAP
+>>>>>>> origin/10.1
 
 #define	NDRVPROTO_NDRV				0
 
@@ -85,6 +92,7 @@ struct sockaddr_ndrv
  *    desc.data.snap[2] = 07;
  *    desc.data.snap[3] = 80;
  *    desc.data.snap[4] = 9B;
+<<<<<<< HEAD
  */
 struct ndrv_demux_desc
 {
@@ -137,6 +145,41 @@ struct ndrv_protocol_desc32 {
     u_int32_t				protocol_family;
     u_int32_t				demux_count;
     user32_addr_t			demux_list;
+=======
+ */
+struct ndrv_demux_desc
+{
+    u_int16_t	type;
+    u_int16_t	length;
+    union
+    {
+        u_int16_t	ether_type;
+        u_int8_t	sap[3];
+        u_int8_t	snap[5];
+        u_int8_t	other[28];
+    } data;
+};
+
+#define NDRV_PROTOCOL_DESC_VERS	1
+
+/*
+ * Struct: ndrv_protocol_desc
+ * Purpose:
+ *   Used to "bind" an NDRV socket so that packets that match
+ *   given protocol demux descriptions can be received:
+ * Field:
+ *		version			:	must be NDRV_PROTOCOL_DESC_VERS
+ *		protocol_family	:	unique identifier for this protocol
+ *		demux_count		:	number of demux_list descriptors in demux_list
+ *		demux_list		:	pointer to array of demux descriptors
+ */
+struct ndrv_protocol_desc
+{
+    u_int32_t				version;
+    u_int32_t				protocol_family;
+    u_int32_t				demux_count;
+    struct ndrv_demux_desc*	demux_list;
+>>>>>>> origin/10.1
 };
 #endif /* KERNEL_PRIVATE */
 
@@ -169,6 +212,7 @@ struct ndrv_protocol_desc32 {
  * you a second or two.
  */
 
+<<<<<<< HEAD
 /* Max number of descriptions allowed by default */
 #define NDRV_DMUX_MAX_DESCR	1024
  
@@ -177,4 +221,17 @@ struct ndrv_protocol_desc32 {
  */
 #define NRDV_MULTICAST_ADDRS_PER_SOCK 1	/* to toggle NDRV_DMUX_MAX_DESCR value */
 
+=======
+#define SOL_NDRVPROTO		NDRVPROTO_NDRV	/* Use this socket level */
+/*		NDRV_DMXSPEC		0x01		   	   Obsolete */
+#define NDRV_DELDMXSPEC		0x02			/* Delete the registered protocol */
+/*		NDRV_DMXSPECCNT		0x03			   Obsolete */
+#define NDRV_SETDMXSPEC		0x04			/* Set the protocol spec */
+
+#if KERNEL
+/* Additional Kernel APIs */
+struct ifnet*	ndrv_get_ifp(caddr_t ndrv_pcb);
+#endif
+
+>>>>>>> origin/10.1
 #endif	/* _NET_NDRV_H */

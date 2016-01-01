@@ -337,7 +337,11 @@ bool IORegistryEntry::init( IORegistryEntry * old,
     fPropertyTable->retain();
 #ifdef IOREGSPLITTABLES
     fRegistryTable = old->fRegistryTable;
+<<<<<<< HEAD
     old->fRegistryTable = (OSDictionary *) fRegistryTable->copyCollection();
+=======
+    old->fRegistryTable = OSDictionary::withDictionary( fRegistryTable );
+>>>>>>> origin/10.1
 #endif /* IOREGSPLITTABLES */
 
     old->registryTable()->removeObject( plane->keys[ kParentSetIndex ] );

@@ -44,6 +44,11 @@
 
 #define MIN_SYNC_NOW_INTERVAL 15*60 /* Minimum 15 Minutes interval mandated */
 
+
+#define kIODTNVRAMOFPartitionName       "common"
+#define kIODTNVRAMXPRAMPartitionName    "APL,MacOS75"
+#define kIODTNVRAMFreePartitionName     "wwwwwwwwwwww"
+
 enum {
   kIODTNVRAMImageSize        = 0x2000,
   kIODTNVRAMXPRAMSize        = 0x0100,
@@ -82,6 +87,7 @@ private:
   OSDictionary      *_ofDict;
   OSDictionary      *_nvramPartitionOffsets;
   OSDictionary      *_nvramPartitionLengths;
+<<<<<<< HEAD
   UInt32            _resv0 __unused;
   UInt32            _resv1 __unused;
   IOLock            *_ofLock;
@@ -95,6 +101,14 @@ private:
   SInt32            _lastDeviceSync;
   bool              _freshInterval;
   bool              _isProxied;
+=======
+  UInt32            _xpramPartitionOffset;
+  UInt32            _xpramPartitionSize;
+  UInt8             *_xpramImage;
+  UInt32            _nrPartitionOffset;
+  UInt32            _nrPartitionSize;
+  UInt8             *_nrImage;
+>>>>>>> origin/10.1
   
   virtual UInt8 calculatePartitionChecksum(UInt8 *partitionHeader);
   virtual IOReturn initOFVariables(void);
@@ -174,10 +188,13 @@ public:
   virtual IOReturn writeNVRAMPartition(const OSSymbol *partitionID,
 				       IOByteCount offset, UInt8 *buffer,
 				       IOByteCount length);  
+<<<<<<< HEAD
   
   virtual IOByteCount savePanicInfo(UInt8 *buffer, IOByteCount length);
   virtual bool safeToSync(void);
   void syncInternal(bool rateLimit);
+=======
+>>>>>>> origin/10.1
 };
 
 #endif /* __cplusplus */

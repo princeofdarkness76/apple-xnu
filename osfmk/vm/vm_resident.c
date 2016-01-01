@@ -555,6 +555,7 @@ vm_page_bootstrap(
 	m->speculative = FALSE;
 	m->laundry = FALSE;
 	m->free = FALSE;
+	m->no_isync = TRUE;
 	m->reference = FALSE;
 	m->gobbled = FALSE;
 	m->private = FALSE;
@@ -1978,7 +1979,6 @@ vm_page_grab_fictitious_common(
 =======
 	m = (vm_page_t)zget(vm_page_zone);
 	if (m) {
-		m->free = FALSE;
 		vm_page_init(m, vm_page_fictitious_addr);
 		m->fictitious = TRUE;
 	}
@@ -2094,7 +2094,31 @@ void vm_page_more_fictitious(void)
 		return;
 	}
 
+<<<<<<< HEAD
 	zcram(vm_page_zone, addr, PAGE_SIZE);
+=======
+	assert(m->busy);
+	assert(m->fictitious);
+	assert(!m->dirty);
+
+	real_m = vm_page_grab();
+	if (real_m == VM_PAGE_NULL)
+		return FALSE;
+
+	m->phys_addr = real_m->phys_addr;
+	m->fictitious = FALSE;
+	m->no_isync = TRUE;
+
+	vm_page_lock_queues();
+	if (m->active)
+		vm_page_active_count++;
+	else if (m->inactive)
+		vm_page_inactive_count++;
+	vm_page_unlock_queues();
+
+	real_m->phys_addr = vm_page_fictitious_addr;
+	real_m->fictitious = TRUE;
+>>>>>>> origin/10.1
 
 	lck_mtx_unlock(&vm_page_alloc_lock);
 }
@@ -5352,6 +5376,7 @@ hibernate_flush_queue(queue_head_t *q, int qcount)
 			 * page is not to be cleaned
 			 * put it back on the head of its queue
 			 */
+<<<<<<< HEAD
 			if (m->precious)
 				hibernate_stats.hibernate_skipped_precious++;
 
@@ -6359,6 +6384,17 @@ hibernate_create_paddr_map()
 
 				ppnm->ppnm_sindx = i;
 				ppnm->ppnm_base_paddr = vm_pages[i].phys_page;
+=======
+			list = *contig_prev;
+			*contig_prev = NEXT_PAGE(m);
+			SET_NEXT_PAGE(m, VM_PAGE_NULL);
+			for (m = list; m != VM_PAGE_NULL; m = NEXT_PAGE(m)) {
+				assert(m->free);
+				assert(!m->wanted);
+				m->free = FALSE;
+				m->no_isync = TRUE;
+				m->gobbled = TRUE;
+>>>>>>> origin/10.1
 			}
 			next_ppnum_in_run = vm_pages[i].phys_page + 1;
 		}

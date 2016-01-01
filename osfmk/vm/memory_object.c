@@ -181,8 +181,46 @@ memory_object_lock_page(
 	 *	Don't worry about pages for which the kernel
 	 *	does not have any data.
 	 */
+<<<<<<< HEAD
 	if (m->absent || m->error || m->restart) {
 		if (m->error && should_flush && !VM_PAGE_WIRED(m)) {
+=======
+
+	if (m->absent || m->error || m->restart) {
+		if(m->error && should_flush) {
+			/* dump the page, pager wants us to */
+			/* clean it up and there is no      */
+			/* relevant data to return */
+			if(m->wire_count == 0) {
+				VM_PAGE_FREE(m);
+				return(MEMORY_OBJECT_LOCK_RESULT_DONE);
+			}
+		} else {
+			return(MEMORY_OBJECT_LOCK_RESULT_DONE);
+		}
+	}
+
+	assert(!m->fictitious);
+
+	if (m->wire_count != 0) {
+		/*
+		 *	If no change would take place
+		 *	anyway, return successfully.
+		 *
+		 *	No change means:
+		 *		Not flushing AND
+		 *		No change to page lock [2 checks]  AND
+		 *		Should not return page
+		 *
+		 * XXX	This doesn't handle sending a copy of a wired
+		 * XXX	page to the pager, but that will require some
+		 * XXX	significant surgery.
+		 */
+		if (!should_flush &&
+		    (m->page_lock == prot || prot == VM_PROT_NO_CHANGE) &&
+		    ! memory_object_should_return_page(m, should_return)) {
+
+>>>>>>> origin/10.1
 			/*
 			 * dump the page, pager wants us to
 			 * clean it up and there is no

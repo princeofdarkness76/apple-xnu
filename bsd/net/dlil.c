@@ -109,6 +109,7 @@
 #include <net/firewire.h>
 #endif
 
+<<<<<<< HEAD
 #if PF
 #include <net/pfvar.h>
 #endif /* PF */
@@ -116,6 +117,9 @@
 #include <net/altq/altq.h>
 #endif /* PF_ALTQ */
 #include <net/pktsched/pktsched.h>
+=======
+#include <machine/machine_routines.h>
+>>>>>>> origin/10.1
 
 #define DBG_LAYER_BEG		DLILDBG_CODE(DBG_DLIL_STATIC, 0)
 #define DBG_LAYER_END		DLILDBG_CODE(DBG_DLIL_STATIC, 2)
@@ -1024,9 +1028,19 @@ dlil_post_msg(struct ifnet *ifp, u_int32_t event_subclass,
 		event_data_len = sizeof(struct net_event_data);
 	}
 
+<<<<<<< HEAD
 	strlcpy(&event_data->if_name[0], ifp->if_name, IFNAMSIZ);
 	event_data->if_family = ifp->if_family;
 	event_data->if_unit   = (u_int32_t) ifp->if_unit;
+=======
+    /*
+     *      Make sure that this thread
+     *      always has a kernel stack, and
+     *      bind it to the master cpu.
+     */
+    stack_privilege(self);
+    ml_thread_policy(current_thread(), MACHINE_GROUP, (MACHINE_NETWORK_GROUP|MACHINE_NETWORK_NETISR));
+>>>>>>> origin/10.1
 
 	ev_msg.dv[0].data_length = event_data_len;
 	ev_msg.dv[0].data_ptr    = event_data;

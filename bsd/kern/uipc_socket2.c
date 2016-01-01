@@ -119,6 +119,12 @@ static int sbappendcontrol_internal(struct sockbuf *, struct mbuf *,
     struct mbuf *);
 static void soevent_ifdenied(struct socket *);
 
+#include <sys/kdebug.h>
+
+#define DBG_FNC_SBDROP	NETDBG_CODE(DBG_NETSOCK, 4)
+#define DBG_FNC_SBAPPEND	NETDBG_CODE(DBG_NETSOCK, 5)
+
+
 /*
  * Primitive routines for operating on sockets and socket buffers
  */
@@ -379,6 +385,7 @@ sonewconn_internal(struct socket *head, int connstatus)
 	so->next_unlock_lr = 0;
 
 	so->so_rcv.sb_flags |= SB_RECV;	/* XXX */
+<<<<<<< HEAD
 	so->so_rcv.sb_so = so->so_snd.sb_so = so;
 	TAILQ_INIT(&so->so_evlist);
 
@@ -398,6 +405,10 @@ sonewconn_internal(struct socket *head, int connstatus)
 	}
 	so->so_rcv.sb_flags |= (head->so_rcv.sb_flags & SB_USRSIZE);
 	so->so_snd.sb_flags |= (head->so_snd.sb_flags & SB_USRSIZE);
+=======
+
+	(void) soreserve(so, head->so_snd.sb_hiwat, head->so_rcv.sb_hiwat);
+>>>>>>> origin/10.1
 
 	/*
 	 * Must be done with head unlocked to avoid deadlock
@@ -785,6 +796,7 @@ sbappend(struct sockbuf *sb, struct mbuf *m)
 {
 	struct socket *so = sb->sb_so;
 
+<<<<<<< HEAD
 	if (m == NULL || (sb->sb_flags & SB_DROP)) {
 		if (m != NULL)
 			m_freem(m);
@@ -809,6 +821,18 @@ sbappend(struct sockbuf *sb, struct mbuf *m)
 			if (error != EJUSTRETURN)
 				m_freem(m);
 			return (0);
+=======
+
+	KERNEL_DEBUG((DBG_FNC_SBAPPEND | DBG_FUNC_START), sb, m->m_len, 0, 0, 0);
+
+	if (m == 0)
+		return;
+	kp = sotokextcb(sbtoso(sb));
+	while (kp)
+	{	if (kp->e_sout && kp->e_sout->su_sbappend)
+		{	if ((*kp->e_sout->su_sbappend)(sb, m, kp))
+				return;
+>>>>>>> origin/10.1
 		}
 	} else if (m) {
 		m->m_flags &= ~M_SKIPCFIL;
@@ -842,6 +866,7 @@ sbappendstream(struct sockbuf *sb, struct mbuf *m)
 		    m->m_nextpkt, sb->sb_mb, sb->sb_lastrecord);
 		/* NOTREACHED */
 	}
+<<<<<<< HEAD
 
 	SBLASTMBUFCHK(sb, __func__);
 
@@ -867,6 +892,11 @@ sbappendstream(struct sockbuf *sb, struct mbuf *m)
 	sb->sb_lastrecord = sb->sb_mb;
 	SBLASTRECORDCHK(sb, "sbappendstream 2");
 	return (1);
+=======
+	sbcompress(sb, m, n);
+
+	KERNEL_DEBUG((DBG_FNC_SBAPPEND | DBG_FUNC_END), sb, sb->sb_cc, 0, 0, 0);
+>>>>>>> origin/10.1
 }
 
 #ifdef SOCKBUF_DEBUG
@@ -1849,6 +1879,7 @@ sbflush(struct sockbuf *sb)
  * m_freem_list.
  */
 void
+<<<<<<< HEAD
 sbdrop(struct sockbuf *sb, int len)
 {
 	struct mbuf *m, *free_list, *ml;
@@ -1867,11 +1898,33 @@ sbdrop(struct sockbuf *sb, int len)
 #endif /* MPTCP */
 	KERNEL_DEBUG((DBG_FNC_SBDROP | DBG_FUNC_START), sb, len, 0, 0, 0);
 
+=======
+sbdrop(sb, len)
+	register struct sockbuf *sb;
+	register int len;
+{
+	register struct mbuf *m, *free_list, *ml;
+	struct mbuf *next, *last;
+	register struct kextcb *kp;
+
+	KERNEL_DEBUG((DBG_FNC_SBDROP | DBG_FUNC_START), sb, len, 0, 0, 0);
+
+	kp = sotokextcb(sbtoso(sb));
+	while (kp)
+	{	if (kp->e_sout && kp->e_sout->su_sbdrop)
+		{	if ((*kp->e_sout->su_sbdrop)(sb, len, kp))
+				return;
+		}
+		kp = kp->e_next;
+	}
+	next = (m = sb->sb_mb) ? m->m_nextpkt : 0;
+>>>>>>> origin/10.1
 	free_list = last = m;
 	ml = (struct mbuf *)0;
 
 	while (len > 0) {
 		if (m == 0) {
+<<<<<<< HEAD
 			if (next == 0) {
 				/*
 				 * temporarily replacing this panic with printf
@@ -1896,6 +1949,10 @@ sbdrop(struct sockbuf *sb, int len)
 				}
 				break;
 			}
+=======
+			if (next == 0)
+				panic("sbdrop");
+>>>>>>> origin/10.1
 			m = last = next;
 			next = m->m_nextpkt;
 			continue;
@@ -1922,15 +1979,22 @@ sbdrop(struct sockbuf *sb, int len)
 		m = m->m_next;
 	}
 	if (ml) {
+<<<<<<< HEAD
 		ml->m_next = (struct mbuf *)0;
 		last->m_nextpkt = (struct mbuf *)0;
 		m_freem_list(free_list);
+=======
+	        ml->m_next = (struct mbuf *)0;
+		last->m_nextpkt = (struct mbuf *)0;
+	        m_freem_list(free_list);
+>>>>>>> origin/10.1
 	}
 	if (m) {
 		sb->sb_mb = m;
 		m->m_nextpkt = next;
 	} else {
 		sb->sb_mb = next;
+<<<<<<< HEAD
 	}
 
 	/*
@@ -1949,6 +2013,8 @@ sbdrop(struct sockbuf *sb, int len)
 #if CONTENT_FILTER
 	cfil_sock_buf_update(sb);
 #endif /* CONTENT_FILTER */
+=======
+>>>>>>> origin/10.1
 
 	postevent(0, sb, EV_RWBYTES);
 

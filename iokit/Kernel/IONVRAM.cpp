@@ -108,6 +108,15 @@ void IODTNVRAM::initProxyData(void)
 
 void IODTNVRAM::registerNVRAMController(IONVRAMController *nvram)
 {
+<<<<<<< HEAD
+=======
+  char   partitionID[18];
+  UInt32 partitionOffset, partitionLength;
+  UInt32 freePartitionOffset, freePartitionSize;
+  UInt32 currentLength, currentOffset = 0;
+  OSNumber *partitionOffsetNumber, *partitionLengthNumber;
+  
+>>>>>>> origin/10.1
   if (_nvramController != 0) return;
   
   _nvramController = nvram;
@@ -130,6 +139,7 @@ void IODTNVRAM::initNVRAMImage(void)
   UInt32 currentLength, currentOffset = 0;
   OSNumber *partitionOffsetNumber, *partitionLengthNumber;
   
+<<<<<<< HEAD
   // Find the offsets for the OF, XPRAM, NameRegistry and PanicInfo partitions.
   _ofPartitionOffset = 0xFFFFFFFF;
   _piPartitionOffset = 0xFFFFFFFF;
@@ -174,6 +184,55 @@ void IODTNVRAM::initNVRAMImage(void)
       
       partitionOffsetNumber->release();
       partitionLengthNumber->release();
+=======
+  // Find the offsets for the OF, XPRAM, and NameRegistry partitions.
+  _ofPartitionOffset = 0xFFFFFFFF;
+  _xpramPartitionOffset = 0xFFFFFFFF;
+  _nrPartitionOffset = 0xFFFFFFFF;
+  freePartitionOffset = 0xFFFFFFFF;
+  freePartitionSize = 0;
+  if (getPlatform()->getBootROMType()) {
+    // Look through the partitions to find the OF, MacOS partitions.
+    while (currentOffset < kIODTNVRAMImageSize) {
+      currentLength = ((UInt16 *)(_nvramImage + currentOffset))[1] * 16;
+      
+      partitionOffset = currentOffset + 16;
+      partitionLength = currentLength - 16;
+      
+      if (strncmp((const char *)_nvramImage + currentOffset + 4,
+		  kIODTNVRAMOFPartitionName, 12) == 0) {
+	_ofPartitionOffset = partitionOffset;
+	_ofPartitionSize = partitionLength;
+      } else if (strncmp((const char *)_nvramImage + currentOffset + 4,
+			 kIODTNVRAMXPRAMPartitionName, 12) == 0) {
+	_xpramPartitionOffset = partitionOffset;
+	_xpramPartitionSize = kIODTNVRAMXPRAMSize;
+	_nrPartitionOffset = _xpramPartitionOffset + _xpramPartitionSize;
+	_nrPartitionSize = partitionLength - _xpramPartitionSize;
+      } else if (strncmp((const char *)_nvramImage + currentOffset + 4,
+			 kIODTNVRAMFreePartitionName, 12) == 0) {
+	freePartitionOffset = currentOffset;
+	freePartitionSize = currentLength;
+      } else {
+	// Construct the partition ID from the signature and name.
+	sprintf(partitionID, "0x%02x,",
+		*(UInt8 *)(_nvramImage + currentOffset));
+	strncpy(partitionID + 5,
+		(const char *)(_nvramImage + currentOffset + 4), 12);
+	partitionID[17] = '\0';
+	
+	partitionOffsetNumber = OSNumber::withNumber(partitionOffset, 32);
+	partitionLengthNumber = OSNumber::withNumber(partitionLength, 32);
+	
+	// Save the partition offset and length
+	_nvramPartitionOffsets->setObject(partitionID, partitionOffsetNumber);
+	_nvramPartitionLengths->setObject(partitionID, partitionLengthNumber);
+	
+	partitionOffsetNumber->release();
+	partitionLengthNumber->release();
+      }
+      currentOffset += currentLength;
+>>>>>>> origin/10.1
     }
     currentOffset += currentLength;
   }
@@ -541,13 +600,39 @@ IOReturn IODTNVRAM::setProperties(OSObject *properties)
 IOReturn IODTNVRAM::readXPRAM(IOByteCount offset, UInt8 *buffer,
 			      IOByteCount length)
 {
+<<<<<<< HEAD
   return kIOReturnUnsupported;
+=======
+  if (_xpramImage == 0) return kIOReturnUnsupported;
+  
+  if ((buffer == 0) || (length <= 0) || (offset < 0) ||
+      (offset + length > kIODTNVRAMXPRAMSize))
+    return kIOReturnBadArgument;
+  
+  bcopy(_nvramImage + _xpramPartitionOffset + offset, buffer, length);
+
+  return kIOReturnSuccess;
+>>>>>>> origin/10.1
 }
 
 IOReturn IODTNVRAM::writeXPRAM(IOByteCount offset, UInt8 *buffer,
 			       IOByteCount length)
 {
+<<<<<<< HEAD
   return kIOReturnUnsupported;
+=======
+  if (_xpramImage == 0) return kIOReturnUnsupported;
+  
+  if ((buffer == 0) || (length <= 0) || (offset < 0) ||
+      (offset + length > kIODTNVRAMXPRAMSize))
+    return kIOReturnBadArgument;
+  
+  bcopy(buffer, _nvramImage + _xpramPartitionOffset + offset, length);
+
+  _nvramImageDirty = true;
+  
+  return kIOReturnSuccess;
+>>>>>>> origin/10.1
 }
 
 IOReturn IODTNVRAM::readNVRAMProperty(IORegistryEntry *entry,
@@ -576,6 +661,12 @@ OSDictionary *IODTNVRAM::getNVRAMPartitions(void)
 {
   return _nvramPartitionLengths;
 }
+<<<<<<< HEAD
+
+IOReturn IODTNVRAM::readNVRAMPartition(const OSSymbol *partitionID,
+				       IOByteCount offset, UInt8 *buffer,
+				       IOByteCount length)
+=======
 
 IOReturn IODTNVRAM::readNVRAMPartition(const OSSymbol *partitionID,
 				       IOByteCount offset, UInt8 *buffer,
@@ -595,11 +686,49 @@ IOReturn IODTNVRAM::readNVRAMPartition(const OSSymbol *partitionID,
   partitionOffset = partitionOffsetNumber->unsigned32BitValue();
   partitionLength = partitionLengthNumber->unsigned32BitValue();
   
+  if ((buffer == 0) || (length <= 0) || (offset < 0) ||
+      (offset + length > partitionLength))
+    return kIOReturnBadArgument;
+  
+  bcopy(_nvramImage + partitionOffset + offset, buffer, length);
+  
+  return kIOReturnSuccess;
+}
+
+IOReturn IODTNVRAM::writeNVRAMPartition(const OSSymbol *partitionID,
+					IOByteCount offset, UInt8 *buffer,
+					IOByteCount length)
+>>>>>>> origin/10.1
+{
+  OSNumber *partitionOffsetNumber, *partitionLengthNumber;
+  UInt32   partitionOffset, partitionLength;
+  
+  partitionOffsetNumber =
+    (OSNumber *)_nvramPartitionOffsets->getObject(partitionID);
+  partitionLengthNumber =
+    (OSNumber *)_nvramPartitionLengths->getObject(partitionID);
+  
+  if ((partitionOffsetNumber == 0) || (partitionLengthNumber == 0))
+    return kIOReturnNotFound;
+  
+  partitionOffset = partitionOffsetNumber->unsigned32BitValue();
+  partitionLength = partitionLengthNumber->unsigned32BitValue();
+  
+<<<<<<< HEAD
   if ((buffer == 0) || (length == 0) ||
       (offset + length > partitionLength))
     return kIOReturnBadArgument;
   
   bcopy(_nvramImage + partitionOffset + offset, buffer, length);
+=======
+  if ((buffer == 0) || (length <= 0) || (offset < 0) ||
+      (offset + length > partitionLength))
+    return kIOReturnBadArgument;
+  
+  bcopy(buffer, _nvramImage + partitionOffset + offset, length);
+  
+  _nvramImageDirty = true;
+>>>>>>> origin/10.1
   
   return kIOReturnSuccess;
 }

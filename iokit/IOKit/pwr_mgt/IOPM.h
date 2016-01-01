@@ -481,6 +481,7 @@ enum {
  * TODO: deprecate kIOPMAllowSleep and kIOPMPreventSleep
  ******************************************************************************/
 enum {
+<<<<<<< HEAD
   kIOPMSleepNow                 = (1<<0),  // put machine to sleep now
   kIOPMAllowSleep               = (1<<1),  // allow idle sleep
   kIOPMPreventSleep             = (1<<2),  // do not allow idle sleep
@@ -493,6 +494,18 @@ enum {
   kIOPMOverTemp                 = (1<<9),  // system dangerously hot
   kIOPMClamshellOpened          = (1<<10), // clamshell was opened
   kIOPMDWOverTemp               = (1<<11)  // DarkWake thermal limits exceeded.
+=======
+  kIOPMSleepNow                  = (1<<0),  // put machine to sleep now
+  kIOPMAllowSleep                = (1<<1),  // allow idle sleep
+  kIOPMPreventSleep              = (1<<2),  // do not allow idle sleep
+  kIOPMPowerButton		 = (1<<3),  // power button was pressed
+  kIOPMClamshellClosed		 = (1<<4),  // clamshell was closed
+  kIOPMPowerEmergency		 = (1<<5),  // battery dangerously low
+  kIOPMDisableClamshell		 = (1<<6),  // do not sleep on clamshell closure
+  kIOPMEnableClamshell		 = (1<<7),  // sleep on clamshell closure
+  kIOPMProcessorSpeedChange	 = (1<<8),  // change the processor speed
+  kIOPMOverTemp                  = (1<<9)   // system dangerously hot
+>>>>>>> origin/10.1
 };
 
 
@@ -756,13 +769,18 @@ enum {
     kPMMinutesToSpinDown,
     kPMMinutesToSleep,
     kPMEthernetWakeOnLANSettings,
+<<<<<<< HEAD
     kPMSetProcessorSpeed,
     kPMPowerSource,
     kPMMotionSensor,
     kPMLastAggressivenessType
+=======
+    kPMSetProcessorSpeed
+>>>>>>> origin/10.1
 };
 #define kMaxType (kPMLastAggressivenessType-1)
 
+<<<<<<< HEAD
 // SetAggressiveness values for the kPMPowerSource aggressiveness type
 enum {
     kIOPMInternalPower = 1,
@@ -780,12 +798,25 @@ enum {
 #define kIOBatteryAmperageKey               "Amperage"
 #define kIOBatteryCycleCountKey             "Cycle Count"
 
+=======
+#define kAppleClamshellStateKey           "AppleClamshellState"
+#define kIOREMSleepEnabledKey             "REMSleepEnabled"
+
+#define kIOBatteryInfoKey		"IOBatteryInfo"
+#define kIOBatteryCurrentChargeKey	"Current"
+#define kIOBatteryCapacityKey		"Capacity"
+#define kIOBatteryFlagsKey		"Flags"
+#define kIOBatteryVoltageKey		"Voltage"
+#define kIOBatteryAmperageKey		"Amperage"
+
+>>>>>>> origin/10.1
 enum {
     kIOBatteryInstalled         = (1 << 2),
     kIOBatteryCharge            = (1 << 1),
     kIOBatteryChargerConnect    = (1 << 0)
 };
 
+<<<<<<< HEAD
 // Private power management message indicating battery data has changed
 // Indicates new data resides in the IORegistry
 #define kIOPMMessageBatteryStatusHasChanged         iokit_family_msg(sub_iokit_pmu, 0x100)
@@ -794,6 +825,20 @@ enum {
 // through newer user space IOPMSchedulePowerEvent API
 #define kIOPMUMessageLegacyAutoWake                 iokit_family_msg(sub_iokit_pmu, 0x200)
 #define kIOPMUMessageLegacyAutoPower                iokit_family_msg(sub_iokit_pmu, 0x210)
+=======
+// These flags are deprecated. Use the version with the kIOPM prefix below.
+enum {
+  kACInstalled      = kIOBatteryChargerConnect,
+  kBatteryCharging  = kIOBatteryCharge,
+  kBatteryInstalled = kIOBatteryInstalled,
+  kUPSInstalled     = (1<<3),
+  kBatteryAtWarn    = (1<<4),
+  kBatteryDepleted  = (1<<5),
+  kACnoChargeCapability = (1<<6),     // AC adapter cannot charge battery
+  kRawLowBattery    = (1<<7),         // used only by  Platform Expert
+  kForceLowSpeed    = (1<<8)         // set by Platfm Expert, chk'd by Pwr Plugin};
+};
+>>>>>>> origin/10.1
 
 // For use with IOPMPowerSource bFlags
 #define IOPM_POWER_SOURCE_REV   2
@@ -811,9 +856,13 @@ enum {
   kIOPMClamshellStateOnWake = (1<<10)     // used only by Platform Expert
 };
 
+<<<<<<< HEAD
 // **********************************************
 // Internal power management data structures
 // **********************************************
+=======
+
+>>>>>>> origin/10.1
 
 #if KERNEL && __cplusplus
 class IOService;

@@ -3969,12 +3969,59 @@ again:
 	uio_reset(auio, off, UIO_SYSSPACE, UIO_READ);
 	uio_addiov(auio, CAST_USER_ADDR_T(rbuf), fullsiz);
 	eofflag = 0;
+<<<<<<< HEAD
 	error = VNOP_READDIR(vp, auio, vnopflag, &eofflag, &nentries, ctx);
 	off = uio_offset(auio);
 
 	if (nd->nd_vers == NFS_VER3) {
 		nfsm_srv_vattr_init(&attr, NFS_VER3);
 		attrerr = vnode_getattr(vp, &attr, ctx);
+=======
+
+        if (cookies) {
+                _FREE((caddr_t)cookies, M_TEMP);
+                cookies = NULL;
+        }
+	if (error = vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, procp)) {
+		FREE((caddr_t)rbuf, M_TEMP);
+		nfsm_reply(NFSX_POSTOPATTR(v3));
+		nfsm_srvpostop_attr(getret, &at);
+		return (0);
+	}
+	error = VOP_READDIR(vp, &io, cred, &eofflag, &ncookies, &cookies);
+	off = (off_t)io.uio_offset;
+        /*
+         * We cannot set the error in the case where there are no cookies 
+         * and no error, only, as FreeBSD. In the scenario the client is
+         * calling us back being told there were "more" entries on last readdir
+         * return, and we have no more entries, our VOP_READDIR can give 
+         * cookies = NULL and no error. This is due to a zero size to MALLOC
+         * returning NULL unlike FreeBSD which returns a pointer.
+         * With FreeBSD it makes sense if the MALLOC failed and you get in that
+         * bind. For us, we need something more. Thus, we should make sure we
+         * had some cookies to return, but no pointer and no error for EPERM case.
+         * Otherwise, go thru normal processing of sending back the eofflag. This check
+         * is also legit on first call to the routine by client since . and ..
+         * should be returned. Make same change to nfsrv_readdirplus. 
+         */
+	if ((ncookies != 0) && !cookies && !error)
+         	error = NFSERR_PERM;
+                
+	if (v3) {
+		getret = VOP_GETATTR(vp, &at, cred, procp);
+		if (!error)
+			error = getret;
+	}
+	VOP_UNLOCK(vp, 0, procp);
+	if (error) {
+		vrele(vp);
+		_FREE((caddr_t)rbuf, M_TEMP);
+		if (cookies)
+			_FREE((caddr_t)cookies, M_TEMP);
+		nfsm_reply(NFSX_POSTOPATTR(v3));
+		nfsm_srvpostop_attr(getret, &at);
+		return (0);
+>>>>>>> origin/10.1
 	}
 	nfsmerr_if(error);
 
@@ -4191,11 +4238,33 @@ again:
 	uio_reset(auio, off, UIO_SYSSPACE, UIO_READ);
 	uio_addiov(auio, CAST_USER_ADDR_T(rbuf), fullsiz);
 	eofflag = 0;
+<<<<<<< HEAD
 	error = VNOP_READDIR(vp, auio, vnopflag, &eofflag, &nentries, ctx);
 	off = uio_offset(auio);
 	nfsm_srv_vattr_init(&attr, NFS_VER3);
 	attrerr = vnode_getattr(vp, &attr, ctx);
 	nfsmerr_if(error);
+=======
+	if (cookies) {
+                _FREE((caddr_t)cookies, M_TEMP);
+                cookies = NULL;
+        }       
+        if (error = vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, procp)) {
+                FREE((caddr_t)rbuf, M_TEMP);
+                nfsm_reply(NFSX_V3POSTOPATTR);
+                nfsm_srvpostop_attr(getret, &at);
+                return (0);
+        }
+	error = VOP_READDIR(vp, &io, cred, &eofflag, &ncookies, &cookies);
+	off = (u_quad_t)io.uio_offset;
+	getret = VOP_GETATTR(vp, &at, cred, procp);
+	VOP_UNLOCK(vp, 0, procp);
+        /*
+         * See nfsrv_readdir comment above on this
+         */
+        if ((ncookies != 0) && !cookies && !error)
+         	error = NFSERR_PERM;
+>>>>>>> origin/10.1
 
 	if (uio_resid(auio) != 0) {
 		siz -= uio_resid(auio);

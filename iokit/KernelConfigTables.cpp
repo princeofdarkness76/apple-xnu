@@ -35,6 +35,7 @@
 =======
 const char * gIOKernelKmods =
 "{
+<<<<<<< HEAD
     'com.apple.kernel'                         = '1.3.7';
     'com.apple.kernel.bsd'                     = '1.0.7';
     'com.apple.kernel.iokit'                   = '1.0.7';
@@ -50,6 +51,18 @@ const char * gIOKernelKmods =
     'com.apple.iokit.IOPCIFamily'              = '1.0.7';
     'com.apple.iokit.IOStorageFamily'          = '1.0.7';
     'com.apple.iokit.IOSystemManagementFamily' = '1.0.7';
+=======
+    'com.apple.kernel'                         = '5.5';
+    'com.apple.kernel.bsd'                     = '5.5';
+    'com.apple.kernel.iokit'                   = '5.5';
+    'com.apple.kernel.libkern'                 = '5.5';
+    'com.apple.kernel.mach'                    = '5.5';
+    'com.apple.iokit.IOADBFamily'              = '1.1';
+    'com.apple.iokit.IONVRAMFamily'            = '1.1';
+    'com.apple.iokit.IOSystemManagementFamily' = '1.1';
+    'com.apple.iokit.ApplePlatformFamily'      = '1.0';
+    'com.apple.driver.AppleNMI'                = '1.0';
+>>>>>>> origin/10.1
 }";
 
 >>>>>>> origin/10.0

@@ -81,7 +81,11 @@
 #include <net/if_llc.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
+<<<<<<< HEAD
 #include <net/kpi_protocol.h>
+=======
+
+>>>>>>> origin/10.1
 #include <netinet/in.h>
 #include <netinet/in_var.h>
 #include <netinet/if_ether.h>

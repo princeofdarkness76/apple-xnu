@@ -309,8 +309,28 @@ void bzero_phys(
 	addr64_t phys_address,
 	uint32_t length);
 
+<<<<<<< HEAD
 /* Bytes available on current stack */
 vm_offset_t ml_stack_remaining(void);
+=======
+void ml_thread_policy(
+	thread_t thread,
+	unsigned policy_id,
+	unsigned policy_info);
+
+#define MACHINE_GROUP				0x00000001
+#define MACHINE_NETWORK_GROUP		0x10000000
+#define MACHINE_NETWORK_WORKLOOP	0x00000001
+#define MACHINE_NETWORK_NETISR		0x00000002
+
+/* Initialize Interrupts */
+void ml_install_interrupt_handler(
+    void *nub,
+    int source,
+    void *target,
+    IOInterruptHandler handler,
+    void *refCon);
+>>>>>>> origin/10.1
 
 __END_DECLS
 

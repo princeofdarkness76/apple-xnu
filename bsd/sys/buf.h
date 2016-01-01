@@ -686,11 +686,53 @@ buf_t 	buf_alloc(vnode_t);
 void	buf_free(buf_t);
 
 /*
+<<<<<<< HEAD
  * flags for buf_invalidateblks
  */
 #define	BUF_WRITE_DATA	0x0001		/* write data blocks first */
 #define	BUF_SKIP_META	0x0002		/* skip over metadata blocks */
 #define BUF_INVALIDATE_LOCKED	0x0004	/* force B_LOCKED blocks to be invalidated */
+=======
+ * These flags are kept in b_flags.
+ */
+#define	B_AGE		0x00000001	/* Move to age queue when I/O done. */
+#define	B_NEEDCOMMIT	0x00000002	/* Append-write in progress. */
+#define	B_ASYNC		0x00000004	/* Start I/O, do not wait. */
+#define	B_BAD		0x00000008	/* Bad block revectoring in progress. */
+#define	B_BUSY		0x00000010	/* I/O in progress. */
+#define	B_CACHE		0x00000020	/* Bread found us in the cache. */
+#define	B_CALL		0x00000040	/* Call b_iodone from biodone. */
+#define	B_DELWRI	0x00000080	/* Delay I/O until buffer reused. */
+#define	B_DIRTY		0x00000100	/* Dirty page to be pushed out async. */
+#define	B_DONE		0x00000200	/* I/O completed. */
+#define	B_EINTR		0x00000400	/* I/O was interrupted */
+#define	B_ERROR		0x00000800	/* I/O error occurred. */
+#define	B_WASDIRTY	0x00001000	/* page was found dirty in the VM cache */
+#define	B_INVAL		0x00002000	/* Does not contain valid info. */
+#define	B_LOCKED	0x00004000	/* Locked in core (not reusable). */
+#define	B_NOCACHE	0x00008000	/* Do not cache block after use. */
+#define	B_PAGEOUT	0x00010000	/* Page out indicator... */
+#define	B_PGIN		0x00020000	/* Pagein op, so swap() can count it. */
+#define	B_PHYS		0x00040000	/* I/O to user memory. */
+#define	B_RAW		0x00080000	/* Set by physio for raw transfers. */
+#define	B_READ		0x00100000	/* Read buffer. */
+#define	B_TAPE		0x00200000	/* Magnetic tape I/O. */
+#define	B_PAGELIST	0x00400000	/* Buffer describes pagelist I/O. */
+#define	B_WANTED	0x00800000	/* Process wants this buffer. */
+#define	B_WRITE		0x00000000	/* Write buffer (pseudo flag). */
+#define	B_WRITEINPROG	0x01000000	/* Write in progress. */
+#define	B_HDRALLOC	0x02000000	/* zone allocated buffer header */
+#define	B_UNUSED1	0x04000000	/* Unused bit */
+#define B_NEED_IODONE   0x08000000
+								/* need to do a biodone on the */
+								/* real_bp associated with a cluster_io */
+#define B_COMMIT_UPL    0x10000000
+								/* commit pages in upl when */
+								/* I/O completes/fails */
+#define	B_ZALLOC	0x20000000	/* b_data is zalloc()ed */
+#define	B_META		0x40000000	/* buffer contains meta-data. */
+#define	B_VECTORLIST	0x80000000	/* Used by device drivers. */
+>>>>>>> origin/10.1
 
 /*!
  @function buf_invalidateblks
@@ -1015,6 +1057,7 @@ void	buf_clear_redundancy_flags(buf_t, uint32_t);
  @param bp Buffer whose redundancy flags to grab.
  @return flags.
  */
+<<<<<<< HEAD
 uint32_t	buf_redundancy_flags(buf_t);
 
 /*!
@@ -1216,6 +1259,16 @@ void bufattr_markquickcomplete(bufattr_t bap);
 int bufattr_quickcomplete(bufattr_t bap);
 
 #endif /* KERNEL_PRIVATE */
+=======
+#define	BQUEUES		6		/* number of free buffer queues */
+
+#define	BQ_LOCKED	0		/* super-blocks &c */
+#define	BQ_LRU		1		/* lru, useful buffers */
+#define	BQ_AGE		2		/* rubbish */
+#define	BQ_EMPTY	3		/* buffer headers with no memory */
+#define BQ_META		4		/* buffer containing metadata */
+#define BQ_LAUNDRY	5		/* buffers that need cleaning */
+>>>>>>> origin/10.1
 
 __END_DECLS
 

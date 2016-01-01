@@ -765,6 +765,7 @@ task_name_for_pid(
 		return(KERN_FAILURE);
 	} 
 
+<<<<<<< HEAD
 	p = proc_find(pid);
 	if (p != PROC_NULL) {
 		AUDIT_ARG(process, p);
@@ -777,6 +778,20 @@ task_name_for_pid(
 			|| ((kauth_cred_getuid(target_cred) == kauth_cred_getuid(kauth_cred_get())) && 
 			    ((kauth_cred_getruid(target_cred) == kauth_getruid()))))) {
 
+=======
+	funnel_state = thread_funnel_set(kernel_flock, TRUE);
+
+ restart:
+	p1 = get_bsdtask_info(t1);
+	if (
+		((p = pfind(pid)) != (struct proc *) 0)
+		&& (p1 != (struct proc *) 0)
+		&& (((p->p_ucred->cr_uid == p1->p_ucred->cr_uid) && 
+			((p->p_cred->p_ruid == p1->p_cred->p_ruid)))
+		|| !(suser(p1->p_ucred, &p1->p_acflag)))
+		&& (p->p_stat != SZOMB)
+		) {
+>>>>>>> origin/10.1
 			if (p->task != TASK_NULL) {
 				task_reference(p->task);
 #if CONFIG_MACF

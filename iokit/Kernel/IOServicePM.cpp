@@ -3316,9 +3316,26 @@ void IOService::idleTimerExpired( void )
         }
     }
 
+<<<<<<< HEAD
     if (fAdvisoryTickled)
     {
         fAdvisoryTickled = false;
+=======
+    if ( priv->head_note_state < pm_vars->myCurrentState ) {	// dropping power?
+        priv->machine_state = IOPMour_prechange_03;		// yes, in case we have to wait for acks
+        pm_vars->doNotPowerDown = false;
+        pm_vars->outofbandparameter = kNotifyApps;  		// ask apps and kernel clients if we can drop power
+        if ( askChangeDown(priv->head_note_state) ) {
+            if ( pm_vars->doNotPowerDown ) {			// don't have to wait, did any clients veto?
+                tellNoChangeDown(priv->head_note_state);	// yes, rescind the warning
+                priv-> head_note_flags |= IOPMNotDone;		// mark the change note un-actioned
+                all_done();					// and we're done
+            }
+            else {
+                our_prechange_03();				// no, tell'em we're dropping power
+            }
+        }
+>>>>>>> origin/10.1
     }
     else if (fHasAdvisoryDesire)
     {

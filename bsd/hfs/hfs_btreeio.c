@@ -99,6 +99,7 @@ OSStatus GetBTreeBlock(FileReference vp, u_int32_t blockNum, GetBlockOptions opt
     struct buf   *bp = NULL;
 	u_int8_t     allow_empty_node;	  
 
+<<<<<<< HEAD
 	/* If the btree block is being read using hint, it is 
 	 * fine for the swap code to find zeroed out nodes. 
 	 */
@@ -107,6 +108,17 @@ OSStatus GetBTreeBlock(FileReference vp, u_int32_t blockNum, GetBlockOptions opt
 	} else {
 			allow_empty_node = false;
 	}
+=======
+    if (options & kGetEmptyBlock)
+        bp = getblk(vp, blockNum, block->blockSize, 0, 0, BLK_META);
+    else
+        retval = meta_bread(vp, blockNum, block->blockSize, NOCRED, &bp);
+
+    DBG_ASSERT(bp != NULL);
+    DBG_ASSERT(bp->b_data != NULL);
+    DBG_ASSERT(bp->b_bcount == block->blockSize);
+    DBG_ASSERT(bp->b_lblkno == blockNum);
+>>>>>>> origin/10.1
 
     if (options & kGetEmptyBlock) {
         daddr64_t blkno;
@@ -126,6 +138,7 @@ OSStatus GetBTreeBlock(FileReference vp, u_int32_t blockNum, GetBlockOptions opt
 
     if (retval == E_NONE) {
         block->blockHeader = bp;
+<<<<<<< HEAD
         block->buffer = (char *)buf_dataptr(bp);
     	block->blockNum = buf_lblkno(bp);
         block->blockReadFromDisk = (buf_fromcache(bp) == 0);	/* not found in cache ==> came from disk */
@@ -201,6 +214,34 @@ OSStatus GetBTreeBlock(FileReference vp, u_int32_t blockNum, GetBlockOptions opt
 	}
     
     if (retval) {
+=======
+        block->buffer = bp->b_data;
+        block->blockReadFromDisk = (bp->b_flags & B_CACHE) == 0;	/* not found in cache ==> came from disk */
+
+#if BYTE_ORDER == LITTLE_ENDIAN
+        /* Endian swap B-Tree node (only if it's a valid block) */
+        if (!(options & kGetEmptyBlock)) {
+            /* This happens when we first open the b-tree, we might not have all the node data on hand */
+            if ((((BTNodeDescriptor *)block->buffer)->kind == kBTHeaderNode) &&
+                (((BTHeaderRec *)((char *)block->buffer + 14))->nodeSize != bp->b_bcount) &&
+                (SWAP_BE16 (((BTHeaderRec *)((char *)block->buffer + 14))->nodeSize) != bp->b_bcount)) {
+
+                /* Don't swap the descriptors at all, we don't care (this block will be invalidated) */
+                SWAP_BT_NODE (block, ISHFSPLUS(VTOVCB(vp)), H_FILEID(VTOH(vp)), 3);
+
+            /* The node needs swapping */
+            } else if (*((UInt16 *)((char *)block->buffer + (block->blockSize - sizeof (UInt16)))) == 0x0e00) {
+                SWAP_BT_NODE (block, ISHFSPLUS(VTOVCB(vp)), H_FILEID(VTOH(vp)), 0);
+#if 0
+            /* The node is not already in native byte order, hence corrupt */
+            } else if (*((UInt16 *)((char *)block->buffer + (block->blockSize - sizeof (UInt16)))) != 0x000e) {
+                panic ("%s Corrupt B-Tree node detected!\n", "GetBTreeBlock:");
+#endif
+            }
+        }
+#endif
+    } else {
+>>>>>>> origin/10.1
     	if (bp)
 			buf_brelse(bp);
         block->blockHeader = NULL;
@@ -513,6 +554,7 @@ OSStatus ExtendBTreeFile(FileReference vp, FSSize minEOF, FSSize maxEOF)
 		ret = TruncateFileC(vcb, filePtr, filePtr->fcbEOF - trim, 0, 0, FTOC(filePtr)->c_fileid, 0);
 		filePtr->fcbEOF = (u_int64_t)filePtr->ff_blocks * (u_int64_t)vcb->blockSize;
 
+<<<<<<< HEAD
 		// XXXdbg - panic if the file didn't get trimmed back properly
 		if ((filePtr->fcbEOF % btInfo.nodeSize) != 0) {
 			panic("hfs: truncate file didn't! fcbEOF %lld nsize %d fcb %p\n",
@@ -562,6 +604,47 @@ OSStatus ExtendBTreeFile(FileReference vp, FSSize minEOF, FSSize maxEOF)
 out:
 	if (retval == 0)
 		retval = ret;
+=======
+static OSStatus
+FlushAlternate( ExtendedVCB *vcb )
+{
+	struct hfsmount *hfsmp = VCBTOHFS(vcb);
+	struct vnode *dev_vp = hfsmp->hfs_devvp;
+	struct buf *pri_bp = NULL;
+	struct buf *alt_bp = NULL;
+	int sectorsize;
+	u_long priIDSector;
+	u_long altIDSector;
+	int result;
+
+	sectorsize = hfsmp->hfs_phys_block_size;
+	priIDSector = (vcb->hfsPlusIOPosOffset / sectorsize) +
+			HFS_PRI_SECTOR(sectorsize);
+
+	altIDSector = (vcb->hfsPlusIOPosOffset / sectorsize) +
+			HFS_ALT_SECTOR(sectorsize, hfsmp->hfs_phys_block_count);
+
+	/* Get the main MDB/VolumeHeader block */
+	result = meta_bread(dev_vp, priIDSector, sectorsize, NOCRED, &pri_bp);
+	if (result)
+		goto exit;
+
+	/* Get the alternate MDB/VolumeHeader block */
+	result = meta_bread(dev_vp, altIDSector, sectorsize, NOCRED, &alt_bp);
+	if (result)
+		goto exit;
+
+	bcopy(pri_bp->b_data + HFS_PRI_OFFSET(sectorsize),
+	      alt_bp->b_data + HFS_ALT_OFFSET(sectorsize), kMDBSize);
+
+	result = VOP_BWRITE(alt_bp);
+	alt_bp = NULL;
+exit:
+	if (alt_bp)
+		brelse(alt_bp);
+	if (pri_bp)
+		brelse(pri_bp);
+>>>>>>> origin/10.1
 	
 	if (lockflags)
 		hfs_systemfile_unlock(vcb, lockflags);

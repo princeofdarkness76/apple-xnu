@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2001 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.1
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -126,6 +130,7 @@
 #include <mach/sync_policy.h>
 #include <kern/clock.h>
 #include <mach/kern_return.h>
+<<<<<<< HEAD
 #include <mach/thread_act.h>		/* for thread_resume() */
 #include <mach/task.h>			/* for task_set_exception_ports() */
 #include <sys/ux_exception.h>		/* for ux_handler() */
@@ -194,6 +199,10 @@
 #include <pexpert/pexpert.h>
 #include <machine/pal_routines.h>
 #include <console/video_console.h>
+=======
+
+extern shared_region_mapping_t       system_shared_region;
+>>>>>>> origin/10.1
 
 
 void * get_user_regs(thread_t);		/* XXX kludge for <machine/thread.h> */
@@ -266,8 +275,10 @@ extern void acct_init(void);
 extern int serverperfmode;
 extern int ncl;
 
+#define	BSD_PAGABLE_MAP_SIZE	(4 * 512 * 1024)
 vm_map_t	bsd_pageable_map;
 vm_map_t	mb_map;
+semaphore_t execve_semaphore;
 
 static  int bsd_simul_execs;
 static int bsd_pageable_map_size;
@@ -348,8 +359,15 @@ extern int check_policy_init(int);
 /*
  *	Sets the name for the given task.
  */
+<<<<<<< HEAD
 static void
 process_name(const char *s, proc_t p)
+=======
+void
+proc_name(s, p)
+	char		*s;
+	struct proc *p;
+>>>>>>> origin/10.1
 {
        strlcpy(p->p_comm, s, sizeof(p->p_comm));
        strlcpy(p->p_name, s, sizeof(p->p_name));
@@ -408,7 +426,26 @@ bsd_init(void)
 	boolean_t       netboot = FALSE;
 #endif
 
+<<<<<<< HEAD
 #define bsd_init_kprintf(x...) /* kprintf("bsd_init: " x) */
+=======
+	kernel_flock = funnel_alloc(KERNEL_FUNNEL);
+	if (kernel_flock == (funnel_t *)0 ) {
+		panic("bsd_init: Fail to allocate kernel mutex lock");
+	}
+        
+        
+	funnel_state = thread_funnel_set(kernel_flock, TRUE);
+
+	if (!disable_funnel) {
+		network_flock = funnel_alloc(NETWORK_FUNNEL);
+		if (network_flock == (funnel_t *)0 ) {
+			panic("bds_init: Fail to allocate network mutex lock");
+		}
+	} else {
+		network_flock = kernel_flock;
+	}
+>>>>>>> origin/10.1
 
 	throttle_init();
 
@@ -649,13 +686,37 @@ bsd_init(void)
 		bsd_init_kprintf("calling kmem_suballoc\n");
 		assert(bsd_pageable_map_size != 0);
 		ret = kmem_suballoc(kernel_map,
+<<<<<<< HEAD
 				&minimum,
 				(vm_size_t)bsd_pageable_map_size,
+=======
+				&min,
+				(vm_size_t)BSD_PAGABLE_MAP_SIZE,
+				TRUE,
+>>>>>>> origin/10.1
 				TRUE,
 				VM_FLAGS_ANYWHERE | VM_MAKE_TAG(VM_KERN_MEMORY_BSD),
 				&bsd_pageable_map);
+<<<<<<< HEAD
 		if (ret != KERN_SUCCESS) 
 			panic("bsd_init: Failed to allocate bsd pageable map");
+=======
+	if (ret != KERN_SUCCESS) 
+		panic("bsd_init: Failed to allocare bsd pageable map");
+	}
+
+	/* Initialize the execve() semaphore */
+	{
+		kern_return_t kret;
+		int value;
+
+		value = BSD_PAGABLE_MAP_SIZE / NCARGS;
+
+		kret = semaphore_create(kernel_task, &execve_semaphore,
+				SYNC_POLICY_FIFO, value);
+		if (kret != KERN_SUCCESS)
+			panic("bsd_init: Failed to create execve semaphore");
+>>>>>>> origin/10.1
 	}
 
 	/*
@@ -926,6 +987,7 @@ bsd_init(void)
 
 	bsd_init_kprintf("calling VFS_ROOT\n");
 	/* Get the vnode for '/'.  Set fdp->fd_fd.fd_cdir to reference it. */
+<<<<<<< HEAD
 	if (VFS_ROOT(mountlist.tqh_first, &rootvnode, &context))
 		panic("bsd_init: cannot find root vnode: %s", PE_boot_args());
 	rootvnode->v_flag |= VROOT;
@@ -952,6 +1014,13 @@ bsd_init(void)
 		}
 	}
 #endif
+=======
+	if (VFS_ROOT(mountlist.cqh_first, &rootvnode))
+		panic("bsd_init: cannot find root vnode");
+	VREF(rootvnode);
+	filedesc0.fd_cdir = rootvnode;
+	VOP_UNLOCK(rootvnode, 0, p);
+>>>>>>> origin/10.1
 	
 
 #if CONFIG_IMAGEBOOT

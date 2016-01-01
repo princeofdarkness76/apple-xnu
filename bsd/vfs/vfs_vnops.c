@@ -1408,11 +1408,14 @@ vn_ioctl(struct fileproc *fp, u_long com, caddr_t data, vfs_context_t ctx)
 	off_t file_size;
 	int error;
 	struct vnode *ttyvp;
+<<<<<<< HEAD
 	struct session * sessp;
 	
 	if ( (error = vnode_getwithref(vp)) ) {
 		return(error);
 	}
+=======
+>>>>>>> origin/10.1
 
 #if CONFIG_MACF
 	error = mac_vnode_check_ioctl(ctx, vp, com);
@@ -1471,6 +1474,7 @@ vn_ioctl(struct fileproc *fp, u_long com, caddr_t data, vfs_context_t ctx)
 		error = VNOP_IOCTL(vp, com, data, fp->f_fglob->fg_flag, ctx);
 
 		if (error == 0 && com == TIOCSCTTY) {
+<<<<<<< HEAD
 			sessp = proc_session(vfs_context_proc(ctx));
 
 			session_lock(sessp);
@@ -1479,6 +1483,13 @@ vn_ioctl(struct fileproc *fp, u_long com, caddr_t data, vfs_context_t ctx)
 			sessp->s_ttyvid = vnode_vid(vp);
 			session_unlock(sessp);
 			session_rele(sessp);
+=======
+			VREF(vp);
+			ttyvp = p->p_session->s_ttyvp;
+			p->p_session->s_ttyvp = vp;
+			if (ttyvp)
+				vrele(ttyvp);
+>>>>>>> origin/10.1
 		}
 	}
 out:

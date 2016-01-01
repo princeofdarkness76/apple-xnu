@@ -909,6 +909,7 @@ loopit:
 		 * See if the caller provided any multicast options
 		 */
 		if (imo != NULL) {
+<<<<<<< HEAD
 			IMO_LOCK(imo);
 			vif = imo->imo_multicast_vif;
 			ttl = imo->imo_multicast_ttl;
@@ -922,6 +923,18 @@ loopit:
 			vif = -1;
 			ip->ip_ttl = ttl;
 		}
+=======
+			ip->ip_ttl = imo->imo_multicast_ttl;
+			if (imo->imo_multicast_ifp != NULL) {
+				ifp = imo->imo_multicast_ifp;
+				dl_tag = ifp->if_data.default_proto;
+			}
+			if (imo->imo_multicast_vif != -1)
+				ip->ip_src.s_addr =
+				    ip_mcast_src(imo->imo_multicast_vif);
+		} else
+			ip->ip_ttl = IP_DEFAULT_MULTICAST_TTL;
+>>>>>>> origin/10.1
 		/*
 		 * Confirm that the outgoing interface supports multicast.
 		 */
@@ -2123,8 +2136,13 @@ in_finalize_cksum(struct mbuf *m, uint32_t hoff, uint32_t csum_flags)
 
 	sw_csum = (csum_flags & m->m_pkthdr.csum_flags);
 
+<<<<<<< HEAD
 	if ((sw_csum &= (CSUM_DELAY_IP | CSUM_DELAY_DATA)) == 0)
 		goto done;
+=======
+	if ((m->m_pkthdr.csum_flags & CSUM_UDP) && csum == 0)
+		csum = 0xffff;
+>>>>>>> origin/10.1
 
 	mlen = m->m_pkthdr.len;				/* total mbuf len */
 

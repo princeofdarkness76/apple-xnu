@@ -581,6 +581,7 @@ skipcheck:
 		(void)sys_perf_notify(self, p->p_pid);
 	}
 
+<<<<<<< HEAD
 
 	/* stash the usage into corpse data if making_corpse == true */
 	if (create_corpse == TRUE) {
@@ -623,6 +624,8 @@ skipcheck:
 	if (create_corpse) {
 		populate_corpse_crashinfo(p, task_get_corpseinfo(current_task()), rup, code, subcode);
 	}
+=======
+>>>>>>> origin/10.1
 	/*
 	 * Remove proc from allproc queue and from pidhash chain.
 	 * Need to do this before we do anything that can block.
@@ -651,11 +654,20 @@ skipcheck:
 	 * If parent is waiting for us to exit or exec,
 	 * P_LPPWAIT is set; we will wakeup the parent below.
 	 */
+<<<<<<< HEAD
 	proc_lock(p);
 	p->p_lflag &= ~(P_LTRACED | P_LPPWAIT);
 	p->p_sigignore = ~(sigcantmask);
 	ut->uu_siglist = 0;
 	proc_unlock(p);
+=======
+	p->p_flag &= ~(P_TRACED | P_PPWAIT);
+	p->p_sigignore = ~0;
+	p->p_siglist = 0;
+	ut = get_bsdthread_info(th_act_self);
+	ut->uu_sig = 0;
+	untimeout(realitexpire, (caddr_t)p);
+>>>>>>> origin/10.1
 }
 
 void 
@@ -664,6 +676,7 @@ proc_exit(proc_t p)
 	proc_t q;
 	proc_t pp;
 	struct task *task = p->task;
+<<<<<<< HEAD
 	vnode_t tvp = NULLVP;
 	struct pgrp * pg;
 	struct session *sessp;
@@ -690,6 +703,10 @@ proc_exit(proc_t p)
 	} else {
 		proc_transend(p, 1);
 	}
+=======
+	register int i,s;
+	boolean_t funnel_state;
+>>>>>>> origin/10.1
 
 	p->p_lflag |= P_LPEXIT;
 
@@ -808,6 +825,12 @@ proc_exit(proc_t p)
 			struct vfs_context context;
 			struct tty *tp;
 
+<<<<<<< HEAD
+=======
+		if (sp->s_ttyvp) {
+			struct vnode *ttyvp;
+
+>>>>>>> origin/10.1
 			/*
 			 * Controlling process.
 			 * Signal foreground pgrp,
@@ -879,6 +902,18 @@ proc_exit(proc_t p)
 
 				ttyfree(tp);
 			}
+<<<<<<< HEAD
+=======
+			ttyvp = sp->s_ttyvp;
+			sp->s_ttyvp = NULL;
+			if (ttyvp)
+				vrele(ttyvp);
+			/*
+			 * s_ttyp is not zero'd; we use this to indicate
+			 * that the session once had a controlling terminal.
+			 * (for logging and informational purposes)
+			 */
+>>>>>>> origin/10.1
 		}
 		session_lock(sessp);
 		sessp->s_leader = NULL;
@@ -891,7 +926,21 @@ proc_exit(proc_t p)
 	pg_rele(pg);
 
 	p->p_rlimit[RLIMIT_FSIZE].rlim_cur = RLIM_INFINITY;
+<<<<<<< HEAD
 	(void)acct_process(p);
+=======
+#if KTRACE
+	/* 
+	 * release trace file
+	 */
+	p->p_traceflag = 0;	/* don't trace the vrele() */
+	if (p->p_tracep) {
+		struct vnode *tvp = p->p_tracep;
+		p->p_tracep = NULL;
+		vrele(tvp);
+	}
+#endif
+>>>>>>> origin/10.1
 
 	proc_list_lock();
 
@@ -990,9 +1039,12 @@ proc_exit(proc_t p)
 		}
 	}
 
+<<<<<<< HEAD
 	proc_childdrainend(p);
 	proc_list_unlock();
 
+=======
+>>>>>>> origin/10.1
 	/*
 	 * Release reference to text vnode
 	 */
@@ -1002,6 +1054,7 @@ proc_exit(proc_t p)
 		vnode_rele(tvp);
 	}
 
+<<<<<<< HEAD
 	/*
 	 * Save exit status and final rusage info, adding in child rusage
 	 * info and self times.  If we were unable to allocate a zombie
@@ -1013,6 +1066,9 @@ proc_exit(proc_t p)
 
 	    ruadd(&(p->p_ru->ru), &p->p_stats->p_cru);
 	}
+=======
+	ruadd(p->p_ru, &p->p_stats->p_cru);
+>>>>>>> origin/10.1
 
 	/*
 	 * Free up profiling buffers.
@@ -1497,6 +1553,7 @@ loop1:
 					goto out;
 			}
 
+<<<<<<< HEAD
 			/* Conformance change for 6577252.
 			 * When SIGCHLD is blocked and wait() returns because the status
 			 * of a child process is available and there are no other 
@@ -1553,6 +1610,16 @@ loop1:
 			if ((error = mac_proc_check_wait(q, p)) != 0)
 				goto out;
 #endif
+=======
+int
+wait4(p, uap, retval)
+	struct proc *p;
+	struct wait4_args *uap;
+	int *retval;
+{
+	return (wait1(p, uap, retval, 0));
+}
+>>>>>>> origin/10.1
 
 			/* Prevent other process for waiting for this event */
 			OSBitAndAtomic(~((uint32_t)P_CONTINUED), &p->p_flag);
@@ -1609,6 +1676,7 @@ out:
 int
 waitidcontinue(int result)
 {
+<<<<<<< HEAD
 	proc_t p;
 	thread_t thread;
 	uthread_t uth;
@@ -1627,6 +1695,21 @@ waitidcontinue(int result)
 	uap = waitid_data->args;
 	retval = waitid_data->retval;
 	return(waitid_nocancel(p, uap, retval));
+=======
+	void *vt;
+	thread_act_t thread;
+	int *retval;
+	struct proc *p;
+
+	if (result)
+		return(result);
+
+	p = current_proc();
+	thread = current_act();
+	vt = get_bsduthreadarg(thread);
+	retval = get_bsduthreadrval(thread);
+	wait1((struct proc *)p, (struct wait4_args *)vt, retval, 0);
+>>>>>>> origin/10.1
 }
 
 /*
@@ -1645,6 +1728,7 @@ waitidcontinue(int result)
 int
 waitid(proc_t q, struct waitid_args *uap, int32_t *retval)
 {
+<<<<<<< HEAD
 	__pthread_testcancel(1);
 	return (waitid_nocancel(q, (struct waitid_nocancel_args *)uap, retval));
 }
@@ -1674,6 +1758,16 @@ waitid_nocancel(proc_t q, struct waitid_nocancel_args *uap,
 	case P_ALL:	/* any child */
 		break;
 	}
+=======
+	register int nfound;
+	register struct proc *p, *t;
+	int status, error;
+	struct vnode *tvp;
+
+retry:
+	if (uap->pid == 0)
+		uap->pid = -q->p_pgid;
+>>>>>>> origin/10.1
 
 loop:
 	proc_list_lock();
@@ -1708,6 +1802,7 @@ loop1:
 		p->p_listflag |= P_LIST_WAITING;		/* mark busy */
 
 		nfound++;
+<<<<<<< HEAD
 
 		bzero(&siginfo, sizeof (siginfo));
 
@@ -1736,6 +1831,50 @@ loop1:
 			/* Prevent other process for waiting for this event? */
 			if (!(uap->options & WNOWAIT)) {
 				(void) reap_child_locked(q, p, 0, 0, 0, 0);
+=======
+		if (p->p_flag & P_WAITING) {
+			(void)tsleep(&p->p_stat, PWAIT, "waitcoll", 0);
+			goto loop;
+		}
+		p->p_flag |= P_WAITING;   /* only allow single thread to wait() */
+
+		if (p->p_stat == SZOMB) {
+			retval[0] = p->p_pid;
+#if COMPAT_43
+			if (compat)
+				retval[1] = p->p_xstat;
+			else
+#endif
+			if (uap->status) {
+				status = p->p_xstat;	/* convert to int */
+				if (error = copyout((caddr_t)&status,
+				    (caddr_t)uap->status,
+						    sizeof(status))) {
+					p->p_flag &= ~P_WAITING;
+					wakeup(&p->p_stat);
+					return (error);
+				}
+			}
+			if (uap->rusage &&
+			    (error = copyout((caddr_t)p->p_ru,
+			    (caddr_t)uap->rusage,
+					     sizeof (struct rusage)))) {
+				p->p_flag &= ~P_WAITING;
+				wakeup(&p->p_stat);
+				return (error);
+			}
+			/*
+			 * If we got the child via a ptrace 'attach',
+			 * we need to give it back to the old parent.
+			 */
+			if (p->p_oppid && (t = pfind(p->p_oppid))) {
+				p->p_oppid = 0;
+				proc_reparent(p, t);
+				psignal(t, SIGCHLD);
+				wakeup((caddr_t)t);
+				p->p_flag &= ~P_WAITING;
+				wakeup(&p->p_stat);
+>>>>>>> origin/10.1
 				return (0);
 			}
 			goto out;
@@ -1776,15 +1915,26 @@ loop1:
 			}
 			goto out;
 
+<<<<<<< HEAD
 		default:		/* All other states => Continued */
 			if (!(uap->options & WCONTINUED))
 				break;
+=======
+			/*
+			 * Release reference to text vnode
+			 */
+			tvp = p->p_textvp;
+			p->p_textvp = NULL;
+			if (tvp)
+				vrele(tvp);
+>>>>>>> origin/10.1
 
 			/*
 			 * If the flag isn't set, then this process has not
 			 * been stopped and continued, or the status has
 			 * already been reaped by another caller of waitid().
 			 */
+<<<<<<< HEAD
 			if ((p->p_flag & P_CONTINUED) == 0)
 				break;
 			proc_list_unlock();
@@ -1852,6 +2002,50 @@ loop1:
 
 	if ((error = msleep0(q, proc_list_mlock,
 	    PWAIT | PCATCH | PDROP, "waitid", 0, waitidcontinue)) != 0)
+=======
+			leavepgrp(p);
+			LIST_REMOVE(p, p_list);	/* off zombproc */
+			LIST_REMOVE(p, p_sibling);
+			p->p_flag &= ~P_WAITING;
+			FREE_ZONE(p, sizeof *p, M_PROC);
+			nprocs--;
+			wakeup(&p->p_stat);
+			return (0);
+		}
+		if (p->p_stat == SSTOP && (p->p_flag & P_WAITED) == 0 &&
+		    (p->p_flag & P_TRACED || uap->options & WUNTRACED)) {
+			p->p_flag |= P_WAITED;
+			retval[0] = p->p_pid;
+#if COMPAT_43
+			if (compat) {
+				retval[1] = W_STOPCODE(p->p_xstat);
+				error = 0;
+			} else
+#endif
+			if (uap->status) {
+				status = W_STOPCODE(p->p_xstat);
+				error = copyout((caddr_t)&status,
+				    (caddr_t)uap->status,
+				    sizeof(status));
+			} else
+				error = 0;
+			p->p_flag &= ~P_WAITING;
+			wakeup(&p->p_stat);
+			return (error);
+		}
+		p->p_flag &= ~P_WAITING;
+		wakeup(&p->p_stat);
+	}
+	if (nfound == 0)
+		return (ECHILD);
+
+	if (uap->options & WNOHANG) {
+		retval[0] = 0;
+		return (0);
+	}
+
+	if (error = tsleep0((caddr_t)q, PWAIT | PCATCH, "wait", 0, wait1continue))
+>>>>>>> origin/10.1
 		return (error);
 
 	goto loop;
@@ -1896,7 +2090,24 @@ proc_reparentlocked(proc_t child, proc_t parent, int cansignal, int locked)
 	LIST_INSERT_HEAD(&parent->p_children, child, p_sibling);
 	parent->p_childrencnt++;	
 	child->p_pptr = parent;
+<<<<<<< HEAD
 	child->p_ppid = parent->p_pid;
+=======
+}
+
+/*
+ *	Make the current process an "init" process, meaning
+ *	that it doesn't have a parent, and that it won't be
+ *	gunned down by kill(-1, 0).
+ */
+kern_return_t
+init_process(void)
+{
+	register struct proc *p = current_proc();
+
+	if (suser(p->p_ucred, &p->p_acflag))
+		return(KERN_NO_ACCESS);
+>>>>>>> origin/10.1
 
 	proc_list_unlock();
 
@@ -1906,6 +2117,20 @@ proc_reparentlocked(proc_t child, proc_t parent, int cansignal, int locked)
 		proc_list_lock();
 }
 
+<<<<<<< HEAD
+=======
+void
+process_terminate_self(void)
+{
+	struct proc *p = current_proc();
+
+	if (p != NULL) {
+		exit1(p, W_EXITCODE(0, SIGKILL), (int *)NULL);
+		/*NOTREACHED*/
+	}
+}
+
+>>>>>>> origin/10.1
 /*
  * Exit: deallocate address space and other resources, change proc state
  * to zombie, and unlink proc from allproc and parent's lists.  Save exit
@@ -2016,10 +2241,15 @@ vproc_exit(proc_t p)
 	vnode_t tvp;
 #ifdef FIXME
 	struct task *task = p->task;
+<<<<<<< HEAD
 #endif
 	struct pgrp * pg;
 	struct session *sessp;
 	struct rusage_superset *rup;
+=======
+	register int i,s;
+	boolean_t funnel_state;
+>>>>>>> origin/10.1
 
 	/* XXX Zombie allocation may fail, in which case stats get lost */
 	MALLOC_ZONE(rup, struct rusage_superset *,
@@ -2043,6 +2273,12 @@ vproc_exit(proc_t p)
 			struct vfs_context context;
 			struct tty *tp;
 
+<<<<<<< HEAD
+=======
+		if (sp->s_ttyvp) {
+			struct vnode *ttyvp;
+
+>>>>>>> origin/10.1
 			/*
 			 * Controlling process.
 			 * Signal foreground pgrp,
@@ -2114,6 +2350,18 @@ vproc_exit(proc_t p)
 
 				ttyfree(tp);
 			}
+<<<<<<< HEAD
+=======
+			ttyvp = sp->s_ttyvp;
+			sp->s_ttyvp = NULL;
+			if (ttyvp)
+				vrele(ttyvp);
+			/*
+			 * s_ttyp is not zero'd; we use this to indicate
+			 * that the session once had a controlling terminal.
+			 * (for logging and informational purposes)
+			 */
+>>>>>>> origin/10.1
 		}
 		session_lock(sessp);
 		sessp->s_leader = NULL;
@@ -2126,6 +2374,7 @@ vproc_exit(proc_t p)
 	pg_rele(pg);
 
 	p->p_rlimit[RLIMIT_FSIZE].rlim_cur = RLIM_INFINITY;
+<<<<<<< HEAD
 
 	proc_list_lock();
 	proc_childdrainstart(p);
@@ -2200,13 +2449,54 @@ vproc_exit(proc_t p)
 			} else {
 				q->p_listflag |= P_LIST_DEADPARENT;
 				proc_reparentlocked(q, initproc, 0, 1);
+=======
+#if KTRACE
+	/* 
+	 * release trace file
+	 */
+	p->p_traceflag = 0;	/* don't trace the vrele() */
+	if (p->p_tracep) {
+		struct vnode *tvp = p->p_tracep;
+		p->p_tracep = NULL;
+		vrele(tvp);
+	}
+#endif
+
+	q = p->p_children.lh_first;
+	if (q)		/* only need this if any child is S_ZOMB */
+		wakeup((caddr_t) initproc);
+	for (; q != 0; q = nq) {
+		nq = q->p_sibling.le_next;
+		proc_reparent(q, initproc);
+		/*
+		 * Traced processes are killed
+		 * since their existence means someone is messing up.
+		 */
+		if (q->p_flag & P_TRACED) {
+			q->p_flag &= ~P_TRACED;
+			if (q->sigwait_thread) {
+				thread_t sig_shuttle  = getshuttle_thread(q->sigwait_thread);
+				/*
+				 * The sigwait_thread could be stopped at a
+				 * breakpoint. Wake it up to kill.
+				 * Need to do this as it could be a thread which is not
+				 * the first thread in the task. So any attempts to kill
+				 * the process would result into a deadlock on q->sigwait.
+				 */
+				thread_resume((struct thread *)q->sigwait_thread);
+				clear_wait(sig_shuttle, THREAD_INTERRUPTED);
+				threadsignal(q->sigwait_thread, SIGKILL, 0);
+>>>>>>> origin/10.1
 			}
 		}
 	}
 
+<<<<<<< HEAD
 	proc_childdrainend(p);
 	proc_list_unlock();
 
+=======
+>>>>>>> origin/10.1
 	/*
 	 * Release reference to text vnode
 	 */
@@ -2347,6 +2637,7 @@ vproc_exit(proc_t p)
 		p->p_stat = SZOMB;
 		p->p_listflag |= P_LIST_WAITING;
 
+<<<<<<< HEAD
 		/*
 		 * This is a named reference and it is not granted
 		 * if the reap is already in progress. So we get
@@ -2425,3 +2716,8 @@ munge_user32_rusage(struct rusage *a_rusage_p, struct user32_rusage *a_user_rusa
 	a_user_rusage_p->ru_nvcsw = a_rusage_p->ru_nvcsw;
 	a_user_rusage_p->ru_nivcsw = a_rusage_p->ru_nivcsw;
 }
+=======
+	/* and now wakeup the parent */
+	wakeup((caddr_t)p->p_pptr);
+}
+>>>>>>> origin/10.1

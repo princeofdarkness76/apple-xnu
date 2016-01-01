@@ -808,6 +808,7 @@ extern void pmap_pagetable_corruption_msg_log(int (*)(const char * fmt, ...)__pr
 #define	pmap_copy(dst_pmap,src_pmap,dst_addr,len,src_addr)
 #define	pmap_attribute(pmap,addr,size,attr,value) \
 					(KERN_INVALID_ADDRESS)
+<<<<<<< HEAD
 #define	pmap_attribute_cache_sync(addr,size,attr,value) \
 					(KERN_INVALID_ADDRESS)
 
@@ -821,6 +822,11 @@ extern boolean_t pmap_is_empty(pmap_t		pmap,
 kern_return_t
 pmap_permissions_verify(pmap_t, vm_map_t, vm_offset_t, vm_offset_t);
 
+=======
+#define pmap_sync_caches_phys(pa) \
+					(KERN_INVALID_ADDRESS)
+
+>>>>>>> origin/10.1
 #endif	/* ASSEMBLER */
 
 

@@ -574,9 +574,17 @@ loop:
 	}
 	lck_mtx_unlock(nfs_node_hash_mutex);
 
+<<<<<<< HEAD
 	*npp = np;
 
 	FSDBG_BOT(263, dnp, vp, *npp, error);
+=======
+	/*
+	 * Lock the new nfsnode.
+	 */
+	error =	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
+
+>>>>>>> origin/10.1
 	return (error);
 }
 
@@ -653,6 +661,7 @@ restart:
 		 * node has gone inactive without being open, we need to
 		 * clean up (close) the open done in the create.
 		 */
+<<<<<<< HEAD
 		if ((nofp->nof_flags & NFS_OPEN_FILE_CREATE) && nofp->nof_creator && !force) {
 			if (nofp->nof_flags & NFS_OPEN_FILE_REOPEN) {
 				lck_mtx_unlock(&np->n_openlock);
@@ -675,6 +684,33 @@ restart:
 			if (inuse)
 				nfs_mount_state_in_use_end(nmp, error);
 			goto restart;
+=======
+                if (ap->a_vp->v_usecount > 0) {
+                        VREF(ap->a_vp);
+                } else if (vget(ap->a_vp, 0, ap->a_p))
+			panic("nfs_inactive: vget failed");
+		(void) nfs_vinvalbuf(ap->a_vp, 0, sp->s_cred, p, 1);
+		np->n_size = 0;
+		ubc_setsize(ap->a_vp, (off_t)0);
+
+                /* We have a problem. The dvp could have gone away on us while
+                 * in the unmount path. Thus it appears as VBAD and we cannot
+                 * use it. If we tried locking the parent (future), for silly
+                 * rename files, it is unclear where we would lock. The unmount
+                 * code just pulls unlocked vnodes as it goes thru its list and
+                 * yanks them. Could unmount be smarter to see if a busy reg vnode has
+                 * a parent, and not yank it yet? Put in more passes at unmount
+                 * time? In the meantime, just check if it went away on us.
+                 * Could have gone away during the nfs_vinvalbuf or ubc_setsize
+                 * which block.  Or perhaps even before nfs_inactive got called.
+                 */
+                if ((sp->s_dvp)->v_type != VBAD) 
+                        nfs_removeit(sp); /* uses the dvp */
+		cred = sp->s_cred;
+		if (cred != NOCRED) {
+			sp->s_cred = NOCRED;
+			crfree(cred);
+>>>>>>> origin/10.1
 		}
 		if (nofp->nof_flags & NFS_OPEN_FILE_NEEDCLOSE) {
 			/*
@@ -1050,6 +1086,7 @@ nfs_vnop_reclaim(ap)
  */
 
 int
+<<<<<<< HEAD
 nfs_node_lock_internal(nfsnode_t np, int force)
 {
 	FSDBG_TOP(268, np, force, 0, 0);
@@ -1061,6 +1098,28 @@ nfs_node_lock_internal(nfsnode_t np, int force)
 	}
 	FSDBG_BOT(268, np, force, 0, 0);
 	return (0);
+=======
+nfs_lock(ap)
+	struct vop_lock_args /* {
+                struct vnode *a_vp;
+                int a_flags;
+                struct proc *a_p;
+	} */ *ap;
+{
+	register struct vnode *vp = ap->a_vp;
+
+	/*
+	 * Ugh, another place where interruptible mounts will get hung.
+	 * If you make this call interruptible, then you have to fix all
+	 * the VOP_LOCK() calls to expect interruptibility.
+	 */
+	if (vp->v_tag == VT_NON)
+		return (ENOENT); /* ??? -- got to check something and error, but what? */
+	 
+	return(lockmgr(&VTONFS(vp)->n_lock, ap->a_flags, &vp->v_interlock,
+                ap->a_p));
+	
+>>>>>>> origin/10.1
 }
 
 int
@@ -1092,6 +1151,7 @@ nfs_node_unlock(nfsnode_t np)
  *   - only one lock taken per node (dup nodes are skipped)
  */
 int
+<<<<<<< HEAD
 nfs_node_lock2(nfsnode_t np1, nfsnode_t np2)
 {
 	nfsnode_t first, second;
@@ -1222,6 +1282,19 @@ nfs_node_set_busy4(nfsnode_t np1, nfsnode_t np2, nfsnode_t np3, nfsnode_t np4, t
 			return (error);
 		}
 	return (0);
+=======
+nfs_unlock(ap)
+        struct vop_unlock_args /* {
+                struct vnode *a_vp;
+                int a_flags;
+                struct proc *a_p;
+        } */ *ap;
+{
+        struct vnode *vp = ap->a_vp;
+
+        return (lockmgr(&VTONFS(vp)->n_lock, ap->a_flags | LK_RELEASE,
+                &vp->v_interlock, ap->a_p));
+>>>>>>> origin/10.1
 }
 
 void
@@ -1241,6 +1314,7 @@ nfs_node_clear_busy4(nfsnode_t np1, nfsnode_t np2, nfsnode_t np3, nfsnode_t np4)
 void
 nfs_data_lock(nfsnode_t np, int locktype)
 {
+<<<<<<< HEAD
 	nfs_data_lock_internal(np, locktype, 1);
 }
 void
@@ -1291,6 +1365,11 @@ nfs_data_unlock_internal(nfsnode_t np, int updatesize)
 		nfs_data_update_size(np, 0);
 	FSDBG_BOT(271, np, np->n_datalockowner, current_thread(), 0);
 }
+=======
+	return (lockstatus(&VTONFS(ap->a_vp)->n_lock));
+
+}
+>>>>>>> origin/10.1
 
 
 /*

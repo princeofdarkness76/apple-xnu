@@ -292,6 +292,7 @@ kernel_mount(char *fstype, vnode_t pvp, vnode_t vp, const char *path,
 int
 mount(proc_t p, struct mount_args *uap, __unused int32_t *retval)
 {
+<<<<<<< HEAD
 	struct __mac_mount_args muap;
 
 	muap.type = uap->type;
@@ -337,6 +338,15 @@ __mac_mount(struct proc *p, register struct __mac_mount_args *uap, __unused int3
    	vnode_t vp = NULL;
 	int need_nameidone = 0;
 	vfs_context_t ctx = vfs_context_current();
+=======
+	struct vnode *vp;
+	struct mount *mp;
+	struct vfsconf *vfsp;
+	int error, flag, err2;
+	struct vattr va;
+	u_long fstypenum;
+	struct nameidata nd;
+>>>>>>> origin/10.1
 	char fstypename[MFSNAMELEN];
 	struct nameidata nd;
 	size_t dummy=0;
@@ -880,6 +890,7 @@ update:
 		goto exit;
 	}
 
+<<<<<<< HEAD
 	/*
 	 * Put the new filesystem on the mount list after root.
 	 */
@@ -897,6 +908,28 @@ update:
 			 * drop reference provided by VFS_ROOT
 			 */
 			vnode_put(rvp);
+=======
+	/* get the vnode lock */
+	err2 = vn_lock(vp,  LK_EXCLUSIVE|LK_RETRY, p);
+
+	/*
+	 * Put the new filesystem on the mount list after root.
+	 */
+	cache_purge(vp);
+	if (!error && !err2) {
+		simple_lock(&vp->v_interlock);
+		CLR(vp->v_flag, VMOUNT);
+		vp->v_mountedhere =mp;
+		simple_unlock(&vp->v_interlock);
+		simple_lock(&mountlist_slock);
+		CIRCLEQ_INSERT_TAIL(&mountlist, mp, mnt_list);
+		simple_unlock(&mountlist_slock);
+		checkdirs(vp);
+		VOP_UNLOCK(vp, 0, p);
+		vfs_unbusy(mp, p);
+		if (error = VFS_START(mp, 0, p))
+			vrele(vp);
+>>>>>>> origin/10.1
 
 			if (error)
 				goto out3;
@@ -905,6 +938,7 @@ update:
 
 		vnode_lock_spin(vp);
 		CLR(vp->v_flag, VMOUNT);
+<<<<<<< HEAD
 		vp->v_mountedhere = mp;
 		vnode_unlock(vp);
 
@@ -1018,6 +1052,51 @@ update:
 		if (device_vnode ) {
 			vnode_rele(device_vnode);
 			VNOP_CLOSE(device_vnode, ronly ? FREAD : FREAD|FWRITE, ctx);
+=======
+		simple_unlock(&vp->v_interlock);
+		mp->mnt_vfc->vfc_refcount--;
+		vfs_unbusy(mp, p);
+		_FREE_ZONE((caddr_t)mp, sizeof (struct mount), M_MOUNT);
+		if (err2)
+			vrele(vp);
+		else
+			vput(vp);
+	}
+	return (error);
+}
+
+/*
+ * Scan all active processes to see if any of them have a current
+ * or root directory onto which the new filesystem has just been
+ * mounted. If so, replace them with the new mount point.
+ */
+static void
+checkdirs(olddp)
+	struct vnode *olddp;
+{
+	struct filedesc *fdp;
+	struct vnode *newdp;
+	struct proc *p;
+	struct vnode *tvp;
+
+	if (olddp->v_usecount == 1)
+		return;
+	if (VFS_ROOT(olddp->v_mountedhere, &newdp))
+		panic("mount: lost mount");
+	for (p = allproc.lh_first; p != 0; p = p->p_list.le_next) {
+		fdp = p->p_fd;
+		if (fdp->fd_cdir == olddp) {
+			VREF(newdp);
+			tvp = fdp->fd_cdir;
+			fdp->fd_cdir = newdp;
+			vrele(tvp);
+		}
+		if (fdp->fd_rdir == olddp) {
+			VREF(newdp);
+			tvp = fdp->fd_rdir;
+			fdp->fd_rdir = newdp;
+			vrele(tvp);
+>>>>>>> origin/10.1
 		}
 		lck_rw_done(&mp->mnt_rwlock);
 		is_rwlock_locked = FALSE;
@@ -1034,6 +1113,7 @@ update:
 #endif
 		FREE_ZONE((caddr_t)mp, sizeof (struct mount), M_MOUNT);
 	}
+<<<<<<< HEAD
 exit:
 	/*
 	 * drop I/O count on the device vp if there was one
@@ -1100,6 +1180,13 @@ out1:
 		mount_list_lock();
 		vfsp->vfc_refcount--;
 		mount_list_unlock();
+=======
+	if (rootvnode == olddp) {
+		VREF(newdp);
+		tvp = rootvnode;
+		rootvnode = newdp;
+		vrele(tvp);
+>>>>>>> origin/10.1
 	}
 
 	return(error);
@@ -1523,10 +1610,31 @@ relocate_imageboot_source(vnode_t pvp, vnode_t vp, struct componentname *cnp,
 		}
 	}
 
+<<<<<<< HEAD
 	/* 
 	 * Place mp on top of vnode, ref the vnode,  call checkdirs(),
 	 * and increment the name cache's mount generation 
 	 */
+=======
+/*
+ * Change current working directory to a given file descriptor.
+ */
+struct fchdir_args {
+	int	fd;
+};
+/* ARGSUSED */
+int
+fchdir(p, uap, retval)
+	struct proc *p;
+	struct fchdir_args *uap;
+	register_t *retval;
+{
+	register struct filedesc *fdp = p->p_fd;
+	struct vnode *vp, *tdp, *tvp;
+	struct mount *mp;
+	struct file *fp;
+	int error;
+>>>>>>> origin/10.1
 
 	IMGSRC_DEBUG("About to call place_mount_and_checkdirs().\n");
 	error = place_mount_and_checkdirs(mp, vp, ctx);
@@ -1553,6 +1661,7 @@ relocate_imageboot_source(vnode_t pvp, vnode_t vp, struct componentname *cnp,
 		error = EBUSY;
 		goto out3;
 	}
+<<<<<<< HEAD
 
 	mount_end_update(mp);
 	vnode_put(rvp);
@@ -1588,6 +1697,41 @@ out0:
 	vnode_put(rvp);
 	FREE(old_mntonname, M_TEMP);
 	return error;
+=======
+	VOP_UNLOCK(vp, 0, p);
+	tvp = fdp->fd_cdir;
+	fdp->fd_cdir = vp;
+	vrele(tvp);
+	return (0);
+}
+
+/*
+ * Change current working directory (``.'').
+ */
+struct chdir_args {
+	char	*path;
+};
+/* ARGSUSED */
+int
+chdir(p, uap, retval)
+	struct proc *p;
+	struct chdir_args *uap;
+	register_t *retval;
+{
+	register struct filedesc *fdp = p->p_fd;
+	int error;
+	struct nameidata nd;
+	struct vnode *tvp;
+
+	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_USERSPACE,
+	    uap->path, p);
+	if (error = change_dir(&nd, p))
+		return (error);
+	tvp = fdp->fd_cdir;
+	fdp->fd_cdir = nd.ni_vp;
+	vrele(tvp);
+	return (0);
+>>>>>>> origin/10.1
 }
 
 #endif /* CONFIG_IMGSRC_ACCESS */
@@ -1595,6 +1739,7 @@ out0:
 void
 enablequotas(struct mount *mp, vfs_context_t ctx)
 {
+<<<<<<< HEAD
 	struct nameidata qnd;
 	int type;
 	char qfpath[MAXPATHLEN];
@@ -1624,6 +1769,12 @@ enablequotas(struct mount *mp, vfs_context_t ctx)
 	}
 	return;
 }
+=======
+	register struct filedesc *fdp = p->p_fd;
+	int error;
+	struct nameidata nd;
+	struct vnode *tvp;
+>>>>>>> origin/10.1
 
 
 static int
@@ -1645,6 +1796,7 @@ checkdirs_callback(proc_t p, void * arg)
 	 * XXX update that as well.
 	 */
 
+<<<<<<< HEAD
 	proc_fdlock(p);
 	fdp = p->p_fd;
 	if (fdp == (struct filedesc *)0) {
@@ -1676,6 +1828,13 @@ checkdirs_callback(proc_t p, void * arg)
 		proc_fdunlock(p);
 	}
 	return(PROC_RETURNED);
+=======
+	tvp = fdp->fd_rdir;
+	fdp->fd_rdir = nd.ni_vp;
+	if (tvp != NULL)
+		vrele(tvp);
+	return (0);
+>>>>>>> origin/10.1
 }
 
 

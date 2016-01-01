@@ -77,6 +77,7 @@
 #include <vm/vm_fault.h>
 #include <vm/vm_init.h>
 
+<<<<<<< HEAD
 #include <pexpert/pexpert.h>
 
 #include <vm/vm_protos.h>
@@ -103,6 +104,10 @@ vm_mem_bootstrap_log(const char *message)
 //	kprintf("vm_mem_bootstrap: %s\n", message);
 	kernel_debug_string_simple(message);
 }
+=======
+#define ZONE_MAP_MIN (12 * 1024 * 1024) 
+#define ZONE_MAP_MAX (256 * 1024 * 1024) 
+>>>>>>> origin/10.1
 
 /*
  *	vm_mem_bootstrap initializes the virtual memory system.

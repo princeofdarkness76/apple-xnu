@@ -4115,8 +4115,27 @@ vs_cluster_transfer(
 				       size, &residual, flags);
 */
 		} else {
+<<<<<<< HEAD
 			/* NEED TO ISSUE WITH SYNC & NO COMMIT */
 			error = ps_read_file(ps, upl, (upl_offset_t) 0, actual_offset, 
+=======
+#ifndef ubc_sync_working
+			int page_list_count = 0;
+
+			error = vm_object_upl_request(transfer_object, 
+(vm_object_offset_t) (actual_offset & ((vm_page_size << vs->vs_clshift) - 1)),
+					size, &upl, NULL, &page_list_count,
+					UPL_NO_SYNC | UPL_CLEAN_IN_PLACE 
+						    | UPL_SET_INTERNAL);
+			if (error == KERN_SUCCESS) {
+				error = ps_read_file(ps, upl, (vm_offset_t) 0, actual_offset, 
+							size, &residual, 0);
+			}
+					
+#else
+			/* NEED TO BE WITH SYNC & NO COMMIT & NO RDAHEAD*/
+			error = ps_read_file(ps, upl, (vm_offset_t) 0, actual_offset, 
+>>>>>>> origin/10.1
 					size, &residual, 
 					(UPL_IOSYNC | UPL_NOCOMMIT | (dp_encryption ? UPL_PAGING_ENCRYPTED : 0)));
 		}

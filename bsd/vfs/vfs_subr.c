@@ -653,6 +653,7 @@ static void vnode_iterate_panic_hook(panic_hook_t *hook_)
 		kdb_log("mp = %p, phys = %p, prev (!)\n", hook->mp, phys);
 	}
 
+<<<<<<< HEAD
 	if (panic_phys_range_before(hook->vp, &phys, &range)) {
 		kdb_log("vp = %p, phys = %p, prev (%p: %p-%p)\n", 
 				hook->vp, phys, range.type, range.phys_start,
@@ -661,6 +662,34 @@ static void vnode_iterate_panic_hook(panic_hook_t *hook_)
 		kdb_log("vp = %p, phys = %p, prev (!)\n", hook->vp, phys);
 	}
 	panic_dump_mem((void *)(((vm_offset_t)hook->mp -4096) & ~4095), 12288);
+=======
+__inline void
+vpwakeup(struct vnode *vp)
+{
+	if (vp) {
+		if (--vp->v_numoutput < 0)
+			panic("vpwakeup: neg numoutput");
+		if ((vp->v_flag & VBWAIT) && vp->v_numoutput <= 0) {
+			if (vp->v_numoutput < 0)
+				panic("vpwakeup: neg numoutput 2");
+			vp->v_flag &= ~VBWAIT;
+			wakeup((caddr_t)&vp->v_numoutput);
+		}
+	}
+}
+
+/*
+ * Update outstanding I/O count and do wakeup if requested.
+ */
+void
+vwakeup(bp)
+	register struct buf *bp;
+{
+	register struct vnode *vp;
+
+	CLR(bp->b_flags, B_WRITEINPROG);
+	vpwakeup(bp->b_vp);
+>>>>>>> origin/10.1
 }
 
 int

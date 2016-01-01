@@ -870,6 +870,7 @@ OSCollectionIterator * IODTFindMatchingEntries( IORegistryEntry * from,
     iter = IORegistryIterator::iterateOver( from, gIODTPlane,
 		(options & kIODTRecursive) ? kIORegistryIterateRecursively : 0 );
     if( iter) {
+<<<<<<< HEAD
 
         do {
 
@@ -879,23 +880,46 @@ OSCollectionIterator * IODTFindMatchingEntries( IORegistryEntry * from,
             if( !result)
                 break;
 
+=======
+        do {
+
+            if( result)
+                result->release();
+            result = OSSet::withCapacity( 3 );
+            if( !result)
+                break;
+
+>>>>>>> origin/10.1
             iter->reset();
             while( (next = iter->getNextObject())) {
     
                 // Look for existence of a debug property to skip
                 if( next->getProperty("AAPL,ignore"))
+<<<<<<< HEAD
                     continue;
     
                 if( keys) {
+=======
+                                    continue;
+    
+                    if( keys) {
+>>>>>>> origin/10.1
                     cmp = IODTMatchNubWithKeys( next, keys );
                     if( (minus && (false == cmp))
                             || ((false == minus) && (false != cmp)) )
                         result->setObject( next);
+<<<<<<< HEAD
                 } else
                     result->setObject( next);
             }
         } while( !iter->isValid());
 
+=======
+                    } else
+                    result->setObject( next);
+            }
+        } while( !iter->isValid());
+>>>>>>> origin/10.1
         iter->release();
     }
 

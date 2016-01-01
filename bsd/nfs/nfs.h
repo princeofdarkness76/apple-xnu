@@ -1472,6 +1472,7 @@ void	nfs_ephemeral_mount_harvester_start(void);
 void	nfs_ephemeral_mount_harvester(__unused void *arg, __unused wait_result_t wr);
 #endif
 
+<<<<<<< HEAD
 /* socket upcall interfaces */
 void nfsrv_uc_init(void);
 void nfsrv_uc_cleanup(void);
@@ -1498,6 +1499,246 @@ void nfs_printf(int, int, const char *, ...) __printflike(3,4);
 int  nfs_mountopts(struct nfsmount *, char *, int);
 
 __END_DECLS
+=======
+#define NFS_DPF(cat, args)
+
+#endif /* NFSDIAG */
+
+int	nfs_init __P((struct vfsconf *vfsp));
+int	nfs_reply __P((struct nfsreq *));
+int	nfs_getreq __P((struct nfsrv_descript *,struct nfsd *,int));
+int	nfs_send __P((struct socket *, struct mbuf *, struct mbuf *, 
+		      struct nfsreq *));
+int	nfs_rephead __P((int, struct nfsrv_descript *, struct nfssvc_sock *,
+			 int, int, u_quad_t *, struct mbuf **, struct mbuf **,
+			 caddr_t *));
+int	nfs_sndlock __P((int *, struct nfsreq *));
+void	nfs_sndunlock __P((int *flagp));
+int	nfs_disct __P((struct mbuf **, caddr_t *, int, int, caddr_t *));
+int	nfs_vinvalbuf __P((struct vnode *, int, struct ucred *, struct proc *,
+			   int));
+int	nfs_readrpc __P((struct vnode *, struct uio *, struct ucred *));
+int	nfs_writerpc __P((struct vnode *, struct uio *, struct ucred *, int *, 
+			  int *));
+int	nfs_readdirrpc __P((struct vnode *, struct uio *, struct ucred *));
+int	nfs_asyncio __P((struct buf *, struct ucred *));
+int	nfs_doio __P((struct buf *, struct ucred *, struct proc *));
+int	nfs_readlinkrpc __P((struct vnode *, struct uio *, struct ucred *));
+int	nfs_sigintr __P((struct nfsmount *, struct nfsreq *, struct proc *));
+int	nfs_readdirplusrpc __P((struct vnode *, struct uio *, struct ucred *));
+int	nfsm_disct __P((struct mbuf **, caddr_t *, int, int, caddr_t *));
+void	nfsm_srvfattr __P((struct nfsrv_descript *, struct vattr *, 
+			   struct nfs_fattr *));
+void	nfsm_srvwcc __P((struct nfsrv_descript *, int, struct vattr *, int,
+			 struct vattr *, struct mbuf **, char **));
+void	nfsm_srvpostopattr __P((struct nfsrv_descript *, int, struct vattr *,
+				struct mbuf **, char **));
+int	netaddr_match __P((int, union nethostaddr *, struct mbuf *));
+int	nfs_request __P((struct vnode *, struct mbuf *, int, struct proc *,
+			 struct ucred *, struct mbuf **, struct mbuf **,
+			 caddr_t *, u_int64_t *));
+int	nfs_loadattrcache __P((struct vnode **, struct mbuf **, caddr_t *,
+			       struct vattr *, int, u_int64_t *));
+int	nfs_namei __P((struct nameidata *, fhandle_t *, int,
+		       struct nfssvc_sock *, struct mbuf *, struct mbuf **,
+		       caddr_t *, struct vnode **, struct proc *, int, int));
+void	nfsm_adj __P((struct mbuf *, int, int));
+int	nfsm_mbuftouio __P((struct mbuf **, struct uio *, int, caddr_t *));
+void	nfsrv_initcache __P((void));
+int	nfs_getauth __P((struct nfsmount *, struct nfsreq *, struct ucred *, 
+			 char **, int *, char *, int *, NFSKERBKEY_T));
+int	nfs_getnickauth __P((struct nfsmount *, struct ucred *, char **, 
+			     int *, char *, int));
+int	nfs_savenickauth __P((struct nfsmount *, struct ucred *, int, 
+			      NFSKERBKEY_T, struct mbuf **, char **,
+			      struct mbuf *));
+int	nfs_adv __P((struct mbuf **, caddr_t *, int, int));
+void	nfs_nhinit __P((void));
+void	nfs_timer __P((void*));
+u_long	nfs_hash __P((nfsfh_t *, int));
+int	nfsrv_dorec __P((struct nfssvc_sock *, struct nfsd *, 
+			 struct nfsrv_descript **));
+int	nfsrv_getcache __P((struct nfsrv_descript *, struct nfssvc_sock *,
+			    struct mbuf **));
+void	nfsrv_updatecache __P((struct nfsrv_descript *, int, struct mbuf *));
+void	nfsrv_cleancache __P((void));
+int	nfs_connect __P((struct nfsmount *, struct nfsreq *));
+void	nfs_disconnect __P((struct nfsmount *));
+int	nfs_getattrcache __P((struct vnode *, struct vattr *));
+int	nfsm_strtmbuf __P((struct mbuf **, char **, char *, long));
+int	nfs_bioread __P((struct vnode *, struct uio *, int, struct ucred *,
+			 int));
+int	nfsm_uiotombuf __P((struct uio *, struct mbuf **, int, caddr_t *));
+void	nfsrv_init __P((int));
+void	nfs_clearcommit __P((struct mount *));
+int	nfsrv_errmap __P((struct nfsrv_descript *, int));
+void	nfsrvw_sort __P((gid_t *, int));
+void	nfsrv_setcred __P((struct ucred *, struct ucred *));
+int	nfs_writebp __P((struct buf *, int));
+int	nfsrv_object_create __P((struct vnode *));
+void	nfsrv_wakenfsd __P((struct nfssvc_sock *slp));
+int	nfsrv_writegather __P((struct nfsrv_descript **, struct nfssvc_sock *,
+			       struct proc *, struct mbuf **));
+int	nfs_fsinfo __P((struct nfsmount *, struct vnode *, struct ucred *,
+			struct proc *p));
+
+int	nfsrv3_access __P((struct nfsrv_descript *nfsd, 
+			   struct nfssvc_sock *slp,
+			   struct proc *procp, struct mbuf **mrq));
+int	nfsrv_commit __P((struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
+			  struct proc *procp, struct mbuf **mrq));
+int	nfsrv_create __P((struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
+			  struct proc *procp, struct mbuf **mrq));
+int	nfsrv_fhtovp __P((fhandle_t *, int, struct vnode **, struct ucred *,
+			  struct nfssvc_sock *, struct mbuf *, int *,
+			  int, int));
+int	nfsrv_setpublicfs __P((struct mount *, struct netexport *,
+			       struct export_args *));
+int	nfs_ispublicfh __P((fhandle_t *));
+int	nfsrv_fsinfo __P((struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
+			  struct proc *procp, struct mbuf **mrq));
+int	nfsrv_getattr __P((struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
+			   struct proc *procp, struct mbuf **mrq));
+int	nfsrv_link __P((struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
+			struct proc *procp, struct mbuf **mrq));
+int	nfsrv_lookup __P((struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
+			  struct proc *procp, struct mbuf **mrq));
+int	nfsrv_mkdir __P((struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
+			 struct proc *procp, struct mbuf **mrq));
+int	nfsrv_mknod __P((struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
+			 struct proc *procp, struct mbuf **mrq));
+int	nfsrv_noop __P((struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
+			struct proc *procp, struct mbuf **mrq));
+int	nfsrv_null __P((struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
+			struct proc *procp, struct mbuf **mrq));
+int	nfsrv_pathconf __P((struct nfsrv_descript *nfsd,
+			    struct nfssvc_sock *slp, struct proc *procp,
+			    struct mbuf **mrq));
+int	nfsrv_read __P((struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
+			struct proc *procp, struct mbuf **mrq));
+int	nfsrv_readdir __P((struct nfsrv_descript *nfsd, 
+			   struct nfssvc_sock *slp,
+			   struct proc *procp, struct mbuf **mrq));
+int	nfsrv_readdirplus __P((struct nfsrv_descript *nfsd,
+			       struct nfssvc_sock *slp, struct proc *procp,
+			       struct mbuf **mrq));
+int	nfsrv_readlink __P((struct nfsrv_descript *nfsd,
+			    struct nfssvc_sock *slp, struct proc *procp,
+			    struct mbuf **mrq));
+int	nfsrv_remove __P((struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
+			  struct proc *procp, struct mbuf **mrq));
+int	nfsrv_rename __P((struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
+			  struct proc *procp, struct mbuf **mrq));
+int	nfsrv_rmdir __P((struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
+			 struct proc *procp, struct mbuf **mrq));
+int	nfsrv_setattr __P((struct nfsrv_descript *nfsd, 
+			   struct nfssvc_sock *slp,
+			   struct proc *procp, struct mbuf **mrq));
+int	nfsrv_statfs __P((struct nfsrv_descript *nfsd, 
+			  struct nfssvc_sock *slp,
+			  struct proc *procp, struct mbuf **mrq));
+int	nfsrv_symlink __P((struct nfsrv_descript *nfsd, 
+			   struct nfssvc_sock *slp,
+			   struct proc *procp, struct mbuf **mrq));
+int	nfsrv_write __P((struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
+			 struct proc *procp, struct mbuf **mrq));
+void	nfsrv_rcv __P((struct socket *so, caddr_t arg, int waitflag));
+void	nfsrv_slpderef __P((struct nfssvc_sock *slp));
+
+/*
+ * NFSTRACE points were changed to FSDBG (KERNEL_DEBUG)
+ * But some of this code may prove useful someday...
+ */
+#undef NFSDIAG
+#if NFSDIAG
+
+extern int nfstraceindx;
+#define NFSTBUFSIZ 8912
+struct nfstracerec { uint i1, i2, i3, i4; };
+extern struct nfstracerec nfstracebuf[NFSTBUFSIZ];
+extern uint nfstracemask; /* 32 bits - trace points over 31 are unconditional */
+
+/* 0x0000000f nfs_getattrcache trace points */
+#define NFSTRC_GAC_MISS 0x00	/* 0x00000001 cache miss */
+#define NFSTRC_GAC_HIT	0x01	/* 0x00000002 cache hit */
+#define NFSTRC_GAC_NP	0x02	/* 0x00000004 np size mismatch - vp... */
+/* 0x00000038 nfs_loadattrcache trace points */
+#define NFSTRC_LAC	0x03	/* 0x00000008 function entry point - vp */
+#define NFSTRC_LAC_INIT	0x04	/* 0x00000010 new vp & init n_mtime - vp */
+#define NFSTRC_LAC_NP	0x05	/* 0x00000020 np size mismatch - vp... */
+/* 0x000000c0 nfs_getattr trace points */
+#define NFSTRC_GA_INV	0x06	/* 0x00000040 times mismatch - vp */
+#define NFSTRC_GA_INV1	0x07	/* 0x00000080 invalidate ok - vp */
+/* 0x00000100 vmp_invalidate trace points */
+#define NFSTRC_VMP_INV	0x08	/* 0x00000100 function entry point - vmp */
+/* 0x00000200 nfs_request trace points */
+#define NFSTRC_REQ	0x09	/* 0x00000200 - alternates vp and procnum */
+/* 0x00000c00 vmp_push_range trace points */
+#define NFSTRC_VPR	0xa	/* 0x00000400 entry point - vp... */
+#define NFSTRC_VPR_DONE	0xb	/* 0x00000800 tail exit - error # */
+/* 0x00003000 nfs_doio trace points */
+#define NFSTRC_DIO	0xc	/* 0x00001000 entry point - vp */
+#define NFSTRC_DIO_DONE	0xd	/* 0x00002000 exit points - vp */
+/* 0x000fc000 congestion window trace points */
+#define NFSTRC_CWND_INIT      0xe
+#define NFSTRC_CWND_REPLY     0xf
+#define NFSTRC_CWND_TIMER     0x10
+#define NFSTRC_CWND_REQ1      0x11
+#define NFSTRC_CWND_REQ2      0x12
+#define NFSTRC_CWND_SOFT      0x13
+/* 0xfff00000 nfs_rcvlock & nfs_rcvunlock trace points */
+#define NFSTRC_ECONN	0x14
+#define NFSTRC_RCVERR	0x15
+#define NFSTRC_REQFREE	0x16
+#define NFSTRC_NOTMINE	0x17
+#define NFSTRC_6	0x18
+#define NFSTRC_7	0x19
+#define NFSTRC_RCVLCKINTR	0x1a
+#define NFSTRC_RCVALREADY	0x1b
+#define NFSTRC_RCVLCKW	0x1c	/* 0x10000000 seeking recieve lock (waiting) */
+#define NFSTRC_RCVLCK	0x1d	/* 0x20000000 getting recieve lock */ 
+#define NFSTRC_RCVUNLW	0x1e	/* 0x40000000 releasing rcv lock w/ wakeup */
+#define NFSTRC_RCVUNL	0x1f	/* 0x80000000 releasing rcv lock w/o wakeup */
+/* trace points beyond 31 are on if any of above points are on */
+#define NFSTRC_GA_INV2	0x20	/* nfs_getattr invalidate - error# */
+#define NFSTRC_VBAD	0x21
+#define NFSTRC_REQERR	0x22
+#define NFSTRC_RPCERR	0x23
+#define NFSTRC_DISSECTERR	0x24
+#define NFSTRC_CONTINUE	0xff	/* continuation record for previous entry */
+
+#define NFSTRACEX(a1, a2, a3, a4) \
+( \
+	nfstracebuf[nfstraceindx].i1 = (uint)(a1), \
+	nfstracebuf[nfstraceindx].i2 = (uint)(a2), \
+	nfstracebuf[nfstraceindx].i3 = (uint)(a3), \
+	nfstracebuf[nfstraceindx].i4 = (uint)(a4), \
+	nfstraceindx = (nfstraceindx + 1) % NFSTBUFSIZ, \
+	1 \
+)
+
+#define NFSTRACE(cnst, fptr) \
+( \
+	(nfstracemask && ((cnst) > 31 || nfstracemask & 1<<(cnst))) ? \
+		NFSTRACEX((cnst), (fptr), current_thread(), \
+			  clock_get_system_value().tv_nsec) : \
+		0 \
+)
+
+#define NFSTRACE4(cnst, fptr, a2, a3, a4) \
+( \
+	NFSTRACE(cnst,fptr) ? \
+		NFSTRACEX(NFSTRC_CONTINUE, a2, a3, a4) : \
+		0 \
+)
+
+#else	/* NFSDIAG */
+
+	#define NFSTRACE(cnst, fptr)
+	#define NFSTRACE4(cnst, fptr, a2, a3, a4)
+
+#endif	/* NFSDIAG */
+>>>>>>> origin/10.1
 
 #endif	/* KERNEL */
 #endif /* __APPLE_API_PRIVATE */

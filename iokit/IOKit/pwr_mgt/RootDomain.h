@@ -79,9 +79,14 @@ typedef uint32_t IOPMDriverAssertionLevel;
 #define kIOPMDriverAssertionLevelOff          0
 #define kIOPMDriverAssertionLevelOn           255
 
+<<<<<<< HEAD
 /*
  * Flags for get/setSleepSupported()
  */
+=======
+#define kRootDomainSupportedFeatures "Supported Features"
+
+>>>>>>> origin/10.1
 enum {
     kRootDomainSleepNotSupported    = 0x00000000,
     kRootDomainSleepSupported         = 0x00000001,
@@ -117,6 +122,7 @@ enum {
 #define kIOPMRootDomainLidCloseCString      "LidClose"
 #define kIOPMRootDomainBatPowerCString      "BatPower"
 
+<<<<<<< HEAD
 /*
  * Supported Feature bitfields for IOPMrootDomain::publishFeature()
  */
@@ -144,6 +150,9 @@ IOReturn        vetoSleepWakeNotification(void * PMrefcon);
 __END_DECLS
 
 #define IOPM_ROOTDOMAIN_REV        2
+=======
+#define IOPM_ROOTDOMAIN_REV		2
+>>>>>>> origin/10.1
 
 class IOPMrootDomain: public IOService
 {
@@ -156,6 +165,7 @@ public:
     virtual IOReturn    setAggressiveness( unsigned long, unsigned long ) APPLE_KEXT_OVERRIDE;
     virtual IOReturn    getAggressiveness( unsigned long, unsigned long * ) APPLE_KEXT_OVERRIDE;
 
+<<<<<<< HEAD
     virtual IOReturn    sleepSystem( void );
     IOReturn            sleepSystemOptions( OSDictionary *options );
 
@@ -390,6 +400,24 @@ public:
     @result Return kIOReturnSuccess if it work, kIOReturnError if the service is not available.
 */
     IOReturn restartWithStackshot();
+=======
+    static IOPMrootDomain * construct( void );
+    virtual bool start( IOService * provider );
+    virtual IOReturn newUserClient ( task_t,  void *, UInt32, IOUserClient ** );
+    virtual IOReturn setAggressiveness ( unsigned long, unsigned long );
+    virtual IOReturn youAreRoot ( void );
+    virtual IOReturn sleepSystem ( void );
+    IOReturn shutdownSystem ( void );
+    IOReturn restartSystem ( void );
+    virtual IOReturn receivePowerNotification (UInt32 msg);
+    virtual void setSleepSupported( IOOptionBits flags );
+    virtual IOOptionBits getSleepSupported();
+    virtual IOReturn requestPowerDomainState ( IOPMPowerFlags, IOPowerConnection *, unsigned long );
+    virtual void handleSleepTimerExpiration ( void );
+    void stopIgnoringClamshellEventsDuringWakeup ( void );
+    void wakeFromDoze( void );
+    void publishFeature( const char *feature );
+>>>>>>> origin/10.1
 
 private:
     virtual IOReturn    changePowerStateTo( unsigned long ordinal ) APPLE_KEXT_COMPATIBILITY_OVERRIDE;
@@ -560,6 +588,23 @@ private:
     friend class RootDomainUserClient;
     friend class PMAssertionsTracker;
 
+<<<<<<< HEAD
+=======
+    class IORootParent * patriarch;			// points to our parent
+    long		sleepSlider;			// pref: idle time before idle sleep
+    long		longestNonSleepSlider;		// pref: longest of other idle times
+    long		extraSleepDelay;		// sleepSlider - longestNonSleepSlider
+    thread_call_t	extraSleepTimer;		// used to wait between say display idle and system idle
+    thread_call_t   clamshellWakeupIgnore;   // Used to ignore clamshell close events while we're waking from sleep
+    
+    virtual void powerChangeDone ( unsigned long );
+    virtual void command_received ( void *, void * , void * , void *);
+    virtual bool tellChangeDown ( unsigned long stateNum);
+    virtual bool askChangeDown ( unsigned long stateNum);
+    virtual void tellChangeUp ( unsigned long );
+    virtual void tellNoChangeDown ( unsigned long );
+    void reportUserInput ( void );
+>>>>>>> origin/10.1
     static IOReturn sysPowerDownHandler( void * target, void * refCon,
                                     UInt32 messageType, IOService * service,
                                     void * messageArgument, vm_size_t argSize );
@@ -568,6 +613,7 @@ private:
                                     UInt32 messageType, IOService * service,
                                     void * messageArgument, vm_size_t argSize );
 
+<<<<<<< HEAD
     static IOReturn rootBusyStateChangeHandler( void * target, void * refCon,
                                     UInt32 messageType, IOService * service,
                                     void * messageArgument, vm_size_t argSize );
@@ -879,6 +925,34 @@ private:
     void        setThermalState(OSObject *value);
     void        copySleepPreventersList(OSArray  **idleSleepList, OSArray  **systemSleepList);
 #endif /* XNU_KERNEL_PRIVATE */
+=======
+    static bool displayWranglerPublished( void * target, void * refCon,
+                                    IOService * newService);
+
+    void setQuickSpinDownTimeout ( void );
+    void adjustPowerState( void );
+    void restoreUserSpinDownTimeout ( void );
+
+    
+    unsigned int user_spindown;       // User's selected disk spindown value
+
+    unsigned int systemBooting:1;
+    unsigned int ignoringClamshell:1;
+    unsigned int allowSleep:1;
+    unsigned int sleepIsSupported:1;
+    unsigned int canSleep:1;
+    unsigned int idleSleepPending:1;
+    unsigned int sleepASAP:1;
+    unsigned int desktopMode:1;
+
+    unsigned int acAdaptorConnect:1;
+    unsigned int ignoringClamshellDuringWakeup:1;
+    unsigned int reservedA:6;
+    unsigned char reservedB[3];
+
+    thread_call_t diskSyncCalloutEntry;
+    IOOptionBits platformSleepSupport;
+>>>>>>> origin/10.1
 };
 
 #ifdef XNU_KERNEL_PRIVATE

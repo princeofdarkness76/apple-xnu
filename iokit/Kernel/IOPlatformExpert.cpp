@@ -36,12 +36,17 @@
 #include <IOKit/IORangeAllocator.h>
 #include <IOKit/IOWorkLoop.h>
 #include <IOKit/pwr_mgt/RootDomain.h>
+<<<<<<< HEAD
 #include <IOKit/IOKitKeys.h>
 #include <IOKit/IOTimeStamp.h>
 #include <IOKit/IOUserClient.h>
 #include <IOKit/IOKitDiagnosticsUserClient.h>
 
 #include <IOKit/system.h>
+=======
+#include <IOKit/IOMessage.h>
+#include <libkern/c++/OSContainers.h>
+>>>>>>> origin/10.1
 
 #include <libkern/c++/OSContainers.h>
 #include <libkern/crypto/sha1.h>
@@ -79,7 +84,10 @@ OSMetaClassDefineReservedUnused(IOPlatformExpert, 11);
 static IOPlatformExpert * gIOPlatform;
 static OSDictionary * gIOInterruptControllers;
 static IOLock * gIOInterruptControllersLock;
+<<<<<<< HEAD
 static IODTNVRAM *gIOOptionsEntry;
+=======
+>>>>>>> origin/10.1
 
 OSSymbol * gPlatformInterruptControllerName;
 
@@ -103,6 +111,7 @@ bool IOPlatformExpert::start( IOService * provider )
     if (!super::start(provider))
       return false;
     
+<<<<<<< HEAD
     // Override the mapper present flag is requested by boot arguments.
     if (PE_parse_boot_argn("dart", &debugFlags, sizeof (debugFlags)) && (debugFlags == 0))
       removeProperty(kIOPlatformMapperPresentKey);
@@ -113,6 +122,8 @@ bool IOPlatformExpert::start( IOService * provider )
     // PCI address mapper with the IOMapper class
     IOMapper::setMapperRequired(0 != getProperty(kIOPlatformMapperPresentKey));
     
+=======
+>>>>>>> origin/10.1
     gIOInterruptControllers = OSDictionary::withCapacity(1);
     gIOInterruptControllersLock = IOLockAlloc();
     
@@ -317,9 +328,14 @@ IOReturn IOPlatformExpert::registerInterruptController(OSSymbol *name, IOInterru
   
   gIOInterruptControllers->setObject(name, interruptController);
   
+<<<<<<< HEAD
   IOLockWakeup(gIOInterruptControllersLock,
 		gIOInterruptControllers, /* one-thread */ false);
 
+=======
+  thread_wakeup(gIOInterruptControllers);
+  
+>>>>>>> origin/10.1
   IOLockUnlock(gIOInterruptControllersLock);
   
   return kIOReturnSuccess;
@@ -327,6 +343,7 @@ IOReturn IOPlatformExpert::registerInterruptController(OSSymbol *name, IOInterru
 
 IOReturn IOPlatformExpert::deregisterInterruptController(OSSymbol *name)
 {
+<<<<<<< HEAD
   IOLockLock(gIOInterruptControllersLock);
   
   gIOInterruptControllers->removeObject(name);
@@ -353,6 +370,24 @@ IOInterruptController *IOPlatformExpert::lookUpInterruptController(OSSymbol *nam
   }
   
   IOLockUnlock(gIOInterruptControllersLock);
+=======
+  OSObject              *object;
+  
+  while (1) {
+    IOLockLock(gIOInterruptControllersLock);
+    
+    object = gIOInterruptControllers->getObject(name);
+    
+    if (object == 0) assert_wait(gIOInterruptControllers, THREAD_UNINT);
+    
+    IOLockUnlock(gIOInterruptControllersLock);
+    
+    if (object != 0) break;
+    
+    thread_block(0);
+  }
+  
+>>>>>>> origin/10.1
   return OSDynamicCast(IOInterruptController, object);
 }
 
@@ -731,6 +766,7 @@ getCStringForObject(OSObject *inObj, char *outStr, size_t outStrLen)
    }
 }
 
+<<<<<<< HEAD
 /* IOShutdownNotificationsTimedOut
  * - Called from a timer installed by PEHaltRestart
  */
@@ -742,6 +778,17 @@ static void IOShutdownNotificationsTimedOut(
 
     /* 30 seconds has elapsed - resume shutdown */
     if(gIOPlatform) gIOPlatform->haltRestart(type);
+=======
+/* IOPMPanicOnShutdownHang
+ * - Called from a timer installed by PEHaltRestart
+ */
+static void IOPMPanicOnShutdownHang(thread_call_param_t p0, thread_call_param_t p1)
+{
+    int type = (int)p0;
+
+    /* 30 seconds has elapsed - resume shutdown */
+    gIOPlatform->haltRestart(type);
+>>>>>>> origin/10.1
 }
 
 
@@ -777,6 +824,7 @@ int PEGetPlatformEpoch(void)
 
 int PEHaltRestart(unsigned int type)
 {
+<<<<<<< HEAD
   IOPMrootDomain    *pmRootDomain;
   AbsoluteTime      deadline;
   thread_call_t     shutdown_hang;
@@ -824,6 +872,36 @@ int PEHaltRestart(unsigned int type)
    {
     IOCPURunPlatformPanicActions(type);
    }
+=======
+  IOPMrootDomain    *pmRootDomain = IOService::getPMRootDomain();
+  bool              noWaitForResponses;
+  AbsoluteTime      deadline;
+  thread_call_t     shutdown_hang;
+  
+  /* Notify IOKit PM clients of shutdown/restart
+     Clients subscribe to this message with a call to
+     IOService::registerInterest()
+  */
+  
+  /* Spawn a thread that will panic in 30 seconds. 
+     If all goes well the machine will be off by the time
+     the timer expires.
+   */
+  shutdown_hang = thread_call_allocate( &IOPMPanicOnShutdownHang, (thread_call_param_t) type);
+  clock_interval_to_deadline( 30, kSecondScale, &deadline );
+  thread_call_enter1_delayed( shutdown_hang, 0, deadline );
+  
+  noWaitForResponses = pmRootDomain->tellChangeDown2(type); 
+  /* This notification should have few clients who all do 
+     their work synchronously.
+           
+     In this "shutdown notification" context we don't give
+     drivers the option of working asynchronously and responding 
+     later. PM internals make it very hard to wait for asynchronous
+     replies. In fact, it's a bad idea to even be calling
+     tellChangeDown2 from here at all.
+   */ 
+>>>>>>> origin/10.1
 
   if (gIOPlatform) return gIOPlatform->haltRestart(type);
   else return -1;
@@ -1377,6 +1455,7 @@ IOReturn IODTPlatformExpert::writeNVRAMPartition(const OSSymbol * partitionID,
   else return kIOReturnNotReady;
 }
 
+<<<<<<< HEAD
 IOByteCount IODTPlatformExpert::savePanicInfo(UInt8 *buffer, IOByteCount length)
 {
   IOByteCount lengthSaved = 0;
@@ -1420,6 +1499,8 @@ OSString* IODTPlatformExpert::createSystemSerialNumberString(OSData* myProperty)
     return NULL;
 }
 
+=======
+>>>>>>> origin/10.1
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 

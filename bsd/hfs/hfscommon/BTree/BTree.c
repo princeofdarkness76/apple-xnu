@@ -230,6 +230,7 @@ OSStatus BTOpenPath(FCB *filePtr, KeyCompareProcPtr keyCompareProc)
 	btreePtr->fileRefNum		= GetFileRefNumFromFCB(filePtr);
 	filePtr->fcbBTCBPtr			= (Ptr) btreePtr;	// attach btree cb to file
 
+<<<<<<< HEAD
 	/* Prefer doing I/O a physical block at a time */
 	nodeRec.blockSize = VTOHFS(btreePtr->fileRefNum)->hfs_physical_block_size;
 
@@ -238,11 +239,20 @@ OSStatus BTOpenPath(FCB *filePtr, KeyCompareProcPtr keyCompareProc)
 	{
 		nodeRec.blockSize = FCBTOVCB(filePtr)->blockSize;
 	}
+=======
+	/* The minimum node size is the physical block size */
+	nodeRec.blockSize = VTOHFS(btreePtr->fileRefNum)->hfs_phys_block_size;
+
+>>>>>>> origin/10.1
 	REQUIRE_FILE_LOCK(btreePtr->fileRefNum, false);
 
 	// it is now safe to call M_ExitOnError (err)
 
+<<<<<<< HEAD
 	err = SetBTreeBlockSize (btreePtr->fileRefNum, nodeRec.blockSize, 1);
+=======
+	err = setBlockSizeProc (btreePtr->fileRefNum, nodeRec.blockSize, 1);
+>>>>>>> origin/10.1
 	M_ExitOnError (err);
 
 
@@ -301,8 +311,20 @@ OSStatus BTOpenPath(FCB *filePtr, KeyCompareProcPtr keyCompareProc)
 
 	// set kBadClose attribute bit, and UpdateNode
 
+<<<<<<< HEAD
 	/* b-tree node size must be at least as big as the logical block size */
 	if (btreePtr->nodeSize < VTOHFS(btreePtr->fileRefNum)->hfs_logical_block_size)
+=======
+	// if nodeSize matches then we don't need to release, just CheckNode
+
+	/* b-tree node size must be at least as big as the physical block size */
+	if (btreePtr->nodeSize < nodeRec.blockSize) {
+		err = fsBTBadNodeSize;
+		goto ErrorExit;
+	}
+
+	if ( btreePtr->nodeSize == nodeRec.blockSize )
+>>>>>>> origin/10.1
 	{
 		/*
 		 * If this tree has any records or the media is writeable then

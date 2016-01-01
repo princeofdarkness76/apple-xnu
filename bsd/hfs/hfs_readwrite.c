@@ -5671,7 +5671,45 @@ errno_t hfs_flush_invalid_ranges(vnode_t vp)
 			r = next;
 	}
 
+<<<<<<< HEAD
 	ret = 0;
+=======
+/*
+ * Intercept B-Tree node writes to unswap them if necessary.
+#
+#vop_bwrite {
+#	IN struct buf *bp;
+ */
+int
+hfs_bwrite(ap)
+struct vop_bwrite_args /* {
+    struct buf *a_bp;
+} */ *ap;
+{
+    register struct buf *bp = ap->a_bp;
+    register struct vnode *vp = bp->b_vp;
+    BlockDescriptor block;
+    int retval = 0;
+
+	DBG_FUNC_NAME("hfs_bwrite");
+
+#if BYTE_ORDER == LITTLE_ENDIAN
+    /* Trap B-Tree writes */
+    if ((H_FILEID(VTOH(vp)) == kHFSExtentsFileID) ||
+        (H_FILEID(VTOH(vp)) == kHFSCatalogFileID)) {
+
+        /* Swap if the B-Tree node is in native byte order */
+        if (((UInt16 *)((char *)bp->b_data + bp->b_bcount - 2))[0] == 0x000e) {
+            /* Prepare the block pointer */
+            block.blockHeader = bp;
+            block.buffer = bp->b_data;
+            block.blockReadFromDisk = (bp->b_flags & B_CACHE) == 0;	/* not found in cache ==> came from disk */
+            block.blockSize = bp->b_bcount;
+    
+            /* Endian un-swap B-Tree node */
+            SWAP_BT_NODE (&block, ISHFSPLUS (VTOVCB(vp)), H_FILEID(VTOH(vp)), 1);
+        }
+>>>>>>> origin/10.1
 
 exit:
 

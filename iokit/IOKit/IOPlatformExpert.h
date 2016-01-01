@@ -266,9 +266,12 @@ public:
     /* virtual */ IOReturn writeNVRAMPartition(const OSSymbol * partitionID,
 					       IOByteCount offset, UInt8 * buffer,
 					       IOByteCount length);
+<<<<<<< HEAD
 
     virtual IOByteCount savePanicInfo(UInt8 *buffer, IOByteCount length) APPLE_KEXT_OVERRIDE;
     virtual OSString* createSystemSerialNumberString(OSData* myProperty) APPLE_KEXT_OVERRIDE;
+=======
+>>>>>>> origin/10.1
 
     OSMetaClassDeclareReservedUnused(IODTPlatformExpert,  0);
     OSMetaClassDeclareReservedUnused(IODTPlatformExpert,  1);

@@ -504,9 +504,37 @@ thread_terminate_self(void)
 			thread->wait_timer_active--;
 	}
 
+<<<<<<< HEAD
 	while (thread->wait_timer_active > 0) {
 		thread_unlock(thread);
 		splx(s);
+=======
+	ret = kmem_suballoc(kernel_map, 		/* Suballocate from the kernel map */
+
+		&stack,
+		(stack_alloc_bndry * (2*THREAD_MAX + 64)),	/* Allocate enough for all of it */
+		FALSE,								/* Say not pageable so that it is wired */
+		TRUE,								/* Allocate from anywhere */
+		&stack_map);						/* Allocate a submap */
+		
+	if(ret != KERN_SUCCESS) {				/* Did we get one? */
+		panic("thread_init: kmem_suballoc for stacks failed - ret = %d\n", ret);	/* Die */
+	}	
+	stack = vm_map_min(stack_map);			/* Make sure we skip the first hunk */
+	ret = vm_map_enter(stack_map, &stack, PAGE_SIZE, 0,	/* Make sure there is nothing at the start */
+		0, 									/* Force it at start */
+		VM_OBJECT_NULL, 0, 					/* No object yet */
+		FALSE,								/* No copy */
+		VM_PROT_NONE,						/* Allow no access */
+		VM_PROT_NONE,						/* Allow no access */
+		VM_INHERIT_DEFAULT);				/* Just be normal */
+		
+	if(ret != KERN_SUCCESS) {					/* Did it work? */
+		panic("thread_init: dummy alignment allocation failed; ret = %d\n", ret);
+	}
+		
+#endif  /* MACHINE_STACK */
+>>>>>>> origin/10.1
 
 		delay(1);
 

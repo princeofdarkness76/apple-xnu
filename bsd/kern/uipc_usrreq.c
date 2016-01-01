@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2001 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.1
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -890,6 +894,7 @@ unp_detach(struct unpcb *unp)
 	++unp_gencnt;
 	lck_rw_done(unp_list_mtx);
 	if (unp->unp_vnode) {
+<<<<<<< HEAD
 		struct vnode *tvp = NULL;
 		socket_unlock(unp->unp_socket, 0);
 
@@ -907,6 +912,14 @@ unp_detach(struct unpcb *unp)
 		lck_mtx_unlock(unp_connect_lock);
 		if (tvp != NULL)
 			vnode_rele(tvp);		/* drop the usecount */
+=======
+		struct vnode *tvp = unp->unp_vnode;
+		unp->unp_vnode->v_socket = 0;
+		unp->unp_vnode = 0;
+		thread_funnel_switch(NETWORK_FUNNEL, KERNEL_FUNNEL);
+		vrele(tvp);
+		thread_funnel_switch(KERNEL_FUNNEL, NETWORK_FUNNEL);
+>>>>>>> origin/10.1
 	}
 	if (unp->unp_conn)
 		unp_disconnect(unp);

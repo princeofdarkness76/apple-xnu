@@ -555,9 +555,70 @@ typedef struct filefork FCB;
 /*
  * Macros for creating item names for our special/private directories.
  */
+<<<<<<< HEAD
 #define MAKE_INODE_NAME(name, size, linkno) \
 	    (void) snprintf((name), size, "%s%d", HFS_INODE_PREFIX, (linkno))
 #define HFS_INODE_PREFIX_LEN	5
+=======
+struct CatalogNodeData {
+	int16_t			cnd_type;
+	u_int16_t		cnd_flags;
+	u_int32_t		cnd_valence;	/* dirs only */
+	u_int32_t		cnd_nodeID;
+	u_int32_t		cnd_createDate;
+	u_int32_t		cnd_contentModDate;
+	u_int32_t		cnd_attributeModDate;
+	u_int32_t		cnd_accessDate;
+	u_int32_t		cnd_backupDate;
+	u_int32_t 		cnd_ownerID;
+	u_int32_t 		cnd_groupID;
+	u_int8_t 		cnd_adminFlags;  /* super-user changeable flags */
+	u_int8_t 		cnd_ownerFlags;  /* owner changeable flags */
+	u_int16_t 		cnd_mode;        /* file type + permission bits */
+	union {
+	    u_int32_t	cndu_iNodeNum;   /* indirect links only */
+	    u_int32_t	cndu_linkCount;  /* indirect nodes only */
+	    u_int32_t 	cndu_rawDevice;  /* special files (FBLK and FCHR) only */
+	} cnd_un;
+	u_int8_t		cnd_finderInfo[32];
+	u_int32_t 		cnd_textEncoding;
+	u_int32_t		cnd_reserved;
+	HFSPlusForkData	cnd_datafork;
+	HFSPlusForkData	cnd_rsrcfork;
+	u_int32_t	cnd_iNodeNumCopy;
+	u_int32_t	cnd_linkCNID;	/* for hard links only */
+	u_int8_t	cnd_extra[264];	/* make struct at least 520 bytes long */
+	struct CatalogNameSpecifier		cnd_namespecifier;
+};
+typedef struct CatalogNodeData CatalogNodeData;
+
+#define	cnd_iNodeNum		cnd_un.cndu_iNodeNum
+#define	cnd_linkCount		cnd_un.cndu_linkCount
+#define	cnd_rawDevice		cnd_un.cndu_rawDevice
+
+#define	cnm_flags		cnd_namespecifier.cnm_flags
+#define	cnm_length		cnd_namespecifier.cnm_length
+#define	cnm_parID		cnd_namespecifier.cnm_parID
+#define	cnm_nameptr		cnd_namespecifier.cnm_nameptr
+#define	cnm_namespace		cnd_namespecifier.cnm_namespace
+
+#define INIT_CATALOGDATA(C,F)	do { bzero(&((C)->cnd_namespecifier), sizeof(struct CatalogNameSpecifier)); (C)->cnm_flags=(F);}while(0);
+#if HFS_DIAGNOSTIC
+extern void debug_check_catalogdata(struct CatalogNodeData *cat);
+#define CLEAN_CATALOGDATA(C)	do { debug_check_catalogdata(C); \
+											if ((C)->cnm_flags & kCatNameIsAllocated) {\
+											FREE((C)->cnm_nameptr, M_TEMP);\
+											(C)->cnm_flags &= ~kCatNameIsAllocated;\
+											(C)->cnm_nameptr = NULL;\
+											}}while(0);
+#else
+#define CLEAN_CATALOGDATA(C)	do { if ((C)->cnm_flags & kCatNameIsAllocated) {\
+											FREE((C)->cnm_nameptr, M_TEMP);\
+											(C)->cnm_flags &= ~kCatNameIsAllocated;\
+											(C)->cnm_nameptr = NULL;\
+											}}while(0);
+#endif
+>>>>>>> origin/10.1
 
 #define MAKE_DIRINODE_NAME(name, size, linkno) \
 	    (void) snprintf((name), size, "%s%d", HFS_DIRINODE_PREFIX, (linkno))
@@ -636,6 +697,38 @@ enum { kHFSPlusMaxFileNameBytes = kHFSPlusMaxFileNameChars * 3 };
 
 
 
+<<<<<<< HEAD
+=======
+#define E_NONE	0
+#define kHFSBlockSize 512
+
+#define IOBLKNOFORBLK(STARTINGBLOCK, BLOCKSIZEINBYTES) ((daddr_t)((STARTINGBLOCK) / ((BLOCKSIZEINBYTES) >> 9)))
+#define IOBLKCNTFORBLK(STARTINGBLOCK, BYTESTOTRANSFER, BLOCKSIZEINBYTES) \
+    ((int)(IOBLKNOFORBYTE(((STARTINGBLOCK) * 512) + (BYTESTOTRANSFER) - 1, (BLOCKSIZEINBYTES)) - \
+           IOBLKNOFORBLK((STARTINGBLOCK), (BLOCKSIZEINBYTES)) + 1))
+#define IOBYTECCNTFORBLK(STARTINGBLOCK, BYTESTOTRANSFER, BLOCKSIZEINBYTES) \
+    (IOBLKCNTFORBLK((STARTINGBLOCK),(BYTESTOTRANSFER),(BLOCKSIZEINBYTES)) * (BLOCKSIZEINBYTES))
+#define IOBYTEOFFSETFORBLK(STARTINGBLOCK, BLOCKSIZEINBYTES) \
+    (((STARTINGBLOCK) * 512) - \
+     (IOBLKNOFORBLK((STARTINGBLOCK), (BLOCKSIZEINBYTES)) * (BLOCKSIZEINBYTES)))
+
+#define IOBLKNOFORBYTE(STARTINGBYTE, BLOCKSIZEINBYTES) ((daddr_t)((STARTINGBYTE) / (BLOCKSIZEINBYTES)))
+#define IOBLKCNTFORBYTE(STARTINGBYTE, BYTESTOTRANSFER, BLOCKSIZEINBYTES) \
+((int)(IOBLKNOFORBYTE((STARTINGBYTE) + (BYTESTOTRANSFER) - 1, (BLOCKSIZEINBYTES)) - \
+           IOBLKNOFORBYTE((STARTINGBYTE), (BLOCKSIZEINBYTES)) + 1))
+#define IOBYTECNTFORBYTE(STARTINGBYTE, BYTESTOTRANSFER, BLOCKSIZEINBYTES) \
+    (IOBLKCNTFORBYTE((STARTINGBYTE),(BYTESTOTRANSFER),(BLOCKSIZEINBYTES)) * (BLOCKSIZEINBYTES))
+#define IOBYTEOFFSETFORBYTE(STARTINGBYTE, BLOCKSIZEINBYTES) ((STARTINGBYTE) - (IOBLKNOFORBYTE((STARTINGBYTE), (BLOCKSIZEINBYTES)) * (BLOCKSIZEINBYTES)))
+
+
+#define HFS_PRI_SECTOR(blksize)    (1024 / (blksize))
+#define HFS_PRI_OFFSET(blksize)    ((blksize) > 1024 ? 1024 : 0)
+
+#define HFS_ALT_SECTOR(blksize, blkcnt)  (((blkcnt) - 1) - (512 / (blksize)))
+#define HFS_ALT_OFFSET(blksize)          ((blksize) > 1024 ? (blksize) - 1024 : 0)
+
+#define MAKE_VREFNUM(x)	((int32_t)((x) & 0xffff))
+>>>>>>> origin/10.1
 /*
  *	This is the straight GMT conversion constant:
  *	00:00:00 January 1, 1970 - 00:00:00 January 1, 1904
@@ -721,6 +814,7 @@ time_t to_bsd_time(u_int32_t hfs_time);
 
 u_int32_t to_hfs_time(time_t bsd_time);
 
+<<<<<<< HEAD
 
 /*****************************************************************************
 	Functions from hfs_encodinghint.c
@@ -738,6 +832,13 @@ void hfs_setencodingbias(u_int32_t bias);
 void hfs_converterinit(void);
 
 int hfs_relconverter (u_int32_t encoding);
+=======
+OSErr	hfs_MountHFSVolume(struct hfsmount *hfsmp, HFSMasterDirectoryBlock *mdb,
+		struct proc *p);
+OSErr	hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
+		off_t embeddedOffset, off_t disksize, struct proc *p);
+OSStatus  GetInitializedVNode(struct hfsmount *hfsmp, struct vnode **tmpvnode);
+>>>>>>> origin/10.1
 
 int hfs_getconverter(u_int32_t encoding, hfs_to_unicode_func_t *get_unicode,
 		     unicode_to_hfs_func_t *get_hfsname);

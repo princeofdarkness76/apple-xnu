@@ -378,7 +378,37 @@ int nfsm_chain_trim_data(struct nfsm_chain *, int, int *);
 		if ((VERS) == NFS_VER2) { \
 			nfsm_chain_add_v2time((E), (NMC), (TVP)); \
 		} else { \
+<<<<<<< HEAD
 			nfsm_chain_add_v3time((E), (NMC), (TVP)); \
+=======
+			nfsm_build(cp, caddr_t, NFSX_V2FH); \
+			bcopy((caddr_t)(f), cp, NFSX_V2FH); \
+		} }
+
+#define nfsm_srvpostop_fh(f) \
+		{ nfsm_build(tl, u_long *, 2 * NFSX_UNSIGNED + NFSX_V3FH); \
+		*tl++ = nfs_true; \
+		*tl++ = txdr_unsigned(NFSX_V3FH); \
+		bcopy((caddr_t)(f), (caddr_t)tl, NFSX_V3FH); \
+		}
+
+#define nfsm_mtofh(d, v, v3, f, x) \
+		{ struct nfsnode *ttnp; nfsfh_t *ttfhp; int ttfhsize; \
+		if (v3) { \
+			nfsm_dissect(tl, u_long *, NFSX_UNSIGNED); \
+			(f) = fxdr_unsigned(int, *tl); \
+		} else \
+			(f) = 1; \
+		if (f) { \
+			nfsm_getfh(ttfhp, ttfhsize, (v3)); \
+			if ((t1 = nfs_nget((d)->v_mount, ttfhp, ttfhsize, \
+				&ttnp))) { \
+				error = t1; \
+				m_freem(mrep); \
+				goto nfsmout; \
+			} \
+			(v) = NFSTOV(ttnp); \
+>>>>>>> origin/10.1
 		} \
 	} while (0)
 
@@ -397,6 +427,7 @@ int nfsm_chain_trim_data(struct nfsm_chain *, int, int *);
 			nfsm_chain_add_32((E), (NMC), FALSE); \
 			break; \
 		} \
+<<<<<<< HEAD
 		nfsm_chain_add_32((E), (NMC), TRUE); \
 		if (E) break; \
 		(E) = nfsm_chain_add_fattr((ND), (NMC), (VAP)); \
@@ -515,17 +546,158 @@ int nfsm_chain_trim_data(struct nfsm_chain *, int, int *);
 		nfsm_chain_add_64((E), (NMC), (NLOP)->nlo_pid_start.tv_sec); \
 		nfsm_chain_add_32((E), (NMC), (NLOP)->nlo_pid_start.tv_usec); \
 	} while (0)
+=======
+		if (f) \
+			nfsm_loadattr((v), (struct vattr *)0, (x)); \
+		}
+
+#define nfsm_getfh(f, s, v3) \
+		{ if (v3) { \
+			nfsm_dissect(tl, u_long *, NFSX_UNSIGNED); \
+			if (((s) = fxdr_unsigned(int, *tl)) <= 0 || \
+				(s) > NFSX_V3FHMAX) { \
+				m_freem(mrep); \
+				error = EBADRPC; \
+				goto nfsmout; \
+			} \
+		} else \
+			(s) = NFSX_V2FH; \
+		nfsm_dissect((f), nfsfh_t *, nfsm_rndup(s)); }
+
+#define	nfsm_loadattr(v, a, x) \
+		{ struct vnode *ttvp = (v); \
+		if ((t1 = nfs_loadattrcache(&ttvp, &md, &dpos, (a), 0, \
+					    (x)))) { \
+			error = t1; \
+			m_freem(mrep); \
+			goto nfsmout; \
+		} \
+		(v) = ttvp; }
+
+#define	nfsm_postop_attr(v, f, x) \
+		{ struct vnode *ttvp = (v); \
+		nfsm_dissect(tl, u_long *, NFSX_UNSIGNED); \
+		if (((f) = fxdr_unsigned(int, *tl))) { \
+			if ((t1 = nfs_loadattrcache(&ttvp, &md, &dpos, \
+					(struct vattr *)0, 1, (x)))) { \
+				error = t1; \
+				(f) = 0; \
+				m_freem(mrep); \
+				goto nfsmout; \
+			} \
+			if (*(x) == 0) \
+				(f) = 0; \
+			(v) = ttvp; \
+		} }
+
+/* Used as (f) for nfsm_wcc_data() */
+#define NFSV3_WCCRATTR	0
+#define NFSV3_WCCCHK	1
+
+#define	nfsm_wcc_data(v, f, x) \
+		{ int ttattrf, ttretf = 0; \
+		nfsm_dissect(tl, u_long *, NFSX_UNSIGNED); \
+		if (*tl == nfs_true) { \
+			nfsm_dissect(tl, u_long *, 6 * NFSX_UNSIGNED); \
+			if (f) \
+				ttretf = (VTONFS(v)->n_mtime == \
+					fxdr_unsigned(u_long, *(tl + 2))); \
+		} \
+		nfsm_postop_attr((v), ttattrf, (x)); \
+		if (f) { \
+			(f) = ttretf; \
+		} else { \
+			(f) = ttattrf; \
+		} }
+
+#define nfsm_v3sattr(s, a, u, g) \
+		{ (s)->sa_modetrue = nfs_true; \
+		(s)->sa_mode = vtonfsv3_mode((a)->va_mode); \
+		(s)->sa_uidtrue = nfs_true; \
+		(s)->sa_uid = txdr_unsigned(u); \
+		(s)->sa_gidtrue = nfs_true; \
+		(s)->sa_gid = txdr_unsigned(g); \
+		(s)->sa_sizefalse = nfs_false; \
+		(s)->sa_atimetype = txdr_unsigned(NFSV3SATTRTIME_TOSERVER); \
+		(s)->sa_mtimetype = txdr_unsigned(NFSV3SATTRTIME_TOSERVER); \
+		}
+
+#define	nfsm_strsiz(s,m) \
+		{ nfsm_dissect(tl,u_long *,NFSX_UNSIGNED); \
+		if (((s) = fxdr_unsigned(long,*tl)) > (m)) { \
+			m_freem(mrep); \
+			error = EBADRPC; \
+			goto nfsmout; \
+		} }
+
+#define	nfsm_srvstrsiz(s,m) \
+		{ nfsm_dissect(tl,u_long *,NFSX_UNSIGNED); \
+		if (((s) = fxdr_unsigned(long,*tl)) > (m) || (s) <= 0) { \
+			error = EBADRPC; \
+			nfsm_reply(0); \
+		} }
+
+#define	nfsm_srvnamesiz(s) \
+		{ nfsm_dissect(tl,u_long *,NFSX_UNSIGNED); \
+		if (((s) = fxdr_unsigned(long,*tl)) > NFS_MAXNAMLEN) \
+			error = NFSERR_NAMETOL; \
+		if ((s) <= 0) \
+			error = EBADRPC; \
+		if (error) \
+			nfsm_reply(0); \
+		}
+
+#define nfsm_mtouio(p,s) \
+		if ((s) > 0 && \
+		   (t1 = nfsm_mbuftouio(&md,(p),(s),&dpos))) { \
+			error = t1; \
+			m_freem(mrep); \
+			goto nfsmout; \
+		}
+
+#define nfsm_uiotom(p,s) \
+		if ((t1 = nfsm_uiotombuf((p),&mb,(s),&bpos))) { \
+			error = t1; \
+			m_freem(mreq); \
+			goto nfsmout; \
+		}
+
+#define	nfsm_reqhead(v,a,s) \
+		mb = mreq = nfsm_reqh((v),(a),(s),&bpos)
+>>>>>>> origin/10.1
 
 /*
  * macros for dissecting NFS mbuf chains
  */
 
+<<<<<<< HEAD
 /* prepare an mbuf chain for dissection starting with the given mbuf */
 #define nfsm_chain_dissect_init(E, NMC, H) \
 	do { \
 		if (!(H)) { \
 			(E) = EINVAL; \
 			break; \
+=======
+/* 
+* We seem to see cases mainly on shutdown where the vnode got recycled
+* on use while waiting on server. Maybe nfs vnode locking will help if
+* we implement that, but for now, check for bad vnodes and return an
+* error. This call spot should catch most of them. Note that NFSv2
+* just goes to nfsmout here, while nfsV3 goes back to caller's next
+* line for post-processing. It will do a nfsm_reqdone also making
+* m_freem(mrep). Wondering if some of our freeing problems could be
+* due to nfsv3 calling nfsm_reqdone unlike nfsv2. Separate problem.
+*/
+#define	nfsm_request(v, t, p, c, x)	\
+                { \
+                int nfsv3 = (VFSTONFS((v)->v_mount))->nm_flag & NFSMNT_NFSV3; \
+		if ((error = nfs_request((v), mreq, (t), (p), \
+		   (c), &mrep, &md, &dpos, (x)))) { \
+			if (error & NFSERR_RETERR) \
+				error &= ~NFSERR_RETERR; \
+			else \
+				goto nfsmout; \
+>>>>>>> origin/10.1
 		} \
 		(NMC)->nmc_mcur = (NMC)->nmc_mhead = (H); \
 		(NMC)->nmc_ptr = mbuf_data(H); \

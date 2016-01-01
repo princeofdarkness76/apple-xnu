@@ -1681,6 +1681,7 @@ vm_map_pmap_enter(
 			printf("map: %p, addr: %llx, object: %p, offset: %llx\n",
 			       map, (unsigned long long)addr, object, (unsigned long long)offset);
 		}
+<<<<<<< HEAD
 		type_of_fault = DBG_CACHE_HIT_FAULT;
 		kr = vm_fault_enter(m, map->pmap, addr, protection, protection,
 				    VM_PAGE_WIRED(m), FALSE, FALSE, FALSE,
@@ -1689,6 +1690,15 @@ vm_map_pmap_enter(
 				    NULL,
 				    &type_of_fault);
 
+=======
+		m->busy = TRUE;
+
+		if (m->no_isync == TRUE) {
+		        pmap_sync_caches_phys(m->phys_addr);
+
+			m->no_isync = FALSE;
+		}
+>>>>>>> origin/10.1
 		vm_object_unlock(object);
 
 		offset += PAGE_SIZE_64;
@@ -1715,6 +1725,7 @@ boolean_t vm_map_pmap_is_empty(
 		return TRUE;
 	}
 
+<<<<<<< HEAD
 	for (offset = start;
 	     offset < end;
 	     offset += PAGE_SIZE) {
@@ -1747,6 +1758,17 @@ vm_map_random_address_for_size(
 	vm_map_entry_t	prev_entry = VM_MAP_ENTRY_NULL;
 	vm_map_size_t	vm_hole_size = 0;
 	vm_map_size_t	addr_space_size;
+=======
+		vm_object_lock(object);
+
+		PAGE_WAKEUP_DONE(m);
+		vm_page_lock_queues();
+		if (!m->active && !m->inactive)
+		    vm_page_activate(m);
+		vm_page_unlock_queues();
+		vm_object_paging_end(object);
+		vm_object_unlock(object);
+>>>>>>> origin/10.1
 
 	addr_space_size = vm_map_max(map) - vm_map_min(map);
 

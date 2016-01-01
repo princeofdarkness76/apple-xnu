@@ -29,12 +29,15 @@
  /*
  	Includes Unicode 3.2 decomposition code derived from Core Foundation
  */
-
 #include <sys/param.h>
 #include <sys/utfconv.h>
 #include <sys/errno.h>
+<<<<<<< HEAD
 #include <sys/malloc.h>
 #include <libkern/OSByteOrder.h>
+=======
+#include <architecture/byte_order.h>
+>>>>>>> origin/10.1
 
 /*
  * UTF-8 (Unicode Transformation Format)
@@ -62,6 +65,7 @@
 
 /* Surrogate Pair Constants */
 #define SP_HALF_SHIFT	10
+<<<<<<< HEAD
 #define SP_HALF_BASE	0x0010000u
 #define SP_HALF_MASK	0x3FFu
 
@@ -70,12 +74,34 @@
 #define SP_LOW_FIRST	0xDC00u
 #define SP_LOW_LAST		0xDFFFu
 
+=======
+#define SP_HALF_BASE	0x0010000UL
+#define SP_HALF_MASK	0x3FFUL
+
+#define SP_HIGH_FIRST	0xD800UL
+#define SP_HIGH_LAST	0xDBFFUL
+#define SP_LOW_FIRST	0xDC00UL
+#define SP_LOW_LAST		0xDFFFUL
+
+
+static u_int16_t ucs_decompose(u_int16_t, u_int16_t *);
+>>>>>>> origin/10.1
 
 #include "vfs_utfconvdata.h"
 
 
+char utf_extrabytes[32] = {
+	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+	-1, -1, -1, -1, -1, -1, -1, -1,  1,  1,  1,  1,  2,  2,  3, -1
+};
+
+
 /*
+<<<<<<< HEAD
  * Test for a combining character.
+=======
+ * utf8_encodelen - Calculates the UTF-8 encoding length for a Unicode filename
+>>>>>>> origin/10.1
  *
  * Similar to __CFUniCharIsNonBaseCharacter except that
  * unicode_combinable also includes Hangul Jamo characters.
@@ -103,6 +129,7 @@ unicode_combinable(u_int16_t character)
 /*
  * Test for a precomposed character.
  *
+<<<<<<< HEAD
  * Similar to __CFUniCharIsDecomposableCharacter.
  */
 int
@@ -191,6 +218,14 @@ const char hexdigits[16] = {
  */
 size_t
 utf8_encodelen(const u_int16_t * ucsp, size_t ucslen, u_int16_t altslash, int flags)
+=======
+ * input flags:
+ *    UTF_REVERSE_ENDIAN: Unicode byteorder is opposite current runtime
+ */
+size_t
+utf8_encodelen(const u_int16_t * ucsp, size_t ucslen, u_int16_t altslash,
+               int flags)
+>>>>>>> origin/10.1
 {
 	u_int16_t ucs_ch;
 	u_int16_t * chp = NULL;
@@ -205,6 +240,7 @@ utf8_encodelen(const u_int16_t * ucsp, size_t ucslen, u_int16_t altslash, int fl
 	len = 0;
 
 	while (charcnt-- > 0) {
+<<<<<<< HEAD
 		if (extra > 0) {
 			--extra;
 			ucs_ch = *chp++;
@@ -224,6 +260,17 @@ utf8_encodelen(const u_int16_t * ucsp, size_t ucslen, u_int16_t altslash, int fl
 				chp = &sequence[1];
 			}
 		}
+=======
+		ucs_ch = *ucsp++;
+
+		if (swapbytes)
+			ucs_ch = NXSwapShort(ucs_ch);
+		if (ucs_ch == '/')
+			ucs_ch = altslash ? altslash : '_';
+		else if (ucs_ch == '\0')
+			ucs_ch = UCS_ALT_NULL;
+		
+>>>>>>> origin/10.1
 		len += UNICODE_TO_UTF8_LEN(ucs_ch);
 	}
 
@@ -242,6 +289,7 @@ utf8_encodelen(const u_int16_t * ucsp, size_t ucslen, u_int16_t altslash, int fl
  *
  * input flags:
  *    UTF_REVERSE_ENDIAN: Unicode byteorder is opposite current runtime
+<<<<<<< HEAD
  *
  *    UTF_BIG_ENDIAN:  Unicode byte order is always big endian
  *
@@ -249,6 +297,8 @@ utf8_encodelen(const u_int16_t * ucsp, size_t ucslen, u_int16_t altslash, int fl
  *
  *    UTF_DECOMPOSED:  generate fully decomposed output
  *
+=======
+>>>>>>> origin/10.1
  *    UTF_NO_NULL_TERM:  don't add NULL termination to UTF-8 output
  *
  * result:
@@ -322,19 +372,26 @@ utf8_encodestr(const u_int16_t * ucsp, size_t ucslen, u_int8_t * utf8p,
 			*utf8p++ = 0x80 | (0x3f & ucs_ch);
 
 		} else {
+<<<<<<< HEAD
 			/* These chars never valid Unicode. */
 			if (ucs_ch == 0xFFFE || ucs_ch == 0xFFFF) {
 				result = EINVAL;
 				break;
 			}
 
+=======
+>>>>>>> origin/10.1
 			/* Combine valid surrogate pairs */
 			if (ucs_ch >= SP_HIGH_FIRST && ucs_ch <= SP_HIGH_LAST
 				&& charcnt > 0) {
 				u_int16_t ch2;
 				u_int32_t pair;
 
+<<<<<<< HEAD
 				ch2 = swapbytes ? OSSwapInt16(*ucsp) : *ucsp;
+=======
+				ch2 = swapbytes ? NXSwapShort(*ucsp) : *ucsp;
+>>>>>>> origin/10.1
 				if (ch2 >= SP_LOW_FIRST && ch2 <= SP_LOW_LAST) {
 					pair = ((ucs_ch - SP_HIGH_FIRST) << SP_HALF_SHIFT)
 						+ (ch2 - SP_LOW_FIRST) + SP_HALF_BASE;
@@ -350,6 +407,7 @@ utf8_encodestr(const u_int16_t * ucsp, size_t ucslen, u_int8_t * utf8p,
 					*utf8p++ = 0x80 | (0x3f & pair);
 					continue;
 				}
+<<<<<<< HEAD
 			} else if (sfmconv) {
 				ucs_ch = sfm_to_ucs(ucs_ch);
 				if (ucs_ch < 0x0080) {
@@ -360,6 +418,8 @@ utf8_encodestr(const u_int16_t * ucsp, size_t ucslen, u_int8_t * utf8p,
 					*utf8p++ = ucs_ch;
 					continue;
 				}
+=======
+>>>>>>> origin/10.1
 			}
 			if ((utf8p + 2) >= bufend) {
 				result = ENAMETOOLONG;
@@ -407,6 +467,7 @@ static void push(uint16_t ucs_ch, int *combcharcnt, uint16_t **ucsp)
  *    (replacement) char must be provided in altslash.
  *
  * input flags:
+<<<<<<< HEAD
  *    UTF_REV_ENDIAN:  Unicode byte order is opposite current runtime
  *
  *    UTF_BIG_ENDIAN:  Unicode byte order is always big endian
@@ -418,6 +479,10 @@ static void push(uint16_t ucs_ch, int *combcharcnt, uint16_t **ucsp)
  *    UTF_PRECOMPOSED:  generate precomposed output (NFC)
  *
  *    UTF_ESCAPE_ILLEGAL:  percent escape any illegal UTF-8 input
+=======
+ *    UTF_REV_ENDIAN:   Unicode byteorder is oposite current runtime
+ *    UTF_DECOMPOSED:   Unicode output string must be fully decompsed
+>>>>>>> origin/10.1
  *
  * result:
  *    ENAMETOOLONG: Name didn't fit; only ucslen chars were decoded.
@@ -452,6 +517,7 @@ utf8_decodestr(const u_int8_t* utf8p, size_t utf8len, u_int16_t* ucsp,
 
 		/* check for ascii */
 		if (byte < 0x80) {
+<<<<<<< HEAD
 			ucs_ch = sfmconv ? ucs_to_sfm(byte, utf8len == 0) : byte;
 		} else {
 			u_int32_t ch;
@@ -526,6 +592,56 @@ utf8_decodestr(const u_int8_t* utf8p, size_t utf8len, u_int16_t* ucsp,
 			default:
 				result = EINVAL;
 				goto exit;
+=======
+			ucs_ch = byte;				/* 1st byte */
+		} else {
+			u_int32_t ch;
+			int extrabytes = utf_extrabytes[byte >> 3];
+
+			if (utf8len < extrabytes)
+				goto invalid;
+			utf8len -= extrabytes;
+
+			switch (extrabytes) {
+			case 1: ch = byte;			/* 1st byte */
+					ch <<= 6;
+			        ch += *utf8p++;		/* 2nd byte */
+					ch -= 0x00003080UL;
+					if (ch < 0x0080)
+						goto invalid;
+					ucs_ch = ch;
+			        break;
+
+			case 2:	ch = byte;			/* 1st byte */
+					ch <<= 6;
+					ch += *utf8p++;		/* 2nd byte */
+					ch <<= 6;
+					ch += *utf8p++;		/* 3rd byte */
+					ch -= 0x000E2080UL;
+					if (ch < 0x0800)
+						goto invalid;
+					ucs_ch = ch;
+					break;
+
+			case 3:	ch = byte;			/* 1st byte */
+					ch <<= 6;
+					ch += *utf8p++;		/* 2nd byte */
+					ch <<= 6;
+					ch += *utf8p++;		/* 3rd byte */
+					ch <<= 6;
+			        ch += *utf8p++;		/* 4th byte */
+					ch -= 0x03C82080UL + SP_HALF_BASE;
+					ucs_ch = (ch >> SP_HALF_SHIFT) + SP_HIGH_FIRST;
+					*ucsp++ = swapbytes ? NXSwapShort(ucs_ch) : ucs_ch;
+					if (ucsp >= bufend)
+						goto toolong;
+					ucs_ch = (ch & SP_HALF_MASK) + SP_LOW_FIRST;
+					*ucsp++ = swapbytes ? NXSwapShort(ucs_ch) : ucs_ch;
+			        continue;
+
+			default:
+					goto invalid;
+>>>>>>> origin/10.1
 			}
 			if (decompose) {
 				if (unicode_decomposeable(ucs_ch)) {
@@ -534,11 +650,24 @@ utf8_decodestr(const u_int8_t* utf8p, size_t utf8len, u_int16_t* ucsp,
 
 					count = unicode_decompose(ucs_ch, sequence);
 
+<<<<<<< HEAD
 					for (i = 0; i < count; ++i) {
 						if (ucsp >= bufend)
 							goto toolong;
 
 						push(sequence[i], &combcharcnt, &ucsp);
+=======
+				if (comb_ch[0]) {
+					*ucsp++ = swapbytes ? NXSwapShort(ucs_ch) : ucs_ch;
+					if (ucsp >= bufend)
+						goto toolong;
+					ucs_ch = comb_ch[0];
+					if (comb_ch[1]) {
+						*ucsp++ = swapbytes ? NXSwapShort(ucs_ch) : ucs_ch;
+						if (ucsp >= bufend)
+							goto toolong;
+						ucs_ch = comb_ch[1];
+>>>>>>> origin/10.1
 					}
 
 					continue;
@@ -561,6 +690,7 @@ utf8_decodestr(const u_int8_t* utf8p, size_t utf8len, u_int16_t* ucsp,
 		if (ucs_ch == altslash)
 			ucs_ch = '/';
 
+<<<<<<< HEAD
 		push(ucs_ch, &combcharcnt, &ucsp);
 		continue;
 
@@ -614,12 +744,23 @@ escape:
 			++p;
 		}
 	}
+=======
+		*ucsp++ = swapbytes ? NXSwapShort(ucs_ch) : ucs_ch;
+	}
+>>>>>>> origin/10.1
 
 exit:
 	*ucslen = (u_int8_t*)ucsp - (u_int8_t*)bufstart;
 
 	return (result);
 
+<<<<<<< HEAD
+=======
+invalid:
+	result = EINVAL;
+	goto exit;
+
+>>>>>>> origin/10.1
 toolong:
 	result = ENAMETOOLONG;
 	goto exit;
@@ -887,6 +1028,14 @@ getmappedvalue16(const unicode_mappings16 *theTable, u_int32_t numElem,
 	return (0);
 }
 
+<<<<<<< HEAD
+=======
+/* CYRILLIC codepoints 0x0400 ~ 0x04FF */
+static const unsigned long __CyrillicDecompBitmap[] = {
+    0x510A0040, 0x00000040, 0x0000510A, 0x00000000,	/* 0x0400 */
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,	/* 0x0480 */
+};
+>>>>>>> origin/10.1
 
 static u_int32_t
 unicode_recursive_decompose(u_int16_t character, u_int16_t *convertedChars)
@@ -937,7 +1086,11 @@ unicode_recursive_decompose(u_int16_t character, u_int16_t *convertedChars)
 #define HANGUL_NCOUNT (HANGUL_VCOUNT * HANGUL_TCOUNT)
 
 /*
+<<<<<<< HEAD
  * unicode_decompose - decompose a composed Unicode char
+=======
+ * ucs_decompose - decompose a composed Unicode char
+>>>>>>> origin/10.1
  *
  * Composed Unicode characters are forbidden on
  * HFS Plus volumes. ucs_decompose will convert a
@@ -1060,7 +1213,77 @@ prioritysort(u_int16_t* characters, int count)
 			++ch1;
 			++ch2;
 		}
+<<<<<<< HEAD
 	} while (changes);
+=======
+	} else if ((ch >= 0x0400) && (ch <= 0x04FF) &&
+		   IS_DECOMPOSABLE(__CyrillicDecompBitmap, ch - 0x0400)) {
+	
+		/* Handle CYRILLIC LETTERs */
+		switch(ch) {
+		case 0x0401: base = 0x0415; cmb[0] = 0x0308; break; /*  */
+		case 0x0403: base = 0x0413; cmb[0] = 0x0301; break; /*  */
+		case 0x0407: base = 0x0406; cmb[0] = 0x0308; break; /*  */
+		case 0x040C: base = 0x041A; cmb[0] = 0x0301; break; /*  */
+		case 0x040E: base = 0x0423; cmb[0] = 0x0306; break; /*  */
+		case 0x0419: base = 0x0418; cmb[0] = 0x0306; break; /*  */
+		case 0x0439: base = 0x0438; cmb[0] = 0x0306; break; /*  */
+		case 0x0451: base = 0x0435; cmb[0] = 0x0308; break; /*  */
+		case 0x0453: base = 0x0433; cmb[0] = 0x0301; break; /*  */
+		case 0x0457: base = 0x0456; cmb[0] = 0x0308; break; /*  */
+		case 0x045C: base = 0x043A; cmb[0] = 0x0301; break; /*  */
+		case 0x045E: base = 0x0443; cmb[0] = 0x0306; break; /*  */
+		
+		default:
+			/* Should not be hit from bit map table */
+			base = ch;
+		}
+	} else if (ch == 0x1E3F) {
+		base = 0x006D; cmb[0] = 0x0301; /* LATIN SMALL LETTER M WITH ACUTE */
+	} else if ((ch > 0x3000) && (ch < 0x3100) &&
+		   IS_DECOMPOSABLE(__CJKDecompBitmap, ch - 0x3000)) {
+	
+		/* Handle HIRAGANA LETTERs */
+		switch(ch) {
+		case 0x3071: base = 0x306F; cmb[0] = 0x309A; break; /* PA */
+		case 0x3074: base = 0x3072; cmb[0] = 0x309A; break; /* PI */
+		case 0x3077: base = 0x3075; cmb[0] = 0x309A; break; /* PU */
+		case 0x307A: base = 0x3078; cmb[0] = 0x309A; break; /* PE */
+
+		case 0x307D: base = 0x307B; cmb[0] = 0x309A; break; /* PO */
+		case 0x3094: base = 0x3046; cmb[0] = 0x3099; break; /* VU */
+		case 0x30D1: base = 0x30CF; cmb[0] = 0x309A; break; /* PA */
+		case 0x30D4: base = 0x30D2; cmb[0] = 0x309A; break; /* PI */
+
+		case 0x30D7: base = 0x30D5; cmb[0] = 0x309A; break; /* PU */
+		case 0x30DA: base = 0x30D8; cmb[0] = 0x309A; break; /* PE */
+		case 0x30DD: base = 0x30DB; cmb[0] = 0x309A; break; /* PO */
+		case 0x30F4: base = 0x30A6; cmb[0] = 0x3099; break; /* VU */
+
+		case 0x30F7: base = 0x30EF; cmb[0] = 0x3099; break; /* VA */
+		case 0x30F8: base = 0x30F0; cmb[0] = 0x3099; break; /* VI */
+		case 0x30F9: base = 0x30F1; cmb[0] = 0x3099; break; /* VE */
+		case 0x30FA: base = 0x30F2; cmb[0] = 0x3099; break; /* VO */
+		
+		default:
+			/* the rest (41 of them) have a simple conversion */
+			base = ch - 1;
+			cmb[0] = 0x3099;
+		}
+	} else if ((ch >= 0xAC00) && (ch < 0xD7A4)) {
+		/* Hangul */
+		ch -= 0xAC00;
+		base 	= 0x1100 + (ch / (21*28));
+		cmb[0] 	= 0x1161 + (ch % (21*28)) / 28;
+
+		if (ch % 28)
+			cmb[1] = 0x11A7 + (ch % 28);
+	} else {
+		base = ch;
+	}
+	
+	return (base);
+>>>>>>> origin/10.1
 }
 
 
@@ -1126,19 +1349,85 @@ mac2sfm[112] = {
 
 
 /*
+<<<<<<< HEAD
  * Encode illegal NTFS filename characters into SFM Private Unicode characters
+=======
+ * ucs_combine - generate a precomposed Unicode char
+>>>>>>> origin/10.1
  *
  * Assumes non-zero ASCII input.
  */
 static u_int16_t
 ucs_to_sfm(u_int16_t ucs_ch, int lastchar)
 {
+<<<<<<< HEAD
 	/* The last character of filename cannot be a space or period. */
 	if (lastchar) {
 		if (ucs_ch == 0x20)
 			return (0xf028);
 		else if (ucs_ch == 0x2e)
 			return (0xf029);
+=======
+	/* Get out early if we can */
+	if (comb < 0x0300)
+		return (0);
+
+	/* Try ordinary diacritics (0x300 - 0x32F) */
+	if (comb <= 0x032F) {
+		int index;
+		
+		if (base >= 'A' && base <= 'z') {
+			index = diacrit_tbl[comb - 0x0300];
+			if (index < 0 ) return (0);
+	
+			return (composite_tbl[index + (base - 'A')]);
+		}
+
+		/* Handle Cyrillic and some 3 char latin sequences */
+		switch (comb) {
+		case 0x0300:
+			switch (base) {
+			case 0x00DC:  return (0x01DB);
+			case 0x00FC:  return (0x01DC);
+			} break;
+		case 0x0301:
+			switch (base) {
+			case 0x00DC:  return (0x01D7);
+			case 0x00FC:  return (0x01D8);
+			case 0x0413:  return (0x0403);
+			case 0x041A:  return (0x040C);
+			case 0x0433:  return (0x0453);
+			case 0x043A:  return (0x045C);
+			} break;
+		case 0x0304:
+			switch (base) {
+			case 0x00DC:  return (0x01D5);
+			case 0x00FC:  return (0x01D6);
+			case 0x00C4:  return (0x01DE);
+			case 0x00E4:  return (0x01DF);
+			} break;
+		case 0x0306:
+			switch (base) {
+			case 0x0418:  return (0x0419);
+			case 0x0423:  return (0x040E);
+			case 0x0438:  return (0x0439);
+			case 0x0443:  return (0x045E);
+			} break;
+		case 0x0308:
+			switch (base) {
+			case 0x0406:  return (0x0407);
+			case 0x0415:  return (0x0401);
+			case 0x0435:  return (0x0451);
+			case 0x0456:  return (0x0457);
+			} break;
+		case 0x030C:
+			switch (base) {
+			case 0x00DC:  return (0x01D9);
+			case 0x00FC:  return (0x01DA);
+			} break;
+		}
+		return (0);
+>>>>>>> origin/10.1
 	}
 	/* 0x01 - 0x1f is simple transformation. */
 	if (ucs_ch <= 0x1f) {

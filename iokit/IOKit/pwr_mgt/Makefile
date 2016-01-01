@@ -4,8 +4,13 @@ export MakeInc_rule=${SRCROOT}/makedefs/MakeInc.rule
 export MakeInc_dir=${SRCROOT}/makedefs/MakeInc.dir
 
 IOKIT_FRAMEDIR = $(FRAMEDIR)/IOKit.framework/Versions/A
+<<<<<<< HEAD
 INCDIR = $(IOKIT_FRAMEDIR)/Headers
 LCLDIR = $(IOKIT_FRAMEDIR)/PrivateHeaders
+=======
+export INCDIR = $(IOKIT_FRAMEDIR)/Headers
+export LCLDIR = $(FRAMEDIR)/Kernel.framework/Versions/A/PrivateHeaders/IOKit
+>>>>>>> origin/10.1
 
 include $(MakeInc_cmd)
 include $(MakeInc_def)
@@ -15,7 +20,20 @@ NOT_EXPORT_HEADERS = \
 	IOPMinformee.h		\
 	IOPMinformeeList.h	\
 	IOPMlog.h		\
+<<<<<<< HEAD
 	IOPMPrivate.h
+=======
+	IOPMpmChild.h		\
+        IOPMPrivate.h
+
+INSTINC_SUBDIRS =
+INSTINC_SUBDIRS_PPC =
+INSTINC_SUBDIRS_I386 =
+
+EXPINC_SUBDIRS = ${INSTINC_SUBDIRS}
+EXPINC_SUBDIRS_PPC = ${INSTINC_SUBDIRS_PPC}
+EXPINC_SUBDIRS_I386 = ${INSTINC_SUBDIRS_I386}
+>>>>>>> origin/10.1
 
 ALL_HEADERS = $(shell (cd $(SOURCE); echo *.h))
 

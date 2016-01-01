@@ -127,6 +127,7 @@ unsigned int	vm_object_pagein_throttle = 16;
  * delay of HARD_THROTTLE_DELAY microseconds before being allowed to try the page fault again.
  */
 
+<<<<<<< HEAD
 extern void throttle_lowpri_io(int);
 
 uint64_t vm_hard_throttle_threshold;
@@ -136,6 +137,8 @@ uint64_t vm_hard_throttle_threshold;
 #define NEED_TO_HARD_THROTTLE_THIS_TASK()	(vm_wants_task_throttled(current_task()) ||	\
 						 (vm_page_free_count < vm_page_throttle_limit && \
 						  proc_get_effective_thread_policy(current_thread(), TASK_POLICY_IO) > THROTTLE_LEVEL_THROTTLED))
+=======
+>>>>>>> origin/10.1
 
 
 #define HARD_THROTTLE_DELAY	5000	/* 5000 us == 5 ms */
@@ -3882,6 +3885,7 @@ FastPmapEnter:
 				 * cur_object == NULL or it's been unlocked
 				 * no paging references on either object or cur_object
 				 */
+<<<<<<< HEAD
 				if (top_object != VM_OBJECT_NULL || object_lock_type != OBJECT_LOCK_EXCLUSIVE)
 					need_retry_ptr = &need_retry;
 				else
@@ -3925,8 +3929,50 @@ FastPmapEnter:
 						vm_object_lock_assert_exclusive(
 							m->object);
 						m->dirty = TRUE;
+=======
+#if	!VM_FAULT_STATIC_CONFIG
+				if (vm_fault_dirty_handling
+#if	MACH_KDB
+				    || db_watchpoint_list
+#endif
+				    && (fault_type & VM_PROT_WRITE) == 0)
+					prot &= ~VM_PROT_WRITE;
+#else	/* STATIC_CONFIG */
+#if	MACH_KDB
+				if (db_watchpoint_list
+				    && (fault_type & VM_PROT_WRITE) == 0)
+					prot &= ~VM_PROT_WRITE;
+#endif	/* MACH_KDB */
+#endif	/* STATIC_CONFIG */
+				if (m->no_isync == TRUE)
+				        pmap_sync_caches_phys(m->phys_addr);
+
+				PMAP_ENTER(pmap, vaddr, m, prot, wired);
+				{
+				   tws_hash_line_t	line;
+				   task_t		task;
+
+				   task = current_task();
+				   if((map != NULL) && 
+					(task->dynamic_working_set != 0)) {
+					if(tws_lookup
+						((tws_hash_t)
+						task->dynamic_working_set,
+						cur_offset, object,
+						&line) != KERN_SUCCESS) {
+					   	if(tws_insert((tws_hash_t)
+						   task->dynamic_working_set,
+						   m->offset, m->object,
+						   vaddr, pmap_map) 
+							== KERN_NO_SPACE) {
+						   tws_expand_working_set(
+						      task->dynamic_working_set,
+						      TWS_HASH_LINE_COUNT);
+						}
+>>>>>>> origin/10.1
 					}
 				}
+<<<<<<< HEAD
 
 				if (top_object != VM_OBJECT_NULL) {
 					/*
@@ -3941,6 +3987,36 @@ FastPmapEnter:
 					vm_object_unlock(top_object);
 					top_object = VM_OBJECT_NULL;
 				}
+=======
+				/*
+				 *	Grab the object lock to manipulate
+				 *	the page queues.  Change wiring
+				 *	case is obvious.  In soft ref bits
+				 *	case activate page only if it fell
+				 *	off paging queues, otherwise just
+				 *	activate it if it's inactive.
+				 *
+				 *	NOTE: original vm_fault code will
+				 *	move active page to back of active
+				 *	queue.  This code doesn't.
+				 */
+				vm_object_lock(object);
+				vm_page_lock_queues();
+
+				if (m->clustered) {
+				        vm_pagein_cluster_used++;
+					m->clustered = FALSE;
+				}
+				/* 
+				 * we did the isync above (if needed)... we're clearing
+				 * the flag here to avoid holding a lock
+				 * while calling pmap functions, however
+				 * we need hold the object lock before
+				 * we can modify the flag
+				 */
+				m->no_isync = FALSE;
+				m->reference = TRUE;
+>>>>>>> origin/10.1
 
 				if (need_collapse == TRUE)
 				        vm_object_collapse(object, offset, TRUE);
@@ -4685,6 +4761,7 @@ handle_copy_delay:
 		if (real_map != map)
 			vm_map_unlock(real_map);
 
+<<<<<<< HEAD
 		if (m != VM_PAGE_NULL) {
 			RELEASE_PAGE(m);
 
@@ -4749,6 +4826,50 @@ handle_copy_delay:
 			if (prot & VM_PROT_WRITE) {
 				vm_object_lock_assert_exclusive(m->object);
 				m->dirty = TRUE;
+=======
+	/*
+	 *	Put this page into the physical map.
+	 *	We had to do the unlock above because pmap_enter
+	 *	may cause other faults.  The page may be on
+	 *	the pageout queues.  If the pageout daemon comes
+	 *	across the page, it will remove it from the queues.
+	 */
+	if (m != VM_PAGE_NULL) {
+		if (m->no_isync == TRUE) {
+		        pmap_sync_caches_phys(m->phys_addr);
+
+		        m->no_isync = FALSE;
+		}
+	        vm_object_unlock(m->object);
+
+		PMAP_ENTER(pmap, vaddr, m, prot, wired);
+		{
+			tws_hash_line_t	line;
+			task_t		task;
+
+			   task = current_task();
+			   if((map != NULL) && 
+				(task->dynamic_working_set != 0)) {
+				if(tws_lookup
+					((tws_hash_t)
+					task->dynamic_working_set,
+					m->offset, m->object,
+					&line) != KERN_SUCCESS) {
+				   	tws_insert((tws_hash_t)
+					   task->dynamic_working_set,
+					   m->offset, m->object, 
+					   vaddr, pmap_map);
+				   	if(tws_insert((tws_hash_t)
+						   task->dynamic_working_set,
+						   m->offset, m->object,
+						   vaddr, pmap_map) 
+								== KERN_NO_SPACE) {
+						tws_expand_working_set(
+					 		task->dynamic_working_set, 
+							TWS_HASH_LINE_COUNT);
+					}
+				}
+>>>>>>> origin/10.1
 			}
 		}
 	} else {
@@ -5318,6 +5439,15 @@ vm_fault_wire_fast(
 	assert(!m->busy);
 	m->busy = TRUE;
 	assert(!m->absent);
+<<<<<<< HEAD
+
+	/*
+	 *	Give up if the page is being written and there's a copy object
+	 */
+	if ((object->copy != VM_OBJECT_NULL) && (prot & VM_PROT_WRITE)) {
+		RELEASE_PAGE(m);
+		GIVE_UP;
+=======
 
 	/*
 	 *	Give up if the page is being written and there's a copy object
@@ -5326,6 +5456,21 @@ vm_fault_wire_fast(
 		RELEASE_PAGE(m);
 		GIVE_UP;
 	}
+
+	/*
+	 *	Put this page into the physical map.
+	 *	We have to unlock the object because pmap_enter
+	 *	may cause other faults.   
+	 */
+	if (m->no_isync == TRUE) {
+	        pmap_sync_caches_phys(m->phys_addr);
+
+		m->no_isync = FALSE;
+>>>>>>> origin/10.1
+	}
+	vm_object_unlock(object);
+
+	PMAP_ENTER(pmap, va, m, prot, TRUE);
 
 	/*
 	 *	Put this page into the physical map.

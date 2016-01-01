@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2001 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.1
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -63,12 +67,15 @@
  *
  *	@(#)nfs_vfsops.c	8.12 (Berkeley) 5/20/95
  * FreeBSD-Id: nfs_vfsops.c,v 1.52 1997/11/12 05:42:21 julian Exp $
+<<<<<<< HEAD
  */
 /*
  * NOTICE: This file was modified by SPARTA, Inc. in 2005 to introduce
  * support for mandatory and extensible security protections.  This notice
  * is included in support of clause 2.2 (b) of the Apple Public License,
  * Version 2.0.
+=======
+>>>>>>> origin/10.1
  */
 
 #include <sys/param.h>
@@ -362,6 +369,7 @@ nfs3_update_statfs(struct nfsmount *nmp, vfs_context_t ctx)
 	struct nfsm_chain nmreq, nmrep;
 	uint32_t val = 0;
 
+<<<<<<< HEAD
 	nfsvers = nmp->nm_vers;
 	np = nmp->nm_dnp;
 	if (!np)
@@ -427,6 +435,18 @@ nfsmout:
 	nfsm_chain_cleanup(&nmrep);
 	vnode_put(NFSTOV(np));
 	return (error);
+=======
+	/*
+	 * Calculate the size used for io buffers.  Use the larger
+	 * of the two sizes to minimise nfs requests but make sure
+	 * that it is at least one VM page to avoid wasting buffer
+	 * space.
+	 */
+	iosize = max(nmp->nm_rsize, nmp->nm_wsize);
+	if (iosize < PAGE_SIZE)
+		iosize = PAGE_SIZE;
+	return (trunc_page(iosize));
+>>>>>>> origin/10.1
 }
 
 int
@@ -506,6 +526,7 @@ nfsmout:
 int
 nfs_vfs_getattr(mount_t mp, struct vfs_attr *fsap, vfs_context_t ctx)
 {
+<<<<<<< HEAD
 	struct nfsmount *nmp;
 	uint32_t bsize;
 	int error = 0, nfsvers;
@@ -692,6 +713,45 @@ nfs_vfs_getattr(mount_t mp, struct vfs_attr *fsap, vfs_context_t ctx)
 			if (nmp->nm_fsattr.nfsa_flags & NFS_FSFLAG_NAMED_ATTR)
 				caps |= VOL_CAP_INT_NAMEDSTREAMS;
 			valid |= VOL_CAP_INT_NAMEDSTREAMS;
+=======
+	register struct vnode *vp;
+	register struct nfs_statfs *sfp;
+	register caddr_t cp;
+	register u_long *tl;
+	register long t1, t2;
+	caddr_t bpos, dpos, cp2;
+	struct nfsmount *nmp = VFSTONFS(mp);
+	int error = 0, v3 = (nmp->nm_flag & NFSMNT_NFSV3), retattr;
+	struct mbuf *mreq, *mrep, *md, *mb, *mb2;
+	struct ucred *cred;
+	u_quad_t tquad;
+	extern int nfs_mount_type;
+	u_int64_t xid;
+
+#ifndef nolint
+	sfp = (struct nfs_statfs *)0;
+#endif
+	vp = nmp->nm_dvp;
+	if (error = vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p))
+		return(error);
+	cred = crget();
+	cred->cr_ngroups = 1;
+	if (v3 && (nmp->nm_flag & NFSMNT_GOTFSINFO) == 0)
+		(void)nfs_fsinfo(nmp, vp, cred, p);
+	nfsstats.rpccnt[NFSPROC_FSSTAT]++;
+	nfsm_reqhead(vp, NFSPROC_FSSTAT, NFSX_FH(v3));
+	nfsm_fhtom(vp, v3);
+	nfsm_request(vp, NFSPROC_FSSTAT, p, cred, &xid);
+	if (v3)
+		nfsm_postop_attr(vp, retattr, &xid);
+	nfsm_dissect(sfp, struct nfs_statfs *, NFSX_STATFS(v3));
+
+/* XXX CSM 12/2/97 Cleanup when/if we integrate FreeBSD mount.h */
+#ifdef notyet
+	sbp->f_type = MOUNT_NFS;
+#else
+	sbp->f_type = nfs_mount_type;
+>>>>>>> origin/10.1
 #endif
 		} else if (nmp->nm_lockmode == NFS_LOCK_MODE_DISABLED) {
 			/* locks disabled on this mount, so they definitely won't work */
@@ -774,6 +834,7 @@ nfs_vfs_getattr(mount_t mp, struct vfs_attr *fsap, vfs_context_t ctx)
 int
 nfs3_fsinfo(struct nfsmount *nmp, nfsnode_t np, vfs_context_t ctx)
 {
+<<<<<<< HEAD
 	int error = 0, lockerror, status, nmlocked = 0;
 	u_int64_t xid;
 	uint32_t val, prefsize, maxsize;
@@ -810,6 +871,51 @@ nfs3_fsinfo(struct nfsmount *nmp, nfsnode_t np, vfs_context_t ctx)
 		nmp->nm_rsize = maxsize & ~(NFS_FABLKSIZE - 1);
 		if (nmp->nm_rsize == 0)
 			nmp->nm_rsize = maxsize;
+=======
+	register struct nfsv3_fsinfo *fsp;
+	register caddr_t cp;
+	register long t1, t2;
+	register u_long *tl, pref, max;
+	caddr_t bpos, dpos, cp2;
+	int error = 0, retattr;
+	struct mbuf *mreq, *mrep, *md, *mb, *mb2;
+	u_int64_t xid;
+
+	nfsstats.rpccnt[NFSPROC_FSINFO]++;
+	nfsm_reqhead(vp, NFSPROC_FSINFO, NFSX_FH(1));
+	nfsm_fhtom(vp, 1);
+	nfsm_request(vp, NFSPROC_FSINFO, p, cred, &xid);
+	nfsm_postop_attr(vp, retattr, &xid);
+	if (!error) {
+		nfsm_dissect(fsp, struct nfsv3_fsinfo *, NFSX_V3FSINFO);
+		pref = fxdr_unsigned(u_long, fsp->fs_wtpref);
+		if (pref < nmp->nm_wsize)
+			nmp->nm_wsize = (pref + NFS_FABLKSIZE - 1) &
+				~(NFS_FABLKSIZE - 1);
+		max = fxdr_unsigned(u_long, fsp->fs_wtmax);
+		if (max < nmp->nm_wsize) {
+			nmp->nm_wsize = max & ~(NFS_FABLKSIZE - 1);
+			if (nmp->nm_wsize == 0)
+				nmp->nm_wsize = max;
+		}
+		pref = fxdr_unsigned(u_long, fsp->fs_rtpref);
+		if (pref < nmp->nm_rsize)
+			nmp->nm_rsize = (pref + NFS_FABLKSIZE - 1) &
+				~(NFS_FABLKSIZE - 1);
+		max = fxdr_unsigned(u_long, fsp->fs_rtmax);
+		if (max < nmp->nm_rsize) {
+			nmp->nm_rsize = max & ~(NFS_FABLKSIZE - 1);
+			if (nmp->nm_rsize == 0)
+				nmp->nm_rsize = max;
+		}
+		pref = fxdr_unsigned(u_long, fsp->fs_dtpref);
+		if (pref < nmp->nm_readdirsize)
+			nmp->nm_readdirsize = pref;
+		if (max < nmp->nm_readdirsize) {
+			nmp->nm_readdirsize = max;
+		}
+		nmp->nm_flag |= NFSMNT_GOTFSINFO;
+>>>>>>> origin/10.1
 	}
 	nfsm_chain_adv(error, &nmrep, NFSX_UNSIGNED); // skip rtmult
 
@@ -1232,12 +1338,18 @@ nfs_mount_diskless_private(
 		/* Get the vnode for '/'. Set fdp->fd_cdir to reference it. */
 		if (VFS_ROOT(mountlist.tqh_first, &rootvnode, NULL))
 			panic("cannot find root vnode");
+<<<<<<< HEAD
 		error = vnode_ref(rootvnode);
 		if (error) {
 			printf("nfs_mountroot: vnode_ref() failed on root vnode!\n");
 			goto out;
 		}
 		fdp->fd_cdir = rootvnode;
+=======
+		VREF(rootvnode);
+		fdp->fd_cdir = rootvnode;
+		VOP_UNLOCK(rootvnode, 0, procp);
+>>>>>>> origin/10.1
 		fdp->fd_rdir = NULL;
 	}
 
@@ -4717,6 +4829,7 @@ nfs4_getquota(struct nfsmount *nmp, vfs_context_t ctx, uid_t id, int type, struc
 	kauth_cred_t cred = vfs_context_ucred(ctx);
 	struct nfsreq_secinfo_args si;
 
+<<<<<<< HEAD
 	if (type != USRQUOTA)  /* NFSv4 only supports user quotas */
 		return (ENOTSUP);
 
@@ -4725,6 +4838,48 @@ nfs4_getquota(struct nfsmount *nmp, vfs_context_t ctx, uid_t id, int type, struc
 	    !NFS_BITMAP_ISSET(nmp->nm_fsattr.nfsa_supp_attr, NFS_FATTR_QUOTA_AVAIL_SOFT) &&
 	    !NFS_BITMAP_ISSET(nmp->nm_fsattr.nfsa_supp_attr, NFS_FATTR_QUOTA_USED))
 		return (ENOTSUP);
+=======
+	if (mntflags & MNT_FORCE)
+		flags |= FORCECLOSE;
+	nmp = VFSTONFS(mp);
+	/*
+	 * Goes something like this..
+	 * - Call vflush() to clear out vnodes for this file system,
+	 *   except for the swap files. Deal with them in 2nd pass.
+	 *   It will do vgone making the vnode VBAD at that time.
+	 * - Decrement reference on the vnode representing remote root.
+	 * - Close the socket
+	 * - Free up the data structures
+	 */
+	vp = nmp->nm_dvp;
+	
+	/*
+	 * Must handshake with nqnfs_clientd() if it is active.
+	 */
+	nmp->nm_flag |= NFSMNT_DISMINPROG;
+	while (nmp->nm_inprog != NULLVP)
+		(void) tsleep((caddr_t)&lbolt, PSOCK, "nfsdism", 0);
+	/*
+	 * vflush will check for busy vnodes on mountpoint. 
+	 * Will do the right thing for MNT_FORCE. That is, we should
+	 * not get EBUSY back.
+	 */
+	error = vflush(mp, vp, SKIPSWAP | flags);
+	if (mntflags & MNT_FORCE) 
+		error = vflush(mp, NULLVP, flags); /* locks vp in the process */
+	else {
+		if (vp->v_usecount > 1) {
+			nmp->nm_flag &= ~NFSMNT_DISMINPROG;
+			return (EBUSY);
+		}
+		error = vflush(mp, vp, flags);
+	}
+
+	if (error) {
+		nmp->nm_flag &= ~NFSMNT_DISMINPROG;
+		return (error);
+	}
+>>>>>>> origin/10.1
 
 	/*
 	 * The credential passed to the server needs to have
@@ -4744,6 +4899,7 @@ nfs4_getquota(struct nfsmount *nmp, vfs_context_t ctx, uid_t id, int type, struc
 		kauth_cred_ref(cred);
 	}
 
+<<<<<<< HEAD
 	nfsvers = nmp->nm_vers;
 	np = nmp->nm_dnp;
 	if (!np)
@@ -4752,6 +4908,20 @@ nfs4_getquota(struct nfsmount *nmp, vfs_context_t ctx, uid_t id, int type, struc
 		kauth_cred_unref(&cred);
 		return(error);
 	}
+=======
+	/*
+	 * Release the root vnode reference held by mountnfs()
+	 * vflush did the vgone for us when we didn't skip over
+	 * it in the MNT_FORCE case. (Thus vp can't be locked when
+	 * called vflush in non-skip vp case.)
+	 */
+	vrele(vp);
+	if (!(mntflags & MNT_FORCE))
+		vgone(vp);
+	mp->mnt_data = 0; /* don't want to end up using stale vp */
+	nfs_disconnect(nmp);
+	m_freem(nmp->nm_nam);
+>>>>>>> origin/10.1
 
 	NFSREQ_SECINFO_SET(&si, np, NULL, 0, NULL, 0);
 	nfsm_chain_null(&nmreq);
@@ -4857,9 +5027,38 @@ nfs_sync_callout(vnode_t vp, void *arg)
 	nfsnode_t np = VTONFS(vp);
 	int error;
 
+<<<<<<< HEAD
 	if (np->n_flag & NREVOKE) {
 		vn_revoke(vp, REVOKEALL, cargs->ctx);
 		return (VNODE_RETURNED);
+=======
+	/*
+	 * Force stale buffer cache information to be flushed.
+	 */
+loop:
+	for (vp = mp->mnt_vnodelist.lh_first;
+	     vp != NULL;
+	     vp = vp->v_mntvnodes.le_next) {
+		 int didhold = 0;
+		/*
+		 * If the vnode that we are about to sync is no longer
+		 * associated with this mount point, start over.
+		 */
+		if (vp->v_mount != mp)
+			goto loop;
+		if (VOP_ISLOCKED(vp) || vp->v_dirtyblkhd.lh_first == NULL)
+			continue;
+		if (vget(vp, LK_EXCLUSIVE, p))
+			goto loop;
+		didhold = ubc_hold(vp);
+		error = VOP_FSYNC(vp, cred, waitfor, p);
+		if (error)
+			allerror = error;
+		VOP_UNLOCK(vp, 0, p);
+		if (didhold)
+			ubc_rele(vp);
+		vrele(vp);
+>>>>>>> origin/10.1
 	}
 
 	if (LIST_EMPTY(&np->n_dirtyblkhd))

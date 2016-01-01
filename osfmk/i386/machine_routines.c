@@ -314,6 +314,7 @@ void ml_cause_interrupt(void)
 	panic("ml_cause_interrupt not defined yet on Intel");
 }
 
+<<<<<<< HEAD
 /*
  * TODO: transition users of this to kernel_thread_start_priority
  * ml_thread_policy is an unsupported KPI
@@ -334,6 +335,14 @@ __unused	unsigned policy_id,
 		                                                THREAD_PRECEDENCE_POLICY_COUNT);
 		assert(kret == KERN_SUCCESS);
 	}
+=======
+void ml_thread_policy(
+	thread_t thread,
+	unsigned policy_id,
+	unsigned policy_info)
+{
+	return;
+>>>>>>> origin/10.1
 }
 
 /* Initialize Interrupts */

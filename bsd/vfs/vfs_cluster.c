@@ -95,7 +95,16 @@
 
 #include <sys/sdt.h>
 
+<<<<<<< HEAD
 #include <stdbool.h>
+=======
+/*
+ * throttle the number of async writes that
+ * can be outstanding on a single vnode
+ * before we issue a synchronous write 
+ */
+#define ASYNC_THROTTLE  9
+>>>>>>> origin/10.1
 
 #if 0
 #undef KERNEL_DEBUG
@@ -543,9 +552,55 @@ static void cluster_handle_associated_upl(struct clios *iostate, upl_t upl,
 	if (!associated_upl)
 		return;
 
+<<<<<<< HEAD
 #if 0
 	printf("1: %d %d\n", upl_offset, upl_offset + size);
 #endif
+=======
+	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 49)) | DBG_FUNC_START,
+		     (int)f_offset, size, (int)filesize, 0, 0);
+
+	if (f_offset >= filesize) {
+	        KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 49)) | DBG_FUNC_END,
+			     (int)f_offset, 0, 0, 0, 0);
+	        return(0);
+	}
+	if (ubc_page_op(vp, f_offset, 0, 0, 0) == KERN_SUCCESS) {
+	        KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 49)) | DBG_FUNC_END,
+			     (int)f_offset, 0, 0, 0, 0);
+	        return(1);
+	}
+	if (size > (MAX_UPL_TRANSFER * PAGE_SIZE))
+	        size = MAX_UPL_TRANSFER * PAGE_SIZE;
+	else
+	        size = (size + (PAGE_SIZE - 1)) & ~(PAGE_SIZE - 1);
+
+	if ((off_t)size > (filesize - f_offset))
+	        size = ((filesize - f_offset) + (devblocksize - 1)) & ~(devblocksize - 1);
+	
+	pages_in_upl = (size + (PAGE_SIZE - 1)) / PAGE_SIZE;
+
+	ubc_create_upl(vp,
+		       	f_offset,
+		       	pages_in_upl * PAGE_SIZE,
+				&upl, 
+				&pl,
+				UPL_FLAGS_NONE);
+
+	if (upl == (upl_t) 0)
+	        return(0);
+
+	/*
+	 * scan from the beginning of the upl looking for the first
+	 * non-valid page.... this will become the first page in
+	 * the request we're going to make to 'cluster_io'... if all
+	 * of the pages are valid, we won't call through to 'cluster_io'
+	 */
+	for (start_pg = 0; start_pg < pages_in_upl; start_pg++) {
+	        if (!upl_valid_page(pl, start_pg))
+		        break;
+	}
+>>>>>>> origin/10.1
 
 	/*
 	 * The associated UPL is page aligned to file offsets whereas the
@@ -616,6 +671,7 @@ static void cluster_handle_associated_upl(struct clios *iostate, upl_t upl,
 
 		// And now the last page...
 
+<<<<<<< HEAD
 		/*
 		 * This needs to be > rather than >= because if it's equal, it
 		 * means there's another transaction that is sharing the last
@@ -626,6 +682,20 @@ static void cluster_handle_associated_upl(struct clios *iostate, upl_t upl,
 		else {
 			upl_end = trunc_page_32(upl_end);
 			const int last_pg = (upl_end >> PAGE_SHIFT) - 1;
+=======
+static void
+cluster_rd_ahead(vp, b_lblkno, e_lblkno, filesize, devblocksize)
+	struct vnode *vp;
+	daddr_t       b_lblkno;
+	daddr_t       e_lblkno;
+	off_t         filesize;
+	int           devblocksize;
+{
+	daddr_t       r_lblkno;
+	off_t         f_offset;
+	int           size_of_prefetch;
+	int           max_pages;
+>>>>>>> origin/10.1
 
 			if (!upl_page_get_mark(assoc_pl, last_pg)) {
 				/*
@@ -651,6 +721,10 @@ static void cluster_handle_associated_upl(struct clios *iostate, upl_t upl,
 		assert(!(upl_offset & PAGE_MASK));
 		assert(!(size & PAGE_MASK));
 	}
+<<<<<<< HEAD
+=======
+	max_pages = MAX_UPL_TRANSFER;
+>>>>>>> origin/10.1
 
 	boolean_t empty;
 
@@ -994,7 +1068,98 @@ cluster_wait_IO(buf_t cbp_head, int async)
 	        if (async) {
 			while (!ISSET(cbp->b_flags, B_TDONE)) {
 
+<<<<<<< HEAD
 				lck_mtx_lock_spin(cl_transaction_mtxp);
+=======
+		ubc_upl_abort_range(upl, (upl_offset & ~PAGE_MASK), upl_size, 
+				UPL_ABORT_FREE_ON_EMPTY);
+	    }
+
+	  if (force_data_sync >= 3)
+	    {
+	      KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 76)) | DBG_FUNC_END,
+			   i, pages_in_pl, upl_size, kret, 0);
+
+	      KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 75)) | DBG_FUNC_END,
+			   (int)uio->uio_offset, (int)uio->uio_resid, kret, 2, 0);
+	      return(0);
+	    }
+
+	  /*
+	   * Consider the possibility that upl_size wasn't satisfied.
+	   */
+	  if (upl_size != upl_needed_size)
+	    io_size = (upl_size - (int)upl_offset) & ~PAGE_MASK;
+
+	  KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 76)) | DBG_FUNC_END,
+		       (int)upl_offset, upl_size, iov->iov_base, io_size, 0);		       
+
+	  if (io_size == 0)
+	    {
+	      ubc_upl_abort_range(upl, (upl_offset & ~PAGE_MASK), upl_size, 
+				   UPL_ABORT_FREE_ON_EMPTY);
+	      KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 75)) | DBG_FUNC_END,
+		     (int)uio->uio_offset, uio->uio_resid, 0, 3, 0);
+
+	      return(0);
+	    }
+
+	  /*
+	   * Now look for pages already in the cache
+	   * and throw them away.
+	   */
+
+	  upl_f_offset = uio->uio_offset;   /* this is page aligned in the file */
+	  max_io_size = io_size;
+
+	  while (max_io_size) {
+
+	    /*
+	     * Flag UPL_POP_DUMP says if the page is found
+	     * in the page cache it must be thrown away.
+	     */
+	    ubc_page_op(vp, 
+			upl_f_offset,
+			UPL_POP_SET | UPL_POP_BUSY | UPL_POP_DUMP,
+			0, 0);
+	    max_io_size  -= PAGE_SIZE;
+	    upl_f_offset += PAGE_SIZE;
+	  }
+
+	  /*
+	   * issue a synchronous write to cluster_io
+	   */
+
+	  KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 77)) | DBG_FUNC_START,
+		       (int)upl_offset, (int)uio->uio_offset, io_size, 0, 0);
+
+	  error = cluster_io(vp, upl, upl_offset, uio->uio_offset,
+			     io_size, 0, (struct buf *)0);
+
+	  if (error == 0) {
+	    /*
+	     * The cluster_io write completed successfully,
+	     * update the uio structure.
+	     */
+	    iov->iov_base += io_size;
+	    iov->iov_len -= io_size;
+	    uio->uio_resid -= io_size;
+	    uio->uio_offset += io_size;
+	  }
+	  /*
+	   * always 'commit' the I/O via the abort primitive whether the I/O
+	   * succeeded cleanly or not... this is necessary to insure that 
+	   * we preserve the state of the DIRTY flag on the pages used to
+	   * provide the data for the I/O... the state of this flag SHOULD
+	   * NOT be changed by a write
+	   */
+	  ubc_upl_abort_range(upl, (upl_offset & ~PAGE_MASK), upl_size, 
+			      UPL_ABORT_FREE_ON_EMPTY);
+
+
+	  KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 77)) | DBG_FUNC_END,
+		       (int)upl_offset, (int)uio->uio_offset, (int)uio->uio_resid, error, 0);
+>>>>>>> origin/10.1
 
 				if (!ISSET(cbp->b_flags, B_TDONE)) {
 					DTRACE_IO1(wait__start, buf_t, cbp);

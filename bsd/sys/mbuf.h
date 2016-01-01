@@ -639,9 +639,57 @@ struct mbuf {
 #define	MCHECK(m)
 #endif
 
+<<<<<<< HEAD
 #define	MGET(m, how, type) ((m) = m_get((how), (type)))
 
 #define	MGETHDR(m, how, type)	((m) = m_gethdr((how), (type)))
+=======
+extern struct mbuf *mfree;				/* mbuf free list */
+extern simple_lock_data_t   mbuf_slock;
+
+#define _MINTGET(m, type) { 						\
+	MBUF_LOCK();							\
+	if (((m) = mfree) != 0) {					\
+		MCHECK(m);								\
+		++mclrefcnt[mtocl(m)]; 					\
+		mbstat.m_mtypes[MT_FREE]--;				\
+		mbstat.m_mtypes[type]++;				\
+		mfree = (m)->m_next;					\
+	}								\
+	MBUF_UNLOCK();							\
+}
+	
+#define	MGET(m, how, type) {						\
+	_MINTGET(m, type);						\
+	if (m) { 							\
+		(m)->m_next = (m)->m_nextpkt = 0; 			\
+		(m)->m_len = 0;						\
+		(m)->m_type = (type); 					\
+		(m)->m_data = (m)->m_dat; 				\
+		(m)->m_flags = 0; 					\
+	} else 								\
+		(m) = m_retry((how), (type)); 				\
+}
+
+#define	MGETHDR(m, how, type) { 					\
+	_MINTGET(m, type);						\
+	if (m) { 							\
+		(m)->m_next = (m)->m_nextpkt = 0; 			\
+		(m)->m_type = (type); 					\
+		(m)->m_data = (m)->m_pktdat; 				\
+		(m)->m_flags = M_PKTHDR; 				\
+		(m)->m_pkthdr.len = 0;					\
+		(m)->m_pkthdr.rcvif = NULL; 				\
+		(m)->m_pkthdr.header = NULL; 				\
+		(m)->m_pkthdr.csum_flags = 0; 				\
+		(m)->m_pkthdr.csum_data = 0; 				\
+		(m)->m_pkthdr.aux = (struct mbuf *)NULL; 		\
+		(m)->m_pkthdr.reserved1 = NULL; 			\
+		(m)->m_pkthdr.reserved2 = NULL; 			\
+	} else 								\
+		(m) = m_retryhdr((how), (type)); 			\
+}
+>>>>>>> origin/10.1
 
 /*
  * Mbuf cluster macros.

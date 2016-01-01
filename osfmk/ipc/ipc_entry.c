@@ -571,7 +571,21 @@ ipc_entry_grow_table(
 			is_write_unlock(space);
 			return KERN_NO_SPACE;
 		}
+<<<<<<< HEAD
 	}
+=======
+ 
+		nits = its + 1;
+		nsize = nits->its_size;
+
+		assert((osize < size) && (size <= nsize));
+
+		/*
+		 *	OK, we'll attempt to grow the table.
+		 *	The realloc requires that the old table
+		 *	remain in existence.
+		 */
+>>>>>>> origin/10.1
 
 	if (osize == size) {
 		is_write_unlock(space);

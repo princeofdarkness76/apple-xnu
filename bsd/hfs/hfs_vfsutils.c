@@ -104,7 +104,11 @@ unsigned char hfs_startupname[] = "Startup File";
 
 #if CONFIG_HFS_STD
 OSErr hfs_MountHFSVolume(struct hfsmount *hfsmp, HFSMasterDirectoryBlock *mdb,
+<<<<<<< HEAD
 		__unused struct proc *p)
+=======
+		struct proc *p)
+>>>>>>> origin/10.1
 {
 	ExtendedVCB *vcb = HFSTOVCB(hfsmp);
 	int error;
@@ -160,6 +164,7 @@ OSErr hfs_MountHFSVolume(struct hfsmount *hfsmp, HFSMasterDirectoryBlock *mdb,
 	 * When an HFS name cannot be encoded with the current
 	 * volume encoding we use MacRoman as a fallback.
 	 */
+<<<<<<< HEAD
 	if (error || (utf8chars == 0)) {
 		error = mac_roman_to_utf8(mdb->drVN, NAME_MAX, &utf8chars, vcb->vcbVN);
 		/* If we fail to encode to UTF8 from Mac Roman, the name is bad.  Deny the mount */
@@ -167,6 +172,14 @@ OSErr hfs_MountHFSVolume(struct hfsmount *hfsmp, HFSMasterDirectoryBlock *mdb,
 			goto MtVolErr;
 		}
 	}
+=======
+	if (err || (utf8chars == 0))
+		(void) mac_roman_to_utf8(mdb->drVN, NAME_MAX, &utf8chars, vcb->vcbVN);
+
+    //	Initialize our dirID/nodePtr cache associated with this volume.
+    err = InitMRUCache( sizeof(UInt32), kDefaultNumMRUCacheBlocks, &(vcb->hintCachePtr) );
+    ReturnIfError( err );
+>>>>>>> origin/10.1
 
 	hfsmp->hfs_logBlockSize = BestBlockSizeFit(vcb->blockSize, MAXBSIZE, hfsmp->hfs_logical_block_size);
 	vcb->vcbVBMIOSize = kHFSBlockSize;
@@ -384,7 +397,11 @@ OSErr hfs_ValidateHFSPlusVolumeHeader(struct hfsmount *hfsmp, HFSPlusVolumeHeade
 //*******************************************************************************
 
 OSErr hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
+<<<<<<< HEAD
 	off_t embeddedOffset, u_int64_t disksize, __unused struct proc *p, void *args, kauth_cred_t cred)
+=======
+	off_t embeddedOffset, off_t disksize, struct proc *p)
+>>>>>>> origin/10.1
 {
 	register ExtendedVCB *vcb;
 	struct cat_desc cndesc;
@@ -459,6 +476,24 @@ OSErr hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 		hfsmp->hfs_log_per_phys = 1;
 	}
 
+<<<<<<< HEAD
+=======
+    retval = ValidVolumeHeader(vhp);	/*	make sure this is an HFS Plus disk */
+    if (retval)
+    	return MacToVFSError(retval);
+   
+	/* don't mount a writable volume if its dirty, it must be cleaned by fsck_hfs */
+	if (hfsmp->hfs_fs_ronly == 0 && (SWAP_BE32 (vhp->attributes) & kHFSVolumeUnmountedMask) == 0)
+		return (EINVAL);
+
+	/* Make sure we can live with the physical block size. */
+	if ((disksize & (hfsmp->hfs_phys_block_size - 1)) ||
+	    (embeddedOffset & (hfsmp->hfs_phys_block_size - 1)) ||
+	    (SWAP_BE32(vhp->blockSize) < hfsmp->hfs_phys_block_size)) {
+		return (ENXIO);
+	}
+
+>>>>>>> origin/10.1
 	/*
 	 * The VolumeHeader seems OK: transfer info from it into VCB
 	 * Note - the VCB starts out clear (all zeros)
@@ -497,6 +532,7 @@ OSErr hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 	/* Default to no free block reserve */
 	vcb->reserveBlocks = 0;
 
+<<<<<<< HEAD
 	/*
 	 * Update the logical block size in the mount struct
 	 * (currently set up from the wrapper MDB) using the
@@ -511,6 +547,17 @@ OSErr hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 	 * Note that there may be spare sectors beyond the end of the filesystem that still 
 	 * belong to our partition. 
 	 */
+=======
+	/*	Now fill in the Extended VCB info */
+	vcb->nextAllocation			=	SWAP_BE32 (vhp->nextAllocation);
+	vcb->totalBlocks			=	SWAP_BE32 (vhp->totalBlocks);
+	vcb->freeBlocks				=	SWAP_BE32 (vhp->freeBlocks);
+	vcb->blockSize				=	SWAP_BE32 (vhp->blockSize);
+	vcb->checkedDate			=	SWAP_BE32 (vhp->checkedDate);
+	vcb->encodingsBitmap		=	SWAP_BE64 (vhp->encodingsBitmap);
+	
+	vcb->hfsPlusIOPosOffset		=	embeddedOffset;
+>>>>>>> origin/10.1
 
 	spare_sectors = hfsmp->hfs_logical_block_count -
 	                (((daddr64_t)vcb->totalBlocks * blockSize) /
@@ -1030,9 +1077,25 @@ OSErr hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 #endif
 #endif
 
+<<<<<<< HEAD
 		if (cp_is_valid_class(0, hfsmp->default_cp_class) == 0) {
 			hfsmp->default_cp_class = PROTECTION_CLASS_C;
 		}
+=======
+/*
+ * hfs_resolvelink - auto resolve HFS+ hardlinks
+ *
+ * Used after calling GetCatalogNode or GetCatalogOffspring
+ */
+void hfs_resolvelink(ExtendedVCB *vcb, CatalogNodeData *cndp)
+{
+	struct FInfo *fip;
+	char iNodeName[32];
+	UInt32 hint;
+	UInt32 indlinkno;
+	UInt32 linkparid, linkcnid;
+	OSErr result;
+>>>>>>> origin/10.1
 
 #else
 		/* If CONFIG_PROTECT not built, ignore CP */
@@ -1043,6 +1106,7 @@ OSErr hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 	/*
 	 * Establish a metadata allocation zone.
 	 */
+<<<<<<< HEAD
 	hfs_metadatazone_init(hfsmp, false);
 
 	/*
@@ -1057,6 +1121,37 @@ OSErr hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 	} else {
 		if (vcb->nextAllocation <= 1) {
 			vcb->nextAllocation = hfsmp->hfs_min_alloc_start;
+=======
+	if ((vcb->vcbSigWord == kHFSPlusSigWord)
+		&& (cndp->cnd_type == kCatalogFileNode)
+	    && (fip->fdType == kHardLinkFileType)
+	    && (fip->fdCreator == kHFSPlusCreator)
+	    && ((cndp->cnd_createDate == vcb->vcbCrDate) ||
+			(cndp->cnd_createDate == VCBTOHFS(vcb)->hfs_metadata_createdate))) {
+		
+		indlinkno = cndp->cnd_iNodeNum;
+		MAKE_INODE_NAME(iNodeName, indlinkno);
+		/*
+		 * Get nodeData from the data node file. 
+		 * Flag the node data to NOT copy the name (ie preserve the original)
+		 * Also preserve the parent directory ID.
+		 */
+		linkparid = cndp->cnm_parID;
+		linkcnid = cndp->cnd_nodeID;
+		cndp->cnm_flags |= kCatNameNoCopyName;
+		result = GetCatalogNode(vcb, VCBTOHFS(vcb)->hfs_private_metadata_dir,
+		                iNodeName, 0, 0, cndp, &hint);
+		cndp->cnm_flags &= ~kCatNameNoCopyName;
+
+		/* Make sure there's a reference */
+		if (result == 0) {
+			if (cndp->cnd_linkCount == 0) cndp->cnd_linkCount = 2;
+			
+			/* Keep a copy of iNodeNum to put into h_indnodeno */
+			cndp->cnd_iNodeNumCopy = indlinkno;
+			cndp->cnm_parID = linkparid;
+			cndp->cnd_linkCNID = linkcnid;
+>>>>>>> origin/10.1
 		}
 	}
 	vcb->sparseAllocation = hfsmp->hfs_min_alloc_start;
@@ -1281,6 +1376,7 @@ bool overflow_extents(struct filefork *fp)
 		if (fp->ff_extents[2].blockCount == 0)
 			return false;
 
+<<<<<<< HEAD
 		blocks = fp->ff_extents[0].blockCount +
 			fp->ff_extents[1].blockCount +
 			fp->ff_extents[2].blockCount;	
@@ -1323,6 +1419,88 @@ hfs_lock_global (struct hfsmount *hfsmp, enum hfs_locktype locktype)
 	if (hfsmp->hfs_global_lockowner == thread) {
 		panic ("hfs_lock_global: locking against myself!");
 	}
+=======
+	hfsmp	= VCBTOHFS(vcb);
+	mp		= HFSTOVFS(hfsmp);
+	dev		= hfsmp->hfs_raw_dev;
+
+	/* Check if unmount in progress */
+	if (mp->mnt_kern_flag & MNTK_UNMOUNT) {
+		*vpp = NULL;
+		return (EPERM);
+	}
+
+	/*
+	 * If this is a hard link then check if the
+	 * data node already exists in our hash.
+	 */
+	if ((forkType == kDataFork)
+		&& (catInfo->nodeData.cnd_type == kCatalogFileNode)
+		&& ((catInfo->nodeData.cnd_mode & IFMT) == IFREG)
+		&& (catInfo->nodeData.cnd_linkCount > 0)) {
+		vp = hfs_vhashget(dev, catInfo->nodeData.cnd_nodeID, kDataFork);
+		if (vp != NULL) {
+			/* Use the name of the link and it's parent ID. */
+			hp = VTOH(vp);
+			H_DIRID(hp) = catInfo->nodeData.cnm_parID;
+			hfs_set_metaname(catInfo->nodeData.cnm_nameptr, hp->h_meta, hfsmp);
+			*vpp = vp;
+			return (0);
+		}
+	}
+
+	MALLOC_ZONE(hp, struct hfsnode *, sizeof(struct hfsnode), M_HFSNODE, M_WAITOK);
+	bzero((caddr_t)hp, sizeof(struct hfsnode));
+	hp->h_nodeflags |= IN_ALLOCATING;
+	lockinit(&hp->h_lock, PINOD, "hfsnode", 0, 0);
+	H_FORKTYPE(hp) = forkType;
+	rl_init(&hp->h_invalidranges);
+
+	/*
+	 * There were several blocking points since we first
+	 * checked the hash. Now that we're through blocking,
+	 * check the hash again in case we're racing for the
+	 * same hnode.
+	 */
+	vp = hfs_vhashget(dev, catInfo->nodeData.cnd_nodeID, forkType);
+	if (vp != NULL) {
+		/* We lost the race, use the winner's vnode */
+		FREE_ZONE(hp, sizeof(struct hfsnode), M_HFSNODE);
+		*vpp = vp;
+		UBCINFOCHECK("hfs_vcreate", vp);
+		return (0);
+	}
+
+	/*
+	 * Insert the hfsnode into the hash queue, also if meta exists
+	 * add to sibling list and return the meta address
+	 */
+	fm = NULL;
+	if  (SIBLING_FORKTYPE(forkType))
+		hfs_vhashins_sibling(dev, catInfo->nodeData.cnd_nodeID, hp, &fm);
+	else
+		hfs_vhashins(dev, catInfo->nodeData.cnd_nodeID, hp);
+>>>>>>> origin/10.1
+
+	/* Allocate a new vnode. If unsuccesful, leave after freeing memory */
+	if ((retval = getnewvnode(VT_HFS, mp, hfs_vnodeop_p, &vp))) {
+		hfs_vhashrem(hp);
+		if (hp->h_nodeflags & IN_WANT) {
+			hp->h_nodeflags &= ~IN_WANT;
+			wakeup(hp);
+		}
+		FREE_ZONE(hp, sizeof(struct hfsnode), M_HFSNODE);
+		*vpp = NULL;
+		return (retval);
+	}
+	hp->h_vp = vp;
+	vp->v_data = hp;
+
+	hp->h_nodeflags &= ~IN_ALLOCATING;
+	if (hp->h_nodeflags & IN_WANT) {
+		hp->h_nodeflags &= ~IN_WANT;
+		wakeup((caddr_t)hp);
+	}
 
 	/*
 	 * This check isn't really necessary but this stops us taking
@@ -1341,6 +1519,7 @@ frozen:
 
 		struct timespec ts = { 0, 500 * NSEC_PER_MSEC };
 
+<<<<<<< HEAD
 		while (hfs_is_frozen(hfsmp)) {
 			if (hfsmp->hfs_freeze_state == HFS_FROZEN
 				&& proc_exiting(hfsmp->hfs_freezing_proc)) {
@@ -1353,6 +1532,12 @@ frozen:
 		}
 		hfs_unlock_mount(hfsmp);
 	}
+=======
+	/*
+	 * Init the File Control Block.
+	 */
+	CopyCatalogToFCB(catInfo, vp);
+>>>>>>> origin/10.1
 
 	/* HFS_SHARED_LOCK */
 	if (locktype == HFS_SHARED_LOCK) {
@@ -1365,6 +1550,7 @@ frozen:
 		hfsmp->hfs_global_lockowner = thread;
 	}
 
+<<<<<<< HEAD
 	/* 
 	 * We have to check if we're frozen again because of the time
 	 * between when we checked and when we took the global lock.
@@ -1415,6 +1601,26 @@ void hfs_lock_mount (struct hfsmount *hfsmp) {
 inline
 void hfs_unlock_mount (struct hfsmount *hfsmp) {
 	lck_mtx_unlock (&(hfsmp->hfs_mutex));
+=======
+	/*
+	 * Initialize the vnode from the inode, check for aliases, sets the VROOT flag.
+	 * Note that the underlying vnode may have changed.
+	 */
+	if ((retval = hfs_vinit(mp, hfs_specop_p, hfs_fifoop_p, &vp))) {
+		vput(vp);
+		*vpp = NULL;
+		return (retval);
+	}
+
+	/*
+	 * Finish inode initialization now that aliasing has been resolved.
+	 */
+	hp->h_meta->h_devvp = hfsmp->hfs_devvp;
+	VREF(hp->h_meta->h_devvp);
+    
+	*vpp = vp;
+	return 0;
+>>>>>>> origin/10.1
 }
 
 /*
@@ -2349,6 +2555,7 @@ hfs_getdirhint(struct cnode *dcp, int index, int detach)
 	return (hint);
 }
 
+<<<<<<< HEAD
 /*
  * Release a single directory hint.
  *
@@ -2458,6 +2665,198 @@ hfs_namecmp(const u_int8_t *str1, size_t len1, const u_int8_t *str2, size_t len2
 		goto out;
 	if (utf8_decodestr(str2, len2, ustr2, &ulen2, maxbytes, ':', 0) != 0)
 		goto out;
+=======
+			  case kCatalogFileNode:
+			  	/* Files in an HFS+ catalog can represent many things (regular files, symlinks, block/character devices, ...) */
+    			if ((HTOVCB(hp)->vcbSigWord == kHFSPlusSigWord) &&
+    				(catalogInfo->nodeData.cnd_mode & IFMT)) {
+					*((fsobj_type_t *)attrbufptr)++	=
+					    IFTOVT((mode_t)catalogInfo->nodeData.cnd_mode);
+				} else {
+					*((fsobj_type_t *)attrbufptr)++	= VREG;
+				};
+				break;
+				
+			  default:
+			  	*((fsobj_type_t *)attrbufptr)++	= VNON;
+			  	break;
+			};
+		}
+		if (a & ATTR_CMN_OBJTAG) *((fsobj_tag_t *)attrbufptr)++ = root_vp->v_tag;
+        if (a & ATTR_CMN_OBJID) {
+            u_int32_t cnid;
+ 
+            /* For hard links use the link's cnid */
+            if (catalogInfo->nodeData.cnd_iNodeNumCopy != 0)
+			  	cnid = catalogInfo->nodeData.cnd_linkCNID;
+            else
+			  	cnid = catalogInfo->nodeData.cnd_nodeID;
+            ((fsobj_id_t *)attrbufptr)->fid_objno = cnid;
+            ((fsobj_id_t *)attrbufptr)->fid_generation = 0;
+            ++((fsobj_id_t *)attrbufptr);
+        };
+        if (a & ATTR_CMN_OBJPERMANENTID) {
+            u_int32_t cnid;
+ 
+            /* For hard links use the link's cnid */
+            if (catalogInfo->nodeData.cnd_iNodeNumCopy != 0)
+			  	cnid = catalogInfo->nodeData.cnd_linkCNID;
+			else
+			  	cnid = catalogInfo->nodeData.cnd_nodeID;
+            ((fsobj_id_t *)attrbufptr)->fid_objno = cnid;
+            ((fsobj_id_t *)attrbufptr)->fid_generation = 0;
+            ++((fsobj_id_t *)attrbufptr);
+        };
+		if (a & ATTR_CMN_PAROBJID)
+		{
+            ((fsobj_id_t *)attrbufptr)->fid_objno = catalogInfo->nodeData.cnm_parID;
+			((fsobj_id_t *)attrbufptr)->fid_generation = 0;
+			++((fsobj_id_t *)attrbufptr);
+		};
+        if (a & ATTR_CMN_SCRIPT)
+	  {
+	    if (HTOVCB(hp)->vcbSigWord == kHFSPlusSigWord) {
+			*((text_encoding_t *)attrbufptr)++ = catalogInfo->nodeData.cnd_textEncoding;
+	    } else {
+			*((text_encoding_t *)attrbufptr)++ = VTOHFS(root_vp)->hfs_encoding;
+	    }
+	  };
+		if (a & ATTR_CMN_CRTIME)
+		{
+			((struct timespec *)attrbufptr)->tv_sec = to_bsd_time(catalogInfo->nodeData.cnd_createDate);
+			((struct timespec *)attrbufptr)->tv_nsec = 0;
+			++((struct timespec *)attrbufptr);
+		};
+		if (a & ATTR_CMN_MODTIME)
+		{
+			((struct timespec *)attrbufptr)->tv_sec = to_bsd_time(catalogInfo->nodeData.cnd_contentModDate);
+			((struct timespec *)attrbufptr)->tv_nsec = 0;
+			++((struct timespec *)attrbufptr);
+		};
+		if (a & ATTR_CMN_CHGTIME)
+		{
+			((struct timespec *)attrbufptr)->tv_sec = to_bsd_time(catalogInfo->nodeData.cnd_attributeModDate);
+			((struct timespec *)attrbufptr)->tv_nsec = 0;
+			++((struct timespec *)attrbufptr);
+		};
+		if (a & ATTR_CMN_ACCTIME)
+		{
+			((struct timespec *)attrbufptr)->tv_sec = to_bsd_time(catalogInfo->nodeData.cnd_accessDate);
+			((struct timespec *)attrbufptr)->tv_nsec = 0;
+			++((struct timespec *)attrbufptr);
+		};
+		if (a & ATTR_CMN_BKUPTIME)
+		{
+			((struct timespec *)attrbufptr)->tv_sec = to_bsd_time(catalogInfo->nodeData.cnd_backupDate);
+			((struct timespec *)attrbufptr)->tv_nsec = 0;
+			++((struct timespec *)attrbufptr);
+		};
+		if (a & ATTR_CMN_FNDRINFO)
+		{
+			bcopy (&catalogInfo->nodeData.cnd_finderInfo, attrbufptr, sizeof(catalogInfo->nodeData.cnd_finderInfo));
+			(char *)attrbufptr += sizeof(catalogInfo->nodeData.cnd_finderInfo);
+		};
+		if (a & ATTR_CMN_OWNERID) {
+			if ((VTOVFS(root_vp)->mnt_flag & MNT_UNKNOWNPERMISSIONS) ||
+				((catalogInfo->nodeData.cnd_mode & IFMT) == 0)) {
+				*((uid_t *)attrbufptr)++ =
+					(VTOHFS(root_vp)->hfs_uid == UNKNOWNUID) ? console_user : VTOHFS(root_vp)->hfs_uid;
+			} else {
+				*((uid_t *)attrbufptr)++ =
+					(catalogInfo->nodeData.cnd_ownerID == UNKNOWNUID) ? console_user : catalogInfo->nodeData.cnd_ownerID;
+			};
+		}
+		if (a & ATTR_CMN_GRPID) {
+			if ((VTOVFS(root_vp)->mnt_flag & MNT_UNKNOWNPERMISSIONS) ||
+				((catalogInfo->nodeData.cnd_mode & IFMT) == 0)) {
+				*((gid_t *)attrbufptr)++ = VTOHFS(root_vp)->hfs_gid;
+			} else {
+				*((gid_t *)attrbufptr)++ = catalogInfo->nodeData.cnd_groupID;
+			};
+		}
+		if (a & ATTR_CMN_ACCESSMASK) {
+			if (((catalogInfo->nodeData.cnd_mode & IFMT) == 0)
+#if OVERRIDE_UNKNOWN_PERMISSIONS
+				|| (VTOVFS(root_vp)->mnt_flag & MNT_UNKNOWNPERMISSIONS)
+#endif
+				) {
+				switch (catalogInfo->nodeData.cnd_type) {
+				  case kCatalogFileNode:
+				  	/* Files in an HFS+ catalog can represent many things (regular files, symlinks, block/character devices, ...) */
+					*((u_long *)attrbufptr)++ = (u_long)(IFREG | (ACCESSPERMS & (u_long)(VTOHFS(root_vp)->hfs_file_mask)));
+					break;
+					
+				  case kCatalogFolderNode:
+					*((u_long *)attrbufptr)++ = (u_long)(IFDIR | (ACCESSPERMS & (u_long)(VTOHFS(root_vp)->hfs_dir_mask)));
+					break;
+				  
+				  default:
+					*((u_long *)attrbufptr)++ = (u_long)((catalogInfo->nodeData.cnd_mode & IFMT) |
+														 VTOHFS(root_vp)->hfs_dir_mask);
+				};
+			} else {
+				*((u_long *)attrbufptr)++ =
+				    (u_long)catalogInfo->nodeData.cnd_mode;
+			};
+		}
+		if (a & ATTR_CMN_NAMEDATTRCOUNT) *((u_long *)attrbufptr)++ = 0;			/* XXX PPD TBC */
+		if (a & ATTR_CMN_NAMEDATTRLIST)
+		{
+			attrlength = 0;
+			((struct attrreference *)attrbufptr)->attr_dataoffset	= 0;
+			((struct attrreference *)attrbufptr)->attr_length		= attrlength;
+			
+			/* Advance beyond the space just allocated and round up to the next 4-byte boundary: */
+			(char *)varbufptr += attrlength + ((4 - (attrlength & 3)) & 3);
+			++((struct attrreference *)attrbufptr);
+		};
+		if (a & ATTR_CMN_FLAGS) {
+			u_long flags;
+
+			if (catalogInfo->nodeData.cnd_mode & IFMT)
+				flags = catalogInfo->nodeData.cnd_ownerFlags |
+				        catalogInfo->nodeData.cnd_adminFlags << 16;
+			else
+				flags = 0;
+
+			if (catalogInfo->nodeData.cnd_type == kCatalogFileNode) {
+				if (catalogInfo->nodeData.cnd_flags & kHFSFileLockedMask)
+					flags |= UF_IMMUTABLE;
+				else
+					flags &= ~UF_IMMUTABLE;
+			};
+			*((u_long *)attrbufptr)++ = flags;
+		};
+		if (a & ATTR_CMN_USERACCESS) {
+			if ((VTOVFS(root_vp)->mnt_flag & MNT_UNKNOWNPERMISSIONS) ||
+				((catalogInfo->nodeData.cnd_mode & IFMT) == 0)) {
+				*((u_long *)attrbufptr)++ =
+					DerivePermissionSummary((VTOHFS(root_vp)->hfs_uid == UNKNOWNUID) ? console_user : VTOHFS(root_vp)->hfs_uid,
+											VTOHFS(root_vp)->hfs_gid,
+#if OVERRIDE_UNKNOWN_PERMISSIONS
+											(catalogInfo->nodeData.cnd_type == kCatalogFileNode) ? VTOHFS(root_vp)->hfs_file_mask : VTOHFS(root_vp)->hfs_dir_mask,
+#else
+											(catalogInfo->nodeData.cnd_mode & IFMT) ?
+												(u_long)catalogInfo->nodeData.cnd_mode :
+												((catalogInfo->nodeData.cnd_type == kCatalogFileNode) ?
+													VTOHFS(root_vp)->hfs_file_mask :
+													VTOHFS(root_vp)->hfs_dir_mask),
+#endif
+											VTOVFS(root_vp),
+											current_proc()->p_ucred,
+											current_proc());
+			} else {
+				*((u_long *)attrbufptr)++ =
+					DerivePermissionSummary((catalogInfo->nodeData.cnd_ownerID == UNKNOWNUID) ? console_user : catalogInfo->nodeData.cnd_ownerID,
+											catalogInfo->nodeData.cnd_groupID,
+											(mode_t)catalogInfo->nodeData.cnd_mode,
+											VTOVFS(root_vp),
+											current_proc()->p_ucred,
+											current_proc());
+			};
+		};
+	};
+>>>>>>> origin/10.1
 	
 	cmp = FastUnicodeCompare(ustr1, ulen1>>1, ustr2, ulen2>>1);
 out:
@@ -2607,6 +3006,7 @@ hfs_early_journal_init(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 	u_int64_t	  jib_size;
 	const char *dev_name;
 	
+<<<<<<< HEAD
 	devvp = hfsmp->hfs_devvp;
 	dev_name = vnode_getname_printable(devvp);
 
@@ -2657,6 +3057,52 @@ hfs_early_journal_init(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 		    buf_brelse(jinfo_bp);
 		    retval = EROFS;
 		    goto cleanup_dev_name;
+=======
+    if ((a = alist->commonattr) != 0) {
+        if (a & ATTR_CMN_NAME) {
+			PackObjectName(vp, H_NAME(hp), hp->h_meta->h_namelen, &attrbufptr, &varbufptr);
+        };
+		if (a & ATTR_CMN_DEVID) *((dev_t *)attrbufptr)++ = H_DEV(hp);
+		if (a & ATTR_CMN_FSID) {
+			*((fsid_t *)attrbufptr) = VTOVFS(vp)->mnt_stat.f_fsid;
+			++((fsid_t *)attrbufptr);
+		};
+		if (a & ATTR_CMN_OBJTYPE) *((fsobj_type_t *)attrbufptr)++ = vp->v_type;
+		if (a & ATTR_CMN_OBJTAG) *((fsobj_tag_t *)attrbufptr)++ = vp->v_tag;
+        if (a & ATTR_CMN_OBJID)	{
+            u_int32_t cnid;
+
+            /* For hard links use the link's cnid */
+            if (hp->h_meta->h_metaflags & IN_DATANODE)
+                cnid = catInfo->nodeData.cnd_linkCNID;
+            else
+                cnid = H_FILEID(hp);
+            ((fsobj_id_t *)attrbufptr)->fid_objno = cnid;
+			((fsobj_id_t *)attrbufptr)->fid_generation = 0;
+			++((fsobj_id_t *)attrbufptr);
+		};
+        if (a & ATTR_CMN_OBJPERMANENTID)	{
+            u_int32_t cnid;
+
+            /* For hard links use the link's cnid */
+            if (hp->h_meta->h_metaflags & IN_DATANODE)
+                cnid = catInfo->nodeData.cnd_linkCNID;
+            else
+                cnid = H_FILEID(hp);
+            ((fsobj_id_t *)attrbufptr)->fid_objno = cnid;
+            ((fsobj_id_t *)attrbufptr)->fid_generation = 0;
+            ++((fsobj_id_t *)attrbufptr);
+        };
+		if (a & ATTR_CMN_PAROBJID) {
+            ((fsobj_id_t *)attrbufptr)->fid_objno = H_DIRID(hp);
+			((fsobj_id_t *)attrbufptr)->fid_generation = 0;
+			++((fsobj_id_t *)attrbufptr);
+		};
+        if (a & ATTR_CMN_SCRIPT)
+	  {
+	    if (HTOVCB(hp)->vcbSigWord == kHFSPlusSigWord) {
+			*((text_encoding_t *)attrbufptr)++ = catInfo->nodeData.cnd_textEncoding;
+>>>>>>> origin/10.1
 	    } else {
 		    if (IOBSDGetPlatformSerialNumber(&jibp->machine_serial_num[0], sizeof(jibp->machine_serial_num)) != KERN_SUCCESS) {
 			    strlcpy(&jibp->machine_serial_num[0], "unknown-machine-uuid", sizeof(jibp->machine_serial_num));
@@ -3852,9 +4298,101 @@ check_for_dataless_file(struct vnode *vp, uint64_t op_type)
 {
 	int error;
 
+<<<<<<< HEAD
 	if (vp == NULL || (VTOC(vp)->c_bsdflags & UF_COMPRESSED) == 0 || VTOCMP(vp) == NULL || VTOCMP(vp)->cmp_type != DATALESS_CMPFS_TYPE) {
 		// there's nothing to do, it's not dataless
 		return 0;
+=======
+    if (err != 0) {
+        DBG_ERR(("MacToVFSError: mapping error code %d...\n", err));
+    };
+    
+	switch (err) {
+	  case dirFulErr:							/*    -33 */
+	  case dskFulErr:							/*    -34 */
+	  case btNoSpaceAvail:						/* -32733 */
+	  case fxOvFlErr:							/* -32750 */
+		return ENOSPC;							/*    +28 */
+
+	  case btBadNode:							/* -32731 */
+	  case ioErr:								/*   -36 */
+		return EIO;								/*    +5 */
+
+	  case mFulErr:								/*   -41 */
+	  case memFullErr:							/*  -108 */
+		return ENOMEM;							/*   +12 */
+
+	  case tmfoErr:								/*   -42 */
+		/* Consider EMFILE (Too many open files, 24)? */	
+		return ENFILE;							/*   +23 */
+
+	  case nsvErr:								/*   -35 */
+	  case fnfErr:								/*   -43 */
+	  case dirNFErr:							/*  -120 */
+	  case fidNotFound:							/* -1300 */
+		return ENOENT;							/*    +2 */
+
+	  case wPrErr:								/*   -44 */
+	  case vLckdErr:							/*   -46 */
+	  case fsDSIntErr:							/*  -127 */
+		return EROFS;							/*   +30 */
+
+	  case opWrErr:								/*   -49 */
+	  case fLckdErr:							/*   -45 */
+		return EACCES;							/*   +13 */
+
+	  case permErr:								/*   -54 */
+	  case wrPermErr:							/*   -61 */
+		return EPERM;							/*    +1 */
+
+	  case fBsyErr:								/*   -47 */
+		return EBUSY;							/*   +16 */
+
+	  case dupFNErr:							/*    -48 */
+	  case fidExists:							/*  -1301 */
+	  case cmExists:							/* -32718 */
+	  case btExists:							/* -32734 */
+		return EEXIST;							/*    +17 */
+
+	  case rfNumErr:							/*   -51 */
+		return EBADF;							/*    +9 */
+
+	  case notAFileErr:							/* -1302 */
+		return EISDIR;							/*   +21 */
+
+	  case cmNotFound:							/* -32719 */
+	  case btNotFound:							/* -32735 */	
+		return ENOENT;							/*     28 */
+
+	  case cmNotEmpty:							/* -32717 */
+		return ENOTEMPTY;						/*     66 */
+
+	  case cmFThdDirErr:						/* -32714 */
+		return EISDIR;							/*     21 */
+
+	  case fxRangeErr:							/* -32751 */
+		return EIO;								/*      5 */
+
+	  case bdNamErr:							/*   -37 */
+		return ENAMETOOLONG;					/*    63 */
+
+	  case fnOpnErr:							/*   -38 */
+	  case eofErr:								/*   -39 */
+	  case posErr:								/*   -40 */
+	  case paramErr:							/*   -50 */
+	  case badMDBErr:							/*   -60 */
+	  case badMovErr:							/*  -122 */
+	  case sameFileErr:							/* -1306 */
+	  case badFidErr:							/* -1307 */
+	  case fileBoundsErr:						/* -1309 */
+		return EINVAL;							/*   +22 */
+
+	  case fsBTBadNodeSize:
+		return ENXIO;
+	  default:
+		DBG_UTILS(("Unmapped MacOS error: %d\n", err));
+		return EIO;								/*   +5 */
+>>>>>>> origin/10.1
 	}
 
 	/* Swap files are special; ignore them */

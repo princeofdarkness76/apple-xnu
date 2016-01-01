@@ -300,6 +300,7 @@ BlockMarkAllocated(ExtendedVCB *vcb, u_int32_t startingBlock, u_int32_t numBlock
 EXTERN_API_C( OSErr )
 BlockMarkFree( ExtendedVCB *vcb, u_int32_t startingBlock, u_int32_t numBlocks);
 
+<<<<<<< HEAD
 EXTERN_API_C( OSErr )
 BlockMarkFreeUnused( ExtendedVCB *vcb, u_int32_t startingBlock, u_int32_t numBlocks);
 
@@ -308,6 +309,8 @@ MetaZoneFreeBlocks(ExtendedVCB *vcb);
 	
 EXTERN_API_C( u_int32_t )
 UpdateAllocLimit (struct hfsmount *hfsmp, u_int32_t new_end_block);
+=======
+>>>>>>> origin/10.1
 
 EXTERN_API_C( u_int32_t )
 ScanUnmapBlocks(struct hfsmount *hfsmp);

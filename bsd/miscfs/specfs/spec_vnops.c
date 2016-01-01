@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2001 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.1
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -786,6 +790,34 @@ void throttle_init(void);
 #define DEBUG_ALLOC_THROTTLE_INFO(format, debug_info, args...)
 #endif
 
+<<<<<<< HEAD
+=======
+	case VCHR:
+		/*
+		 * Hack: a tty device that is a controlling terminal
+		 * has a reference from the session structure.
+		 * We cannot easily tell that a character device is
+		 * a controlling terminal, unless it is the closing
+		 * process' controlling terminal.  In that case,
+		 * if the reference count is 2 (this last descriptor
+		 * plus the session), release the reference from the session.
+		 */
+		if (vcount(vp) == 2 && ap->a_p &&
+		    vp == ap->a_p->p_session->s_ttyvp) {
+			ap->a_p->p_session->s_ttyvp = NULL;
+			vrele(vp);
+		}
+		/*
+		 * If the vnode is locked, then we are in the midst
+		 * of forcably closing the device, otherwise we only
+		 * close on last reference.
+		 */
+		if (vcount(vp) > 1 && (vp->v_flag & VXLOCK) == 0)
+			return (0);
+		devclose = cdevsw[major(dev)].d_close;
+		mode = S_IFCHR;
+		break;
+>>>>>>> origin/10.1
 
 SYSCTL_INT(_debug, OID_AUTO, lowpri_throttle_tier1_window_msecs, CTLFLAG_RW | CTLFLAG_LOCKED, &throttle_windows_msecs[THROTTLE_LEVEL_TIER1], 0, "");
 SYSCTL_INT(_debug, OID_AUTO, lowpri_throttle_tier2_window_msecs, CTLFLAG_RW | CTLFLAG_LOCKED, &throttle_windows_msecs[THROTTLE_LEVEL_TIER2], 0, "");

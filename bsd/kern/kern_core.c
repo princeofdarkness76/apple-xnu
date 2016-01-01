@@ -447,6 +447,7 @@ coredump(proc_t core_proc, uint32_t reserve_mb, int coredump_flags)
 		 *	Note: if we can't read, then we end up with
 		 *	a hole in the file.
 		 */
+<<<<<<< HEAD
 		if ((maxprot & VM_PROT_READ) == VM_PROT_READ
 			&& vbr.user_tag != VM_MEMORY_IOKIT
 			&& coredumpok(map,vmoffset)) {
@@ -455,6 +456,11 @@ coredump(proc_t core_proc, uint32_t reserve_mb, int coredump_flags)
 					(IS_64BIT_PROCESS(core_proc) ? UIO_USERSPACE64 : UIO_USERSPACE32), 
 					IO_NOCACHE|IO_NODELOCKED|IO_UNIT, cred, (int64_t *) 0, core_proc);
 
+=======
+		if ((maxprot & VM_PROT_READ) == VM_PROT_READ && vbr.user_tag != VM_MEMORY_IOKIT) {
+			error = vn_rdwr(UIO_WRITE, vp, (caddr_t)vmoffset, size, foffset,
+				UIO_USERSPACE, IO_NODELOCKED|IO_UNIT, cred, (int *) 0, p);
+>>>>>>> origin/10.1
 		}
 
 		hoffset += segment_command_sz;

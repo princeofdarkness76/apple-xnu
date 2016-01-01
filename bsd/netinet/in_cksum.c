@@ -226,6 +226,7 @@ in_cksumdata(const void *buf, int mlen)
 static uint16_t
 in_cksumdata(const void *buf, int mlen)
 {
+<<<<<<< HEAD
 	uint64_t sum, partial;
 	unsigned int final_acc;
 	const uint8_t *data = (const uint8_t *)buf;
@@ -286,6 +287,40 @@ in_cksumdata(const void *buf, int mlen)
 			sum += (partial >> 32);
 			sum += (partial & 0xffffffff);
 			partial = 0;
+=======
+	register u_short *w;
+	register int sum = 0;
+	register int mlen = 0;
+	int starting_on_odd  = 0;
+
+	len -= skip;
+        for (; skip && m; m = m->m_next) {
+                if (m->m_len > skip) {
+                        mlen = m->m_len - skip;
+			w = (u_short *)(m->m_data+skip);
+                        goto skip_start;
+                } else {    
+                        skip -= m->m_len;
+                }
+        }
+	for (;m && len; m = m->m_next) {
+		if (m->m_len == 0)
+			continue;
+		mlen = m->m_len;
+		w = mtod(m, u_short *);
+
+skip_start:
+		if (len < mlen)
+			mlen = len;
+		sum = xsum_assym(w, mlen, sum, starting_on_odd);
+		len -= mlen;
+		if (mlen & 0x1)
+		{
+		    if (starting_on_odd)
+			starting_on_odd = 0;
+		    else
+			starting_on_odd = 1;
+>>>>>>> origin/10.1
 		}
 	}
 	/*
@@ -442,6 +477,7 @@ ip_cksum_hdr_dir(struct mbuf *m, uint32_t hlen, int out)
 uint16_t
 inet_cksum(struct mbuf *m, uint32_t nxt, uint32_t off, uint32_t len)
 {
+<<<<<<< HEAD
 	uint32_t sum;
 
 	sum = m_sum16(m, off, len);
@@ -451,6 +487,52 @@ inet_cksum(struct mbuf *m, uint32_t nxt, uint32_t off, uint32_t len)
 		struct ip *ip;
 		unsigned char buf[sizeof ((*ip))] __attribute__((aligned(8)));
 		uint32_t mlen;
+=======
+	register u_short *w;
+	register int sum = 0;
+	register int mlen = 0;
+	int byte_swapped = 0;
+	union s_util s_util;
+	union l_util l_util;   
+
+	KERNEL_DEBUG(DBG_FNC_IN_CKSUM | DBG_FUNC_START, len,0,0,0,0);
+
+	len -= skip;
+        for (; skip && m; m = m->m_next) {
+                if (m->m_len > skip) {
+                        mlen = m->m_len - skip;
+			w = (u_short *)(m->m_data+skip);
+                        goto skip_start;
+                } else {    
+                        skip -= m->m_len;
+                }
+        }
+	for (;m && len; m = m->m_next) {
+		if (m->m_len == 0)
+			continue;
+		w = mtod(m, u_short *);
+
+		if (mlen == -1) {
+			/*
+			 * The first byte of this mbuf is the continuation
+			 * of a word spanning between this mbuf and the
+			 * last mbuf.
+			 *
+			 * s_util.c[0] is already saved when scanning previous
+			 * mbuf.
+			 */
+			s_util.c[1] = *(char *)w;
+			sum += s_util.s;
+			w = (u_short *)((char *)w + 1);
+			mlen = m->m_len - 1;
+			len--;
+		} else {
+		  mlen = m->m_len;
+		}
+skip_start:
+		if (len < mlen)
+		    mlen = len;
+>>>>>>> origin/10.1
 
 		/*
 		 * Sanity check

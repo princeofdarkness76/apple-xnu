@@ -1040,7 +1040,9 @@ struct proc *a_p;
 
     if (((alist->volattr == 0) && ((alist->commonattr & HFS_ATTR_CMN_LOOKUPMASK) != 0)) ||
         ((alist->dirattr & HFS_ATTR_DIR_LOOKUPMASK) != 0) ||
-        ((alist->fileattr & HFS_ATTR_FILE_LOOKUPMASK) != 0)) {
+        ((alist->fileattr & HFS_ATTR_FILE_LOOKUPMASK) != 0) ||
+        ((alist->commonattr & (ATTR_CMN_OBJID | ATTR_CMN_OBJPERMANENTID))
+          && (hp->h_meta->h_metaflags & IN_DATANODE))) {
 
         /* lock catalog b-tree */
         error = hfs_metafilelocking(VTOHFS(vp), kHFSCatalogFileID, LK_SHARED, ap->a_p);
@@ -2980,6 +2982,21 @@ hfs_symlink(ap)
                      (struct proc *)0);
 	hp->fcbClmpSize = dfltClump;
 
+<<<<<<< HEAD
+=======
+	/* Allocate space for the link */
+	retval = VOP_TRUNCATE(vp, len, IO_NOZEROFILL,
+	                      ap->a_cnp->cn_cred, ap->a_cnp->cn_proc);
+	if (retval)
+		goto out;
+
+	/* Write the link to disk */
+	bp = getblk(vp, 0, roundup((int)hp->fcbEOF, VTOHFS(vp)->hfs_phys_block_size), 0, 0, BLK_META);
+	bzero(bp->b_data, bp->b_bufsize);
+	bcopy(ap->a_target, bp->b_data, len);
+	bp->b_flags |= B_DIRTY;
+	bawrite(bp);
+>>>>>>> origin/10.1
 
     vput(vp);
     DBG_VOP_LOCKS_TEST(retval);
@@ -3600,11 +3617,47 @@ struct uio *a_uio;
 struct ucred *a_cred;
 } */ *ap;
 {
+<<<<<<< HEAD
     int retval;
     DBG_FUNC_NAME("readlink");
     DBG_VOP_LOCKS_DECL(1);
     DBG_VOP_PRINT_FUNCNAME();
     DBG_VOP_PRINT_VNODE_INFO(ap->a_vp);DBG_VOP_CONT(("\n"));
+=======
+	int retval;
+	struct vnode *vp = ap->a_vp;
+	struct hfsnode *hp = VTOH(vp);
+
+	if (vp->v_type != VLNK)
+		return (EINVAL);
+    
+    /* Zero length sym links are not allowed */
+    if (hp->fcbEOF == 0) {
+        VTOVCB(vp)->vcbFlags |= kHFS_DamagedVolume;
+        return (EINVAL);
+    }
+    
+	/* Cache the path so we don't waste buffer cache resources */
+	if (hp->h_symlinkptr == NULL) {
+		struct buf *bp = NULL;
+
+		if (H_ISBIGLINK(hp))
+			MALLOC(hp->h_symlinkptr, char *, hp->fcbEOF, M_TEMP, M_WAITOK);
+
+		retval = meta_bread(vp, 0, roundup((int)hp->fcbEOF, VTOHFS(vp)->hfs_phys_block_size),
+				ap->a_cred, &bp);
+		if (retval) {
+			if (bp)
+				brelse(bp);
+			if (hp->h_symlinkptr) {
+				FREE(hp->h_symlinkptr, M_TEMP);
+				hp->h_symlinkptr = NULL;
+			}
+			return (retval);
+		}
+		
+		bcopy(bp->b_data, H_SYMLINK(hp), (size_t)hp->fcbEOF);
+>>>>>>> origin/10.1
 
     DBG_VOP_LOCKS_INIT(0,ap->a_vp, VOPDBG_LOCKED, VOPDBG_LOCKED, VOPDBG_LOCKED, VOPDBG_POS);
     retval = VOP_READ(ap->a_vp, ap->a_uio, 0, ap->a_cred);

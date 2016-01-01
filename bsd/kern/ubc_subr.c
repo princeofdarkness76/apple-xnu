@@ -468,15 +468,23 @@ cs_validate_codedirectory(const CS_CodeDirectory *cd, size_t length)
 }
 
 /*
+<<<<<<< HEAD
  *
+=======
+ * Get the size of the file
+>>>>>>> origin/10.1
  */
 
 static int
 cs_validate_blob(const CS_GenericBlob *blob, size_t length)
 {
+<<<<<<< HEAD
 	if (length < sizeof(CS_GenericBlob) || length < ntohl(blob->length))
 		return EBADEXEC;
 	return 0;
+=======
+	return (vp->v_ubcinfo->ui_size);
+>>>>>>> origin/10.1
 }
 
 /*

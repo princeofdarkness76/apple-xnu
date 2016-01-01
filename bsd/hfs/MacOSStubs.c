@@ -30,6 +30,13 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/types.h>
+<<<<<<< HEAD
+=======
+#include <sys/ubc.h>
+#include <sys/vm.h>
+#include "hfs.h"
+#include "hfs_dbg.h"
+>>>>>>> origin/10.1
 
 #include <pexpert/pexpert.h>
 
@@ -43,6 +50,94 @@
  */
 struct timezone gTimeZone = {8*60,1};
 
+<<<<<<< HEAD
+=======
+
+/*										*/
+/*	Creates a new vnode to hold a psuedo file like an extents tree file	*/
+/*										*/
+
+OSStatus  GetInitializedVNode(struct hfsmount *hfsmp, struct vnode **tmpvnode)
+{
+
+    struct hfsnode	*hp;
+    struct vnode 	*vp = NULL;
+    int				rtn;
+
+    DBG_ASSERT(hfsmp != NULL);
+    DBG_ASSERT(tmpvnode != NULL);
+
+    /* Allocate a new hfsnode. */
+    /*
+	 * Must do malloc() before getnewvnode(), since malloc() can block
+	 * and could cause other part of the system to access v_data
+	 * which has not been initialized yet
+	 */
+    MALLOC_ZONE(hp, struct hfsnode *, sizeof(struct hfsnode), M_HFSNODE, M_WAITOK);
+    if(hp == NULL) {
+        rtn = ENOMEM;
+        goto Err_Exit;
+    }
+    bzero((caddr_t)hp, sizeof(struct hfsnode));
+    lockinit(&hp->h_lock, PINOD, "hfsnode", 0, 0);
+
+    MALLOC_ZONE(hp->h_meta, struct hfsfilemeta *, 
+		sizeof(struct hfsfilemeta), M_HFSFMETA, M_WAITOK);
+    /* Allocate a new vnode. */
+    if ((rtn = getnewvnode(VT_HFS, HFSTOVFS(hfsmp), hfs_vnodeop_p, &vp))) {
+		FREE_ZONE(hp->h_meta, sizeof(struct hfsfilemeta), M_HFSFMETA);
+		FREE_ZONE(hp, sizeof(struct hfsnode), M_HFSNODE);
+        goto Err_Exit;
+    }
+
+    /* Init the structure */
+    bzero(hp->h_meta, sizeof(struct hfsfilemeta));
+
+    hp->h_vp = vp;									/* Make HFSTOV work */
+    hp->h_meta->h_devvp = hfsmp->hfs_devvp;
+    hp->h_meta->h_dev = hfsmp->hfs_raw_dev;
+    hp->h_meta->h_usecount++;
+    hp->h_nodeflags |= IN_ACCESS | IN_CHANGE | IN_UPDATE;
+	rl_init(&hp->h_invalidranges);
+#if HFS_DIAGNOSTIC
+    hp->h_valid = HFS_VNODE_MAGIC;
+#endif
+    vp->v_data = hp;								/* Make VTOH work */
+    vp->v_type = VREG;
+	/*
+	 * Metadata files are VREG but not available for IO
+	 * through mapped IO as will as POSIX IO APIs.
+	 * Hence we do not initialize UBC for those files
+	 */
+	vp->v_ubcinfo = UBC_NOINFO;
+
+    *tmpvnode = vp;
+    
+    VREF(hp->h_meta->h_devvp);
+
+    return noErr;
+
+Err_Exit:
+    
+    *tmpvnode = NULL;
+
+    return rtn;
+}
+
+OSErr	C_FlushMDB( ExtendedVCB *volume)
+{
+	short	err;
+
+	if (volume->vcbSigWord == kHFSPlusSigWord)
+		err = hfs_flushvolumeheader(VCBTOHFS(volume), 0);
+	else
+		err = hfs_flushMDB(VCBTOHFS(volume), 0);
+
+	return err;
+}
+
+
+>>>>>>> origin/10.1
 /*
  * GetTimeUTC - get the GMT Mac OS time (in seconds since 1/1/1904)
  *

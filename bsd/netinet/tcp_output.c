@@ -131,6 +131,7 @@
 
 #include <corecrypto/ccaes.h>
 
+
 #define DBG_LAYER_BEG		NETDBG_CODE(DBG_NETTCP, 1)
 #define DBG_LAYER_END		NETDBG_CODE(DBG_NETTCP, 3)
 #define DBG_FNC_TCP_OUTPUT	NETDBG_CODE(DBG_NETTCP, (4 << 8) | 1)
@@ -546,6 +547,7 @@ tcp_output(struct tcpcb *tp)
 #if INET6
 	int isipv6 = inp->inp_vflag & INP_IPV6 ;
 #endif
+<<<<<<< HEAD
 	short packchain_listadd = 0;
 	int so_options = so->so_options;
 	struct rtentry *rt;
@@ -566,6 +568,21 @@ tcp_output(struct tcpcb *tp)
 	boolean_t wired = FALSE;
 	boolean_t sack_rescue_rxt = FALSE;
 
+=======
+	int    last_off;
+	int    m_off;
+	struct mbuf *m_last = 0;
+	struct mbuf *m_head = 0;
+
+
+	KERNEL_DEBUG(DBG_FNC_TCP_OUTPUT | DBG_FUNC_START, 0,0,0,0,0);
+
+	KERNEL_DEBUG(DBG_LAYER_BEG,
+		     ((tp->t_template->tt_dport << 16) | tp->t_template->tt_sport),
+		     (((tp->t_template->tt_src.s_addr & 0xffff) << 16) |
+		      (tp->t_template->tt_dst.s_addr & 0xffff)),
+		     0,0,0);
+>>>>>>> origin/10.1
 	/*
 	 * Determine length of data that should be transmitted,
 	 * and flags that will be used.
@@ -1889,6 +1906,7 @@ send:
 		 * the protocol headers fits into a single mbuf header's
 		 * data area (no cluster attached)
 		 */
+<<<<<<< HEAD
 		m = NULL;
 
 		/* minimum length we are going to allocate */
@@ -1897,6 +1915,17 @@ send:
 			MGETHDR(m, M_DONTWAIT, MT_HEADER);
 			if (m == NULL) {
 				error = ENOBUFS;
+=======
+		m->m_len += hdrlen;
+		m->m_data -= hdrlen;
+#else
+		m = NULL;
+#if INET6
+ 		if (MHLEN < hdrlen + max_linkhdr) {
+		        MGETHDR(m, M_DONTWAIT, MT_HEADER);
+			if (m == NULL) {
+			        error = ENOBUFS;
+>>>>>>> origin/10.1
 				goto out;
 			}
  			MCLGET(m, M_DONTWAIT);
@@ -1907,6 +1936,7 @@ send:
  			}
 			m->m_data += max_linkhdr;
 			m->m_len = hdrlen;
+<<<<<<< HEAD
 			allocated_len = MCLBYTES;
 		}
 		if (len <= allocated_len - hdrlen - max_linkhdr) {
@@ -1915,21 +1945,34 @@ send:
 				MGETHDR(m, M_DONTWAIT, MT_HEADER);
 				if (m == NULL) {
 					error = ENOBUFS;
+=======
+		}
+#endif
+		if (len <= MHLEN - hdrlen - max_linkhdr) {
+		        if (m == NULL) {
+			        MGETHDR(m, M_DONTWAIT, MT_HEADER);
+				if (m == NULL) {
+				        error = ENOBUFS;
+>>>>>>> origin/10.1
 					goto out;
 				}
 				m->m_data += max_linkhdr;
 				m->m_len = hdrlen;
 			}
+<<<<<<< HEAD
 			/* makes sure we still have data left to be sent at this point */
 			if (so->so_snd.sb_mb == NULL || off < 0) {
 				if (m != NULL) 	m_freem(m);
 				error = 0; /* should we return an error? */
 				goto out;
 			}
+=======
+>>>>>>> origin/10.1
 			m_copydata(so->so_snd.sb_mb, off, (int) len,
 			    mtod(m, caddr_t) + hdrlen);
 			m->m_len += len;
 		} else {
+<<<<<<< HEAD
 			uint32_t copymode;
 			/*
 			 * Retain packet header metadata at the socket
@@ -1947,10 +1990,17 @@ send:
 				    off, (int)len, M_DONTWAIT, copymode);
 				if (m->m_next == NULL) {
 					(void) m_free(m);
+=======
+		        if (m != NULL) {
+			        m->m_next = m_copy(so->so_snd.sb_mb, off, (int) len);
+				if (m->m_next == 0) {
+				        (void) m_free(m);
+>>>>>>> origin/10.1
 					error = ENOBUFS;
 					goto out;
 				}
 			} else {
+<<<<<<< HEAD
 				/*
 				 * make sure we still have data left
 				 * to be sent at this point
@@ -1969,6 +2019,14 @@ send:
 			        if ((m = m_copym_with_hdrs(so->so_snd.sb_mb,
 				    off, len, M_DONTWAIT, NULL, NULL,
 				    copymode)) == NULL) {
+=======
+			        if (m_head != so->so_snd.sb_mb || last_off != off)
+				        m_last = NULL;
+				last_off = off + len;
+				m_head = so->so_snd.sb_mb;
+
+			        if ((m = m_copym_with_hdrs(so->so_snd.sb_mb, off, (int) len, M_DONTWAIT, &m_last, &m_off)) == NULL) {
+>>>>>>> origin/10.1
 				        error = ENOBUFS;
 					goto out;
 				}
@@ -2171,6 +2229,7 @@ send:
 		 */
 		tp->snd_up = tp->snd_una;		/* drag it along */
 	}
+
 
 	/*
 	 * Put TCP length in extended header, and then
@@ -2420,6 +2479,7 @@ timer:
 	}
 #endif /* NECP */
 
+<<<<<<< HEAD
 #if IPSEC
 	if (inp->inp_sp != NULL)
 		ipsec_setsocket(m, so);
@@ -2430,6 +2490,12 @@ timer:
 	 */
 	lost = 0;
 
+=======
+	KERNEL_DEBUG(DBG_LAYER_END, ((th->th_dport << 16) | th->th_sport),
+		   (((thtoti(th)->ti_src.s_addr & 0xffff) << 16) | (thtoti(th)->ti_dst.s_addr & 0xffff)),
+		    th->th_seq, th->th_ack, th->th_win);
+#if 1
+>>>>>>> origin/10.1
 	/*
 	 * Embed the flow hash in pkt hdr and mark the packet as
 	 * capable of flow controlling

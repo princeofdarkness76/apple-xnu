@@ -406,6 +406,10 @@ typedef struct memory_object_attr_info	memory_object_attr_info_data_t;
 #define MAX_UPL_SIZE		(MAX_UPL_SIZE_BYTES / PAGE_SIZE)
 #define	MAX_UPL_TRANSFER	(MAX_UPL_TRANSFER_BYTES / PAGE_SIZE)
 
+<<<<<<< HEAD
+=======
+#define MAX_UPL_TRANSFER 256
+>>>>>>> origin/10.1
 
 struct upl_page_info {
 	ppnum_t		phys_addr;	/* physical page index number */

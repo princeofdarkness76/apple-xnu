@@ -1867,6 +1867,7 @@ return_from_scan:
 				continue;
 			}
 
+<<<<<<< HEAD
 			if (vm_page_speculative_count > vm_page_speculative_target)
 			        can_steal = TRUE;
 			else {
@@ -4817,6 +4818,22 @@ upl_create(int type, int flags, upl_size_t size)
 	        bzero((char *)upl + upl_size, page_field_size);
 
 	upl->flags = upl_flags | flags;
+=======
+static upl_t
+upl_create(
+	   boolean_t	internal,
+	   vm_size_t       size)
+{
+	upl_t	upl;
+
+	if(internal) {
+		upl = (upl_t)kalloc(sizeof(struct upl)
+			+ (sizeof(struct upl_page_info)*(size/page_size)));
+	} else {
+		upl = (upl_t)kalloc(sizeof(struct upl));
+	}
+	upl->flags = 0;
+>>>>>>> origin/10.1
 	upl->src_object = NULL;
 	upl->kaddr = (vm_offset_t)0;
 	upl->size = 0;
@@ -8729,6 +8746,22 @@ skip_page:
 				dw_count = 0;
 			}
 		}
+<<<<<<< HEAD
+=======
+		vm_object_unlock(upl->map_object->shadow);
+	}
+#endif /* UBC_DEBUG */
+#ifdef notdefcdy
+	if(!(upl->flags & UPL_DEVICE_MEMORY))
+#endif
+		vm_object_deallocate(upl->map_object);
+	if(upl->flags & UPL_INTERNAL) {
+		kfree((vm_offset_t)upl,
+			sizeof(struct upl) + 
+			(sizeof(struct upl_page_info) * (upl->size/page_size)));
+	} else {
+		kfree((vm_offset_t)upl, sizeof(struct upl));
+>>>>>>> origin/10.1
 	}
 	assert(entry == size_in_pages);
 
@@ -8869,6 +8902,7 @@ upl_transpose(
 		retval = KERN_INVALID_VALUE;
 		goto done;
 	}
+<<<<<<< HEAD
 
 	/*
 	 * Tranpose the VM objects' backing store.
@@ -8885,6 +8919,37 @@ upl_transpose(
 		if ((upl1->flags & UPL_TRACKED_BY_OBJECT) || (upl2->flags & UPL_TRACKED_BY_OBJECT)) {
 			vm_object_lock(object1);
 			vm_object_lock(object2);
+=======
+	if(upl_ptr) {
+		if(cntrl_flags & UPL_SET_INTERNAL) {
+			upl = upl_create(TRUE, size);
+			user_page_list = (upl_page_info_t *)
+				(((vm_offset_t)upl) + sizeof(struct upl));
+			upl->flags |= UPL_INTERNAL;
+		} else {
+			upl = upl_create(FALSE, size);
+		}
+		if(object->phys_contiguous) {
+			upl->size = size;
+			upl->offset = offset + object->paging_offset;
+			*upl_ptr = upl;
+			if(user_page_list) {
+				user_page_list[0].phys_addr = 
+					offset + object->shadow_offset;
+				user_page_list[0].device = TRUE;
+			}
+			upl->map_object = vm_object_allocate(size);
+			vm_object_lock(upl->map_object);
+			upl->map_object->shadow = object;
+			upl->flags = UPL_DEVICE_MEMORY | UPL_INTERNAL;
+			upl->map_object->pageout = TRUE;
+			upl->map_object->can_persist = FALSE;
+			upl->map_object->copy_strategy
+					= MEMORY_OBJECT_COPY_NONE;
+			upl->map_object->shadow_offset = offset;
+			vm_object_unlock(upl->map_object);
+			return KERN_SUCCESS;
+>>>>>>> origin/10.1
 		}
 		if (upl1->flags & UPL_TRACKED_BY_OBJECT)
 			queue_remove(&object1->uplq, upl1, upl_t, uplq);

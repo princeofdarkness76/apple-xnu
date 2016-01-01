@@ -115,9 +115,21 @@
 
 #include <sys/utfconv.h>
 
+#include <sys/kdebug.h>
+
+#define FSDBG(A, B, C, D, E) \
+	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, (A))) | DBG_FUNC_NONE, \
+		(int)(B), (int)(C), (int)(D), (int)(E), 0)
+#define FSDBG_TOP(A, B, C, D, E) \
+	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, (A))) | DBG_FUNC_START, \
+		(int)(B), (int)(C), (int)(D), (int)(E), 0)
+#define FSDBG_BOT(A, B, C, D, E) \
+	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, (A))) | DBG_FUNC_END, \
+		(int)(B), (int)(C), (int)(D), (int)(E), 0)
 /*
  * NFS globals
  */
+<<<<<<< HEAD
 struct nfsstats	__attribute__((aligned(8))) nfsstats;
 size_t nfs_mbuf_mhlen = 0, nfs_mbuf_minclsize = 0;
 
@@ -186,6 +198,23 @@ nfstov_type(nfstype nvtype, int nfsvers)
 		return VNON;
 	}
 }
+=======
+u_long nfs_xdrneg1;
+u_long rpc_call, rpc_vers, rpc_reply, rpc_msgdenied, rpc_autherr,
+	rpc_mismatch, rpc_auth_unix, rpc_msgaccepted,
+	rpc_auth_kerb;
+u_long nfs_prog, nqnfs_prog, nfs_true, nfs_false;
+
+/* And other global data */
+static u_long nfs_xid = 0;
+u_long nfs_xidwrap = 0;		/* to build a (non-wwrapping) 64 bit xid */
+static enum vtype nv2tov_type[8]= {
+	VNON, VREG, VDIR, VBLK, VCHR, VLNK, VNON,  VNON 
+};
+enum vtype nv3tov_type[8]= {
+	VNON, VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO
+};
+>>>>>>> origin/10.1
 
 int
 vtonfsv2_mode(enum vtype vtype, mode_t m)
@@ -389,6 +418,7 @@ nfsm_chain_add_opaque_f(struct nfsm_chain *nmc, const u_char *buf, uint32_t len)
 			if (error)
 				return (error);
 		}
+<<<<<<< HEAD
 		tlen = MIN(nmc->nmc_left, paddedlen);
 		if (tlen) {
 			if (len) {
@@ -397,6 +427,126 @@ nfsm_chain_add_opaque_f(struct nfsm_chain *nmc, const u_char *buf, uint32_t len)
 				bcopy(buf, nmc->nmc_ptr, tlen);
 			} else {
 				bzero(nmc->nmc_ptr, tlen);
+=======
+	}
+	/* Finally, return values */
+	*bposp = bpos;
+	return (mb);
+}
+
+/*
+ * Build the RPC header and fill in the authorization info.
+ * The authorization string argument is only used when the credentials
+ * come from outside of the kernel.
+ * Returns the head of the mbuf list.
+ */
+struct mbuf *
+nfsm_rpchead(cr, nmflag, procid, auth_type, auth_len, auth_str, verf_len,
+	verf_str, mrest, mrest_len, mbp, xidp)
+	register struct ucred *cr;
+	int nmflag;
+	int procid;
+	int auth_type;
+	int auth_len;
+	char *auth_str;
+	int verf_len;
+	char *verf_str;
+	struct mbuf *mrest;
+	int mrest_len;
+	struct mbuf **mbp;
+	u_long *xidp;
+{
+	register struct mbuf *mb;
+	register u_long *tl;
+	register caddr_t bpos;
+	register int i;
+	struct mbuf *mreq, *mb2;
+	int siz, grpsiz, authsiz;
+	struct timeval tv;
+	static u_long base;
+
+	authsiz = nfsm_rndup(auth_len);
+	MGETHDR(mb, M_WAIT, MT_DATA);
+	if ((authsiz + 10 * NFSX_UNSIGNED) >= MINCLSIZE) {
+		MCLGET(mb, M_WAIT);
+	} else if ((authsiz + 10 * NFSX_UNSIGNED) < MHLEN) {
+		MH_ALIGN(mb, authsiz + 10 * NFSX_UNSIGNED);
+	} else {
+		MH_ALIGN(mb, 8 * NFSX_UNSIGNED);
+	}
+	mb->m_len = 0;
+	mreq = mb;
+	bpos = mtod(mb, caddr_t);
+
+	/*
+	 * First the RPC header.
+	 */
+	nfsm_build(tl, u_long *, 8 * NFSX_UNSIGNED);
+
+	/*
+	 * derive initial xid from system time
+	 * XXX time is invalid if root not yet mounted
+	 */
+	if (!base && (rootvp)) {
+		microtime(&tv);
+		base = tv.tv_sec << 12;
+		nfs_xid = base;
+	}
+	/*
+	 * Skip zero xid if it should ever happen.
+	 */
+	if (++nfs_xid == 0) {
+		nfs_xidwrap++;
+		nfs_xid++;
+	}
+
+	*tl++ = *xidp = txdr_unsigned(nfs_xid);
+	*tl++ = rpc_call;
+	*tl++ = rpc_vers;
+	if (nmflag & NFSMNT_NQNFS) {
+		*tl++ = txdr_unsigned(NQNFS_PROG);
+		*tl++ = txdr_unsigned(NQNFS_VER3);
+	} else {
+		*tl++ = txdr_unsigned(NFS_PROG);
+		if (nmflag & NFSMNT_NFSV3)
+			*tl++ = txdr_unsigned(NFS_VER3);
+		else
+			*tl++ = txdr_unsigned(NFS_VER2);
+	}
+	if (nmflag & NFSMNT_NFSV3)
+		*tl++ = txdr_unsigned(procid);
+	else
+		*tl++ = txdr_unsigned(nfsv2_procid[procid]);
+
+	/*
+	 * And then the authorization cred.
+	 */
+	*tl++ = txdr_unsigned(auth_type);
+	*tl = txdr_unsigned(authsiz);
+	switch (auth_type) {
+	case RPCAUTH_UNIX:
+		nfsm_build(tl, u_long *, auth_len);
+		*tl++ = 0;		/* stamp ?? */
+		*tl++ = 0;		/* NULL hostname */
+		*tl++ = txdr_unsigned(cr->cr_uid);
+		*tl++ = txdr_unsigned(cr->cr_groups[0]);
+		grpsiz = (auth_len >> 2) - 5;
+		*tl++ = txdr_unsigned(grpsiz);
+		for (i = 1; i <= grpsiz; i++)
+			*tl++ = txdr_unsigned(cr->cr_groups[i]);
+		break;
+	case RPCAUTH_KERB4:
+		siz = auth_len;
+		while (siz > 0) {
+			if (M_TRAILINGSPACE(mb) == 0) {
+				MGET(mb2, M_WAIT, MT_DATA);
+				if (siz >= MINCLSIZE)
+					MCLGET(mb2, M_WAIT);
+				mb->m_next = mb2;
+				mb = mb2;
+				mb->m_len = 0;
+				bpos = mtod(mb, caddr_t);
+>>>>>>> origin/10.1
 			}
 			nmc->nmc_ptr += tlen;
 			nmc->nmc_left -= tlen;
@@ -627,6 +777,66 @@ nfsm_chain_get_opaque_pointer_f(struct nfsm_chain *nmc, uint32_t len, u_char **p
 		/* reduce current mbuf's length by "left" */
 		mbuf_setlen(mbcur, mbuf_len(mbcur) - left);
 
+<<<<<<< HEAD
+=======
+/*
+ * Load the attribute cache (that lives in the nfsnode entry) with
+ * the values on the mbuf list and
+ * Iff vap not NULL
+ *    copy the attributes to *vaper
+ */
+int
+nfs_loadattrcache(vpp, mdp, dposp, vaper, dontshrink, xidp)
+	struct vnode **vpp;
+	struct mbuf **mdp;
+	caddr_t *dposp;
+	struct vattr *vaper;
+	int dontshrink;
+	u_int64_t *xidp;
+{
+	register struct vnode *vp = *vpp;
+	register struct vattr *vap;
+	register struct nfs_fattr *fp;
+	register struct nfsnode *np;
+	register long t1;
+	caddr_t cp2;
+	int error = 0, rdev;
+	struct mbuf *md;
+	enum vtype vtyp;
+	u_short vmode;
+	struct timespec mtime;
+	struct vnode *nvp;
+	int v3;
+
+	FSDBG_TOP(527, vp, 0, *xidp >> 32, *xidp);
+	/*
+	 * this routine is a good place to check for VBAD again. We caught
+	 * most of them in nfsm_request, but postprocessing may indirectly get
+	 * here, so check again.
+	 */
+	if (vp->v_type == VBAD) {
+		FSDBG_BOT(527, EINVAL, 1, 0, *xidp);
+		return (EINVAL); 
+	}
+
+	v3 = NFS_ISV3(vp);
+	md = *mdp;
+	t1 = (mtod(md, caddr_t) + md->m_len) - *dposp;
+	if ((error = nfsm_disct(mdp, dposp, NFSX_FATTR(v3), t1, &cp2))) {
+		FSDBG_BOT(527, error, 2, 0, *xidp);
+		return (error);
+	}
+	fp = (struct nfs_fattr *)cp2;
+	if (v3) {
+		vtyp = nfsv3tov_type(fp->fa_type);
+		vmode = fxdr_unsigned(u_short, fp->fa_mode);
+		rdev = makedev(fxdr_unsigned(int, fp->fa3_rdev.specdata1),
+			fxdr_unsigned(int, fp->fa3_rdev.specdata2));
+		fxdr_nfsv3time(&fp->fa3_mtime, &mtime);
+	} else {
+		vtyp = nfsv2tov_type(fp->fa_type);
+		vmode = fxdr_unsigned(u_short, fp->fa_mode);
+>>>>>>> origin/10.1
 		/*
 		 * update nmc's state to point at the end of the mbuf
 		 * where the needed data will be copied to.
@@ -652,9 +862,37 @@ nfsm_chain_get_opaque_pointer_f(struct nfsm_chain *nmc, uint32_t len, u_char **p
 	 * move the next "need" bytes into the current
 	 * mbuf from the mbufs that follow
 	 */
+<<<<<<< HEAD
 
 	/* extend current mbuf length */
 	mbuf_setlen(mbcur, mbuf_len(mbcur) + need);
+=======
+	np = VTONFS(vp);
+	if (*xidp < np->n_xid) {
+		/*
+		 * We have already updated attributes with a response from
+		 * a later request.  The attributes we have here are probably
+		 * stale so we drop them (just return).  However, our 
+		 * out-of-order receipt could be correct - if the requests were
+		 * processed out of order at the server.  Given the uncertainty
+		 * we invalidate our cached attributes.  *xidp is zeroed here
+		 * to indicate the attributes were dropped - only getattr
+		 * cares - it needs to retry the rpc.
+		 */
+		np->n_attrstamp = 0;
+		FSDBG_BOT(527, 0, np, np->n_xid, *xidp);
+		*xidp = 0;
+		return (0);
+	}
+	if (vp->v_type != vtyp) {
+		vp->v_type = vtyp;
+
+		if (UBCINFOMISSING(vp) || UBCINFORECLAIMED(vp))
+			if ((error = ubc_info_init(vp))) { /* VREG */
+				FSDBG_BOT(527, error, 3, 0, *xidp);
+				return(error);
+			}
+>>>>>>> origin/10.1
 
 	/* mb follows mbufs we're copying/compacting data from */
 	mb = mbuf_next(mbcur);
@@ -679,6 +917,7 @@ nfsm_chain_get_opaque_pointer_f(struct nfsm_chain *nmc, uint32_t len, u_char **p
 			nmc->nmc_ptr += cplen;
 			need -= cplen;
 		}
+<<<<<<< HEAD
 		/* if more needed, go to next mbuf */
 		if (need)
 			mb = mbuf_next(mb);
@@ -705,6 +944,83 @@ nfsm_chain_get_opaque_pointer_f(struct nfsm_chain *nmc, uint32_t len, u_char **p
 		error = nfsm_chain_advance(nmc, padlen);
 
 	return (error);
+=======
+		np->n_mtime = mtime.tv_sec;
+		FSDBG(527, vp, np->n_mtime, 0, 0);
+	}
+	np->n_xid = *xidp;
+	vap = &np->n_vattr;
+	vap->va_type = vtyp;
+	vap->va_mode = (vmode & 07777);
+	vap->va_rdev = (dev_t)rdev;
+	vap->va_mtime = mtime;
+	vap->va_fsid = vp->v_mount->mnt_stat.f_fsid.val[0];
+	if (v3) {
+		vap->va_nlink = fxdr_unsigned(u_short, fp->fa_nlink);
+		vap->va_uid = fxdr_unsigned(uid_t, fp->fa_uid);
+		vap->va_gid = fxdr_unsigned(gid_t, fp->fa_gid);
+		fxdr_hyper(&fp->fa3_size, &vap->va_size);
+		vap->va_blocksize = NFS_FABLKSIZE;
+		fxdr_hyper(&fp->fa3_used, &vap->va_bytes);
+		vap->va_fileid = fxdr_unsigned(int, fp->fa3_fileid.nfsuquad[1]);
+		fxdr_nfsv3time(&fp->fa3_atime, &vap->va_atime);
+		fxdr_nfsv3time(&fp->fa3_ctime, &vap->va_ctime);
+		vap->va_flags = 0;
+		vap->va_filerev = 0;
+	} else {
+		vap->va_nlink = fxdr_unsigned(u_short, fp->fa_nlink);
+		vap->va_uid = fxdr_unsigned(uid_t, fp->fa_uid);
+		vap->va_gid = fxdr_unsigned(gid_t, fp->fa_gid);
+		vap->va_size = fxdr_unsigned(u_long, fp->fa2_size);
+		vap->va_blocksize = fxdr_unsigned(long, fp->fa2_blocksize);
+		vap->va_bytes = fxdr_unsigned(long, fp->fa2_blocks) * NFS_FABLKSIZE;
+		vap->va_fileid = fxdr_unsigned(long, fp->fa2_fileid);
+		fxdr_nfsv2time(&fp->fa2_atime, &vap->va_atime);
+		vap->va_flags = 0;
+		vap->va_ctime.tv_sec = fxdr_unsigned(long, fp->fa2_ctime.nfsv2_sec);
+		vap->va_ctime.tv_nsec = 0;
+		vap->va_gen = fxdr_unsigned(u_long, fp->fa2_ctime.nfsv2_usec);
+		vap->va_filerev = 0;
+	}
+
+	np->n_attrstamp = time.tv_sec;
+	if (vap->va_size != np->n_size) {
+		FSDBG(527, vp, vap->va_size, np->n_size,
+		      (vap->va_type == VREG) |
+		      (np->n_flag & NMODIFIED ? 6 : 4));
+		if (vap->va_type == VREG) {
+			int orig_size;
+
+			orig_size = np->n_size;
+			if (np->n_flag & NMODIFIED) {
+				if (vap->va_size < np->n_size)
+					vap->va_size = np->n_size;
+				else
+					np->n_size = vap->va_size;
+			} else
+				np->n_size = vap->va_size;
+			if (!UBCINFOEXISTS(vp) ||
+			    dontshrink && np->n_size < ubc_getsize(vp)) {
+				vap->va_size = np->n_size = orig_size;
+				np->n_attrstamp = 0;
+			} else
+				ubc_setsize(vp, (off_t)np->n_size); /* XXX */
+		} else
+			np->n_size = vap->va_size;
+	}
+
+	if (vaper != NULL) {
+		bcopy((caddr_t)vap, (caddr_t)vaper, sizeof(*vap));
+		if (np->n_flag & NCHG) {
+			if (np->n_flag & NACC)
+				vaper->va_atime = np->n_atim;
+			if (np->n_flag & NUPD)
+				vaper->va_mtime = np->n_mtim;
+		}
+	}
+	FSDBG_BOT(527, 0, np, 0, *xidp);
+	return (0);
+>>>>>>> origin/10.1
 }
 
 /*
@@ -719,6 +1035,7 @@ nfsm_chain_get_opaque_f(struct nfsm_chain *nmc, uint32_t len, u_char *buf)
 	uint32_t cplen, padlen;
 	int error = 0;
 
+<<<<<<< HEAD
 	padlen = nfsm_rndup(len) - len;
 
 	/* loop through mbufs copying all the data we need */
@@ -739,6 +1056,40 @@ nfsm_chain_get_opaque_f(struct nfsm_chain *nmc, uint32_t len, u_char *buf)
 			nmc->nmc_ptr = mb ? mbuf_data(mb) : NULL;
 			nmc->nmc_left = mb ? mbuf_len(mb) : 0;
 		}
+=======
+	if ((time.tv_sec - np->n_attrstamp) >= NFS_ATTRTIMEO(np)) {
+		FSDBG(528, vp, 0, 0, 1);
+		nfsstats.attrcache_misses++;
+		return (ENOENT);
+	}
+	FSDBG(528, vp, 0, 0, 2);
+	nfsstats.attrcache_hits++;
+	vap = &np->n_vattr;
+
+	if (vap->va_size != np->n_size) {
+		FSDBG(528, vp, vap->va_size, np->n_size,
+		      (vap->va_type == VREG) |
+		      (np->n_flag & NMODIFIED ? 6 : 4));
+		if (vap->va_type == VREG) {
+			if (np->n_flag & NMODIFIED) {
+				if (vap->va_size < np->n_size)
+					vap->va_size = np->n_size;
+				else
+					np->n_size = vap->va_size;
+			} else
+				np->n_size = vap->va_size;
+			ubc_setsize(vp, (off_t)np->n_size); /* XXX */
+		} else
+			np->n_size = vap->va_size;
+	}
+
+	bcopy((caddr_t)vap, (caddr_t)vaper, sizeof(struct vattr));
+	if (np->n_flag & NCHG) {
+		if (np->n_flag & NACC)
+			vaper->va_atime = np->n_atim;
+		if (np->n_flag & NUPD)
+			vaper->va_mtime = np->n_mtim;
+>>>>>>> origin/10.1
 	}
 
 	/* did we run out of data in the mbuf chain? */

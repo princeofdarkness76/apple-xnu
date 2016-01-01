@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 1997-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2002 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.1
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -64,6 +68,7 @@
 #include "hfscommon/headers/HFSUnicodeWrappers.h"
 #include "hfscommon/headers/BTreesPrivate.h"
 #include "hfscommon/headers/BTreeScanner.h"
+<<<<<<< HEAD
 #include "hfscommon/headers/CatalogPrivate.h"
 
 #if CONFIG_SEARCHFS
@@ -102,12 +107,25 @@ struct searchinfospec
 	struct directoryInfoSpec d;
 };
 typedef struct searchinfospec searchinfospec_t;
+=======
+>>>>>>> origin/10.1
 
 static void ResolveHardlink(struct hfsmount *hfsmp, HFSPlusCatalogFile *recp);
 
 
+<<<<<<< HEAD
 static int UnpackSearchAttributeBlock(struct hfsmount *hfsmp, struct attrlist *alist,
 		searchinfospec_t *searchInfo, void *attributeBuffer, int firstblock);
+=======
+Boolean CheckCriteria(	ExtendedVCB *vcb,
+						u_long searchBits, 
+						struct attrlist *attrList,
+						CatalogNodeData *cnp, 
+						CatalogKey *key,
+						searchinfospec_t *searchInfo1, 
+						searchinfospec_t *searchInfo2,
+						Boolean lookForDup);
+>>>>>>> origin/10.1
 
 static int CheckCriteria(	ExtendedVCB *vcb, 
 							u_long searchBits,
@@ -138,7 +156,13 @@ static Boolean CompareWideRange( u_int64_t val, u_int64_t low, u_int64_t high )
 	return( (val >= low) && (val <= high) );
 }
 //#define CompareRange(val, low, high)	((val >= low) && (val <= high))
+<<<<<<< HEAD
 			
+=======
+
+static Boolean IsTargetName( searchinfospec_t * searchInfoPtr, Boolean isHFSPlus );
+
+>>>>>>> origin/10.1
 
 /************************************************************************/
 /* Entry for searchfs()                                                 */
@@ -177,6 +201,7 @@ hfs_vnop_search(ap)
 		vfs_context_t a_context;
 	*/
 {
+<<<<<<< HEAD
 	ExtendedVCB *vcb = VTOVCB(ap->a_vp);
 	struct hfsmount *hfsmp;
 	FCB * catalogFCB;
@@ -200,6 +225,30 @@ hfs_vnop_search(ap)
 	struct uthread	*ut;
 	boolean_t timerExpired = FALSE;
 	boolean_t needThrottle = FALSE;
+=======
+	FCB*				catalogFCB;
+	searchinfospec_t	searchInfo1;
+	searchinfospec_t	searchInfo2;
+	void				*attributesBuffer;
+	void				*variableBuffer;
+	short				recordSize;
+	short				operation;
+	u_long				fixedBlockSize;
+	u_long				eachReturnBufferSize;
+	struct proc			*p = current_proc();
+	CatalogNodeData		myCNodeData;
+	CatalogNodeData	*	myCNodeDataPtr;
+	CatalogKey * 		myCurrentKeyPtr;
+	CatalogRecord * 	myCurrentDataPtr;
+	CatPosition * 		myCatPositionPtr;
+	BTScanState 		myBTScanState;
+	Boolean				timerExpired = false;
+	Boolean				doQuickExit = false;
+	u_long				lastNodeNum = 0XFFFFFFFF;
+	ExtendedVCB			*vcb = VTOVCB(ap->a_vp);
+	int					err = E_NONE;
+	int					isHFSPlus;
+>>>>>>> origin/10.1
 
 	/* XXX Parameter check a_searchattrs? */
 
@@ -207,6 +256,7 @@ hfs_vnop_search(ap)
 
 	if (ap->a_options & ~SRCHFS_VALIDOPTIONSMASK) {
 		return (EINVAL);
+<<<<<<< HEAD
 	}
 
 	/*
@@ -284,6 +334,18 @@ hfs_vnop_search(ap)
 
 	fixedBlockSize = sizeof(u_int32_t) + hfs_attrblksize(ap->a_returnattrs);	/* u_int32_t for length word */
 
+=======
+
+	isHFSPlus = (vcb->vcbSigWord == kHFSPlusSigWord);
+
+	/* UnPack the search boundries, searchInfo1, searchInfo2 */
+	err = UnpackSearchAttributeBlock( ap->a_vp, ap->a_searchattrs, &searchInfo1, ap->a_searchparams1 );
+	if (err) return err;
+	err = UnpackSearchAttributeBlock( ap->a_vp, ap->a_searchattrs, &searchInfo2, ap->a_searchparams2 );
+	if (err) return err;
+
+	fixedBlockSize = sizeof(u_long) + AttributeBlockSize( ap->a_returnattrs );	/* u_long for length longword */
+>>>>>>> origin/10.1
 	eachReturnBufferSize = fixedBlockSize;
 
 	if ( ap->a_returnattrs->commonattr & ATTR_CMN_NAME )	/* XXX should be more robust! */
@@ -354,8 +416,98 @@ hfs_vnop_search(ap)
 	if (err)
 		goto ExitThisRoutine;
 
+<<<<<<< HEAD
 	if (throttle_get_io_policy(&ut) == IOPOL_THROTTLE)
 		needThrottle = TRUE;
+=======
+	catalogFCB = VTOFCB( vcb->catalogRefNum );
+	myCurrentKeyPtr = NULL;
+	myCurrentDataPtr = NULL;
+	myCatPositionPtr = (CatPosition *)ap->a_searchstate;
+
+	if (ap->a_options & SRCHFS_START) {
+		/* Starting a new search. */
+		/* make sure our meta data is synced up */
+		err = VOP_FSYNC(vcb->catalogRefNum, NOCRED, MNT_WAIT, p);
+		ap->a_options &= ~SRCHFS_START;
+		bzero( (caddr_t)myCatPositionPtr, sizeof( *myCatPositionPtr ) );
+		err = BTScanInitialize(catalogFCB, 0, 0, 0, kCatSearchBufferSize, &myBTScanState);
+
+#if 1 // Installer workaround
+		// hack to get around installer problems when the installer expects search results 
+		// to be in key order.  At this point the problem appears to be limited to 
+		// searches for "Library".  The idea here is to go get the "Library" at root
+		// and return it first to the caller then continue the search as normal with
+		// the exception of taking care not to return a duplicate hit (see CheckCriteria) 
+		if ( err == E_NONE &&
+			 (ap->a_searchattrs->commonattr & ATTR_CMN_NAME) != 0 &&
+			 IsTargetName( &searchInfo1, isHFSPlus )  )
+		{
+			CatalogRecord		rec;
+			BTreeIterator       iterator;
+			FSBufferDescriptor  btrec;
+			CatalogKey *		keyp;
+			UInt16              reclen;
+			OSErr				result;
+		
+			bzero( (caddr_t)&iterator, sizeof( iterator ) );
+			keyp = (CatalogKey *) &iterator.key;
+			(void) BuildCatalogKeyUTF8(vcb, kRootDirID, "Library", kUndefinedStrLen, keyp, NULL);
+
+			btrec.bufferAddress = &rec;
+			btrec.itemCount = 1;
+			btrec.itemSize = sizeof( rec );
+
+			result = BTSearchRecord( catalogFCB, &iterator, kInvalidMRUCacheKey, 
+									 &btrec, &reclen, &iterator );
+			if ( result == E_NONE ) {
+				if ( isHFSPlus ) {
+					// HFSPlus vols have CatalogRecords that map exactly to CatalogNodeData so there is no need 
+					// to copy.
+					myCNodeDataPtr = (CatalogNodeData *) &rec;
+				} else {
+					CopyCatalogNodeData( vcb, &rec, &myCNodeData );
+					myCNodeDataPtr = &myCNodeData;
+				}
+					
+				if (CheckCriteria(vcb, ap->a_options, ap->a_searchattrs, myCNodeDataPtr,
+								  keyp, &searchInfo1, &searchInfo2, false) &&
+					CheckAccess(myCNodeDataPtr, keyp, ap->a_uio->uio_procp)) {
+		
+					result = InsertMatch(ap->a_vp, ap->a_uio, myCNodeDataPtr, 
+									  keyp, ap->a_returnattrs,
+									  attributesBuffer, variableBuffer,
+									  eachReturnBufferSize, ap->a_nummatches);
+					if (result == E_NONE && *(ap->a_nummatches) >= ap->a_maxmatches)
+						doQuickExit = true;
+				}
+			}
+		}
+#endif // Installer workaround
+	} else {
+		/* Resuming a search. */
+		err = BTScanInitialize(catalogFCB, myCatPositionPtr->nextNode, 
+					myCatPositionPtr->nextRecord, 
+					myCatPositionPtr->recordsFound,
+					kCatSearchBufferSize, 
+					&myBTScanState);
+#if 0
+		/* Make sure Catalog hasn't changed. */
+		if (err == 0
+		&&  myCatPositionPtr->writeCount != myBTScanState.btcb->writeCount) {
+			myCatPositionPtr->writeCount = myBTScanState.btcb->writeCount;
+			err = EBUSY; /* catChangedErr */
+		}
+#endif
+	}
+
+	/* Unlock catalog b-tree */
+	(void) hfs_metafilelocking(VTOHFS(ap->a_vp), kHFSCatalogFileID, LK_RELEASE, p);
+	if (err)
+		goto ExitThisRoutine;
+	if ( doQuickExit )
+		goto QuickExit;
+>>>>>>> origin/10.1
 	/*
 	 * Check all the catalog btree records...
 	 *   return the attributes for matching items
@@ -370,6 +522,7 @@ hfs_vnop_search(ap)
 		if (err)
 			break;
 
+<<<<<<< HEAD
 		/* Resolve any hardlinks */
 		if (isHFSPlus && (ap->a_options & SRCHFS_SKIPLINKS) == 0) {
 			ResolveHardlink(vcb, (HFSPlusCatalogFile *)myCurrentDataPtr);
@@ -380,6 +533,25 @@ hfs_vnop_search(ap)
 			err = InsertMatch(hfsmp, ap->a_uio, myCurrentDataPtr, 
 					myCurrentKeyPtr, ap->a_returnattrs,
 					attributesBuffer, variableBuffer, ap->a_nummatches);
+=======
+		if ( isHFSPlus ) {
+			// HFSPlus vols have CatalogRecords that map exactly to CatalogNodeData so there is no need 
+			// to copy.
+			myCNodeDataPtr = (CatalogNodeData *) myCurrentDataPtr;
+		} else {
+			CopyCatalogNodeData( vcb, myCurrentDataPtr, &myCNodeData );
+			myCNodeDataPtr = &myCNodeData;
+		}
+			
+		if (CheckCriteria(vcb, ap->a_options, ap->a_searchattrs, myCNodeDataPtr,
+		                  myCurrentKeyPtr, &searchInfo1, &searchInfo2, true) &&
+		    CheckAccess(myCNodeDataPtr, myCurrentKeyPtr, ap->a_uio->uio_procp)) {
+
+			err = InsertMatch(ap->a_vp, ap->a_uio, myCNodeDataPtr, 
+			                  myCurrentKeyPtr, ap->a_returnattrs,
+			                  attributesBuffer, variableBuffer,
+			                  eachReturnBufferSize, ap->a_nummatches);
+>>>>>>> origin/10.1
 			if (err) {
 				/*
 				 * The last match didn't fit so come back
@@ -389,6 +561,7 @@ hfs_vnop_search(ap)
 				--myBTScanState.recordNum;
 				break;
 			}
+<<<<<<< HEAD
 
 			if (*(ap->a_nummatches) >= ap->a_maxmatches)
 				break;
@@ -411,15 +584,41 @@ hfs_vnop_search(ap)
 				if (throttle_io_will_be_throttled(ut->uu_lowpri_window, HFSTOVFS(hfsmp)))
 					timerExpired = TRUE;
 			}
+=======
+			if (*(ap->a_nummatches) >= ap->a_maxmatches)
+				break;
+		}
+
+		/*
+		 * Check our elapsed time and bail if we've hit the max.
+		 * The idea here is to throttle the amount of time we
+		 * spend in the kernel.
+		 */
+		myCurrentTime = time;
+		timersub(&myCurrentTime, &myBTScanState.startTime, &myElapsedTime);
+		/* Note: assumes kMaxMicroSecsInKernel is less than 1,000,000 */
+		if (myElapsedTime.tv_sec > 0
+		||  myElapsedTime.tv_usec >= kMaxMicroSecsInKernel) {
+			timerExpired = true;
+>>>>>>> origin/10.1
 		}
 	}
+QuickExit:
+	/* Update catalog position */
+	myCatPositionPtr->writeCount = myBTScanState.btcb->writeCount;
 
+<<<<<<< HEAD
 	/* Update catalog position */
 	myCatPositionPtr->writeCount = myBTScanState.btcb->writeCount;
 
 	BTScanTerminate(&myBTScanState, &myCatPositionPtr->nextNode, 
 			&myCatPositionPtr->nextRecord, 
 			&myCatPositionPtr->recordsFound);
+=======
+	BTScanTerminate(&myBTScanState, &myCatPositionPtr->nextNode,
+					&myCatPositionPtr->nextRecord, 
+					&myCatPositionPtr->recordsFound);
+>>>>>>> origin/10.1
 
 	if ( err == E_NONE ) {
 		err = EAGAIN;	/* signal to the user to call searchfs again */
@@ -438,6 +637,7 @@ ExitThisRoutine:
 	if (attributesBuffer)
 		FREE(attributesBuffer, M_TEMP);
 
+<<<<<<< HEAD
 	if (user_start) {
 		vsunlock(user_start, user_len, TRUE);
 	}
@@ -485,6 +685,9 @@ ResolveHardlink(struct hfsmount *hfsmp, HFSPlusCatalogFile *recp)
 		recp->fileID = saved_cnid;
 		hfs_systemfile_unlock(hfsmp, lockflags);
 	}
+=======
+	return (MacToVFSError(err));
+>>>>>>> origin/10.1
 }
 
 
@@ -663,6 +866,7 @@ ExitThisRoutine:
 	
 }
 
+<<<<<<< HEAD
 static int
 CheckCriteria(	ExtendedVCB *vcb, 
 				u_long searchBits,
@@ -672,6 +876,17 @@ CheckCriteria(	ExtendedVCB *vcb,
 				searchinfospec_t  *searchInfo1, 
 				searchinfospec_t *searchInfo2,
 				struct vfs_context *ctx)
+=======
+Boolean
+CheckCriteria(	ExtendedVCB *vcb,
+				u_long searchBits, 
+				struct attrlist *attrList,
+				CatalogNodeData *cnp, 
+				CatalogKey *key,
+				searchinfospec_t *searchInfo1, 
+				searchinfospec_t *searchInfo2,
+				Boolean lookForDup )
+>>>>>>> origin/10.1
 {
 	Boolean matched, atleastone;
 	Boolean isHFSPlus;
@@ -799,8 +1014,26 @@ CheckCriteria(	ExtendedVCB *vcb,
 			else /* full HFS name match */
 				matched = (FastRelString(key->hfs.nodeName, (u_char*)searchInfo1->name) == 0);
 		}
+<<<<<<< HEAD
 #endif
 
+=======
+
+#if 1 // Installer workaround
+		if ( lookForDup ) {
+			HFSCatalogNodeID parentID;
+			if (isHFSPlus)
+				parentID = key->hfsPlus.parentID;
+			else
+				parentID = key->hfs.parentID;
+	
+			if ( matched && parentID == kRootDirID && 
+				 IsTargetName( searchInfo1, isHFSPlus )  )
+				matched = false;
+		}
+#endif // Installer workaround
+		
+>>>>>>> origin/10.1
 		if ( matched == false || (searchBits & ~SRCHFS_MATCHPARTIALNAMES) == 0 )
 			goto TestDone;	/* no match, or nothing more to compare */
 
@@ -868,6 +1101,7 @@ CheckCriteria(	ExtendedVCB *vcb,
 		    
 
 	/* Now that we have a record worth searching, see if it matches the search attributes */
+<<<<<<< HEAD
 #if CONFIG_HFS_STD
 	if (rec->recordType == kHFSFileRecord ||
 	    rec->recordType == kHFSPlusFileRecord) {
@@ -875,6 +1109,9 @@ CheckCriteria(	ExtendedVCB *vcb,
 	if (rec->recordType == kHFSPlusFileRecord) {
 #endif
 
+=======
+	if (cnp->cnd_type == kCatalogFileNode) {
+>>>>>>> origin/10.1
 		if ((attrList->fileattr & ~ATTR_FILE_VALIDMASK) != 0) {	/* attr we do know about  */
 			matched = false;
 			goto TestDone;
@@ -1130,6 +1367,7 @@ InsertMatch(struct hfsmount *hfsmp, uio_t a_uio, CatalogRecord *rec,
 	bzero(&c_attr, sizeof(c_attr));
 	rovingAttributesBuffer = (char*)attributesBuffer + sizeof(u_int32_t); /* Reserve space for length field */
 	rovingVariableBuffer = variableBuffer;
+<<<<<<< HEAD
 
 	/* Convert catalog record into cat_attr format. */
 	cat_convertattr(hfsmp, rec, &c_attr, &datafork, &rsrcfork);
@@ -1154,6 +1392,80 @@ InsertMatch(struct hfsmount *hfsmp, uio_t a_uio, CatalogRecord *rec,
 		if (err) {
 			/* This means that we probably had a CNID error */
 			goto exit;
+=======
+	
+	INIT_CATALOGDATA(&catalogInfo.nodeData, 0);
+	catalogInfo.nodeData.cnd_iNodeNumCopy = 0;
+
+	/* The packing call below expects a struct hfsCatalogInfo */
+	bcopy(cnp, &catalogInfo.nodeData, (cnp->cnd_type == kCatalogFileNode) ?
+	      sizeof(HFSPlusCatalogFile) : sizeof(HFSPlusCatalogFolder));
+
+	catalogInfo.nodeData.cnm_parID = isHFSPlus ? key->hfsPlus.parentID : key->hfs.parentID;
+
+	/* hide open files that have been deleted */
+	if ((privateDir != 0) && (catalogInfo.nodeData.cnm_parID == privateDir))
+		return (0);
+
+	/* hide our private meta data directory */
+	if ((privateDir != 0) && (catalogInfo.nodeData.cnd_nodeID == privateDir))
+		return (0);
+
+	if ( returnAttrList->commonattr & ATTR_CMN_NAME ) {
+		size_t utf8len = 0;
+
+		catalogInfo.nodeData.cnm_nameptr = catalogInfo.nodeData.cnm_namespace;
+
+		/* Return result in UTF-8 */
+		if ( isHFSPlus ) {
+			err = utf8_encodestr(key->hfsPlus.nodeName.unicode,
+					key->hfsPlus.nodeName.length * sizeof(UniChar),
+					catalogInfo.nodeData.cnm_namespace,
+					&utf8len,
+					MAXHFSVNODELEN + 1, ':', 0);
+			if (err == ENAMETOOLONG) {
+				utf8len = utf8_encodelen(key->hfsPlus.nodeName.unicode,
+						key->hfsPlus.nodeName.length * sizeof(UniChar), ':', 0);
+				MALLOC(catalogInfo.nodeData.cnm_nameptr, char *, utf8len+1, M_TEMP, M_WAITOK);
+				catalogInfo.nodeData.cnm_flags |= kCatNameIsAllocated;
+				err = utf8_encodestr(key->hfsPlus.nodeName.unicode,
+						key->hfsPlus.nodeName.length * sizeof(UniChar),
+						catalogInfo.nodeData.cnm_nameptr,
+						&utf8len,
+						utf8len + 1, ':', 0);
+			}
+		 } else {
+			err = hfs_to_utf8(vcb, 
+					key->hfs.nodeName,
+					MAXHFSVNODELEN + 1,
+					(ByteCount*) &utf8len, 
+					catalogInfo.nodeData.cnm_namespace);
+			if (err == ENAMETOOLONG) {
+				MALLOC(catalogInfo.nodeData.cnm_nameptr, char *, utf8len+1, M_TEMP, M_WAITOK);
+				catalogInfo.nodeData.cnm_flags |= kCatNameIsAllocated;
+				err = hfs_to_utf8(vcb, 
+						key->hfs.nodeName, 
+						utf8len + 1, 
+						(ByteCount*) &utf8len, 
+						catalogInfo.nodeData.cnm_nameptr);
+			} else if (err) {
+				/*
+				 * When an HFS name cannot be encoded with the current
+				 * volume encoding we use MacRoman as a fallback.
+				 */
+				err = mac_roman_to_utf8(key->hfs.nodeName, MAXHFSVNODELEN + 1,
+				                        (ByteCount*) &utf8len,
+				                         catalogInfo.nodeData.cnm_namespace);
+			}
+		}
+		catalogInfo.nodeData.cnm_length = utf8len;
+		if (err && (catalogInfo.nodeData.cnm_flags & kCatNameIsAllocated))
+		{
+			DisposePtr(catalogInfo.nodeData.cnm_nameptr);
+			catalogInfo.nodeData.cnm_flags &= ~kCatNameIsAllocated;
+                        catalogInfo.nodeData.cnm_nameptr = catalogInfo.nodeData.cnm_namespace;
+                        catalogInfo.nodeData.cnm_namespace[0] = 0;
+>>>>>>> origin/10.1
 		}
 	} else {
 		c_desc.cd_cnid = c_attr.ca_fileid;
@@ -1404,4 +1716,44 @@ UnpackSearchAttributeBlock( struct hfsmount *hfsmp, struct attrlist	*alist,
 
 	return (0);
 }
+<<<<<<< HEAD
 #endif	/* CONFIG_SEARCHFS */
+=======
+
+
+/* this routine was added as part of the work around where some installers would fail */
+/* because they incorrectly assumed search results were in some kind of order.  */
+/* This routine is used to indentify the problematic target.  At this point we */
+/* only know of one.  This routine could be modified for more (I hope not). */
+static Boolean IsTargetName( searchinfospec_t * searchInfoPtr, Boolean isHFSPlus )
+{
+	if ( searchInfoPtr->name == NULL )
+		return( false );
+		
+	if (isHFSPlus) {
+		HFSUniStr255 myName = {
+			7, 	/* number of unicode characters */
+			{
+				'L','i','b','r','a','r','y'
+			}
+		};		
+		if ( FastUnicodeCompare( myName.unicode, myName.length,
+								 (UniChar*)searchInfoPtr->name,
+								 searchInfoPtr->nameLength ) == 0 )  {
+			return( true );
+		}
+						  
+	} else {
+		u_char		myName[32] = {
+			0x07,'L','i','b','r','a','r','y'
+		};
+		if ( FastRelString(myName, (u_char*)searchInfoPtr->name) == 0 )  {
+			return( true );
+		}
+	}
+	return( false );
+	
+} /* IsTargetName */
+
+
+>>>>>>> origin/10.1

@@ -75,7 +75,12 @@
 #ifndef _NFS_NFS_H_
 #include <nfs/nfs.h>
 #endif
+<<<<<<< HEAD
 #include <sys/kauth.h>
+=======
+#include <sys/lock.h>
+
+>>>>>>> origin/10.1
 
 /*
  * Silly rename structure that hangs off the nfsnode until the name
@@ -547,9 +552,13 @@ struct nfs_lock_owner {
 #define NFS_ACCESS_CACHE_SIZE	3
 
 struct nfsnode {
+<<<<<<< HEAD
 	lck_mtx_t		n_lock;		/* nfs node lock */
 	lck_rw_t		n_datalock;	/* nfs node data lock */
 	void			*n_datalockowner;/* nfs node data lock owner (exclusive) */
+=======
+	struct lock__bsd__	n_lock;	/* the vnode lock */
+>>>>>>> origin/10.1
 	LIST_ENTRY(nfsnode)	n_hash;		/* Hash chain */
 	LIST_ENTRY(nfsnode)	n_monlink;	/* list of monitored nodes */
 	u_quad_t		n_size;		/* Current size of file */
@@ -595,6 +604,7 @@ struct nfsnode {
 		struct nfs_sillyrename *nf_silly;/* Ptr to silly rename struct */
 		struct nfsdmap *nd_cookiecache; /* dir cookie cache */
 	} n_un3;
+<<<<<<< HEAD
 	uint32_t		n_flag;		/* node flags */
 	u_short			n_fhsize;	/* size in bytes, of fh */
 	u_short			n_hflag;	/* node hash flags */
@@ -630,6 +640,12 @@ struct nfsnode {
 	TAILQ_ENTRY(nfsnode)	n_dlink;	/* delegation list link */
 	TAILQ_ENTRY(nfsnode)	n_dreturn;	/* delegation return list link */
 	struct kauth_ace	n_dace;		/* delegation ACE */
+=======
+	short			n_fhsize;	/* size in bytes, of fh */
+	short			n_flag;		/* Flag for locking.. */
+	nfsfh_t			n_fh;		/* Small File Handle */
+	u_int64_t		n_xid;		/* last xid to loadattr */
+>>>>>>> origin/10.1
 };
 
 #define NFS_DATA_LOCK_SHARED	1
@@ -789,6 +805,7 @@ extern lck_mtx_t *nfsiod_mutex;
 
 #if defined(KERNEL)
 
+<<<<<<< HEAD
 typedef int     vnop_t(void *);
 extern	vnop_t	**fifo_nfsv2nodeop_p;
 extern	vnop_t	**nfsv2_vnodeop_p;
@@ -796,10 +813,17 @@ extern	vnop_t	**spec_nfsv2nodeop_p;
 extern	vnop_t	**fifo_nfsv4nodeop_p;
 extern	vnop_t	**nfsv4_vnodeop_p;
 extern	vnop_t	**spec_nfsv4nodeop_p;
+=======
+typedef int     vop_t __P((void *));
+extern	vop_t	**fifo_nfsv2nodeop_p;
+extern	vop_t	**nfsv2_vnodeop_p;
+extern	vop_t	**spec_nfsv2nodeop_p;
+>>>>>>> origin/10.1
 
 /*
  * Prototypes for NFS vnode operations
  */
+<<<<<<< HEAD
 #define nfs_vnop_revoke nop_revoke
 int	nfs_vnop_inactive(struct vnop_inactive_args *);
 int	nfs_vnop_reclaim(struct vnop_reclaim_args *);
@@ -823,6 +847,23 @@ void nfs_data_unlock(nfsnode_t);
 void nfs_data_unlock_noupdate(nfsnode_t);
 void nfs_data_unlock_internal(nfsnode_t, int);
 void nfs_data_update_size(nfsnode_t, int);
+=======
+int	nfs_write __P((struct vop_write_args *));
+#define	nfs_lease_check ((int (*) __P((struct  vop_lease_args *)))nullop)
+#define nqnfs_vop_lease_check	lease_check
+int	nqnfs_vop_lease_check __P((struct vop_lease_args *));
+#define nfs_revoke vop_revoke
+#define nfs_seek ((int (*) __P((struct  vop_seek_args *)))nullop)
+int	nfs_abortop __P((struct vop_abortop_args *));
+int	nfs_inactive __P((struct vop_inactive_args *));
+int	nfs_reclaim __P((struct vop_reclaim_args *));
+int nfs_lock __P((struct vop_lock_args *));
+int nfs_unlock __P((struct vop_unlock_args *));
+int nfs_islocked __P((struct vop_islocked_args *));
+
+#define nfs_reallocblks \
+	((int (*) __P((struct  vop_reallocblks_args *)))eopnotsupp)
+>>>>>>> origin/10.1
 
 /* other stuff */
 int nfs_removeit(struct nfs_sillyrename *);
