@@ -375,6 +375,38 @@ found:
 				retval = EJUSTRETURN;
 			}
 			
+<<<<<<< HEAD
+=======
+			/* If couldn't determine what type of fork, leave */
+			if (forkType == kUndefinedFork) {				
+				retval = EISDIR;
+				goto Err_Exit;
+			};
+				
+			/* Get the vnode now that what type of fork is known */
+			DBG_ASSERT((forkType==kDirectory) || (forkType==kDataFork) || (forkType==kRsrcFork));
+			retval = hfs_vget_catinfo(tparent_vp, &catInfo, forkType, &target_vp);
+			if (retval != E_NONE)
+				goto Err_Exit;
+
+			if (!lockparent || !(flags & ISLASTCN))
+				VOP_UNLOCK(tparent_vp, 0, p);
+
+			CLEAN_CATALOGDATA(&catInfo.nodeData);
+
+		};	/* else found */
+
+
+		/*
+		* Insert name in cache if wanted.
+		 * Names with composed chars are not put into the name cache.
+		 * Resource forks are not entered in the name cache. This
+		 * avoids deadlocks.
+		 */
+		if ((cnp->cn_flags & MAKEENTRY)
+		    && (cnp->cn_namelen == catInfo.nodeData.cnm_length)
+			&& ((H_FORKTYPE(VTOH(target_vp))) != kRsrcFork))	{
+>>>>>>> origin/10.0
 			/*
 			 * If this was a straight lookup operation, we may need to redrive the entire 
 			 * lookup starting from cat_lookup if the element was deleted as the result of 

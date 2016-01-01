@@ -714,6 +714,7 @@ public:
 
     // Following methods are private implementation
 
+<<<<<<< HEAD
 #ifdef __LP64__
     virtual
 #endif /* __LP64__ */
@@ -732,6 +733,12 @@ public:
 	mach_vm_size_t		length,
         IOOptionBits		options );
 
+=======
+    // make virtual
+    IOReturn redirect( task_t safeTask, bool redirect );
+
+protected:
+>>>>>>> origin/10.0
     virtual IOMemoryMap * 	makeMapping(
 	IOMemoryDescriptor *	owner,
 	task_t			intoTask,
@@ -938,9 +945,17 @@ public:
 };
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+<<<<<<< HEAD
 #ifdef XNU_KERNEL_PRIVATE
 // Also these flags should not overlap with the options to
 //	IOMemoryDescriptor::initWithRanges(... IOOptionsBits options);
+=======
+
+// The following classes are private implementation of IOMemoryDescriptor - they
+// should not be reference directly, just through the public API's in the 
+// IOMemoryDescriptor class.
+
+>>>>>>> origin/10.0
 enum {
     _kIOMemorySourceSegment	= 0x00002000
 };
@@ -1146,6 +1161,7 @@ mach_vm_address_t 	IOMemoryMap::getAddress()
     return (getVirtualAddress());
 }
 
+<<<<<<< HEAD
 mach_vm_size_t 	IOMemoryMap::getSize()
 {
     return (getLength());
@@ -1153,6 +1169,20 @@ mach_vm_size_t 	IOMemoryMap::getSize()
 #else /* !__LP64__ */
 #include <IOKit/IOSubMemoryDescriptor.h>
 #endif /* !__LP64__ */
+=======
+    // make virtual
+    IOReturn redirect( task_t safeTask, bool redirect );
+
+protected:
+    virtual IOMemoryMap * 	makeMapping(
+	IOMemoryDescriptor *	owner,
+	task_t		intoTask,
+	IOVirtualAddress	atAddress,
+	IOOptionBits		options,
+	IOByteCount		offset,
+	IOByteCount		length );
+};
+>>>>>>> origin/10.0
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 

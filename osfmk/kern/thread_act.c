@@ -112,6 +112,7 @@ kern_return_t
 thread_terminate_internal(
 	thread_t			thread)
 {
+<<<<<<< HEAD
 	kern_return_t		result = KERN_SUCCESS;
 
 	thread_mtx_lock(thread);
@@ -139,6 +140,46 @@ thread_terminate_internal(
 		thread_wait(thread, FALSE);
 
 	return (result);
+=======
+	thread_t	thread;
+	task_t		task;
+	struct ipc_port	*iplock;
+	kern_return_t	ret;
+
+#if	THREAD_SWAPPER
+	thread_swap_disable(thr_act);
+#endif	/* THREAD_SWAPPER */
+
+	thread = act_lock_thread(thr_act);
+	if (!thr_act->active) {
+		act_unlock_thread(thr_act);
+		return(KERN_TERMINATED);
+	}
+
+	act_disable_task_locked(thr_act);
+	ret = act_abort(thr_act,FALSE);
+
+#if	NCPUS > 1
+	/* 
+	 * Make sure this thread enters the kernel
+	 */
+	if (thread != current_thread()) {
+		thread_hold(thr_act);
+		act_unlock_thread(thr_act);
+
+		if (thread_stop_wait(thread))
+			thread_unstop(thread);
+		else
+			ret = KERN_ABORTED;
+
+		(void)act_lock_thread(thr_act);
+		thread_release(thr_act);
+	}
+#endif	/* NCPUS > 1 */
+
+	act_unlock_thread(thr_act);
+	return(ret);
+>>>>>>> origin/10.0
 }
 
 /*
@@ -324,8 +365,26 @@ act_abort(
 	else
 		thread->sched_flags &= ~TH_SFLAG_ABORTSAFELY;
 
+<<<<<<< HEAD
 	thread_unlock(thread);
 	splx(s);
+=======
+	/*
+	 * If the target thread is the end of the chain, the thread
+	 * has to be marked for abort and rip it out of any wait.
+	 */
+	spl = splsched();
+	thread_lock(thr_act->thread);
+	if (thr_act->thread->top_act == thr_act) {
+	    thr_act->thread->state |= TH_ABORT;
+	    clear_wait_internal(thr_act->thread, THREAD_INTERRUPTED);
+	    thread_unlock(thr_act->thread);
+	    splx(spl);
+	    install_special_handler(thr_act);
+	    nudge( thr_act );
+	}
+	return KERN_SUCCESS;
+>>>>>>> origin/10.0
 }
 	
 kern_return_t
@@ -757,10 +816,65 @@ install_special_handler_locked(
 	else {
 		processor_t		processor = thread->last_processor;
 
+<<<<<<< HEAD
 		if (	processor != PROCESSOR_NULL					&&
 				processor->state == PROCESSOR_RUNNING		&&
 				processor->active_thread == thread			)
 			cause_ast_check(processor);
+=======
+        enable_preemption();
+
+	return(old);
+}
+
+/*
+ * install_special_handler
+ *	Install the special returnhandler that handles suspension and
+ *	termination, if it hasn't been installed already.
+ *
+ * Already locked: RPC-related locks for thr_act, but not
+ * scheduling lock (thread_lock()) of the associated thread.
+ */
+void
+install_special_handler(
+	thread_act_t	thr_act)
+{
+	spl_t		spl;
+	thread_t	thread = thr_act->thread;
+
+#if	MACH_ASSERT
+	if (watchacts & WA_ACT_HDLR)
+	    printf("act_%x: install_special_hdlr(%x)\n",current_act(),thr_act);
+#endif	/* MACH_ASSERT */
+
+	spl = splsched();
+	thread_lock(thread);
+	install_special_handler_locked(thr_act);
+	thread_unlock(thread);
+	splx(spl);
+}
+
+/*
+ * install_special_handler_locked
+ *	Do the work of installing the special_handler.
+ *
+ * Already locked: RPC-related locks for thr_act, plus the
+ * scheduling lock (thread_lock()) of the associated thread.
+ */
+void
+install_special_handler_locked(
+	thread_act_t	thr_act)
+{
+	ReturnHandler	**rh;
+	thread_t	thread = thr_act->thread;
+
+	/* The work handler must always be the last ReturnHandler on the list,
+	   because it can do tricky things like detach the thr_act.  */
+	for (rh = &thr_act->handlers; *rh; rh = &(*rh)->next)
+		/* */ ;
+	if (rh != &thr_act->special_handler.next) {
+		*rh = &thr_act->special_handler;
+>>>>>>> origin/10.0
 	}
 }
 

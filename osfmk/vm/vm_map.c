@@ -11763,6 +11763,7 @@ vm_map_region(
 	}
 }
 
+<<<<<<< HEAD
 #define OBJ_RESIDENT_COUNT(obj, entry_size)				\
 	MIN((entry_size),						\
 	    ((obj)->all_reusable ?					\
@@ -11836,6 +11837,37 @@ vm_map_region_top_walk(
 						top->private_pages_resident =
 							OBJ_RESIDENT_COUNT(obj,
 									   entry_size);
+=======
+			if (src_needs_copy && !tmp_entry->needs_copy) {
+				if (tmp_entry->is_shared  || 
+				     tmp_entry->object.vm_object->true_share ||
+				     map_share) {
+					vm_map_unlock(src_map);
+					new_entry->object.vm_object = 
+						vm_object_copy_delayed(
+							src_object,
+							src_offset,	
+							src_size);
+					/* dec ref gained in copy_quickly */
+					vm_object_lock(src_object);
+					src_object->ref_count--; 
+					vm_object_res_deallocate(src_object);
+					vm_object_unlock(src_object);
+		    			vm_map_lock(src_map);
+					/* 
+					 * it turns out that we have
+					 * finished our copy. No matter
+					 * what the state of the map
+					 * we will lock it again here
+					 * knowing that if there is
+					 * additional data to copy
+					 * it will be checked at
+					 * the top of the loop
+					 *
+					 * Don't do timestamp check
+					 */
+					
+>>>>>>> origin/10.0
 				} else {
 					top->share_mode = SM_SHARED;
 					top->shared_pages_resident =

@@ -122,6 +122,11 @@ struct selinfo {
 	struct	klist si_note;		/* JMM - temporary separation */
 	u_int	si_flags;		/* see below */
 };
+<<<<<<< HEAD
+=======
+#define	SI_COLL		0x0001		/* collision occurred */
+#define	SI_SBSEL	0x0002		/* select socket buffer wanted  replaces SB_SEL */ 
+>>>>>>> origin/10.0
 
 #define	SI_COLL		0x0001		/* collision occurred */
 #define	SI_RECORDED	0x0004		/* select has been recorded */ 

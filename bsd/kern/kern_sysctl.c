@@ -775,6 +775,7 @@ sysctl_prochandle SYSCTL_HANDLER_ARGS
 		case KERN_PROC_RUID:
 			ruidcheck = 1;
 			break;
+<<<<<<< HEAD
 
 		case KERN_PROC_ALL:
 			break;
@@ -782,6 +783,24 @@ sysctl_prochandle SYSCTL_HANDLER_ARGS
 		default:
 			/* must be kern.proc.<unknown> */
 			return (ENOTSUP);
+=======
+		}
+		if (buflen >= sizeof(struct kinfo_proc)) {
+			bzero(&kproc, sizeof(struct kinfo_proc));
+			fill_proc(p, &kproc, doingzomb);
+			if (error = copyout((caddr_t)&kproc, &dp->kp_proc,
+			    sizeof(struct kinfo_proc)))
+				return (error);
+			dp++;
+			buflen -= sizeof(struct kinfo_proc);
+		}
+		needed += sizeof(struct kinfo_proc);
+	}
+	if (doingzomb == 0) {
+		p = zombproc.lh_first;
+		doingzomb++;
+		goto again;
+>>>>>>> origin/10.0
 	}
 
 	error = 0;
@@ -945,6 +964,7 @@ fill_user32_eproc(proc_t p, struct user32_eproc *__restrict ep)
 /*
  * Fill in non-zero fields of an LP64 eproc structure for the specified process.
  */
+<<<<<<< HEAD
 STATIC void
 fill_user64_eproc(proc_t p, struct user64_eproc *__restrict ep)
 {
@@ -984,6 +1004,51 @@ fill_user64_eproc(proc_t p, struct user64_eproc *__restrict ep)
 
 	if ((p->p_flag & P_CONTROLT) && (sessp != SESSION_NULL) &&
 	     (tp = SESSION_TP(sessp))) {
+=======
+void
+fill_eproc(p, ep)
+	register struct proc *p;
+	register struct eproc *ep;
+{
+	register struct tty *tp;
+
+	/*
+	 * Skip zombie processes.
+	 */
+	if (p->p_stat == SZOMB)
+		return;
+
+	ep->e_paddr = p;
+	ep->e_sess = p->p_pgrp->pg_session;
+	ep->e_pcred = *p->p_cred;
+	ep->e_ucred = *p->p_ucred;
+	if (p->p_stat == SIDL || p->p_stat == SZOMB) {
+		ep->e_vm.vm_rssize = 0;
+		ep->e_vm.vm_tsize = 0;
+		ep->e_vm.vm_dsize = 0;
+		ep->e_vm.vm_ssize = 0;
+		/* ep->e_vm.vm_pmap = XXX; */
+	} else {
+#if FIXME  /* [ */
+		register vm_map_t vm = ((task_t)p->task)->map;
+
+		ep->e_vm.vm_rssize = pmap_resident_count(vm->pmap); /*XXX*/
+//		ep->e_vm.vm_tsize = vm->vm_tsize;
+//		ep->e_vm.vm_dsize = vm->vm_dsize;
+//		ep->e_vm.vm_ssize = vm->vm_ssize;
+#else  /* FIXME ][ */
+		ep->e_vm.vm_rssize = 0; /*XXX*/
+#endif  /* FIXME ] */
+	}
+	if (p->p_pptr)
+		ep->e_ppid = p->p_pptr->p_pid;
+	else
+		ep->e_ppid = 0;
+	ep->e_pgid = p->p_pgrp->pg_id;
+	ep->e_jobc = p->p_pgrp->pg_jobc;
+	if ((p->p_flag & P_CONTROLT) &&
+	     (tp = ep->e_sess->s_ttyp)) {
+>>>>>>> origin/10.0
 		ep->e_tdev = tp->t_dev;
 		ep->e_tpgid = sessp->s_ttypgrpid;
 	} else

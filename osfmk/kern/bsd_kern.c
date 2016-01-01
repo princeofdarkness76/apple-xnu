@@ -604,6 +604,7 @@ current_thread_aborted (
 		void)
 {
 	thread_t th = current_thread();
+<<<<<<< HEAD
 	spl_t s;
 
 	if ((th->sched_flags & TH_SFLAG_ABORTED_MASK) == TH_SFLAG_ABORT &&
@@ -618,6 +619,11 @@ current_thread_aborted (
 		splx(s);
 	}
 	return FALSE;
+=======
+
+	return(!th->top_act ||
+	       ((th->state & TH_ABORT) && (th->interruptible))); 
+>>>>>>> origin/10.0
 }
 
 /*

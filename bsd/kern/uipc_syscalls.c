@@ -463,7 +463,11 @@ accept_nocancel(struct proc *p, struct accept_nocancel_args *uap,
 		error = EWOULDBLOCK;
 		goto out;
 	}
+<<<<<<< HEAD
 	while (TAILQ_EMPTY(&head->so_comp) && head->so_error == 0) {
+=======
+        while (TAILQ_EMPTY(&head->so_comp) && head->so_error == 0) {
+>>>>>>> origin/10.0
 		if (head->so_state & SS_CANTRCVMORE) {
 			head->so_error = ECONNABORTED;
 			break;
@@ -499,7 +503,10 @@ accept_nocancel(struct proc *p, struct accept_nocancel_args *uap,
 	 * block allowing another process to accept the connection
 	 * instead.
 	 */
+<<<<<<< HEAD
 	lck_mtx_assert(mutex_held, LCK_MTX_ASSERT_OWNED);
+=======
+>>>>>>> origin/10.0
 	so = TAILQ_FIRST(&head->so_comp);
 	TAILQ_REMOVE(&head->so_comp, so, so_list);
 	head->so_qlen--;

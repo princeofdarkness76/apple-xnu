@@ -330,9 +330,14 @@ soo_select(struct fileproc *fp, int which, void *wql, vfs_context_t ctx)
 	switch (which) {
 
 	case FREAD:
+<<<<<<< HEAD
 		so->so_rcv.sb_flags |= SB_SEL;
+=======
+		so->so_rcv.sb_sel.si_flags |= SI_SBSEL;
+>>>>>>> origin/10.0
 		if (soreadable(so)) {
 			retnum = 1;
+<<<<<<< HEAD
 			so->so_rcv.sb_flags &= ~SB_SEL;
 			goto done;
 		}
@@ -341,8 +346,19 @@ soo_select(struct fileproc *fp, int which, void *wql, vfs_context_t ctx)
 
 	case FWRITE:
 		so->so_snd.sb_flags |= SB_SEL;
+=======
+			so->so_rcv.sb_sel.si_flags &= ~SI_SBSEL;
+			goto done;
+		}
+		selrecord(p, &so->so_rcv.sb_sel);
+		break;
+
+	case FWRITE:
+		so->so_snd.sb_sel.si_flags |= SI_SBSEL;
+>>>>>>> origin/10.0
 		if (sowriteable(so)) {
 			retnum = 1;
+<<<<<<< HEAD
 			so->so_snd.sb_flags &= ~SB_SEL;
 			goto done;
 		}
@@ -351,12 +367,29 @@ soo_select(struct fileproc *fp, int which, void *wql, vfs_context_t ctx)
 
 	case 0:
 		so->so_rcv.sb_flags |= SB_SEL;
+=======
+			so->so_snd.sb_sel.si_flags &= ~SI_SBSEL;
+			goto done;
+		}
+		selrecord(p, &so->so_snd.sb_sel);
+		break;
+
+	case 0:
+		so->so_rcv.sb_sel.si_flags |= SI_SBSEL;
+>>>>>>> origin/10.0
 		if (so->so_oobmark || (so->so_state & SS_RCVATMARK)) {
 			retnum = 1;
+<<<<<<< HEAD
 			so->so_rcv.sb_flags &= ~SB_SEL;
 			goto done;
 		}
 		selrecord(procp, &so->so_rcv.sb_sel, wql);
+=======
+			so->so_rcv.sb_sel.si_flags &= ~SI_SBSEL;
+			goto done;
+		}
+		selrecord(p, &so->so_rcv.sb_sel);
+>>>>>>> origin/10.0
 		break;
 	}
 

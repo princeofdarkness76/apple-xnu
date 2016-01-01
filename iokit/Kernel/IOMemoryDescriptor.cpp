@@ -3140,6 +3140,21 @@ IOReturn IOGeneralMemoryDescriptor::dmaMap(
  * the memory after the I/O transfer finishes.  This method needn't
  * called for non-pageable memory.
  */
+<<<<<<< HEAD
+=======
+IOReturn IOGeneralMemoryDescriptor::prepare(
+		IODirection forDirection = kIODirectionNone)
+{
+    UInt rangeIndex = 0;
+
+    if((_wireCount == 0) && (kIOMemoryRequiresWire & _flags)) {
+        kern_return_t rc;
+
+        if(forDirection == kIODirectionNone)
+            forDirection = _direction;
+
+        vm_prot_t access = VM_PROT_DEFAULT;    // Could be cleverer using direction
+>>>>>>> origin/10.0
 
 IOReturn IOGeneralMemoryDescriptor::prepare(IODirection forDirection)
 {
@@ -3336,6 +3351,7 @@ IOReturn IOGeneralMemoryDescriptor::doMap(
     memory_object_t pager;
     pager = (memory_object_t) (reserved ? reserved->dp.devicePager : 0);
 
+<<<<<<< HEAD
     // <upl_transpose //
     if ((kIOMapReference|kIOMapUnique) == ((kIOMapReference|kIOMapUnique) & options))
     {
@@ -3351,6 +3367,14 @@ IOReturn IOGeneralMemoryDescriptor::doMap(
 		err = kIOReturnNotReadable;
 		break;
 	    }
+=======
+extern "C" {
+// osfmk/device/iokit_rpc.c
+extern kern_return_t IOMapPages( vm_map_t map, vm_offset_t va, vm_offset_t pa,
+                                 vm_size_t length, unsigned int mapFlags);
+extern kern_return_t IOUnmapPages(vm_map_t map, vm_offset_t va, vm_size_t length);
+};
+>>>>>>> origin/10.0
 
 	    size = round_page(mapping->fLength);
 	    flags = UPL_COPYOUT_FROM | UPL_SET_INTERNAL 
@@ -3416,6 +3440,7 @@ IOReturn IOGeneralMemoryDescriptor::doMap(
 	}
     }
 
+<<<<<<< HEAD
     return (err);
 }
 
@@ -3426,6 +3451,63 @@ IOReturn IOGeneralMemoryDescriptor::doUnmap(
 {
     return (super::doUnmap(addressMap, __address, __length));
 }
+=======
+class _IOMemoryMap : public IOMemoryMap
+{
+    OSDeclareDefaultStructors(_IOMemoryMap)
+
+    IOMemoryDescriptor * memory;
+    IOMemoryMap *	superMap;
+    IOByteCount		offset;
+    IOByteCount		length;
+    IOVirtualAddress	logical;
+    task_t		addressTask;
+    vm_map_t		addressMap;
+    IOOptionBits	options;
+
+public:
+    virtual void free();
+
+    // IOMemoryMap methods
+    virtual IOVirtualAddress 	getVirtualAddress();
+    virtual IOByteCount 	getLength();
+    virtual task_t		getAddressTask();
+    virtual IOMemoryDescriptor * getMemoryDescriptor();
+    virtual IOOptionBits 	getMapOptions();
+
+    virtual IOReturn 		unmap();
+    virtual void 		taskDied();
+
+    virtual IOPhysicalAddress 	getPhysicalSegment(IOByteCount offset,
+	       					   IOByteCount * length);
+
+    // for IOMemoryDescriptor use
+    _IOMemoryMap * isCompatible(
+		IOMemoryDescriptor *	owner,
+                task_t			intoTask,
+                IOVirtualAddress	toAddress,
+                IOOptionBits		options,
+                IOByteCount		offset,
+                IOByteCount		length );
+
+    bool init(
+	IOMemoryDescriptor *	memory,
+	IOMemoryMap *		superMap,
+        IOByteCount		offset,
+        IOByteCount		length );
+
+    bool init(
+	IOMemoryDescriptor *	memory,
+	task_t			intoTask,
+	IOVirtualAddress	toAddress,
+	IOOptionBits		options,
+        IOByteCount		offset,
+        IOByteCount		length );
+
+    IOReturn redirect(
+	task_t			intoTask, bool redirect );
+};
+>>>>>>> origin/10.0
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
@@ -3510,6 +3592,7 @@ IOReturn IOMemoryDescriptor::doMap(
     return (kIOReturnUnsupported);
 }
 
+<<<<<<< HEAD
 IOReturn IOMemoryDescriptor::handleFault(
         void *			_pager,
 	mach_vm_size_t		sourceOffset,
@@ -3523,6 +3606,19 @@ IOReturn IOMemoryDescriptor::handleFault(
 	do {
 	    SLEEP;
 	} while( kIOMemoryRedirected & _flags );
+=======
+    if( options & kIOMapStatic)
+	ok = true;
+    else
+	ok = (kIOReturnSuccess == memory->doMap( addressMap, &logical,
+						 options, offset, length ));
+    if( !ok) {
+	logical = 0;
+        memory->release();
+        memory = 0;
+        vm_map_deallocate(addressMap);
+        addressMap = 0;
+>>>>>>> origin/10.0
     }
     return (kIOReturnSuccess);
 }
@@ -3756,7 +3852,76 @@ IOReturn IOMemoryMap::redirect( task_t safeTask, bool doRedirect )
     return( err );
 }
 
+<<<<<<< HEAD
 IOReturn IOMemoryMap::unmap( void )
+=======
+IOReturn IOMemoryDescriptor::redirect( task_t safeTask, bool redirect )
+{
+    IOReturn		err;
+    _IOMemoryMap *	mapping = 0;
+    OSIterator *	iter;
+
+    LOCK;
+
+    do {
+	if( (iter = OSCollectionIterator::withCollection( _mappings))) {
+            while( (mapping = (_IOMemoryMap *) iter->getNextObject()))
+                mapping->redirect( safeTask, redirect );
+
+            iter->release();
+        }
+    } while( false );
+
+    UNLOCK;
+
+    // temporary binary compatibility
+    IOSubMemoryDescriptor * subMem;
+    if( (subMem = OSDynamicCast( IOSubMemoryDescriptor, this)))
+        err = subMem->redirect( safeTask, redirect );
+    else
+        err = kIOReturnSuccess;
+
+    return( err );
+}
+
+IOReturn IOSubMemoryDescriptor::redirect( task_t safeTask, bool redirect )
+{
+// temporary binary compatibility   IOMemoryDescriptor::redirect( safeTask, redirect );
+    return( _parent->redirect( safeTask, redirect ));
+}
+
+IOReturn _IOMemoryMap::redirect( task_t safeTask, bool redirect )
+{
+    IOReturn err = kIOReturnSuccess;
+
+    if( superMap) {
+//        err = ((_IOMemoryMap *)superMap)->redirect( safeTask, redirect );
+    } else {
+
+        LOCK;
+        if( logical && addressMap
+        && (get_task_map( safeTask) != addressMap)
+        && (0 == (options & kIOMapStatic))) {
+    
+            IOUnmapPages( addressMap, logical, length );
+            if( !redirect) {
+                err = vm_deallocate( addressMap, logical, length );
+                err = memory->doMap( addressMap, &logical,
+                                     (options & ~kIOMapAnywhere) /*| kIOMapReserve*/ );
+            } else
+                err = kIOReturnSuccess;
+#ifdef DEBUG
+            IOLog("IOMemoryMap::redirect(%d, %x) %x from %lx\n", redirect, err, logical, addressMap);
+#endif
+        }
+        UNLOCK;
+    }
+
+    return( err );
+}
+
+IOReturn _IOMemoryMap::unmap( void )
+>>>>>>> origin/10.0
 {
     IOReturn	err;
 

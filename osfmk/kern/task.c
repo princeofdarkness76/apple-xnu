@@ -1377,10 +1377,17 @@ __unused task_partial_reap(task_t task, __unused int pid)
 kern_return_t
 task_mark_corpse(task_t task)
 {
+<<<<<<< HEAD
 	kern_return_t kr = KERN_SUCCESS;
 	thread_t self_thread;
 	(void) self_thread;
 	wait_interrupt_t wsave;
+=======
+	thread_act_t	thr_act, cur_thr_act;
+	task_t		cur_task;
+	thread_t	cur_thread;
+	boolean_t	interrupt_save;
+>>>>>>> origin/10.0
 
 	assert(task != kernel_task);
 	assert(task == current_task());
@@ -1483,6 +1490,14 @@ task_terminate_internal(
 	interrupt_save = thread_interrupt_level(THREAD_UNINT);
 
 	/*
+	 * Make sure the current thread does not get aborted out of
+	 * the waits inside these operations.
+	 */
+	cur_thread = current_thread();
+	interrupt_save = cur_thread->interruptible;
+	cur_thread->interruptible = FALSE;
+
+	/*
 	 *	Indicate that we want all the threads to stop executing
 	 *	at user space by holding the task (we would have held
 	 *	each thread independently in thread_terminate_internal -
@@ -1496,6 +1511,7 @@ task_terminate_internal(
 
 #if CONFIG_TELEMETRY
 	/*
+<<<<<<< HEAD
 	 * Notify telemetry that this task is going away.
 	 */
 	telemetry_task_ctl_locked(task, TF_TELEMETRY, 0);
@@ -1513,6 +1529,28 @@ task_terminate_internal(
 		pid = proc_pid(task->bsd_info);
 	}
 #endif /* MACH_BSD */
+=======
+	 *	Terminate each activation in the task.
+	 *
+	 *	Each terminated activation will run it's special handler
+	 *	when its current kernel context is unwound.  That will
+	 *	clean up most of the thread resources.  Then it will be
+	 *	handed over to the reaper, who will finally remove the
+	 *	thread from the task list and free the structures.
+         */
+	queue_iterate(&task->thr_acts, thr_act, thread_act_t, thr_acts) {
+			thread_terminate_internal(thr_act);
+	}
+
+	/*
+	 *	Clean up any virtual machine state/resources associated
+	 *	with the current activation because it may hold wiring
+	 *	and other references on resources we will be trying to
+	 *	release below.
+	 */
+	if (cur_thr_act->task == task)
+		act_virtual_machine_destroy(cur_thr_act);
+>>>>>>> origin/10.0
 
 	task_unlock(task);
 
@@ -1559,6 +1597,26 @@ task_terminate_internal(
 	 * expense of removing the address space regions
 	 * at reap time, we do it explictly here.
 	 */
+<<<<<<< HEAD
+=======
+	(void) vm_map_remove(task->map,
+			     task->map->min_offset,
+			     task->map->max_offset, VM_MAP_NO_FLAGS);
+
+	/*
+	 * We no longer need to guard against being aborted, so restore
+	 * the previous interruptible state.
+	 */
+	cur_thread->interruptible = interrupt_save;
+
+	/*
+	 * Get rid of the task active reference on itself.
+	 */
+	task_deallocate(task);
+
+	return(KERN_SUCCESS);
+}
+>>>>>>> origin/10.0
 
 	vm_map_lock(task->map);
 	vm_map_disable_hole_optimization(task->map);
@@ -1590,12 +1648,49 @@ task_terminate_internal(
 	pmap_set_process(task->map->pmap, pid, procname);
 #endif /* MACH_ASSERT */
 
+<<<<<<< HEAD
 	lck_mtx_lock(&tasks_threads_lock);
 	queue_remove(&tasks, task, task_t, tasks);
 	queue_enter(&terminated_tasks, task, task_t, tasks);
 	tasks_count--;
 	terminated_tasks_count++;
 	lck_mtx_unlock(&tasks_threads_lock);
+=======
+	if (task->thr_act_count > 1) {
+		/*
+		 * Mark all the threads to keep them from starting any more
+		 * user-level execution.  The thread_terminate_internal code
+		 * would do this on a thread by thread basis anyway, but this
+		 * gives us a better chance of not having to wait there.
+		 */
+		task_hold_locked(task);
+
+		/*
+		 *	Terminate all the other activations in the task.
+		 *
+		 *	Each terminated activation will run it's special handler
+		 *	when its current kernel context is unwound.  That will
+		 *	clean up most of the thread resources.  Then it will be
+		 *	handed over to the reaper, who will finally remove the
+		 *	thread from the task list and free the structures.
+		 */
+		queue_iterate(&task->thr_acts, thr_act, thread_act_t,thr_acts) {
+			if (thr_act != cur_thr_act)
+				thread_terminate_internal(thr_act);
+		}
+		task_release_locked(task);
+	}
+
+	/*
+	 *	If the current thread has any virtual machine state
+	 *	associated with it, we need to explicitly clean that
+	 *	up now (because we did not terminate the current act)
+	 *	before we try to clean up the task VM and port spaces.
+	 */
+	act_virtual_machine_destroy(cur_thr_act);
+
+	task_unlock(task);
+>>>>>>> origin/10.0
 
 	/*
 	 * We no longer need to guard against being aborted, so restore
@@ -1609,11 +1704,28 @@ task_terminate_internal(
 		kpc_force_all_ctrs(task, 0);
 #endif
 
+<<<<<<< HEAD
 #if CONFIG_COALITIONS
+=======
+#if 0
+>>>>>>> origin/10.0
 	/*
 	 * Leave our coalitions. (drop activation but not reference)
 	 */
+<<<<<<< HEAD
 	coalitions_remove_task(task);
+=======
+	/*
+	 * Lookupd will break if we enable this cleaning, because it
+	 * uses a slimey trick that depends upon the portspace not
+	 * being cleaned up across exec (it passes the lookupd server
+	 * port to the child after a restart using knowledge of this
+	 * bug in past implementations).  We need to fix lookupd to
+	 * keep from leaking ports across exec.
+	 */
+	if (!task->kernel_loaded)
+		ipc_space_clean(task->itk_space);
+>>>>>>> origin/10.0
 #endif
 
 	/*

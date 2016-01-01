@@ -156,7 +156,7 @@ u_int32_t net_io_policy_uuid = 1;	/* enable UUID socket policy */
  * called during processing of connect() call,
  * resulting in an eventual call to soisconnected() if/when the
  * connection is established.  When the connection is torn down
- * soisdisconnecting() is called during processing of disconnect() call,
+ * soisdisconnecting() is called during processing of disconnect() call,   
  * and soisdisconnected() is called when the connection to the peer
  * is totally severed.  The semantics of these routines are such that
  * connectionless protocols can call soisconnected() and soisdisconnected()
@@ -166,6 +166,7 @@ u_int32_t net_io_policy_uuid = 1;	/* enable UUID socket policy */
  * From the passive side, a socket is created with
  * two queues of sockets: so_incomp for connections in progress
  * and so_comp for connections already made and awaiting user acceptance.
+<<<<<<< HEAD
  * As a protocol is preparing incoming connections, it creates a socket
  * structure queued on so_incomp by calling sonewconn().  When the connection
  * is established, soisconnected() is called, and transfers the
@@ -173,7 +174,16 @@ u_int32_t net_io_policy_uuid = 1;	/* enable UUID socket policy */
  *
  * If a socket is closed with sockets on either
  * so_incomp or so_comp, these sockets are dropped.
+=======
+ * As a protocol is preparing incoming connections, it creates a socket      
+ * structure queued on so_incomp by calling sonewconn().  When the connection
+ * is established, soisconnected() is called, and transfers the
+ * socket structure to so_comp, making it available to accept().
+>>>>>>> origin/10.0
  *
+ * If a socket is closed with sockets on either       
+ * so_incomp or so_comp, these sockets are dropped.
+ * 
  * If higher level protocols are implemented in
  * the kernel, the wakeups done here will sometimes
  * cause software-interrupt process scheduling.
@@ -577,9 +587,22 @@ sowakeup(struct socket *so, struct sockbuf *sb)
 		    (sb->sb_flags & SB_RECV) ? "rcv" : "snd"));
 	}
 
+<<<<<<< HEAD
 	sb->sb_flags &= ~SB_SEL;
 	selwakeup(&sb->sb_sel);
 	sbwakeup(sb);
+=======
+
+	thread_funnel_switch(NETWORK_FUNNEL, KERNEL_FUNNEL);
+	sb->sb_sel.si_flags &= ~SI_SBSEL;
+	selwakeup(&sb->sb_sel);
+    	thread_funnel_switch(KERNEL_FUNNEL, NETWORK_FUNNEL); 
+
+	if (sb->sb_flags & SB_WAIT) {
+		sb->sb_flags &= ~SB_WAIT;
+		wakeup((caddr_t)&sb->sb_cc);
+	}
+>>>>>>> origin/10.0
 	if (so->so_state & SS_ASYNC) {
 		if (so->so_pgid < 0)
 			gsignal(-so->so_pgid, SIGIO);

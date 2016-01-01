@@ -1130,6 +1130,8 @@ thread_stop(
 	thread_lock(thread);
 
 	while (thread->state & TH_SUSP) {
+		int wait_result;
+
 		thread->wake_active = TRUE;
 		thread_unlock(thread);
 
@@ -1137,10 +1139,15 @@ thread_stop(
 		wake_unlock(thread);
 		splx(s);
 
+<<<<<<< HEAD
 		if (wresult == THREAD_WAITING)
 			wresult = thread_block(THREAD_CONTINUE_NULL);
 
 		if (wresult != THREAD_AWAKENED)
+=======
+		wait_result = thread_block((void (*)(void)) 0);
+		if (wait_result != THREAD_AWAKENED)
+>>>>>>> origin/10.0
 			return (FALSE);
 
 		s = splsched();
@@ -1262,11 +1269,19 @@ thread_wait(
 	while ((oncpu = thread_isoncpu(thread)) ||
 			(until_not_runnable && (thread->state & TH_RUN))) {
 
+<<<<<<< HEAD
 		if (oncpu) {
 			assert(thread->state & TH_RUN);
 			processor = thread->chosen_processor;
 			cause_ast_check(processor);
 		}
+=======
+	while (thread->state & (TH_RUN/*|TH_UNINT*/)) {
+		int wait_result;
+
+		if (thread->last_processor != PROCESSOR_NULL)
+			cause_ast_check(thread->last_processor);
+>>>>>>> origin/10.0
 
 		thread->wake_active = TRUE;
 		thread_unlock(thread);
@@ -1275,17 +1290,48 @@ thread_wait(
 		wake_unlock(thread);
 		splx(s);
 
+<<<<<<< HEAD
 		if (wresult == THREAD_WAITING)
 			thread_block(THREAD_CONTINUE_NULL);
+=======
+		wait_result = thread_block((void (*)(void))0);
+		if (wait_result != THREAD_AWAKENED)
+			return FALSE;
+>>>>>>> origin/10.0
 
 		s = splsched();
 		wake_lock(thread);
 		thread_lock(thread);
 	}
+<<<<<<< HEAD
 
 	thread_unlock(thread);
 	wake_unlock(thread);
 	splx(s);
+=======
+	wake_unlock(thread);
+	splx(s);
+	return TRUE;
+}
+
+
+/*
+ * thread_stop_wait(thread)
+ *	Stop the thread then wait for it to block interruptibly
+ */
+boolean_t
+thread_stop_wait(
+	thread_t		thread)
+{
+	if (thread_stop(thread)) {
+		if (thread_wait(thread))
+			return (TRUE);
+
+		thread_unstop(thread);
+	}
+
+	return (FALSE);
+>>>>>>> origin/10.0
 }
 
 /*

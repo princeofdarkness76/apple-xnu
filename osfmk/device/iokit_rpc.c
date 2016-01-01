@@ -609,6 +609,24 @@ ppnum_t IOGetLastPageNumber(void)
 #endif
 }
 
+<<<<<<< HEAD
+=======
+kern_return_t IOUnmapPages(vm_map_t map, vm_offset_t va, vm_size_t length)
+{
+    pmap_t	pmap = map->pmap;
+    vm_size_t	off;
+    boolean_t	b;
+
+#if __ppc__
+    b = mapping_remove(pmap, va);
+#else
+    pmap_remove(pmap, va, va + length);
+    b = TRUE;
+#endif
+
+    return( b ? KERN_SUCCESS : KERN_INVALID_ADDRESS );
+}
+>>>>>>> origin/10.0
 
 void IOGetTime( mach_timespec_t * clock_time);
 void IOGetTime( mach_timespec_t * clock_time)

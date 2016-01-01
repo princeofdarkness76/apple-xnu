@@ -838,6 +838,7 @@ sobindlock(struct socket *so, struct sockaddr *nam, int dolock)
 	struct proc *p = current_proc();
 	int error = 0;
 
+<<<<<<< HEAD
 	if (dolock)
 		socket_lock(so, 1);
 	VERIFY(so->so_usecount > 1);
@@ -859,6 +860,32 @@ sobindlock(struct socket *so, struct sockaddr *nam, int dolock)
 		    __func__, proc_pid(p), (uint64_t)DEBUG_KERNEL_ADDRPERM(so),
 		    SOCK_DOM(so), SOCK_TYPE(so), error));
 		goto out;
+=======
+	s = splnet();
+	error = (*so->so_proto->pr_usrreqs->pru_listen)(so, p);
+	if (error) {
+		splx(s);
+		return (error);
+	}
+        if (TAILQ_EMPTY(&so->so_comp))
+		so->so_options |= SO_ACCEPTCONN;
+	if (backlog < 0 || backlog > somaxconn)
+		backlog = somaxconn;
+	so->so_qlimit = backlog;
+	kp = sotokextcb(so);
+	while (kp)
+	{	
+		if (kp->e_soif && kp->e_soif->sf_solisten)
+		{	error = (*kp->e_soif->sf_solisten)(so, kp);
+			if (error)
+			{	if (error == EJUSTRETURN)
+					break;
+				splx(s);
+				return(error);
+			}
+		}
+		kp = kp->e_next;
+>>>>>>> origin/10.0
 	}
 
 	/* Socket filter */
@@ -884,6 +911,7 @@ sodealloc(struct socket *so)
 	/* Remove any filters */
 	sflt_termsock(so);
 
+<<<<<<< HEAD
 #if CONTENT_FILTER
 	cfil_sock_detach(so);
 #endif /* CONTENT_FILTER */
@@ -892,6 +920,28 @@ sodealloc(struct socket *so)
 	if (so->so_flags & SOF_ENABLE_MSGS) {
 		FREE(so->so_msg_state, M_TEMP);
 		so->so_msg_state = NULL;
+=======
+	if (so->so_pcb || (so->so_state & SS_NOFDREF) == 0)
+		return;
+        if (head != NULL) {
+                if (so->so_state & SS_INCOMP) {  
+                        TAILQ_REMOVE(&head->so_incomp, so, so_list);
+                        head->so_incqlen--;
+                } else if (so->so_state & SS_COMP) {
+                        /*
+                         * We must not decommission a socket that's   
+                         * on the accept(2) queue.  If we do, then
+                         * accept(2) may hang after select(2) indicated
+                         * that the listening socket was ready.
+                         */
+                        return;
+                } else {
+                        panic("sofree: not queued");
+                }
+		head->so_qlen--;
+		so->so_state &= ~(SS_INCOMP|SS_COMP);
+		so->so_head = NULL;
+>>>>>>> origin/10.0
 	}
 	VERIFY(so->so_msg_state == NULL);
 
@@ -938,6 +988,7 @@ solisten(struct socket *so, int backlog)
 	so_update_last_owner_locked(so, p);
 	so_update_policy(so);
 
+<<<<<<< HEAD
 #if NECP
 	so_update_necp_policy(so, NULL, NULL);
 #endif /* NECP */
@@ -1211,6 +1262,26 @@ soclose_locked(struct socket *so)
 		so->so_flags |= SOF_PCBCLEARING;
 		goto discard;
 	}
+=======
+                sp = TAILQ_FIRST(&so->so_incomp);
+                for (; sp != NULL; sp = sonext) {
+                        sonext = TAILQ_NEXT(sp, so_list);
+                        (void) soabort(sp);
+                }
+                for (sp = TAILQ_FIRST(&so->so_comp); sp != NULL; sp = sonext) {
+                        sonext = TAILQ_NEXT(sp, so_list);
+                        /* Dequeue from so_comp since sofree() won't do it */
+                        TAILQ_REMOVE(&so->so_comp, sp, so_list);
+                        so->so_qlen--;
+                        sp->so_state &= ~SS_COMP;
+                        sp->so_head = NULL;
+                        (void) soabort(sp);
+                }
+
+	}
+	if (so->so_pcb == 0)
+		goto discard;
+>>>>>>> origin/10.0
 	if (so->so_state & SS_ISCONNECTED) {
 		if ((so->so_state & SS_ISDISCONNECTING) == 0) {
 			error = sodisconnectlocked(so);
@@ -1258,8 +1329,12 @@ drop:
 		/* NOTREACHED */
 	}
 discard:
+<<<<<<< HEAD
 	if (so->so_pcb != NULL && !(so->so_flags & SOF_MP_SUBFLOW) &&
 	    (so->so_state & SS_NOFDREF)) {
+=======
+	if (so->so_pcb && so->so_state & SS_NOFDREF)
+>>>>>>> origin/10.0
 		panic("soclose: NOFDREF");
 		/* NOTREACHED */
 	}
@@ -6882,6 +6957,7 @@ sockaddrlist_dup(const struct sockaddr_list *src_sl, int how)
 	TAILQ_FOREACH_SAFE(src_se, &src_sl->sl_head, se_link, tse) {
 		struct sockaddr_entry *dst_se;
 
+<<<<<<< HEAD
 		if (src_se->se_addr == NULL)
 			continue;
 
@@ -6889,6 +6965,17 @@ sockaddrlist_dup(const struct sockaddr_list *src_sl, int how)
 		if (dst_se == NULL) {
 			sockaddrlist_free(dst_sl);
 			return (NULL);
+=======
+	if (revents == 0) {
+		if (events & (POLLIN | POLLPRI | POLLRDNORM | POLLRDBAND)) {
+			selrecord(p, &so->so_rcv.sb_sel);
+			so->so_rcv.sb_sel.si_flags |= SI_SBSEL;
+		}
+
+		if (events & (POLLOUT | POLLWRNORM)) {
+			selrecord(p, &so->so_snd.sb_sel);
+			so->so_snd.sb_sel.si_flags |= SI_SBSEL;
+>>>>>>> origin/10.0
 		}
 
 		sockaddrlist_insert(dst_sl, dst_se);

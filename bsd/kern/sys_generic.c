@@ -1702,6 +1702,7 @@ poll_nocancel(struct proc *p, struct poll_nocancel_args *uap, int32_t *retval)
 		goto out;
 	}
 	
+<<<<<<< HEAD
 	fds = (struct pollfd *)&cont[1];
 	error = copyin(uap->fds, fds, nfds * sizeof(struct pollfd));
 	if (error)
@@ -1721,6 +1722,19 @@ poll_nocancel(struct proc *p, struct poll_nocancel_args *uap, int32_t *retval)
 	} else {
 		atv.tv_sec = 0;
 		atv.tv_usec = 0;
+=======
+	if (selthread && is_thread_active(selthread) &&
+		get_thread_waitevent(selthread) == (caddr_t)&selwait) {
+		sip->si_flags |= SI_COLL;
+		splx(oldpri);
+	} else {
+		sip->si_thread = my_thread;
+		splx(oldpri);
+		act_reference(current_act());
+		if (selthread) {
+			act_deallocate(getact_thread(selthread));
+		}
+>>>>>>> origin/10.0
 	}
 
 	/* JMM - all this P_SELECT stuff is bogus */

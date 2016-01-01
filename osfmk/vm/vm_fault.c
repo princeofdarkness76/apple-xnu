@@ -5611,7 +5611,11 @@ vm_fault_copy(
 		} else {
 			vm_object_lock(src_object);
 			src_page = vm_page_lookup(src_object,
+<<<<<<< HEAD
 						  vm_object_trunc_page(src_offset));
+=======
+						  trunc_page_64(src_offset));
+>>>>>>> origin/10.0
 			if (src_page == dst_page) {
 				src_prot = dst_prot;
 				result_page = VM_PAGE_NULL;
@@ -5722,12 +5726,16 @@ vm_fault_copy(
 			}
 
 			if (result_page == VM_PAGE_NULL) {
+<<<<<<< HEAD
 				assert((vm_offset_t) dst_po == dst_po);
 				assert((vm_size_t) part_size == part_size);
+=======
+>>>>>>> origin/10.0
 				vm_page_part_zero_fill(dst_page,
 						       (vm_offset_t) dst_po,
 						       (vm_size_t) part_size);
 			} else {
+<<<<<<< HEAD
 				assert((vm_offset_t) src_po == src_po);
 				assert((vm_offset_t) dst_po == dst_po);
 				assert((vm_size_t) part_size == part_size);
@@ -5736,6 +5744,10 @@ vm_fault_copy(
 						  dst_page,
 						  (vm_offset_t) dst_po,
 						  (vm_size_t)part_size);
+=======
+				vm_page_part_copy(result_page, src_po,
+					dst_page, dst_po, part_size);
+>>>>>>> origin/10.0
 				if(!dst_page->dirty){
 					vm_object_lock(dst_object);
 					SET_PAGE_DIRTY(dst_page, TRUE);
@@ -5749,10 +5761,14 @@ vm_fault_copy(
 			if (result_page == VM_PAGE_NULL)
 				vm_page_zero_fill(dst_page);
 			else{
+<<<<<<< HEAD
 				vm_object_lock(result_page->object);
 				vm_page_copy(result_page, dst_page);
 				vm_object_unlock(result_page->object);
 
+=======
+				vm_page_copy(result_page, dst_page);
+>>>>>>> origin/10.0
 				if(!dst_page->dirty){
 					vm_object_lock(dst_object);
 					SET_PAGE_DIRTY(dst_page, TRUE);

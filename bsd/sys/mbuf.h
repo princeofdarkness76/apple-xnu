@@ -630,7 +630,11 @@ struct mbuf {
  */
 
 #if 1
+<<<<<<< HEAD
 #define	MCHECK(m) m_mcheck(m)
+=======
+#define MCHECK(m) if ((m)->m_type != MT_FREE) panic("mget MCHECK: m_type=%x m=%x", m->m_type, m)
+>>>>>>> origin/10.0
 #else
 #define	MCHECK(m)
 #endif

@@ -1972,8 +1972,17 @@ vm_page_grab_fictitious_common(
 
 	if ((m = (vm_page_t)zget(vm_page_zone))) {
 
+<<<<<<< HEAD
 		vm_page_init(m, phys_addr, FALSE);
 		m->fictitious = TRUE;
+=======
+	m = (vm_page_t)zget(vm_page_zone);
+	if (m) {
+		m->free = FALSE;
+		vm_page_init(m, vm_page_fictitious_addr);
+		m->fictitious = TRUE;
+	}
+>>>>>>> origin/10.0
 
 		c_vm_page_grab_fictitious++;
 	} else

@@ -30,6 +30,7 @@
 #include <IOKit/IOKitDebug.h>
 #include <IOKit/IOLib.h>
 #include <IOKit/IOMessage.h>
+<<<<<<< HEAD
 #include <IOKit/IOPlatformExpert.h>
 #include <IOKit/IOService.h>
 #include <IOKit/IOEventSource.h>
@@ -37,6 +38,14 @@
 #include <IOKit/IOCommand.h>
 #include <IOKit/IOTimeStamp.h>
 #include <IOKit/IOReportMacros.h>
+=======
+#include <IOKit/pwr_mgt/IOPMinformee.h>
+#include "IOKit/pwr_mgt/IOPMinformeeList.h"
+#include "IOKit/pwr_mgt/IOPMchangeNoteList.h"
+#include "IOKit/pwr_mgt/IOPMlog.h"
+#include "IOKit/pwr_mgt/IOPowerConnection.h"
+#include <kern/clock.h>
+>>>>>>> origin/10.0
 
 #include <IOKit/pwr_mgt/IOPMlog.h>
 #include <IOKit/pwr_mgt/IOPMinformee.h>
@@ -1724,8 +1733,34 @@ IOReturn IOService::powerDomainWillChangeTo(
     IOPMPowerFlags      newPowerFlags,
     IOPowerConnection * whichParent )
 {
+<<<<<<< HEAD
     assert(false);
     return kIOReturnUnsupported;
+=======
+    AbsoluteTime uptime;
+
+    if ( type == kIOPMSuperclassPolicy1 ) {
+        if ( (priv->activityLock == NULL) ||
+             (pm_vars->theControllingDriver == NULL) ||
+             ( pm_vars->commandQueue == NULL) ) {
+            return true;
+        }
+        IOTakeLock(priv->activityLock);
+        priv->device_active = true;
+
+        clock_get_uptime(&uptime);
+        priv->device_active_timestamp = uptime;
+
+        if ( pm_vars->myCurrentState >= stateNumber) {
+            IOUnlock(priv->activityLock);
+            return true;
+        }
+        IOUnlock(priv->activityLock);				// send a message on the command queue
+        pm_vars->commandQueue->enqueueCommand(true, (void *)kPMunIdleDevice, (void *)stateNumber);
+        return false;
+    }
+    return true;
+>>>>>>> origin/10.0
 }
 #endif /* !__LP64__ */
 
@@ -1822,6 +1857,7 @@ void IOService::handlePowerDomainWillChangeTo( IOPMRequest * request )
     // transition, i.e. startPowerChange() returned IOPMAckImplied. We are
     // still required to issue an ACK to our parent.
 
+<<<<<<< HEAD
     if (IOPMAckImplied == result)
     {
         IOService * parent;
@@ -1833,6 +1869,48 @@ void IOService::handlePowerDomainWillChangeTo( IOPMRequest * request )
             parent->release();
         }
     }
+=======
+//*********************************************************************************
+// start_PM_idle_timer
+//
+// The parameter is a pointer to us.  Use it to call our timeout method.
+//*********************************************************************************
+void IOService::start_PM_idle_timer ( void )
+{
+    AbsoluteTime uptime;
+    AbsoluteTime delta;
+    UInt64       delta_ns;
+    UInt64       delta_secs;
+    UInt64       delay_secs;
+
+    IOLockLock(priv->activityLock);
+
+    clock_get_uptime(&uptime);
+
+   /* Calculate time difference using funky macro from clock.h.
+    */
+    delta = uptime;
+    SUB_ABSOLUTETIME(&delta, &(priv->device_active_timestamp));
+
+   /* Figure it in seconds.
+    */
+    absolutetime_to_nanoseconds(delta, &delta_ns);
+    delta_secs = delta_ns / NSEC_PER_SEC;
+
+   /* Be paranoid about delta somehow exceeding timer period.
+    */
+    if (delta_secs < priv->idle_timer_period ) {
+        delay_secs = priv->idle_timer_period - delta_secs;
+    } else {
+        delay_secs = priv->idle_timer_period;
+    }
+
+    priv->timerEventSrc->setTimeout(delay_secs, NSEC_PER_SEC);
+
+    IOLockUnlock(priv->activityLock);
+    return;
+}
+>>>>>>> origin/10.0
 
 exit_no_ack:
     // Drop the retain from notifyChild().

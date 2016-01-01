@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2001 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.0
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -3478,8 +3482,78 @@ again:
 				goto again;
 			}
 
+<<<<<<< HEAD
 			OSAddAtomic(1, (SInt32 *)&hfsmp->hfs_active_threads);
 			unlock_on_err = 1;
+=======
+    DBG_ASSERT(catInfo != NULL);
+	
+	a = alist->commonattr;
+	if (a & ATTR_CMN_SCRIPT) {
+		catInfo->nodeData.cnd_textEncoding = (u_int32_t)*((text_encoding_t *)attrbufptr)++;
+#if HFS_DIAGNOSTIC
+		a &= ~ATTR_CMN_SCRIPT;
+#endif
+	};
+	if (a & ATTR_CMN_CRTIME) {
+		catInfo->nodeData.cnd_createDate = to_hfs_time((UInt32)((struct timespec *)attrbufptr)->tv_sec);
+		VTOH(vp)->h_meta->h_crtime = (UInt32)((struct timespec *)attrbufptr)->tv_sec;
+		++((struct timespec *)attrbufptr);
+#if HFS_DIAGNOSTIC
+		a &= ~ATTR_CMN_CRTIME;
+#endif
+	};
+	if (a & ATTR_CMN_MODTIME) {
+		catInfo->nodeData.cnd_contentModDate = to_hfs_time((UInt32)((struct timespec *)attrbufptr)->tv_sec);
+		VTOH(vp)->h_meta->h_mtime = (UInt32)((struct timespec *)attrbufptr)->tv_sec;
+		++((struct timespec *)attrbufptr);
+		hp->h_nodeflags &= ~IN_UPDATE;
+#if HFS_DIAGNOSTIC
+		a &= ~ATTR_CMN_MODTIME;
+#endif
+	};
+	if (a & ATTR_CMN_CHGTIME) {
+		catInfo->nodeData.cnd_attributeModDate = to_hfs_time((UInt32)((struct timespec *)attrbufptr)->tv_sec);
+		VTOH(vp)->h_meta->h_ctime = (UInt32)((struct timespec *)attrbufptr)->tv_sec;
+		++((struct timespec *)attrbufptr);
+		hp->h_nodeflags &= ~IN_CHANGE;
+#if HFS_DIAGNOSTIC
+		a &= ~ATTR_CMN_CHGTIME;
+#endif
+	};
+	if (a & ATTR_CMN_ACCTIME) {
+		catInfo->nodeData.cnd_accessDate = to_hfs_time((UInt32)((struct timespec *)attrbufptr)->tv_sec);
+		VTOH(vp)->h_meta->h_atime = (UInt32)((struct timespec *)attrbufptr)->tv_sec;
+		++((struct timespec *)attrbufptr);
+		hp->h_nodeflags &= ~IN_ACCESS;
+#if HFS_DIAGNOSTIC
+		a &= ~ATTR_CMN_ACCTIME;
+#endif
+	};
+	if (a & ATTR_CMN_BKUPTIME) {
+		catInfo->nodeData.cnd_backupDate = to_hfs_time((UInt32)((struct timespec *)attrbufptr)->tv_sec);
+		VTOH(vp)->h_meta->h_butime = (UInt32)((struct timespec *)attrbufptr)->tv_sec;
+		++((struct timespec *)attrbufptr);
+#if HFS_DIAGNOSTIC
+		a &= ~ATTR_CMN_BKUPTIME;
+#endif
+	};
+	if (a & ATTR_CMN_FNDRINFO) {
+		bcopy (attrbufptr, &catInfo->nodeData.cnd_finderInfo, sizeof(catInfo->nodeData.cnd_finderInfo));
+		(char *)attrbufptr += sizeof(catInfo->nodeData.cnd_finderInfo);
+#if HFS_DIAGNOSTIC
+		a &= ~ATTR_CMN_FNDRINFO;
+#endif
+	};
+	if (a & ATTR_CMN_OWNERID) {
+        if (VTOVCB(vp)->vcbSigWord == kHFSPlusSigWord) {
+			u_int32_t uid = (u_int32_t)*((uid_t *)attrbufptr)++;
+			if (uid != (uid_t)VNOVAL)
+				hp->h_meta->h_uid = uid;	/* catalog will get updated by hfs_chown() */
+        }
+		else {
+            ((uid_t *)attrbufptr)++;
+>>>>>>> origin/10.0
 		}
 	}
 
