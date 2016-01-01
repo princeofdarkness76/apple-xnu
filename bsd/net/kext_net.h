@@ -77,8 +77,42 @@
  */
 #include <sys/kpi_socketfilter.h>
 
+<<<<<<< HEAD
 struct socket;
 struct sockopt;
+=======
+struct socket_filter;
+
+#define	SFEF_DETACHUSEZERO	0x1	/* Detach when use reaches zero */
+#define	SFEF_UNREGISTERING	0x2	/* Remove due to unregister */
+#define	SFEF_DETACHXREF		0x4	/* Extra reference held for detach */
+
+struct socket_filter_entry {
+	struct socket_filter_entry	*sfe_next_onsocket;
+	struct socket_filter_entry	*sfe_next_onfilter;
+	
+	struct socket_filter		*sfe_filter;
+	struct socket				*sfe_socket;
+	void						*sfe_cookie;
+	
+	u_int32_t					sfe_flags;
+};
+
+#define	SFF_DETACHING		0x1
+
+struct socket_filter {
+	TAILQ_ENTRY(socket_filter)	sf_protosw_next;	
+	TAILQ_ENTRY(socket_filter)	sf_global_next;
+	struct socket_filter_entry	*sf_entry_head;
+	
+	struct protosw				*sf_proto;
+	struct sflt_filter			sf_filter;
+	u_int32_t					sf_flags;
+	u_int32_t					sf_usecount;
+};
+
+TAILQ_HEAD(socket_filter_list, socket_filter);
+>>>>>>> origin/10.5
 
 /* Private, internal implementation functions */
 extern void	sflt_init(void);

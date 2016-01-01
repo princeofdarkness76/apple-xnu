@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -63,6 +67,10 @@
 #include <i386/thread.h>		/* for thread_status */
 #include <i386/eflags.h>
 #include <i386/trap.h>
+<<<<<<< HEAD
+=======
+#include <i386/pmCPU.h>
+>>>>>>> origin/10.5
 
 typedef	vm_offset_t	db_addr_t;	/* address - unsigned */
 typedef	int		db_expr_t;	/* expression - signed */
@@ -158,6 +166,22 @@ extern void		db_reboot(
 				db_expr_t	count,
 				char		*modif);
 
+<<<<<<< HEAD
+=======
+extern void db_display_kmod(db_expr_t addr, boolean_t have_addr,
+			    db_expr_t count, char *modif);
+extern void db_display_real(db_expr_t addr, boolean_t have_addr,
+			    db_expr_t count, char *modif);
+extern void db_display_iokit(db_expr_t addr, boolean_t have_addr,
+			     db_expr_t count, char * modif);
+extern void db_cpuid(db_expr_t addr, boolean_t have_addr, db_expr_t count,
+		     char *modif);
+extern void db_msr(db_expr_t addr, boolean_t have_addr, db_expr_t count,
+		   char *modif);
+extern void db_apic(db_expr_t addr, boolean_t have_addr, db_expr_t count,
+		    char *modif);
+
+>>>>>>> origin/10.5
 /* macros for printing OS server dependent task name */
 
 #define DB_TASK_NAME(task)	db_task_name(task)
@@ -184,7 +208,16 @@ extern boolean_t	db_trap_from_asm(
 extern int		dr6(void);
 extern void		kdb_on(
 				int			cpu);
+<<<<<<< HEAD
 extern void		cnpollc(
 				boolean_t		on);
+=======
+
+#if MACH_KDB
+extern void db_chkpmgr(void);
+#endif /* MACH_KDB */
+extern void db_pmgr(db_expr_t addr, int have_addr, db_expr_t count, char * modif);
+extern void db_nap(db_expr_t addr, int have_addr, db_expr_t count, char * modif);
+>>>>>>> origin/10.5
 
 #endif	/* _I386_DB_MACHDEP_H_ */

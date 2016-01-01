@@ -409,6 +409,7 @@
 #define	F_WAIT		0x010		/* Wait until lock is granted */
 #define	F_FLOCK		0x020	 	/* Use flock(2) semantics for lock */
 #define	F_POSIX		0x040	 	/* Use POSIX semantics for lock */
+<<<<<<< HEAD
 #define	F_PROV		0x080		/* Non-coalesced provisional lock */
 #define F_WAKE1_SAFE    0x100           /* its safe to only wake one waiter */
 #define	F_ABORT		0x200		/* lock attempt aborted (force umount) */
@@ -421,6 +422,10 @@
  * for the duration of the I/O delivered to the driver.
  */
 #define F_IOTYPE_ISOCHRONOUS 0x0001 
+=======
+#define	F_PROV		0x080		/* Non-coelesced provisional lock */
+#define F_WAKE1_SAFE    0x100           /* its safe to only wake one waiter */
+>>>>>>> origin/10.5
 #endif
 
 /*

@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2004-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2004-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -412,14 +416,22 @@ vnode_getnamedstream(vnode_t vp, vnode_t *svpp, const char *name, enum nsoperati
 		uint32_t streamflags = VISNAMEDSTREAM;
 		vnode_t svp = *svpp;
 
+<<<<<<< HEAD
 		if ((vp->v_mount->mnt_kern_flag & MNTK_NAMED_STREAMS) == 0) {
 			streamflags |= VISSHADOW;
 		}
 		
+=======
+		if ((vp->v_mount->mnt_kern_flag & MNTK_NAMED_STREAMS) == 0) { 
+			streamflags |= VISSHADOW;
+		}    
+
+>>>>>>> origin/10.5
 		/* Tag the vnode. */
 		vnode_lock_spin(svp);
 		svp->v_flag |= streamflags;
 		vnode_unlock(svp);
+<<<<<<< HEAD
 
 		/* Tag the parent so we know to flush credentials for streams on setattr */
 		vnode_lock_spin(vp);
@@ -433,6 +445,14 @@ vnode_getnamedstream(vnode_t vp, vnode_t *svpp, const char *name, enum nsoperati
 		 * VISNAMEDSTREAM set) by allowing access to mount structure 
 		 * for checking MNTK_NAMED_STREAMS bit at many places in the 
 		 * code.
+=======
+		/* Make the file its parent. 
+		 * Note: This parent link helps us distinguish vnodes for 
+		 * shadow stream files from vnodes for resource fork on file
+		 * systems that support named streams natively (both have
+		 * VISNAMEDSTREAM set) by allowing access to mount structure
+		 * for checking MNTK_NAMED_STREAMS bit at many places in the code
+>>>>>>> origin/10.5
 		 */
 		vnode_update_identity(svp, vp, NULL, 0, 0, VNODE_UPDATE_PARENT);
 	}		
@@ -461,12 +481,17 @@ vnode_makenamedstream(vnode_t vp, vnode_t *svpp, const char *name, int flags, vf
 		if ((vp->v_mount->mnt_kern_flag & MNTK_NAMED_STREAMS) == 0) {
 			streamflags |= VISSHADOW;
 		}
+<<<<<<< HEAD
 		
+=======
+
+>>>>>>> origin/10.5
 		/* Tag the vnode. */
 		vnode_lock_spin(svp);
 		svp->v_flag |= streamflags;
 		vnode_unlock(svp);
 
+<<<<<<< HEAD
 		/* Tag the parent so we know to flush credentials for streams on setattr */
 		vnode_lock_spin(vp);
 		vp->v_lflag |= VL_HASSTREAMS;
@@ -479,6 +504,14 @@ vnode_makenamedstream(vnode_t vp, vnode_t *svpp, const char *name, int flags, vf
 		 * VISNAMEDSTREAM set) by allowing access to mount structure 
 		 * for checking MNTK_NAMED_STREAMS bit at many places in the 
 		 * code.
+=======
+		/* Make the file its parent. 
+		 * Note: This parent link helps us distinguish vnodes for 
+		 * shadow stream files from vnodes for resource fork on file
+		 * systems that support named streams natively (both have
+		 * VISNAMEDSTREAM set) by allowing access to mount structure
+		 * for checking MNTK_NAMED_STREAMS bit at many places in the code
+>>>>>>> origin/10.5
 		 */
 		vnode_update_identity(svp, vp, NULL, 0, 0, VNODE_UPDATE_PARENT);
 	}
@@ -553,8 +586,13 @@ vnode_relenamedstream(vnode_t vp, vnode_t svp) {
 	if (err != 0) {
 		return err;
 	}
+<<<<<<< HEAD
 
 	(void) VNOP_REMOVE(dvp, svp, &cn, 0, kernelctx);
+=======
+	
+	(void) VNOP_REMOVE(dvp, svp, &cn, 0, context);
+>>>>>>> origin/10.5
 	vnode_put(dvp);
 
 	return (0);
@@ -991,6 +1029,7 @@ out:
 			wakeup((caddr_t)&svp->v_parent);
 			vnode_unlock(svp);
 		} else {
+<<<<<<< HEAD
 			/* On post create errors, get rid of the shadow file.  This 
 			 * way if there is another process waiting for initialization 
 			 * of the shadowfile by the current process will wake up and 
@@ -1001,6 +1040,14 @@ out:
 			(void)vnode_relenamedstream(vp, svp);
 			vnode_lock (svp);
 			svp->v_flag |= VISSHADOW;
+=======
+			/* On post create errors, get rid of the shadow file. This
+			 * way, if there is another process waiting for initialization
+			 * of the shadow file by the current process, it will wake up
+			 * and retry by creating and initializing the shadow file again.
+			 */
+			(void) vnode_relenamedstream(vp, svp, context);
+>>>>>>> origin/10.5
 			wakeup((caddr_t)&svp->v_parent);
 			vnode_unlock(svp);
 		}
@@ -3313,7 +3360,11 @@ lock_xattrfile(vnode_t xvp, short locktype, vfs_context_t context)
 	lf.l_len = 0;
 	lf.l_type = locktype; /* F_WRLCK or F_RDLCK */
 	/* Note: id is just a kernel address that's not a proc */
+<<<<<<< HEAD
 	error = VNOP_ADVLOCK(xvp, (caddr_t)xvp, F_SETLK, &lf, F_FLOCK|F_WAIT, context, NULL);
+=======
+	error = VNOP_ADVLOCK(xvp, (caddr_t)xvp, F_SETLK, &lf, F_FLOCK|F_WAIT, context);
+>>>>>>> origin/10.5
 	return (error == ENOTSUP ? 0 : error);
 }
 

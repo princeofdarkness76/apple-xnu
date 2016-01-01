@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -562,7 +566,11 @@ int	lstatx_np(const char *, struct stat *, filesec_t) __DARWIN_INODE64(lstatx_np
 int	mkdirx_np(const char *, filesec_t);
 int	mkfifox_np(const char *, filesec_t);
 int	statx_np(const char *, struct stat *, filesec_t) __DARWIN_INODE64(statx_np);
+<<<<<<< HEAD
 int	umaskx_np(filesec_t) __OSX_AVAILABLE_BUT_DEPRECATED(__MAC_10_4,__MAC_10_6,__IPHONE_NA,__IPHONE_NA);
+=======
+int	umaskx_np(filesec_t);
+>>>>>>> origin/10.5
 
 #if !__DARWIN_ONLY_64_BIT_INO_T
 /* The following deprecated routines are simillar to stat and friends except provide struct stat64 instead of struct stat  */

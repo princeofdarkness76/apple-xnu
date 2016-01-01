@@ -138,6 +138,7 @@ int nd6_optimistic_dad =
 static int nd6_inuse, nd6_allocated;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 /*
  * Synchronization notes:
  *
@@ -177,6 +178,10 @@ static lck_attr_t	*nd_if_lock_attr = NULL;
 =======
 struct llinfo_nd6 llinfo_nd6 = {&llinfo_nd6, &llinfo_nd6};
 size_t nd_ifinfo_indexlim = 8;
+=======
+struct llinfo_nd6 llinfo_nd6 = {&llinfo_nd6, &llinfo_nd6, NULL, NULL, 0, 0, 0, 0, 0 };
+size_t nd_ifinfo_indexlim = 32; /* increased for 5589193 */
+>>>>>>> origin/10.5
 struct nd_ifinfo *nd_ifinfo = NULL;
 >>>>>>> origin/10.3
 struct nd_drhead nd_defrouter;
@@ -275,6 +280,7 @@ SYSCTL_INT(_net_inet6_ip6, OID_AUTO, maxchainsent,
 	CTLFLAG_RW | CTLFLAG_LOCKED, &ip6_maxchainsent, 0,
 	"use dlil_output_list");
 
+
 void
 nd6_init(void)
 {
@@ -326,6 +332,7 @@ nd6_llinfo_alloc(int how)
 	return (ln);
 }
 
+<<<<<<< HEAD
 static void
 nd6_llinfo_free(void *arg)
 {
@@ -385,6 +392,23 @@ nd6_llinfo_get_ri(struct rtentry *rt, struct rt_reach_info *ri)
 		ri->ri_snd_expire =
 		    ifnet_llreach_up2calexp(lr, ln->ln_lastused);
 		IFLR_UNLOCK(lr);
+=======
+		/* grow nd_ifinfo */
+		n = nd_ifinfo_indexlim * sizeof(struct nd_ifinfo);
+		q = (caddr_t)_MALLOC(n, M_IP6NDP, M_WAITOK);
+		bzero(q, n);
+		if (nd_ifinfo) {
+			bcopy((caddr_t)nd_ifinfo, q, n/2);
+			/* Radar 5589193:
+			 * SU fix purposely leaks the old nd_ifinfo array
+			 * if we grow the arraw to more than 32 interfaces
+			 * Fix for future release is to use proper locking.
+
+			FREE((caddr_t)nd_ifinfo, M_IP6NDP);
+			*/
+		}
+		nd_ifinfo = (struct nd_ifinfo *)q;
+>>>>>>> origin/10.5
 	}
 }
 
@@ -732,6 +756,7 @@ nd6_service(void *arg)
 	struct nd_prefix *pr;
 	struct ifnet *ifp = NULL;
 	struct in6_ifaddr *ia6, *nia6;
+<<<<<<< HEAD
 	uint64_t timenow;
 	bool send_nc_failure_kev = false;
 
@@ -752,6 +777,11 @@ nd6_service(void *arg)
 
 	/* We are busy now; tell everyone else to go away */
 	nd6_service_busy = TRUE;
+=======
+	struct in6_addrlifetime *lt6;
+	struct timeval timenow;
+	int count = 0;
+>>>>>>> origin/10.5
 
 	net_update_uptime();
 	timenow = net_uptime();
@@ -798,6 +828,7 @@ again:
 		kev_post_msg(&ev_msg);
 	}
 
+<<<<<<< HEAD
 	send_nc_failure_kev = false;
 	ifp = NULL;
 	/*
@@ -814,6 +845,8 @@ again:
 	 */
 	lck_mtx_assert(rnh_lock, LCK_MTX_ASSERT_OWNED);
 
+=======
+>>>>>>> origin/10.5
 	ln = llinfo_nd6.ln_next;
 	while (ln != NULL && ln != &llinfo_nd6) {
 		struct rtentry *rt;
@@ -842,11 +875,42 @@ again:
 			/* NOTREACHED */
 		}
 
+<<<<<<< HEAD
 		/* rt_llinfo must always be equal to ln */
 		if ((struct llinfo_nd6 *)rt->rt_llinfo != ln) {
 			panic("%s: rt_llinfo(%p) is not equal to ln(%p)",
 			    __func__, rt->rt_llinfo, ln);
 			/* NOTREACHED */
+=======
+		count++;
+
+		if (ln->ln_expire > timenow.tv_sec) {
+
+			/* Radar 6871508 Check if we have too many cache entries.
+			 * In that case purge 20% of the table to make space
+			 * for the new entries. 
+			 * This is a bit crude but keeps the deletion in timer
+			 * thread only. 
+			 */
+
+			if ((ip6_neighborgcthresh >= 0 &&
+		    		nd6_inuse >= ip6_neighborgcthresh) &&
+				((count % 5) == 0))  {
+
+				if (ln->ln_state > ND6_LLINFO_INCOMPLETE) 
+					ln->ln_state = ND6_LLINFO_STALE;
+				else
+					ln->ln_state = ND6_LLINFO_PURGE;
+				ln->ln_expire = timenow.tv_sec;
+
+				/* fallthrough and call nd6_free() */
+			}
+
+			else {
+				ln = next;
+				continue;
+			}
+>>>>>>> origin/10.5
 		}
 
 		/* rt_key should never be NULL */
@@ -962,6 +1026,7 @@ again:
 
 		case ND6_LLINFO_STALE:
 		case ND6_LLINFO_PURGE:
+<<<<<<< HEAD
 			/* Garbage Collection(RFC 4861 5.3) */
 			if (ln->ln_expire != 0) {
 				RT_ADDREF_LOCKED(rt);
@@ -975,6 +1040,11 @@ again:
 			} else {
 				RT_UNLOCK(rt);
 			}
+=======
+			/* Garbage Collection(RFC 2461 5.3) */
+			if (ln->ln_expire)
+				next = nd6_free(rt);
+>>>>>>> origin/10.5
 			break;
 
 		case ND6_LLINFO_DELAY:

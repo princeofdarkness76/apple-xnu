@@ -1669,9 +1669,17 @@ restart_replay:
 		}
 
 		if (   (last_sequence_num != 0)
+<<<<<<< HEAD
 		       && (blhdr->binfo[0].u.bi.b.sequence_num != 0)
 		       && (blhdr->binfo[0].u.bi.b.sequence_num != last_sequence_num)
 		       && (blhdr->binfo[0].u.bi.b.sequence_num != last_sequence_num+1)) {
+=======
+		    && (blhdr->binfo[0].b.sequence_num != 0)
+		    && (blhdr->binfo[0].b.sequence_num != last_sequence_num)
+		    && (blhdr->binfo[0].b.sequence_num != last_sequence_num+1)) {
+
+		    txn_start_offset = jnl->jhdr->end = blhdr_offset;
+>>>>>>> origin/10.5
 
 			txn_start_offset = jnl->jhdr->end = blhdr_offset;
 
@@ -1690,6 +1698,7 @@ restart_replay:
 		last_sequence_num = blhdr->binfo[0].u.bi.b.sequence_num;
 
 		if (blhdr_offset >= jnl->jhdr->end && jnl->jhdr->start <= jnl->jhdr->end) {
+<<<<<<< HEAD
 			if (last_sequence_num == 0) {
 				check_past_jnl_end = 0;
 				printf("jnl: %s: pre-sequence-num-enabled txn's - can not go further than end (%lld %lld).\n",
@@ -1700,6 +1709,18 @@ restart_replay:
 				continue;
 			}
 			printf("jnl: %s: examining extra transactions starting @ %lld / 0x%llx\n", jnl->jdev_name, blhdr_offset, blhdr_offset);
+=======
+		    if (last_sequence_num == 0) {
+			check_past_jnl_end = 0;
+			printf("jnl: %s: pre-sequence-num-enabled txn's - can not go further than end (%lld %lld).\n",
+			    jnl->jdev_name, jnl->jhdr->start, jnl->jhdr->end);
+			if (jnl->jhdr->start != jnl->jhdr->end) {
+			    jnl->jhdr->start = jnl->jhdr->end;
+			}
+			continue;
+		    }
+		    printf("jnl: %s: examining extra transactions starting @ %lld / 0x%llx\n", jnl->jdev_name, blhdr_offset, blhdr_offset);
+>>>>>>> origin/10.5
 		}
 
 		if (   blhdr->max_blocks <= 0 || blhdr->max_blocks > (jnl->jhdr->size/jnl->jhdr->jhdr_size)
@@ -2797,6 +2818,7 @@ journal_open(struct vnode *jvp,
 	}
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	if (phys_blksz != (size_t)jnl->jhdr->jhdr_size && jnl->jhdr->jhdr_size != 0) {
 		/*
 		 * The volume has probably been resized (such that we had to adjust the
@@ -2847,6 +2869,31 @@ journal_open(struct vnode *jvp,
 			goto bad_journal;
 		}
 //		goto bad_journal;
+=======
+    if (phys_blksz != (size_t)jnl->jhdr->jhdr_size && jnl->jhdr->jhdr_size != 0) {
+    	/*
+    	 * The volume has probably been resized (such that we had to adjust the
+    	 * logical sector size), or copied to media with a different logical
+    	 * sector size.  If the journal is empty, then just switch to the
+    	 * current logical sector size.  If the journal is not empty, then
+    	 * fail to open the journal.
+    	 */
+    	 
+    	if (jnl->jhdr->start == jnl->jhdr->end) {
+    	    int err;
+    	    printf("jnl: %s: open: changing journal header size from %d to %lu\n",
+		jdev_name, jnl->jhdr->jhdr_size, phys_blksz);
+	    jnl->jhdr->jhdr_size = phys_blksz;
+	    if (write_journal_header(jnl)) {
+		printf("jnl: %s: open: failed to update journal header size\n", jdev_name);
+		goto bad_journal;
+	    }
+	} else {
+	    printf("jnl: %s: open: phys_blksz %lu does not match journal header size %d, and journal is not empty!\n",
+		jdev_name, phys_blksz, jnl->jhdr->jhdr_size);
+	    goto bad_journal;
+	}
+>>>>>>> origin/10.5
     }
 
     if (   jnl->jhdr->start <= 0
@@ -3473,7 +3520,11 @@ check_free_space(journal *jnl, int desired_size)
 
 			lcl_counter = 0;
 			while (jnl->old_start[i] & 0x8000000000000000LL) {
+<<<<<<< HEAD
 				if (lcl_counter++ > 10000) {
+=======
+				if (lcl_counter++ > 1000) {
+>>>>>>> origin/10.5
 					panic("jnl: check_free_space: tr starting @ 0x%llx not flushing (jnl %p).\n",
 					      jnl->old_start[i], jnl);
 				}
@@ -6036,8 +6087,38 @@ end_transaction(transaction *tr, int force_it)
 
 		blhdr->checksum = 0;
 		blhdr->checksum = calc_checksum((char *)blhdr, BLHDR_CHECKSUM_SIZE);
+<<<<<<< HEAD
 	
 		ret = write_journal_data(jnl, &end, blhdr, amt);
+=======
+
+		if (kmem_alloc(kernel_map, (vm_offset_t *)&bparray, blhdr->num_blocks * sizeof(struct buf *))) {
+		    panic("can't allocate %lu bytes for bparray\n", blhdr->num_blocks * sizeof(struct buf *));
+		}
+
+		// calculate individual block checksums
+		tbuffer_offset = jnl->jhdr->blhdr_size;
+		for(i=1; i < blhdr->num_blocks; i++) {
+		    bparray[i] = blhdr->binfo[i].b.bp;
+		    if (bparray[i]) {
+			blhdr->binfo[i].b.cksum = calc_checksum(&((char *)blhdr)[tbuffer_offset], blhdr->binfo[i].bsize);
+		    } else {
+			blhdr->binfo[i].b.cksum = 0;
+		    }
+
+		    tbuffer_offset += blhdr->binfo[i].bsize;
+		}
+
+		ret = write_journal_data(jnl, &end, blhdr, amt);
+
+		// always put the bp pointers back
+		for(i=1; i < blhdr->num_blocks; i++) {
+		    blhdr->binfo[i].b.bp = bparray[i];
+		}
+
+		kmem_free(kernel_map, (vm_offset_t)bparray, blhdr->num_blocks * sizeof(struct buf *));
+
+>>>>>>> origin/10.5
 		if (ret != amt) {
 			printf("jnl: end_transaction: only wrote %d of %d bytes to the journal!\n",
 				   ret, amt);

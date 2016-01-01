@@ -371,6 +371,7 @@ void IOWorkLoop::disableAllInterrupts() const
 	
     bool more;
     do {
+<<<<<<< HEAD
 		CLRP(&fFlags, kLoopRestart);
 		more = false;
 		IOInterruptState is = IOSimpleLockLockDisableInterrupt(workToDoLock);
@@ -394,6 +395,26 @@ void IOWorkLoop::disableAllInterrupts() const
 				break;
 			}
 		}
+=======
+	CLRP(&fFlags, kLoopRestart);
+	more = false;
+	IOInterruptState is = IOSimpleLockLockDisableInterrupt(workToDoLock);
+	workToDo = false;
+	IOSimpleLockUnlockEnableInterrupt(workToDoLock, is);
+	for (IOEventSource *evnt = eventChain; evnt; evnt = evnt->getNext()) {
+
+	    IOTimeClientS();
+	    more |= evnt->checkForWork();
+	    IOTimeClientE();
+
+	    if (ISSETP(&fFlags, kLoopTerminate))
+		goto abort;
+	    else if (fFlags & kLoopRestart) {
+		more = true;
+		break;
+	    }
+	}
+>>>>>>> origin/10.5
     } while (more);
 	
     res = true;

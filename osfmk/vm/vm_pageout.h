@@ -451,11 +451,17 @@ extern kern_return_t vm_paging_map_object(
 	vm_page_t		page,
 	vm_object_t		object,
 	vm_object_offset_t	offset,
+<<<<<<< HEAD
 	vm_prot_t		protection,
 	boolean_t		can_unlock_object,
 	vm_map_size_t		*size,		/* IN/OUT */
 	vm_map_offset_t		*address,	/* OUT */
 	boolean_t		*need_unmap);	/* OUT */
+=======
+	vm_map_size_t		*size,
+	vm_prot_t		protection,
+	boolean_t		can_unlock_object);
+>>>>>>> origin/10.5
 extern void vm_paging_unmap_object(
 	vm_object_t		object,
 	vm_map_offset_t		start,

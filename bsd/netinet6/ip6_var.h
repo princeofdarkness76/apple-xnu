@@ -442,6 +442,41 @@ extern int ip6_dad_count;	/* DupAddrDetectionTransmits */
 /* RFC4193 Unique Local Unicast Prefixes only */
 extern int ip6_only_allow_rfc4193_prefix;
 
+<<<<<<< HEAD
+=======
+extern struct	ip6stat ip6stat;	/* statistics */
+extern u_int32_t ip6_id;		/* fragment identifier */
+extern int	ip6_defhlim;		/* default hop limit */
+extern int	ip6_defmcasthlim;	/* default multicast hop limit */
+extern int	ip6_forwarding;		/* act as router? */
+extern int	ip6_forward_srcrt;	/* forward src-routed? */
+extern int	ip6_gif_hlim;		/* Hop limit for gif encap packet */
+extern int	ip6_use_deprecated;	/* allow deprecated addr as source */
+extern int	ip6_rr_prune;		/* router renumbering prefix
+					 * walk list every 5 sec.    */
+#define ip6_mapped_addr_on	(!ip6_v6only)
+extern int	ip6_v6only;
+
+extern int	ip6_neighborgcthresh;	/* Threshold # of NDP entries for GC */
+extern int	ip6_maxifprefixes;	/* Max acceptable prefixes via RA per IF */
+extern int	ip6_maxifdefrouters;	/* Max acceptable def routers via RA */
+extern int	ip6_maxdynroutes;	/* Max # of routes created via redirect */
+
+extern struct socket *ip6_mrouter; 	/* multicast routing daemon */
+extern int	ip6_sendredirects;	/* send IP redirects when forwarding? */
+extern int	ip6_maxfragpackets; 	/* Maximum packets in reassembly queue */
+extern int      ip6_maxfrags;   	/* Maximum fragments in reassembly queue */
+extern int	ip6_sourcecheck;	/* Verify source interface */
+extern int	ip6_sourcecheck_interval; /* Interval between log messages */
+extern int	ip6_accept_rtadv;	/* Acts as a host not a router */
+extern int	ip6_keepfaith;		/* Firewall Aided Internet Translator */
+extern int	ip6_log_interval;
+extern time_t	ip6_log_time;
+extern int	ip6_hdrnestlimit; /* upper limit of # of extension headers */
+extern int	ip6_dad_count;		/* DupAddrDetectionTransmits */
+
+extern u_int32_t ip6_flow_seq;
+>>>>>>> origin/10.5
 extern int ip6_auto_flowlabel;
 extern int ip6_auto_linklocal;
 

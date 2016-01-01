@@ -213,6 +213,7 @@ struct thread {
 #define TH_IDLE			0x80			/* idling processor */
 
 	/* Scheduling information */
+<<<<<<< HEAD
 	sched_mode_t			sched_mode;		/* scheduling mode */
 	sched_mode_t			saved_mode;		/* saved mode during forced mode demotion */
 
@@ -255,6 +256,27 @@ struct thread {
 	int16_t				promotions;			/* level of promotion */
 	int16_t				pending_promoter_index;
 	uint32_t			ref_count;		/* number of references to me */
+=======
+	integer_t			sched_mode;			/* scheduling mode bits */
+#define TH_MODE_REALTIME		0x0001		/* time constraints supplied */
+#define TH_MODE_TIMESHARE		0x0002		/* use timesharing algorithm */
+#define TH_MODE_FAILSAFE		0x0004		/* fail-safe has tripped */
+#define	TH_MODE_PROMOTED		0x0008		/* sched pri has been promoted */
+#define TH_MODE_ABORT			0x0010		/* abort interruptible waits */
+#define TH_MODE_ABORTSAFELY		0x0020		/* ... but only those at safe point */
+#define TH_MODE_ISABORTED		(TH_MODE_ABORT | TH_MODE_ABORTSAFELY)
+#define	TH_MODE_DEPRESS			0x0040		/* normal depress yield */
+#define TH_MODE_POLLDEPRESS		0x0080		/* polled depress yield */
+#define TH_MODE_ISDEPRESSED		(TH_MODE_DEPRESS | TH_MODE_POLLDEPRESS)
+
+	integer_t			sched_pri;			/* scheduled (current) priority */
+	integer_t			priority;			/* base priority */
+	integer_t			max_priority;		/* max base priority */
+	integer_t			task_priority;		/* copy of task base priority */
+
+	integer_t			promotions;			/* level of promotion */
+	integer_t			pending_promoter_index;
+>>>>>>> origin/10.5
 	void				*pending_promoter[2];
 
 	uint32_t			rwlock_count;	/* Number of lck_rw_t locks held by thread */

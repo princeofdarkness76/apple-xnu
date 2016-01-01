@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -109,12 +113,19 @@ enum {
 	MAXHFSFILESIZE = 0x7FFFFFFF		/* this needs to go in the mount structure */
 };
 
+<<<<<<< HEAD
 /* from bsd/hfs/hfs_vfsops.c */
 extern int hfs_vfs_vget (struct mount *mp, ino64_t ino, struct vnode **vpp, vfs_context_t context);
 
 /* from hfs_hotfiles.c */
 extern int hfs_pin_overflow_extents (struct hfsmount *hfsmp, uint32_t fileid,
 		                              uint8_t forktype, uint32_t *pinned);
+=======
+/* from bsd/vfs/vfs_cluster.c */
+extern int is_file_clean(vnode_t vp, off_t filesize);
+/* from bsd/hfs/hfs_vfsops.c */
+extern int hfs_vfs_vget(struct mount *mp, ino64_t ino, struct vnode **vpp, vfs_context_t context);
+>>>>>>> origin/10.5
 
 static int  hfs_clonefile(struct vnode *, int, int, int);
 static int  hfs_clonesysfile(struct vnode *, int, int, int, kauth_cred_t, struct proc *);
@@ -712,7 +723,11 @@ sizeok:
 
 		hfs_unlock(cp);
 		cnode_locked = 0;
+<<<<<<< HEAD
 
+=======
+		
+>>>>>>> origin/10.5
 		/*
 		 * We need to tell UBC the fork's new size BEFORE calling
 		 * cluster_write, in case any of the new pages need to be
@@ -733,6 +748,7 @@ sizeok:
 		 * zero, unless we are extending the file via write.
 		 */
 		if (filesize > fp->ff_size) {
+<<<<<<< HEAD
 			retval = hfs_zero_eof_page(vp, offset);
 			if (retval)
 				goto exit;
@@ -774,6 +790,15 @@ sizeok:
 				}
 				goto exit;
 			}
+=======
+			fp->ff_new_size = filesize;
+			ubc_setsize(vp, filesize);
+		}
+		retval = cluster_write(vp, uio, fp->ff_size, filesize, zero_off,
+				tail_off, lflag | IO_NOZERODIRTY);
+		if (retval) {
+			fp->ff_new_size = 0;	/* no longer extending; use ff_size */
+>>>>>>> origin/10.5
 			if (filesize > origFileSize) {
 				ubc_setsize(vp, origFileSize);
 			}
@@ -788,7 +813,17 @@ sizeok:
 				fp->ff_bytesread = 0;
 			}
 		}
+<<<<<<< HEAD
 		fp->ff_new_size = 0;	/* ff_size now has the correct size */		
+=======
+		fp->ff_new_size = 0;	/* ff_size now has the correct size */
+		
+		/* If we wrote some bytes, then touch the change and mod times */
+		if (resid > uio_resid(uio)) {
+			cp->c_touch_chgtime = TRUE;
+			cp->c_touch_modtime = TRUE;
+		}
+>>>>>>> origin/10.5
 	}
 	if (partialwrite) {
 		uio_setresid(uio, (uio_resid(uio) + bytesToAdd));
@@ -1864,6 +1899,13 @@ hfs_vnop_ioctl( struct vnop_ioctl_args /* {
 		 * hfs_vget, since we will need the parent for build_path call.
 		 */
 
+<<<<<<< HEAD
+=======
+		/* We need to call hfs_vfs_vget to leverage the code that will fix the
+		 * origin list for us if needed, as opposed to calling hfs_vget, since
+		 * we will need it for the subsequent build_path call.  
+		 */
+>>>>>>> origin/10.5
 		if ((error = hfs_vfs_vget(HFSTOVFS(hfsmp), cnid, &file_vp, context))) {
 			return (error);
 		}
@@ -2710,6 +2752,7 @@ fail_change_next_allocation:
 		return 0;
 	}
 
+<<<<<<< HEAD
 	case SPOTLIGHT_FSCTL_GET_MOUNT_TIME:
 	    *(uint32_t *)ap->a_data = hfsmp->hfs_mount_time;
 	    break;
@@ -2759,6 +2802,23 @@ fail_change_next_allocation:
 	case HFS_VOLUME_STATUS:
 	    *(uint32_t *)ap->a_data = hfsmp->hfs_notification_conditions;
 	    break;
+=======
+	case HFS_GET_MOUNT_TIME:
+	    if (is64bit) {
+	    	*(user_time_t *)(ap->a_data) = (user_time_t) hfsmp->hfs_mount_time;
+	    } else {
+	    	*(time_t *)(ap->a_data) = (time_t) hfsmp->hfs_mount_time;
+	    }
+		return 0;
+
+	case HFS_GET_LAST_MTIME:
+	    if (is64bit) {
+	    	*(user_time_t *)(ap->a_data) = (user_time_t) hfsmp->hfs_last_mounted_mtime;
+	    } else {
+	    	*(time_t *)(ap->a_data) = (time_t) hfsmp->hfs_last_mounted_mtime;
+	    }
+		return 0;
+>>>>>>> origin/10.5
 
 	case HFS_SET_BOOT_INFO:
 		if (!vnode_isvroot(vp))
@@ -4932,6 +4992,7 @@ hfs_vnop_pageout(struct vnop_pageout_args *ap)
 	cp = VTOC(vp);
 	fp = VTOF(vp);
 	
+<<<<<<< HEAD
 	a_flags = ap->a_flags;
 	a_pl_offset = ap->a_pl_offset;
 
@@ -4966,6 +5027,39 @@ hfs_vnop_pageout(struct vnop_pageout_args *ap)
 
 		if (a_flags & UPL_MSYNC) {
 			request_flags = UPL_UBC_MSYNC | UPL_RET_ONLY_DIRTY;
+=======
+	/*
+	 * Figure out where the file ends, for pageout purposes.  If
+	 * ff_new_size > ff_size, then we're in the middle of extending the
+	 * file via a write, so it is safe (and necessary) that we be able
+	 * to pageout up to that point.
+	 */
+	filesize = fp->ff_size;
+	if (fp->ff_new_size > filesize)
+		filesize = fp->ff_new_size;
+	
+	if (!vnode_isswap(vp)) {
+		off_t end_of_range;
+		int tooklock = 0;
+
+		if (cp->c_lockowner != current_thread()) {
+		    if ( (retval = hfs_lock(cp, HFS_EXCLUSIVE_LOCK))) {
+			if (!(ap->a_flags & UPL_NOCOMMIT)) {
+				ubc_upl_abort_range(ap->a_pl,
+						    ap->a_pl_offset,
+						    ap->a_size,
+						    UPL_ABORT_FREE_ON_EMPTY);
+			}
+			return (retval);
+		    }
+		    tooklock = 1;
+		}
+	
+		end_of_range = ap->a_f_offset + ap->a_size - 1;
+	
+		if (end_of_range >= filesize) {
+			end_of_range = (off_t)(filesize - 1);
+>>>>>>> origin/10.5
 		}
 		else {
 			request_flags = UPL_UBC_PAGEOUT | UPL_RET_ONLY_DIRTY;
@@ -5353,6 +5447,7 @@ hfs_pin_vnode(struct hfsmount *hfsmp, struct vnode *vp, int pin_state, uint32_t 
 			//printf("hfs: fileid %d resource fork nblocks: %d / size: %lld\n", VTOC(vp)->c_fileid,
 			//       VTOC(rsrc_vp)->c_rsrcfork->ff_blocks,VTOC(rsrc_vp)->c_rsrcfork->ff_size);
 
+<<<<<<< HEAD
 			fp = VTOC(rsrc_vp)->c_rsrcfork;
 			need_put = 1;
 		}
@@ -5367,6 +5462,28 @@ hfs_pin_vnode(struct hfsmount *hfsmp, struct vnode *vp, int pin_state, uint32_t 
 			err = EALREADY;
 		} else {
 			err = EINVAL;
+=======
+		/* 
+		 * Swap and validate the node if it is in native byte order.
+		 * This is always be true on big endian, so we always validate
+		 * before writing here.  On little endian, the node typically has
+		 * been swapped and validated when it was written to the journal,
+		 * so we won't do anything here.
+		 */
+		if (((u_int16_t *)((char *)buf_dataptr(bp) + buf_count(bp) - 2))[0] == 0x000e) {
+			/* Prepare the block pointer */
+			block.blockHeader = bp;
+			block.buffer = (char *)buf_dataptr(bp);
+			block.blockNum = buf_lblkno(bp);
+			/* not found in cache ==> came from disk */
+			block.blockReadFromDisk = (buf_fromcache(bp) == 0);
+			block.blockSize = buf_count(bp);
+    
+			/* Endian un-swap B-Tree node */
+			retval = hfs_swap_BTNode (&block, vp, kSwapBTNodeHostToBig, false);
+			if (retval)
+				panic("hfs_vnop_bwrite: about to write corrupt node!\n");
+>>>>>>> origin/10.5
 		}
 		goto out;
 	}

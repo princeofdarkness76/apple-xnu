@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -753,11 +757,62 @@ transmit_event(struct dn_pipe *pipe, struct mbuf **head, struct mbuf **tail)
 	u_int64_t schedule_time;
 
 	lck_mtx_assert(dn_mutex, LCK_MTX_ASSERT_OWNED);
+<<<<<<< HEAD
         ASSERT(serialize >= 0);
 	if (serialize == 0) {
 		while ((m = pipe->head) != NULL) {
 			pkt = dn_tag_get(m);
 			if (!DN_KEY_LEQ(pkt->dn_output_time, curr_time))
+=======
+	
+    while ( (m = pipe->head) ) {
+		pkt = dn_tag_get(m);
+		if ( !DN_KEY_LEQ(pkt->output_time, curr_time) )
+			break;
+		/*
+		 * first unlink, then call procedures, since ip_input() can invoke
+		 * ip_output() and viceversa, thus causing nested calls
+		 */
+		pipe->head = m->m_nextpkt ;
+		m->m_nextpkt = NULL;
+	
+		/* XXX: drop the lock for now to avoid LOR's */
+		lck_mtx_unlock(dn_mutex);
+		switch (pkt->dn_dir) {
+			case DN_TO_IP_OUT: {
+				struct route tmp_rt = pkt->ro;
+				(void)ip_output(m, NULL, NULL, pkt->flags, NULL, NULL);
+				if (tmp_rt.ro_rt) {
+					rtfree(tmp_rt.ro_rt);
+					tmp_rt.ro_rt = NULL;
+				}
+				break ;
+			}
+			case DN_TO_IP_IN :
+				proto_inject(PF_INET, m);
+				break ;
+		
+#if BRIDGE
+			case DN_TO_BDG_FWD :
+				/*
+				 * The bridge requires/assumes the Ethernet header is
+				 * contiguous in the first mbuf header.  Insure this is true.
+				 */
+				if (BDG_LOADED) {
+				if (m->m_len < ETHER_HDR_LEN &&
+					(m = m_pullup(m, ETHER_HDR_LEN)) == NULL) {
+					printf("dummynet/bridge: pullup fail, dropping pkt\n");
+					break;
+				}
+				m = bdg_forward_ptr(m, pkt->ifp);
+				} else {
+				/* somebody unloaded the bridge module. Drop pkt */
+				/* XXX rate limit */
+				printf("dummynet: dropping bridged packet trapped in pipe\n");
+				}
+				if (m)
+				m_freem(m);
+>>>>>>> origin/10.5
 				break;
 
 			pipe->head = m->m_nextpkt;
@@ -1672,6 +1727,7 @@ dummynet_io(struct mbuf *m, int pipe_nr, int dir, struct ip_fw_args *fwa, int cl
 			if (fwa->fwa_dst == (struct sockaddr_in *)&fwa->fwa_ro->ro_dst) /* dst points into ro */
 				fwa->fwa_dst = (struct sockaddr_in *)&(pkt->dn_ro.ro_dst) ;
 	
+<<<<<<< HEAD
 			bcopy (fwa->fwa_dst, &pkt->dn_dst, sizeof(pkt->dn_dst));
 		}
     } else if (dir == DN_TO_IP6_OUT) {
@@ -1707,6 +1763,13 @@ dummynet_io(struct mbuf *m, int pipe_nr, int dir, struct ip_fw_args *fwa, int cl
 		if (fwa->fwa_ipoa != NULL)
 			pkt->dn_ipoa = *(fwa->fwa_ipoa);
     }
+=======
+	pkt->dn_dst = fwa->dst;
+	pkt->flags = fwa->flags;
+	if (fwa->ipoa != NULL)
+		pkt->ipoa = *(fwa->ipoa);
+	}
+>>>>>>> origin/10.5
     if (q->head == NULL)
 	q->head = m;
     else
@@ -1819,10 +1882,20 @@ dropit:
 	struct m_tag *tag = m_tag_locate(m, KERNEL_MODULE_TAG_ID, KERNEL_TAG_TYPE_DUMMYNET, NULL); \
 	if (tag) {						\
 		struct dn_pkt_tag *n = (struct dn_pkt_tag *)(tag+1);	\
+<<<<<<< HEAD
 		ROUTE_RELEASE(&n->dn_ro);			\
 	}							\
 	m_tag_delete(_m, tag);					\
 	m_freem(_m);						\
+=======
+		if (n->ro.ro_rt) {				\
+			rtfree(n->ro.ro_rt);	\
+			n->ro.ro_rt = NULL;	\
+		}				\
+	}									\
+	m_tag_delete(_m, tag);			\
+	m_freem(_m);					\
+>>>>>>> origin/10.5
 } while (0)
 
 /*

@@ -134,11 +134,14 @@ struct IODMACommandInternal
     UInt8  fPrepared;
     UInt8  fDoubleBuffer;
     UInt8  fNewMD;
+<<<<<<< HEAD
     UInt8  fLocalMapper;
 	
     vm_page_t fCopyPageAlloc;
     vm_page_t fCopyNext;
     vm_page_t fNextRemapPage;
+=======
+>>>>>>> origin/10.5
 
     ppnum_t  fCopyPageCount;
 

@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -411,7 +415,16 @@ main(
 		offsetof(cpu_data_t, cpu_uber.cu_tmp));
 
 	DECLARE("CPU_NANOTIME",
+<<<<<<< HEAD
 		offsetof(cpu_data_t, cpu_nanotime));
+=======
+		offsetof(cpu_data_t *, cpu_nanotime));
+
+	DECLARE("CPU_DR7",
+		offsetof(cpu_data_t *, cpu_dr7));
+
+	DECLARE("hwIntCnt", 	offsetof(cpu_data_t *,cpu_hwIntCnt));
+>>>>>>> origin/10.5
 
 	DECLARE("CPU_DR7",
 		offsetof(cpu_data_t, cpu_dr7));
@@ -517,7 +530,10 @@ main(
 
 	DECLARE("OnProc", OnProc);
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.5
 #if	CONFIG_DTRACE
 	DECLARE("LS_LCK_MTX_LOCK_ACQUIRE", LS_LCK_MTX_LOCK_ACQUIRE);
 	DECLARE("LS_LCK_MTX_TRY_SPIN_LOCK_ACQUIRE", LS_LCK_MTX_TRY_SPIN_LOCK_ACQUIRE);

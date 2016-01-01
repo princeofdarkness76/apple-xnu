@@ -2028,7 +2028,12 @@ exit:
 
 	if (result && *open_transaction) {
 		hfs_end_transaction(hfsmp);
+<<<<<<< HEAD
 		*open_transaction = false;
+=======
+		if (result)
+			break;
+>>>>>>> origin/10.5
 	}
 
 	return result;

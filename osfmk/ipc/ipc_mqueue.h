@@ -159,7 +159,11 @@ extern int ipc_mqueue_full;
 // extern int ipc_mqueue_rcv;
 
 #define IPC_MQUEUE_FULL		CAST_EVENT64_T(&ipc_mqueue_full)
+<<<<<<< HEAD
 #define IPC_MQUEUE_RECEIVE	NO_EVENT64
+=======
+#define IPC_MQUEUE_RECEIVE	CAST_EVENT64_T(&ipc_mqueue_rcv)
+>>>>>>> origin/10.5
 
 /*
  * Exported interfaces

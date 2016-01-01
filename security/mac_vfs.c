@@ -502,6 +502,7 @@ mac_vnode_label_store(vfs_context_t ctx, struct vnode *vp,
 	return (error);
 }
 
+<<<<<<< HEAD
 void
 mac_cred_label_update_execve(vfs_context_t ctx, kauth_cred_t new, struct vnode *vp, off_t offset,
 	struct vnode *scriptvp, struct label *scriptvnodelabel, struct label *execl, u_int *csflags,
@@ -517,11 +518,23 @@ mac_cred_label_update_execve(vfs_context_t ctx, kauth_cred_t new, struct vnode *
     if (!mac_proc_enforce || !mac_vnode_enforce)
         return;
 #endif
+=======
+int
+mac_cred_label_update_execve(vfs_context_t ctx, kauth_cred_t new, struct vnode *vp,
+    struct label *scriptvnodelabel, struct label *execl)
+{
+	kauth_cred_t cred;
+	int disjoint = 0;
+
+	if (!mac_proc_enforce && !mac_vnode_enforce)
+		return disjoint;
+>>>>>>> origin/10.5
 
 	/* mark the new cred to indicate "matching" includes the label */
 	pcred->cr_flags |= CRF_MAC_ENFORCE;
 
 	cred = vfs_context_ucred(ctx);
+<<<<<<< HEAD
 
 	/*
 	 * NB: Cannot use MAC_CHECK macro because we need a sequence point after
@@ -570,6 +583,12 @@ mac_cred_label_update_execve(vfs_context_t ctx, kauth_cred_t new, struct vnode *
 		}
 	}
 	*labelupdateerror = error;
+=======
+	MAC_PERFORM(cred_label_update_execve, cred, new, vp, vp->v_label,
+	    scriptvnodelabel, execl, &disjoint);
+
+	return (disjoint);
+>>>>>>> origin/10.5
 }
 
 int
@@ -945,6 +964,19 @@ mac_vnode_check_signature(struct vnode *vp, off_t macho_offset,
 	MAC_CHECK(vnode_check_signature, vp, vp->v_label, macho_offset, sha1, 
 							  signature, size, 
 							  flags, is_platform_binary);
+	return (error);
+}
+
+int
+mac_vnode_check_signature(struct vnode *vp, unsigned char *sha1,
+			  void * signature, size_t size)
+{
+	int error;
+	
+	if (!mac_vnode_enforce || !mac_proc_enforce)
+		return (0);
+	
+	MAC_CHECK(vnode_check_signature, vp, vp->v_label, sha1, signature, size);
 	return (error);
 }
 

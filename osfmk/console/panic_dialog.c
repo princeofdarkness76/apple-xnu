@@ -125,6 +125,20 @@ static const unsigned char appleClut8[ 256 * 3 ] = {
 static int mac_addr_digit_x;
 static int mac_addr_digit_y;
 static void blit_digit( int digit );
+<<<<<<< HEAD
+=======
+static const char * strnstr(const char * s, const char * find, size_t slen);
+void dim_screen(void);
+static void panic_blit_rect(unsigned int x, unsigned int y, unsigned int width,
+			    unsigned int height, int transparent,
+			    const unsigned char * dataPtr);
+
+static int panic_info_x;
+static int panic_info_y;
+
+static const unsigned char * active_clut = NULL;			/* This is a copy of the active clut */
+
+>>>>>>> origin/10.5
 static boolean_t panicDialogDrawn = FALSE;
 
 static void 
@@ -162,7 +176,88 @@ decode_rle( unsigned char * dataPtr, unsigned int * quantity, unsigned int * val
 void 
 panic_ui_initialize(const unsigned char * system_clut)
 {
+<<<<<<< HEAD
 	clut = system_clut;
+=======
+	char vstr[VERSIONBUF_LEN];
+
+	panic_dialog_set_image( NULL, 0 );
+
+	active_clut = system_clut;
+
+	strlcpy(vstr, "custom", VERSIONBUF_LEN);
+
+	/* Convert xnu-####.###.obj~### into ####.###~### */
+
+	if (version[0]) {
+		const char *versionpos = strnstr(version, "xnu-", VERSIONBUF_LEN);
+
+		if (versionpos) {
+			int len, i;
+
+			vstr[0] = '\0';
+
+			for (i = 0, len = 4; len < VERSIONBUF_LEN; len++) {
+				if (isdigit(versionpos[len]) || versionpos[len] == '.') {	/* extract ####.###. */
+					vstr[i++] = versionpos[len];
+					continue;
+				}
+				break;
+			}
+
+			if ( versionpos[len-1] == '.' )     		/* remove trailing period if present */
+				i--;
+
+			for (; len < VERSIONBUF_LEN; len++) {						/* skip to next digit if present */
+				if ( !isdigit(versionpos[len]) )
+					continue;
+				break;
+			}
+
+			if ( versionpos[len-1] == '~' ) {				/* extract ~### if present */
+				vstr[i++] = versionpos[len-1];
+				for (; len < VERSIONBUF_LEN; len++) {						/* extract ### */
+					if ( isdigit(versionpos[len]) ) {
+						vstr[i++] = versionpos[len];
+						continue;
+					}
+					break;
+				}
+			}
+
+			vstr[i] = '\0';
+		}
+	}
+
+	strlcpy(versionbuf, vstr, VERSIONBUF_LEN);
+}
+
+
+
+void
+panic_dialog_test( void )
+{
+	boolean_t o_panicDialogDrawn = panicDialogDrawn;
+	boolean_t o_panicDialogDesired = panicDialogDesired;
+	unsigned int o_logPanicDataToScreen = logPanicDataToScreen;
+	unsigned long o_panic_caller = panic_caller;
+	unsigned int o_panicDebugging = panicDebugging;
+
+
+	panicDebugging = TRUE;
+	panic_caller = (unsigned long)(char *)__builtin_return_address(0);
+	logPanicDataToScreen = FALSE;
+	panicDialogDesired = TRUE;
+	panicDialogDrawn = FALSE;
+
+	draw_panic_dialog();
+
+	panicDebugging = o_panicDebugging;
+	panic_caller = o_panic_caller;
+	logPanicDataToScreen = o_logPanicDataToScreen;
+	panicDialogDesired = o_panicDialogDesired;
+	panicDialogDrawn = o_panicDialogDrawn;
+>>>>>>> origin/10.5
 }
 
 void 
@@ -553,7 +648,12 @@ decode_rle( unsigned char * dataPtr, unsigned int * quantity, unsigned int * val
 	return num_slots;
 }
 
+<<<<<<< HEAD
 static void 
+=======
+
+void 
+>>>>>>> origin/10.5
 dim_screen(void)
 {
 	if(!vinfo.v_depth)

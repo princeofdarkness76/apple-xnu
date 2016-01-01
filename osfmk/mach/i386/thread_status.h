@@ -359,7 +359,30 @@ typedef struct x86_saved_state32 x86_saved_state32_t;
 #define x86_SAVED_STATE32_COUNT	((mach_msg_type_number_t) \
 	(sizeof (x86_saved_state32_t)/sizeof(unsigned int)))
 
+<<<<<<< HEAD
 #pragma pack(4)
+=======
+struct x86_saved_state32_tagged {
+	uint32_t			tag;
+	struct x86_saved_state32	state;
+};
+typedef struct x86_saved_state32_tagged x86_saved_state32_tagged_t;
+
+struct x86_sframe32 {
+	/*
+	 * in case we throw a fault reloading
+	 * segment registers on a return out of
+	 * the kernel... the 'slf' state is only kept
+	 * long enough to rejigger (i.e. restore
+	 * the save area to its original state)
+	 * the save area and throw the appropriate
+	 * kernel trap pointing to the 'ssf' state
+	 */
+        struct x86_seg_load_fault32	slf;
+        struct x86_saved_state32_tagged ssf;
+};
+typedef struct x86_sframe32 x86_sframe32_t;
+>>>>>>> origin/10.5
 
 /*
  * This is the state pushed onto the 64-bit interrupt stack

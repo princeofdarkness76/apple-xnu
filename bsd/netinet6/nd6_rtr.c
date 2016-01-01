@@ -1012,6 +1012,7 @@ void
 defrtrlist_del(struct nd_defrouter *dr)
 {
 	struct nd_defrouter *deldr = NULL;
+	struct nd_ifinfo *ndi = &nd_ifinfo[dr->ifp->if_index];
 	struct nd_prefix *pr;
 	struct ifnet *ifp = dr->ifp;
 	struct nd_ifinfo *ndi = NULL;
@@ -1080,6 +1081,7 @@ defrtrlist_del(struct nd_defrouter *dr)
 	}
 	lck_mtx_unlock(&ndi->lock);
 
+<<<<<<< HEAD
 	if (resetmtu)
 		nd6_setmtu(ifp);
 
@@ -1134,6 +1136,16 @@ defrtrlist_del_static(struct nd_defrouter *new)
 		NDDR_REMREF(dr);
 	}
 	lck_mtx_unlock(nd6_mutex);
+=======
+	ndi->ndefrouters--;
+	if (ndi->ndefrouters < 0) {
+		log(LOG_WARNING, "defrtrlist_del: negative count on %s\n",
+		    if_name(dr->ifp));
+	}
+
+	if (nd6locked == 0)
+		lck_mtx_unlock(nd6_mutex);
+>>>>>>> origin/10.5
 
 	return (dr != NULL ? 0 : EINVAL);
 }
@@ -1693,9 +1705,13 @@ static struct nd_defrouter *
 defrtrlist_update_common(struct nd_defrouter *new, boolean_t scoped)
 {
 	struct nd_defrouter *dr, *n;
+<<<<<<< HEAD
 	struct ifnet *ifp = new->ifp;
 	struct nd_ifinfo *ndi = NULL;
 	struct timeval caltime;
+=======
+	struct nd_ifinfo *ndi = &nd_ifinfo[new->ifp->if_index];
+>>>>>>> origin/10.5
 
 	lck_mtx_assert(nd6_mutex, LCK_MTX_ASSERT_OWNED);
 
@@ -1776,7 +1792,17 @@ defrtrlist_update_common(struct nd_defrouter *new, boolean_t scoped)
 		return (NULL);
 	}
 
+<<<<<<< HEAD
 	n = nddr_alloc(M_WAITOK);
+=======
+	if (ip6_maxifdefrouters >= 0 &&
+	    ndi->ndefrouters >= ip6_maxifdefrouters) {
+		lck_mtx_unlock(nd6_mutex);
+		return (NULL);
+	}
+
+	n = (struct nd_defrouter *)_MALLOC(sizeof(*n), M_IP6NDP, M_NOWAIT);
+>>>>>>> origin/10.5
 	if (n == NULL) {
 		return (NULL);
 	}
@@ -1829,6 +1855,7 @@ insert:
 	 * preference is the primary default router, when the interface used
 	 * by the entry is the default interface.
 	 */
+<<<<<<< HEAD
 
 	/* insert at the end of the group */
 	for (dr = TAILQ_FIRST(&nd_defrouter); dr;
@@ -1896,6 +1923,16 @@ defrtrlist_sync(struct ifnet *ifp)
 		if (dr)
 			NDDR_REMREF(dr);
 	}
+=======
+	TAILQ_INSERT_TAIL(&nd_defrouter, n, dr_entry);
+	if (TAILQ_FIRST(&nd_defrouter) == n)
+		defrouter_select();
+	
+	ndi->ndefrouters++;
+		
+	lck_mtx_unlock(nd6_mutex);
+	return(n);
+>>>>>>> origin/10.5
 }
 
 static struct nd_pfxrouter *
@@ -2063,14 +2100,60 @@ repeat:
 	lck_mtx_unlock(nd6_mutex);
 }
 
+static void
+purge_detached(struct ifnet *ifp)
+{
+	struct nd_prefix *pr, *pr_next;
+	struct in6_ifaddr *ia;
+	struct ifaddr *ifa, *ifa_next;
+	
+	lck_mtx_lock(nd6_mutex);
+
+	for (pr = nd_prefix.lh_first; pr; pr = pr_next) {
+		pr_next = pr->ndpr_next;
+		if (pr->ndpr_ifp != ifp ||
+		    IN6_IS_ADDR_LINKLOCAL(&pr->ndpr_prefix.sin6_addr) ||
+		    ((pr->ndpr_stateflags & NDPRF_DETACHED) == 0 &&
+		    !LIST_EMPTY(&pr->ndpr_advrtrs)))
+			continue;
+
+		for (ifa = ifp->if_addrlist.tqh_first; ifa; ifa = ifa_next) {
+			ifa_next = ifa->ifa_list.tqe_next;
+			if (ifa->ifa_addr->sa_family != AF_INET6)
+				continue;
+			ia = (struct in6_ifaddr *)ifa;
+			if ((ia->ia6_flags & IN6_IFF_AUTOCONF) ==
+			    IN6_IFF_AUTOCONF && ia->ia6_ndpr == pr) {
+				in6_purgeaddr(ifa, 1);
+			}
+		}
+		if (pr->ndpr_refcnt == 0)
+			prelist_remove(pr, 1);
+	}
+
+	lck_mtx_unlock(nd6_mutex);
+}
+
 int
 nd6_prelist_add(struct nd_prefix *pr, struct nd_defrouter *dr,
     struct nd_prefix **newp, boolean_t force_scoped)
 {
 	struct nd_prefix *new = NULL;
+<<<<<<< HEAD
 	struct ifnet *ifp = pr->ndpr_ifp;
 	struct nd_ifinfo *ndi = NULL;
 	int i, error;
+=======
+	int i;
+	struct nd_ifinfo *ndi = &nd_ifinfo[pr->ndpr_ifp->if_index];
+
+	if (ip6_maxifprefixes >= 0) {
+		if (ndi->nprefixes >= ip6_maxifprefixes / 2)
+			purge_detached(pr->ndpr_ifp);
+		if (ndi->nprefixes >= ip6_maxifprefixes)
+			return(ENOMEM);
+	}
+>>>>>>> origin/10.5
 
 	if (ip6_maxifprefixes >= 0) {
 		ndi = ND_IFINFO(ifp);
@@ -2151,10 +2234,14 @@ nd6_prelist_add(struct nd_prefix *pr, struct nd_defrouter *dr,
 		pfxrtr_add(new, dr);
 	}
 
+<<<<<<< HEAD
 	lck_mtx_lock(&ndi->lock);
 	ndi->nprefixes++;
 	VERIFY(ndi->nprefixes != 0);
 	lck_mtx_unlock(&ndi->lock);
+=======
+	ndi->nprefixes++;
+>>>>>>> origin/10.5
 
 	lck_mtx_unlock(nd6_mutex);
 
@@ -2170,6 +2257,7 @@ prelist_remove(struct nd_prefix *pr)
 	struct nd_pfxrouter *pfr, *next;
 	struct ifnet *ifp = pr->ndpr_ifp;
 	int e;
+<<<<<<< HEAD
 	struct nd_ifinfo *ndi = NULL;
 
 	lck_mtx_assert(nd6_mutex, LCK_MTX_ASSERT_OWNED);
@@ -2186,6 +2274,9 @@ prelist_remove(struct nd_prefix *pr)
 	 */
 	if (pr->ndpr_addrcnt == 0)
 		pr->ndpr_stateflags |= NDPRF_DEFUNCT;
+=======
+	struct nd_ifinfo *ndi = &nd_ifinfo[pr->ndpr_ifp->if_index];
+>>>>>>> origin/10.5
 
 	/* make sure to invalidate the prefix until it is really freed. */
 	pr->ndpr_vltime = 0;
@@ -2232,6 +2323,7 @@ prelist_remove(struct nd_prefix *pr)
 		pfxrtr_del(pfr, pr);
 	}
 
+<<<<<<< HEAD
 	ndi = ND_IFINFO(ifp);
 	VERIFY((NULL != ndi) && (TRUE == ndi->initialized));
 	lck_mtx_lock(&ndi->lock);
@@ -2244,6 +2336,15 @@ prelist_remove(struct nd_prefix *pr)
 		panic("%s: unexpected (missing) refcnt ndpr=%p", __func__, pr);
 		/* NOTREACHED */
 	}
+=======
+	ndi->nprefixes--;
+	if (ndi->nprefixes < 0) {
+		log(LOG_WARNING, "prelist_remove: negative count on %s\n",
+		    if_name(pr->ndpr_ifp));
+	}
+
+	FREE(pr, M_IP6NDP);
+>>>>>>> origin/10.5
 
 	/*
 	 * Don't call pfxlist_onlink_check() here because we are

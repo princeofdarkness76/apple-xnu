@@ -460,6 +460,7 @@ enum {
 #define kIOPMMessageSystemPowerEventOccurred  \
                 iokit_family_msg(sub_iokit_powermanagement, 0x130)
 
+<<<<<<< HEAD
 /* kIOPMMessageSleepWakeUUIDChange
  * Either a new SleepWakeUUID has been specified at the beginning of a sleep,
  * or we're removing the existing property upon completion of a wakeup.
@@ -491,6 +492,8 @@ enum {
  */
 #define kIOPMMessageDarkWakeThermalEmergency \
                 iokit_family_msg(sub_iokit_powermanagement, 0x160)
+=======
+>>>>>>> origin/10.5
 
 /*******************************************************************************
  *
@@ -609,16 +612,24 @@ enum {
 #define kIOPMPSCapacityEstimatedKey	                "CapacityEstimated"
 #define kIOPMPSBatteryChargeStatusKey               "ChargeStatus"
 #define kIOPMPSBatteryTemperatureKey                "Temperature"
+<<<<<<< HEAD
 #define kIOPMPSAdapterDetailsKey		    "AdapterDetails"
 #define kIOPMPSChargerConfigurationKey		    "ChargerConfiguration"
 
 // kIOPMPSBatteryChargeStatusKey may have one of the following values, or may have
+=======
+
+// kIOPMBatteryChargeStatusKey may have one of the following values, or may have
+>>>>>>> origin/10.5
 // no value. If kIOPMBatteryChargeStatusKey has a NULL value (or no value) associated with it
 // then charge is proceeding normally. If one of these battery charge status reasons is listed,
 // then the charge may have been interrupted.
 #define kIOPMBatteryChargeStatusTooHot              "HighTemperature"
 #define kIOPMBatteryChargeStatusTooCold             "LowTemperature"
+<<<<<<< HEAD
 #define kIOPMBatteryChargeStatusTooHotOrCold	    "HighOrLowTemperature"
+=======
+>>>>>>> origin/10.5
 #define kIOPMBatteryChargeStatusGradient            "BatteryTemperatureGradient"
 
 // Definitions for battery location, in case of multiple batteries.
@@ -718,6 +729,7 @@ enum {
 #define kIOPMThermalLevelWarningKey                     "Thermal_Level_Warning"
 
 /* Thermal Warning Level values
+<<<<<<< HEAD
  *      kIOPMThermalLevelNormal   - under normal operating conditions
  *      kIOPMThermalLevelDanger   - thermal pressure may cause system slowdown
  *      kIOPMThermalLevelCritical - thermal conditions may cause imminent shutdown
@@ -739,6 +751,20 @@ enum {
 #define kIOPMThermalWarningLevelNormal kIOPMThermalLevelNormal
 #define kIOPMThermalWarningLevelDanger kIOPMThermalLevelWarning
 #define kIOPMThermalWarningLevelCrisis kIOPMThermalLevelCritical
+=======
+ *      kIOPMThermalWarningLevelNormal - under normal operating conditions
+ *      kIOPMThermalWarningLevelDanger - thermal pressure may cause system slowdown
+ *      kIOPMThermalWarningLevelCrisis - thermal conditions may cause imminent shutdown
+ *
+ * The platform may define additional thermal levels if necessary.
+ */
+enum {
+  kIOPMThermalWarningLevelNormal    = 0,
+  kIOPMThermalWarningLevelDanger    = 5,
+  kIOPMThermalWarningLevelCrisis    = 10
+};
+
+>>>>>>> origin/10.5
 
 // PM Settings Controller setting types
 // Settings types used primarily with:

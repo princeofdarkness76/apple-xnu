@@ -273,6 +273,7 @@ struct socket {
 	/* Plug-in support - make the socket interface overridable */
 	struct mbuf	*so_tail;
 	struct socket_filter_entry *so_filt;	/* NKE hook */
+<<<<<<< HEAD
 	u_int32_t	so_flags;	/* Flags */
 #define	SOF_NOSIGPIPE		0x00000001
 #define	SOF_NOADDRAVAIL		0x00000002 /* EADDRNOTAVAIL if src addr is gone */
@@ -319,6 +320,27 @@ struct socket {
 	u_int16_t	so_traffic_class;
 	u_int8_t	so_traffic_mgt_flags;	/* traffic_mgt socket config */
 	u_int8_t	so_restrictions;
+=======
+	u_long	so_flags;	/* Flags */
+#define	SOF_NOSIGPIPE	0x1
+#define	SOF_NOADDRAVAIL	0x2	/* EADDRNOTAVAIL if src addr is gone */
+#define	SOF_PCBCLEARING	0x4	/* pru_disconnect done; don't call pru_detach */
+#define	SOF_DEFUNCT	0x8	/* accepted socket marked as inactive */
+#define	SOF_CLOSEWAIT	0x10	/* blocked in close awaiting some events */
+#define	SOF_UPCALLINUSE	0x20	/* socket upcall is currently in progress */
+#define SOF_REUSESHAREUID	0x40	/* Allows SO_REUSEADDR/SO_REUSEPORT for multiple so_uid */
+#define	SOF_MULTIPAGES	0x80	/* jumbo clusters may be used for sosend */
+#define SOF_ABORTED	0x100	/* soabort was already called once on the socket */
+#define SOF_OVERFLOW 0x200	/* socket was dropped as overflow of listen queue */
+#ifdef __APPLE_API_PRIVATE
+#define SOF_NOTIFYCONFLICT 0x400	/* notify that a bind was done on a port already in use */
+#endif
+#define	SOF_UPCALLCLOSEWAIT 0x800 /* block on close until an upcall returns  */
+	int	so_usecount;	/* refcounting of socket use */;
+	int	so_retaincnt;
+	u_int32_t so_filteruse;	/* usecount for the socket filters */
+	u_int32_t	so_traffic_mgt_flags;	/* traffic_mgt socket config */
+>>>>>>> origin/10.5
 	thread_t	so_send_filt_thread;
 
 	/* for debug pruposes */

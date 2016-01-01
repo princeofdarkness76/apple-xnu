@@ -97,7 +97,10 @@ const struct memory_object_pager_ops device_pager_ops = {
 	device_pager_synchronize,
 	device_pager_map,
 	device_pager_last_unmap,
+<<<<<<< HEAD
 	NULL, /* data_reclaim */
+=======
+>>>>>>> origin/10.5
 	"device pager"
 };
 

@@ -401,6 +401,7 @@ found:
 
 		if (retval) {
 			/*
+<<<<<<< HEAD
 			 * If this was a create/rename operation lookup, then by this point
 			 * we expected to see the item returned from hfs_getnewvnode above.  
 			 * In the create case, it would probably eventually bubble out an EEXIST 
@@ -414,6 +415,18 @@ found:
 			if ((retval == ENOENT) &&
 					((cnp->cn_nameiop == CREATE) || (cnp->cn_nameiop == RENAME)) &&
 					(flags & ISLASTCN)) {
+=======
+			 * If this was a create operation lookup and another
+			 * process removed the object before we had a chance
+			 * to create the vnode, then just treat it as the not
+			 * found case above and return EJUSTRETURN.
+			 * We should do the same for the RENAME operation since we are
+			 * going to write it in regardless.
+			 */
+			if ((retval == ENOENT) &&
+			    ((cnp->cn_nameiop == CREATE) || (cnp->cn_nameiop == RENAME)) &&
+			    (flags & ISLASTCN)) {
+>>>>>>> origin/10.5
 				retval = EJUSTRETURN;
 			}
 			
@@ -490,13 +503,24 @@ found:
 			/* skip to the error-handling code if we can't retry */
 			goto exit;
 		}
+<<<<<<< HEAD
 
+=======
+		
+>>>>>>> origin/10.5
 		/* 
 		 * Save the origin info for file and directory hardlinks.  Directory hardlinks 
 		 * need the origin for '..' lookups, and file hardlinks need it to ensure that 
 		 * competing lookups do not cause us to vend different hardlinks than the ones requested.
+<<<<<<< HEAD
 		 */
 		if (ISSET(VTOC(tvp)->c_flag, C_HARDLINK))
+=======
+		 * We want to restrict saving the cache entries to LOOKUP namei operations, since
+		 * we're really doing this to protect getattr.
+		 */
+		if ((cnp->cn_nameiop == LOOKUP) && (VTOC(tvp)->c_flag & C_HARDLINK)) {
+>>>>>>> origin/10.5
 			hfs_savelinkorigin(VTOC(tvp), VTOC(dvp)->c_fileid);
 		*cnode_locked = 1;
 		*vpp = tvp;
@@ -671,6 +695,38 @@ hfs_vnop_lookup(struct vnop_lookup_args *ap)
 			error = cat_lookup(VTOHFS(vp), &desc, 0, 0, &desc, &lookup_attr, NULL, NULL);	
 			
 			hfs_systemfile_unlock(VTOHFS(dvp), lockflags);
+<<<<<<< HEAD
+=======
+		}
+
+		/* Save the lookup result in the origin list for future lookups, but
+		 * only if it was through a LOOKUP nameiop
+		 */
+		if (cnp->cn_nameiop == LOOKUP) {
+			hfs_savelinkorigin(cp, dcp->c_fileid);
+		}	   
+
+		hfs_unlock(cp);
+	}
+#if NAMEDRSRCFORK
+	/*
+	 * Check if caller wants the resource fork but utilized
+	 * the legacy "file/rsrc" access path.
+	 *
+	 * This is deprecated behavior and support for it will not
+	 * be allowed beyond case insensitive HFS+ and even that
+	 * support will be removed in the next major OS release.
+	 */
+	if ((dvp != vp) &&
+	    ((flags & ISLASTCN) == 0) &&
+	    vnode_isreg(vp) &&
+	    (cnp->cn_nameptr[cnp->cn_namelen] == '/') &&
+	    (bcmp(&cnp->cn_nameptr[cnp->cn_namelen+1], "rsrc", 5) == 0) &&
+	    ((VTOHFS(vp)->hfs_flags & (HFS_STANDARD | HFS_CASE_SENSITIVE)) == 0)) {		
+		cnp->cn_consume = 5;
+		cnp->cn_flags |= CN_WANTSRSRCFORK | ISLASTCN | NOCACHE;
+		cnp->cn_flags &= ~MAKEENTRY;
+>>>>>>> origin/10.5
 
 			/* 
 			 * Note that cat_lookup may fail to find something with the name provided in the

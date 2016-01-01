@@ -72,7 +72,10 @@
 
 #include <libkern/c++/OSContainers.h>
 #include <libkern/crypto/sha1.h>
+<<<<<<< HEAD
 #include <libkern/OSAtomic.h>
+=======
+>>>>>>> origin/10.5
 
 extern "C" {
 #include <machine/machine_routines.h>
@@ -1159,7 +1162,11 @@ void IOPlatformExpert::registerNVRAMController(IONVRAMController * caller)
     OSData *          data;
     IORegistryEntry * entry;
     OSString *        string = 0;
+<<<<<<< HEAD
     uuid_string_t     uuid;
+=======
+    char              uuid[ 36 + 1 ];
+>>>>>>> origin/10.5
 
     entry = IORegistryEntry::fromPath( "/efi/platform", gIODTPlane );
     if ( entry )
@@ -1170,12 +1177,21 @@ void IOPlatformExpert::registerNVRAMController(IONVRAMController * caller)
             SHA1_CTX     context;
             uint8_t      digest[ SHA_DIGEST_LENGTH ];
             const uuid_t space = { 0x2A, 0x06, 0x19, 0x90, 0xD3, 0x8D, 0x44, 0x40, 0xA1, 0x39, 0xC4, 0x97, 0x70, 0x37, 0x65, 0xAC };
+<<<<<<< HEAD
 
             SHA1Init( &context );
             SHA1Update( &context, space, sizeof( space ) );
             SHA1Update( &context, data->getBytesNoCopy( ), data->getLength( ) );
             SHA1Final( digest, &context );
 
+=======
+
+            SHA1Init( &context );
+            SHA1Update( &context, space, sizeof( space ) );
+            SHA1Update( &context, data->getBytesNoCopy( ), data->getLength( ) );
+            SHA1Final( digest, &context );
+
+>>>>>>> origin/10.5
             digest[ 6 ] = ( digest[ 6 ] & 0x0F ) | 0x50;
             digest[ 8 ] = ( digest[ 8 ] & 0x3F ) | 0x80;
 

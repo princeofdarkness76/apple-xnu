@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2005 Apple Computer, Inc. All rights reserved.
 >>>>>>> origin/10.3
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -151,7 +155,12 @@ processor_up(
 	init_ast_check(processor);
 	pset = processor->processor_set;
 	pset_lock(pset);
+<<<<<<< HEAD
 	++pset->online_processor_count;
+=======
+	if (++pset->processor_count == 1)
+		pset->low_pri = pset->low_count = processor;
+>>>>>>> origin/10.5
 	enqueue_tail(&pset->active_queue, (queue_entry_t)processor);
 	processor->state = PROCESSOR_RUNNING;
 	(void)hw_atomic_add(&processor_avail_count, 1);
@@ -255,10 +264,17 @@ processor_shutdown(
 	}
 
 	if (processor->state == PROCESSOR_IDLE)
+<<<<<<< HEAD
 		remqueue((queue_entry_t)processor);
 	else
 	if (processor->state == PROCESSOR_RUNNING)
 		remqueue((queue_entry_t)processor);
+=======
+		remqueue(&pset->idle_queue, (queue_entry_t)processor);
+	else
+	if (processor->state == PROCESSOR_RUNNING)
+		remqueue(&pset->active_queue, (queue_entry_t)processor);
+>>>>>>> origin/10.5
 
 	processor->state = PROCESSOR_SHUTDOWN;
 
@@ -268,12 +284,16 @@ processor_shutdown(
 	splx(s);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	cpu_exit_wait(processor->cpu_id);
 =======
 #ifdef	__ppc__
 	cpu_exit_wait(processor->slot_num);
 #endif
 >>>>>>> origin/10.3
+=======
+	cpu_exit_wait(processor->cpu_num);
+>>>>>>> origin/10.5
 
 	return (KERN_SUCCESS);
 }
@@ -328,6 +348,7 @@ processor_doshutdown(
 	old_thread = machine_processor_shutdown(self, processor_offline, processor);
 
 	thread_dispatch(old_thread, self);
+<<<<<<< HEAD
 =======
 	thread_bind(self, prev);
 	old_thread = switch_to_shutdown_context(self,
@@ -339,6 +360,8 @@ processor_doshutdown(
 
 	thread_dispatch(old_thread);
 >>>>>>> origin/10.3
+=======
+>>>>>>> origin/10.5
 }
 
 /*
@@ -366,7 +389,22 @@ processor_offline(
 
 	thread_dispatch(old_thread, new_thread);
 
+<<<<<<< HEAD
 	PMAP_DEACTIVATE_KERNEL(processor->cpu_id);
+=======
+	PMAP_DEACTIVATE_KERNEL(processor->cpu_num);
+
+	pset = processor->processor_set;
+	pset_lock(pset);
+	processor->state = PROCESSOR_OFF_LINE;
+	if (--pset->processor_count == 0)
+		pset->low_pri = pset->low_count = PROCESSOR_NULL;
+	(void)hw_atomic_sub(&processor_avail_count, 1);
+	processor_queue_shutdown(processor);
+	/* pset lock dropped */
+
+	ml_cpu_down();
+>>>>>>> origin/10.5
 
 	cpu_sleep();
 	panic("zombie processor");

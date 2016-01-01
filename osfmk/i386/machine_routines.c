@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -62,7 +66,10 @@
 #include <prng/random.h>
 #include <i386/machine_cpu.h>
 #include <i386/lapic.h>
+<<<<<<< HEAD
 #include <i386/bit_routines.h>
+=======
+>>>>>>> origin/10.5
 #include <i386/mp_events.h>
 #include <i386/pmCPU.h>
 #include <i386/trap.h>
@@ -391,6 +398,7 @@ void ml_install_interrupt_handler(
 void
 machine_signal_idle(
         processor_t processor)
+<<<<<<< HEAD
 {
 	cpu_interrupt(processor->cpu_id);
 }
@@ -410,6 +418,10 @@ ml_cpu_get_info(ml_cpu_info_t *cpu_info)
 void
 ml_init_max_cpus(unsigned long max_cpus)
 {
+=======
+{
+	cpu_interrupt(processor->cpu_num);
+>>>>>>> origin/10.5
 }
 
 int
@@ -694,6 +706,7 @@ ml_init_lock_timeout(void)
 	LockTimeOut = (uint32_t) abstime;
 	LockTimeOutTSC = (uint32_t) tmrCvt(abstime, tscFCvtn2t);
 
+<<<<<<< HEAD
 	/*
 	 * TLBTimeOut dictates the TLB flush timeout period. It defaults to
 	 * LockTimeOut but can be overriden separately. In particular, a
@@ -714,6 +727,8 @@ ml_init_lock_timeout(void)
 		reportphyreaddelayabs = abstime;
 	}
 
+=======
+>>>>>>> origin/10.5
 	if (PE_parse_boot_argn("mtxspin", &mtxspin, sizeof (mtxspin))) {
 		if (mtxspin > USEC_PER_SEC>>4)
 			mtxspin =  USEC_PER_SEC>>4;

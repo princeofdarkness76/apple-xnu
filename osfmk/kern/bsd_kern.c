@@ -302,8 +302,13 @@ int get_task_numactivethreads(task_t task)
 	int num_active_thr=0;
 	task_lock(task);
 
+<<<<<<< HEAD
 	for (inc  = (thread_t)(void *)queue_first(&task->threads);
 			!queue_end(&task->threads, (queue_entry_t)inc); inc = (thread_t)(void *)queue_next(&inc->task_threads)) 
+=======
+	for (inc  = (thread_t)queue_first(&task->threads);
+			!queue_end(&task->threads, (queue_entry_t)inc); inc = (thread_t)queue_next(&inc->task_threads)) 
+>>>>>>> origin/10.5
 	{
 		if(inc->active)
 			num_active_thr++;

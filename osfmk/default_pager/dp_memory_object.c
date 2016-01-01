@@ -391,7 +391,10 @@ const struct memory_object_pager_ops default_pager_ops = {
 	dp_memory_object_synchronize,
 	dp_memory_object_map,
 	dp_memory_object_last_unmap,
+<<<<<<< HEAD
 	dp_memory_object_data_reclaim,
+=======
+>>>>>>> origin/10.5
 	"default pager"
 };
 

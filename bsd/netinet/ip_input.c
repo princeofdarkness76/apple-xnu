@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -286,6 +290,23 @@ SYSCTL_INT(_net_inet_ip, OID_AUTO, maxfragsperpacket, CTLFLAG_RW,
 	&maxfragsperpacket, 0,
 	"Maximum number of IPv4 fragments allowed per packet");
 
+<<<<<<< HEAD
+=======
+static int    maxfrags;
+SYSCTL_INT(_net_inet_ip, OID_AUTO, maxfrags, CTLFLAG_RW,
+	&maxfrags, 0, "Maximum number of IPv4 fragments allowed");
+
+static int    currentfrags = 0;
+
+#if CONFIG_SCOPEDROUTING
+int	ip_doscopedroute = 1;
+#else
+int	ip_doscopedroute = 0;
+#endif
+SYSCTL_INT(_net_inet_ip, OID_AUTO, scopedroute, CTLFLAG_RW,
+     &ip_doscopedroute, 0, "Enable IPv4 scoped routing");
+
+>>>>>>> origin/10.5
 /*
  * XXX - Setting ip_checkinterface mostly implements the receive side of
  * the Strong ES model described in RFC 1122, but since the routing table
@@ -381,7 +402,14 @@ int fw_one_pass = 0;
 
 #if DUMMYNET
 ip_dn_io_t *ip_dn_io_ptr;
+<<<<<<< HEAD
 #endif /* DUMMYNET */
+=======
+#endif
+
+int (*fr_checkp)(struct ip *, int, struct ifnet *, int, struct mbuf **) = NULL;
+#endif /* IPFIREWALL */
+>>>>>>> origin/10.5
 
 SYSCTL_NODE(_net_inet_ip, OID_AUTO, linklocal,
 	CTLFLAG_RW | CTLFLAG_LOCKED, 0, "link local");
@@ -723,6 +751,7 @@ ip_proto_dispatch_in(struct mbuf *m, int hlen, u_int8_t proto,
 	}
 }
 
+<<<<<<< HEAD
 struct pktchain_elm {
 	struct mbuf	*pkte_head;
 	struct mbuf	*pkte_tail;
@@ -732,11 +761,57 @@ struct pktchain_elm {
 	uint16_t	pkte_proto;
 	uint32_t	pkte_nbytes;
 };
+=======
+/* 
+ * ipforward_rt cleared in in_addroute()
+ * when a new route is successfully created.
+ */
+static struct	sockaddr_in ipaddr = { sizeof(ipaddr), AF_INET , 0 , {0}, {0,0,0,0,0,0,0,0} };
+
+/*
+ * Ip input routine.  Checksum and byte swap header.  If fragmented
+ * try to reassemble.  Process options.  Pass to next level.
+ */
+void
+ip_input(struct mbuf *m)
+{
+	struct ip *ip;
+	struct ipq *fp;
+	struct in_ifaddr *ia = NULL;
+	int    i, hlen, checkif;
+	u_short sum;
+	struct in_addr pkt_dst;
+	u_int32_t div_info = 0;		/* packet divert/tee info */
+#if IPFIREWALL
+	struct ip_fw_args args;
+#endif
+	ipfilter_t inject_filter_ref = 0;
+	struct m_tag	*tag;
+	struct route	ipforward_rt;
+	
+	bzero(&ipforward_rt, sizeof(struct route));
+	
+#if IPFIREWALL
+	args.eh = NULL;
+	args.oif = NULL;
+	args.rule = NULL;
+	args.divert_rule = 0;			/* divert cookie */
+	args.next_hop = NULL;
+>>>>>>> origin/10.5
 
 typedef struct pktchain_elm pktchain_elm_t;
 
+<<<<<<< HEAD
 /* Store upto PKTTBL_SZ unique flows on the stack */
 #define PKTTBL_SZ	7
+=======
+#if IPDIVERT
+	if ((tag = m_tag_locate(m, KERNEL_MODULE_TAG_ID, KERNEL_TAG_TYPE_DIVERT, NULL)) != NULL) {
+		struct divert_tag	*div_tag;
+		
+		div_tag = (struct divert_tag *)(tag+1);
+		args.divert_rule = div_tag->cookie;
+>>>>>>> origin/10.5
 
 <<<<<<< HEAD
 static struct mbuf *
@@ -770,8 +845,18 @@ ip_chain_insert(struct mbuf *packet, pktchain_elm_t *tbl)
 >>>>>>> origin/10.3
 		}
 	}
+<<<<<<< HEAD
 	if (tbl[pkttbl_idx].pkte_tail != NULL)
 		mbuf_setnextpkt(tbl[pkttbl_idx].pkte_tail, packet);
+=======
+#endif
+
+	if ((tag = m_tag_locate(m, KERNEL_MODULE_TAG_ID, KERNEL_TAG_TYPE_IPFORWARD, NULL)) != NULL) {
+		struct ip_fwd_tag	*ipfwd_tag;
+		
+		ipfwd_tag = (struct ip_fwd_tag *)(tag+1);
+		args.next_hop = ipfwd_tag->next_hop;
+>>>>>>> origin/10.5
 
 	tbl[pkttbl_idx].pkte_tail = packet;
 	tbl[pkttbl_idx].pkte_npkts += 1;
@@ -779,6 +864,7 @@ ip_chain_insert(struct mbuf *packet, pktchain_elm_t *tbl)
 	return (NULL);
 }
 
+<<<<<<< HEAD
 /* args is a dummy variable here for backward compatibility */
 static void
 ip_input_second_pass_loop_tbl(pktchain_elm_t *tbl, struct ip_fw_in_args *args)
@@ -821,6 +907,30 @@ ip_input_cpout_args(struct ip_fw_in_args *args, struct ip_fw_args *args1,
 	if (*done_init == FALSE) {
 		bzero(args1, sizeof(struct ip_fw_args));
 		*done_init = TRUE;
+=======
+#if DUMMYNET
+	if (args.rule) {	/* dummynet already filtered us */
+            ip = mtod(m, struct ip *);
+            hlen = IP_VHL_HL(ip->ip_vhl) << 2;
+            inject_filter_ref = ipf_get_inject_filter(m);
+            goto iphack ;
+	}
+#endif /* DUMMYNET */
+#endif /* IPFIREWALL */
+	
+	/*
+	 * No need to proccess packet twice if we've 
+	 * already seen it
+	 */
+	inject_filter_ref = ipf_get_inject_filter(m);
+	if (inject_filter_ref != 0) {
+		ip = mtod(m, struct ip *);
+		hlen = IP_VHL_HL(ip->ip_vhl) << 2;
+		ip->ip_len = ntohs(ip->ip_len) - hlen;
+		ip->ip_off = ntohs(ip->ip_off);
+		ip_proto_dispatch_in(m, hlen, ip->ip_p, inject_filter_ref);
+		return;
+>>>>>>> origin/10.5
 	}
 	args1->fwa_next_hop = args->fwai_next_hop;
 	args1->fwa_ipfw_rule = args->fwai_ipfw_rule;
@@ -2196,11 +2306,18 @@ pass:
 	 */
 	ip_nhops = 0;		/* for source routed packets */
 #if IPFIREWALL
+<<<<<<< HEAD
 	if (hlen > sizeof (struct ip) &&
 	    ip_dooptions(m, 0, args.fwa_next_hop)) {
 #else /* !IPFIREWALL */
 	if (hlen > sizeof (struct ip) && ip_dooptions(m, 0, NULL)) {
 #endif /* !IPFIREWALL */
+=======
+	if (hlen > sizeof (struct ip) && ip_dooptions(m, 0, args.next_hop, &ipforward_rt)) {
+#else
+	if (hlen > sizeof (struct ip) && ip_dooptions(m, 0, NULL, &ipforward_rt)) {
+#endif
+>>>>>>> origin/10.5
 		return;
 	}
 
@@ -2220,11 +2337,19 @@ pass:
 	 * changed by use of 'ipfw fwd'.
 	 */
 #if IPFIREWALL
+<<<<<<< HEAD
 	pkt_dst = args.fwa_next_hop == NULL ?
 	    ip->ip_dst : args.fwa_next_hop->sin_addr;
 #else /* !IPFIREWALL */
 	pkt_dst = ip->ip_dst;
 #endif /* !IPFIREWALL */
+=======
+	pkt_dst = args.next_hop == NULL ?
+	    ip->ip_dst : args.next_hop->sin_addr;
+#else
+	pkt_dst = ip->ip_dst;
+#endif
+>>>>>>> origin/10.5
 
 	/*
 	 * Enable a consistency check between the destination address
@@ -2240,6 +2365,7 @@ pass:
 	 * to the loopback interface instead of the interface where
 	 * the packets are received.
 	 */
+<<<<<<< HEAD
 	checkif = ip_checkinterface && (ipforwarding == 0) &&
 	    !(inifp->if_flags & IFF_LOOPBACK) &&
 	    !(m->m_pkthdr.pkt_flags & PKTF_LOOP)
@@ -2248,6 +2374,19 @@ pass:
 #else /* !IPFIREWALL */
 		;
 #endif /* !IPFIREWALL */
+=======
+	checkif = ip_checkinterface && (ipforwarding == 0) && 
+	    ((m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK) == 0)
+#if IPFIREWALL
+	    && (args.next_hop == NULL);
+#else
+		;
+#endif
+
+	lck_mtx_lock(rt_mtx);
+	TAILQ_FOREACH(ia, &in_ifaddrhead, ia_link) {
+#define	satosin(sa)	((struct sockaddr_in *)(sa))
+>>>>>>> origin/10.5
 
 	/*
 	 * Check for exact addresses in the hash bucket.
@@ -2346,10 +2485,21 @@ pass:
 		m_freem(m);
 	} else {
 #if IPFIREWALL
+<<<<<<< HEAD
 		ip_forward(m, 0, args.fwa_next_hop);
 #else
 		ip_forward(m, 0, NULL);
 #endif
+=======
+		ip_forward(m, 0, args.next_hop, &ipforward_rt);
+#else
+		ip_forward(m, 0, NULL, &ipforward_rt);
+#endif
+		if (ipforward_rt.ro_rt != NULL) {
+			rtfree(ipforward_rt.ro_rt);
+			ipforward_rt.ro_rt = NULL;
+		}
+>>>>>>> origin/10.5
 	}
 	return;
 
@@ -2533,6 +2683,7 @@ found:
 	/*
 	 * Switch out to protocol's input routine.
 	 */
+<<<<<<< HEAD
 	OSAddAtomic(1, &ipstat.ips_delivered);
 
 #if IPFIREWALL
@@ -2574,6 +2725,44 @@ found:
 		m = tcp_lro(m, hlen);
 		if (m == NULL)
 			return;
+=======
+	OSAddAtomic(1, (SInt32*)&ipstat.ips_delivered);
+	{
+#if IPFIREWALL
+		if (args.next_hop && ip->ip_p == IPPROTO_TCP) {
+			/* TCP needs IPFORWARD info if available */
+			struct m_tag *fwd_tag;
+			struct ip_fwd_tag	*ipfwd_tag;
+			
+			fwd_tag = m_tag_alloc(KERNEL_MODULE_TAG_ID, KERNEL_TAG_TYPE_IPFORWARD,
+					sizeof(struct sockaddr_in), M_NOWAIT);
+			if (fwd_tag == NULL) {
+				goto bad;
+			}
+			
+			ipfwd_tag = (struct ip_fwd_tag *)(fwd_tag+1);
+			ipfwd_tag->next_hop = args.next_hop;
+
+			m_tag_prepend(m, fwd_tag);
+	
+			KERNEL_DEBUG(DBG_LAYER_END, ip->ip_dst.s_addr, 
+			     ip->ip_src.s_addr, ip->ip_p, ip->ip_off, ip->ip_len);
+	
+	
+			/* TCP deals with its own locking */
+			ip_proto_dispatch_in(m, hlen, ip->ip_p, 0);
+		} else {
+			KERNEL_DEBUG(DBG_LAYER_END, ip->ip_dst.s_addr, 
+			     ip->ip_src.s_addr, ip->ip_p, ip->ip_off, ip->ip_len);
+		
+			ip_proto_dispatch_in(m, hlen, ip->ip_p, 0);
+		}
+#else
+		ip_proto_dispatch_in(m, hlen, ip->ip_p, 0);
+#endif
+		
+		return;
+>>>>>>> origin/10.5
 	}
 	ip_proto_dispatch_in(m, hlen, ip->ip_p, 0);
 #endif /* !IPFIREWALL */
@@ -3992,6 +4181,7 @@ ip_forward(struct mbuf *m, int srcrt, struct sockaddr_in *next_hop)
 	struct mbuf *mcopy;
 	n_long dest;
 	struct in_addr pkt_dst;
+<<<<<<< HEAD
 	u_int32_t nextmtu = 0, len;
 	struct ip_out_args ipoa = { IFSCOPE_NONE, { 0 }, 0, 0 };
 	struct ifnet *rcvifp = m->m_pkthdr.rcvif;
@@ -4002,6 +4192,12 @@ ip_forward(struct mbuf *m, int srcrt, struct sockaddr_in *next_hop)
 #if PF
 	struct pf_mtag *pf_mtag;
 #endif /* PF */
+=======
+	struct ifnet *destifp;
+#if IPSEC
+	struct ifnet dummyifp;
+#endif
+>>>>>>> origin/10.5
 
 	dest = 0;
 #if IPFIREWALL

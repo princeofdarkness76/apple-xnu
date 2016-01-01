@@ -18,11 +18,14 @@ EXPORT_ONLY_FILES = 	\
 		    cpu_topology.h \
 		    cpuid.h \
 		    eflags.h \
+<<<<<<< HEAD
 =======
 		    cpu_capabilities.h	\
 		    cpu_number.h \
 		    hw_lock_types.h \
 >>>>>>> origin/10.2
+=======
+>>>>>>> origin/10.5
 		    io_map_entries.h \
 		    lapic.h \
 		    lock.h \

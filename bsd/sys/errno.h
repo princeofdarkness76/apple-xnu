@@ -291,6 +291,7 @@ __END_DECLS
 /* pseudo-errors returned inside kernel to modify return to process */
 #define	ERESTART	(-1)		/* restart syscall */
 #define	EJUSTRETURN	(-2)		/* don't modify regs, just return */
+<<<<<<< HEAD
 
 #ifdef BSD_KERNEL_PRIVATE
 #define ERECYCLE    (-5)		/* restart lookup under heavy vnode pressure/recycling */
@@ -307,4 +308,9 @@ __END_DECLS
 #define	EQSUSPENDED	(-EQFULL)	/* Output queue is suspended */
 #endif /* PRIVATE */
 #endif /* KERNEL */
+=======
+#define ERECYCLE    (-5)		/* restart lookup under heavy vnode pressure/recycling */
+#define EREDRIVEOPEN	(-6)
+#endif
+>>>>>>> origin/10.5
 #endif /* _SYS_ERRNO_H_ */

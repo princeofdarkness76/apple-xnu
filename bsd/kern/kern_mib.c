@@ -630,10 +630,17 @@ sysctl_mib_init(void)
 	cputype = cpu_type();
 	cpusubtype = cpu_subtype();
 	cputhreadtype = cpu_threadtype();
+<<<<<<< HEAD
 #if defined(__i386__) || defined (__x86_64__)
 	cpu64bit = (_get_cpu_capabilities() & k64Bit) == k64Bit;
 #else
 #error Unsupported arch
+=======
+#if defined(__ppc__)
+    cpu64bit = (_cpu_capabilities & k64Bit) == k64Bit;
+#elif defined(__i386__)
+    cpu64bit = (_get_cpu_capabilities() & k64Bit) == k64Bit;
+>>>>>>> origin/10.5
 #endif
 
 =======
@@ -656,6 +663,53 @@ sysctl_mib_init(void)
 	/* hw.cpufamily */
 	cpufamily = cpuid_cpufamily();
 
+<<<<<<< HEAD
+=======
+	/* hw.packages */
+	if (cpusubtype == CPU_SUBTYPE_POWERPC_970 && 
+	    cpu_info.l2_cache_size == 1 * 1024 * 1024)
+		/* The signature of the dual-core G5 */
+		packages = roundup(hinfo.max_cpus, 2) / 2;
+	else
+		packages = hinfo.max_cpus;
+
+#elif defined (__i386__)
+	mmx_flag = ((_get_cpu_capabilities() & kHasMMX) == kHasMMX)? 1 : 0;
+	sse_flag = ((_get_cpu_capabilities() & kHasSSE) == kHasSSE)? 1 : 0;
+	sse2_flag = ((_get_cpu_capabilities() & kHasSSE2) == kHasSSE2)? 1 : 0;
+	sse3_flag = ((_get_cpu_capabilities() & kHasSSE3) == kHasSSE3)? 1 : 0;
+	supplementalsse3_flag = ((_get_cpu_capabilities() & kHasSupplementalSSE3) == kHasSupplementalSSE3)? 1 : 0;
+	sse4_1_flag = ((_get_cpu_capabilities() & kHasSSE4_1) == kHasSSE4_1)? 1 : 0;
+	sse4_2_flag = ((_get_cpu_capabilities() & kHasSSE4_2) == kHasSSE4_2)? 1 : 0;
+	x86_64_flag = ((_get_cpu_capabilities() & k64Bit) == k64Bit)? 1 : 0;
+
+	/* hw.cpufamily */
+	switch (cpuid_info()->cpuid_family) {
+	case 6:
+		switch (cpuid_info()->cpuid_model) {
+		case 13:
+			cpufamily = CPUFAMILY_INTEL_6_13;
+			break;
+		case 14:
+			cpufamily = CPUFAMILY_INTEL_6_14; /* Core Solo/Duo */
+			break;
+		case 15:
+			cpufamily = CPUFAMILY_INTEL_6_15; /* Core 2 */
+			break;
+		case 23:
+			cpufamily = CPUFAMILY_INTEL_6_23;
+			break;
+		case 26:
+			cpufamily = CPUFAMILY_INTEL_6_26;
+			break;
+		default:
+			cpufamily = CPUFAMILY_UNKNOWN;
+		}
+		break;
+	default:
+		cpufamily = CPUFAMILY_UNKNOWN;
+	}
+>>>>>>> origin/10.5
 	/* hw.cacheconfig */
 	cacheconfig[0] = ml_cpu_cache_sharing(0);
 	cacheconfig[1] = ml_cpu_cache_sharing(1);
@@ -673,6 +727,7 @@ sysctl_mib_init(void)
 	/* hw.packages */
 	packages = roundup(ml_cpu_cache_sharing(0), cpuid_info()->thread_count)
 			/ cpuid_info()->thread_count;
+<<<<<<< HEAD
 
 #else
 #error unknown architecture
@@ -763,4 +818,11 @@ sysctl_mib_init(void)
 
 >>>>>>> origin/10.2
 
+=======
+
+#else /* end __arm__ */
+# warning we do not support this platform yet
+#endif /* __ppc__ */
+
+>>>>>>> origin/10.5
 }

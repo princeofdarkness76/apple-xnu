@@ -382,6 +382,625 @@ hibernate_page_list_iterate(hibernate_page_list_t * list, vm_offset_t * pPage)
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
+<<<<<<< HEAD
+=======
+static IOReturn
+IOHibernatePollerProbe(IOPolledFileIOVars * vars, IOService * target)
+{
+    IOReturn            err = kIOReturnError;
+    int32_t		idx;
+    IOPolledInterface * poller;
+
+    for (idx = vars->pollers->getCount() - 1; idx >= 0; idx--)
+    {
+        poller = (IOPolledInterface *) vars->pollers->getObject(idx);
+        err = poller->probe(target);
+        if (err)
+        {
+            HIBLOG("IOPolledInterface::probe[%d] 0x%x\n", idx, err);
+            break;
+        }
+    }
+
+    return (err);
+}
+
+static IOReturn
+IOHibernatePollerOpen(IOPolledFileIOVars * vars, uint32_t state, IOMemoryDescriptor * md)
+{
+    IOReturn            err = kIOReturnError;
+    int32_t		idx;
+    IOPolledInterface * poller;
+
+    for (idx = vars->pollers->getCount() - 1; idx >= 0; idx--)
+    {
+        poller = (IOPolledInterface *) vars->pollers->getObject(idx);
+        err = poller->open(state, md);
+        if (err)
+        {
+            HIBLOG("IOPolledInterface::open[%d] 0x%x\n", idx, err);
+            break;
+        }
+    }
+
+    return (err);
+}
+
+static IOReturn
+IOHibernatePollerClose(IOPolledFileIOVars * vars, uint32_t state)
+{
+    IOReturn            err = kIOReturnError;
+    int32_t		idx;
+    IOPolledInterface * poller;
+
+    for (idx = 0;
+         (poller = (IOPolledInterface *) vars->pollers->getObject(idx));
+         idx++)
+    {
+        err = poller->close(state);
+        if (err)
+            HIBLOG("IOPolledInterface::close[%d] 0x%x\n", idx, err);
+    }
+
+    return (err);
+}
+
+static void
+IOHibernatePollerIOComplete(void *   target,
+                            void *   parameter,
+                            IOReturn status,
+                            UInt64   actualByteCount)
+{
+    IOPolledFileIOVars * vars = (IOPolledFileIOVars *) parameter;
+
+    vars->ioStatus = status;
+}
+
+static IOReturn
+IOHibernatePollerIO(IOPolledFileIOVars * vars, 
+                    uint32_t operation, uint32_t bufferOffset, 
+		    uint64_t deviceOffset, uint64_t length)
+{
+
+    IOReturn            err = kIOReturnError;
+    IOPolledInterface * poller;
+    IOPolledCompletion  completion;
+
+    completion.target    = 0;
+    completion.action    = &IOHibernatePollerIOComplete;
+    completion.parameter = vars;
+
+    vars->ioStatus = -1;
+
+    poller = (IOPolledInterface *) vars->pollers->getObject(0);
+    err = poller->startIO(operation, bufferOffset, deviceOffset + vars->block0, length, completion);
+    if (err)
+        HIBLOG("IOPolledInterface::startIO[%d] 0x%x\n", 0, err);
+
+    return (err);
+}
+
+static IOReturn
+IOHibernatePollerIODone(IOPolledFileIOVars * vars, bool abortable)
+{
+    IOReturn            err = kIOReturnSuccess;
+    int32_t		idx = 0;
+    IOPolledInterface * poller;
+
+    while (-1 == vars->ioStatus)
+    {
+        for (idx = 0; 
+	    (poller = (IOPolledInterface *) vars->pollers->getObject(idx));
+             idx++)
+        {
+	    IOReturn newErr;
+            newErr = poller->checkForWork();
+	    if ((newErr == kIOReturnAborted) && !abortable)
+		newErr = kIOReturnSuccess;
+	    if (kIOReturnSuccess == err)
+		err = newErr;
+        }
+    }
+
+    if (err)
+    {
+	HIBLOG("IOPolledInterface::checkForWork[%d] 0x%x\n", idx, err);
+    }
+    else 
+    {
+	err = vars->ioStatus;
+	if (kIOReturnSuccess != err)
+	    HIBLOG("IOPolledInterface::ioStatus 0x%x\n", err);
+    }
+
+    return (err);
+}
+
+IOReturn
+IOPolledInterface::checkAllForWork(void)
+{
+    IOReturn            err = kIOReturnNotReady;
+    int32_t		idx;
+    IOPolledInterface * poller;
+
+    IOHibernateVars * vars  = &gIOHibernateVars;
+
+    if (!vars->fileVars || !vars->fileVars->pollers)
+	return (err);
+
+    for (idx = 0;
+            (poller = (IOPolledInterface *) vars->fileVars->pollers->getObject(idx));
+            idx++)
+    {
+        err = poller->checkForWork();
+        if (err)
+            HIBLOG("IOPolledInterface::checkAllForWork[%d] 0x%x\n", idx, err);
+    }
+
+    return (err);
+}
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+struct _OpenFileContext
+{
+    OSData * extents;
+    uint64_t size;
+};
+
+static void
+file_extent_callback(void * ref, uint64_t start, uint64_t length)
+{
+    _OpenFileContext * ctx = (_OpenFileContext *) ref;
+    IOPolledFileExtent extent;
+
+    extent.start  = start;
+    extent.length = length;
+
+    ctx->extents->appendBytes(&extent, sizeof(extent));
+    ctx->size += length;
+}
+
+IOReturn
+IOPolledFileOpen( const char * filename, IOBufferMemoryDescriptor * ioBuffer,
+			    IOPolledFileIOVars ** fileVars, OSData ** fileExtents,
+			    OSData ** imagePath)
+{
+    IOReturn			err = kIOReturnError;
+    IOPolledFileIOVars *	vars;
+    _OpenFileContext		ctx;
+    OSData *			extentsData;
+    OSNumber *			num;
+    IORegistryEntry *		part = 0;
+    OSDictionary *		matching;
+    OSIterator *		iter;
+    dev_t 			hibernate_image_dev;
+    uint64_t			maxiobytes;
+
+    vars = &gFileVars;
+    do
+    {
+	HIBLOG("sizeof(IOHibernateImageHeader) == %ld\n", sizeof(IOHibernateImageHeader));
+	if (sizeof(IOHibernateImageHeader) != 512)
+	    continue;
+    
+	vars->io           = false;
+	vars->buffer       = (uint8_t *) ioBuffer->getBytesNoCopy();
+	vars->bufferHalf   = 0;
+	vars->bufferOffset = 0;
+	vars->bufferSize   = ioBuffer->getLength() >> 1;
+    
+	extentsData = OSData::withCapacity(32);
+    
+	ctx.extents = extentsData;
+	ctx.size    = 0;
+	vars->fileRef = kern_open_file_for_direct_io(filename, 
+						    &file_extent_callback, &ctx, 
+						    &hibernate_image_dev,
+                                                    &vars->block0,
+                                                    &maxiobytes);
+	if (!vars->fileRef)
+	{
+	    err = kIOReturnNoSpace;
+	    break;
+	}
+	HIBLOG("Opened file %s, size %qd, partition base 0x%qx, maxio %qx\n", filename, ctx.size, 
+                    vars->block0, maxiobytes);
+	if (ctx.size < 1*1024*1024)		// check against image size estimate!
+	{
+	    err = kIOReturnNoSpace;
+	    break;
+	}
+
+        if (maxiobytes < vars->bufferSize)
+            vars->bufferSize = maxiobytes;
+    
+	vars->extentMap = (IOPolledFileExtent *) extentsData->getBytesNoCopy();
+    
+	matching = IOService::serviceMatching("IOMedia");
+	num = OSNumber::withNumber(major(hibernate_image_dev), 32);
+	matching->setObject(kIOBSDMajorKey, num);
+	num->release();
+	num = OSNumber::withNumber(minor(hibernate_image_dev), 32);
+	matching->setObject(kIOBSDMinorKey, num);
+	num->release();
+	iter = IOService::getMatchingServices(matching);
+	matching->release();
+	if (iter)
+	{
+	    part = (IORegistryEntry *) iter->getNextObject();
+	    part->retain();
+	    iter->release();
+	}
+    	if (!part)
+	    break;
+
+	int minor, major;
+	IORegistryEntry * next;
+	IORegistryEntry * child;
+	OSData * data;
+
+	num = (OSNumber *) part->getProperty(kIOBSDMajorKey);
+	if (!num)
+	    break;
+	major = num->unsigned32BitValue();
+	num = (OSNumber *) part->getProperty(kIOBSDMinorKey);
+	if (!num)
+	    break;
+	minor = num->unsigned32BitValue();
+
+	hibernate_image_dev = makedev(major, minor);
+
+        vars->pollers = OSArray::withCapacity(4);
+	if (!vars->pollers)
+	    break;
+
+	vars->blockSize = 512;
+	next = part;
+	do
+	{
+            IOPolledInterface * poller;
+	    OSObject *          obj;
+
+	    obj = next->getProperty(kIOPolledInterfaceSupportKey);
+	    if (kOSBooleanFalse == obj)
+	    {
+		vars->pollers->flushCollection();
+		break;
+	    }
+            else if ((poller = OSDynamicCast(IOPolledInterface, obj)))
+                vars->pollers->setObject(poller);
+	    if ((num = OSDynamicCast(OSNumber, next->getProperty(kIOMediaPreferredBlockSizeKey))))
+		vars->blockSize = num->unsigned32BitValue();
+            child = next;
+	}
+	while ((next = child->getParentEntry(gIOServicePlane)) 
+                && child->isParent(next, gIOServicePlane, true));
+
+	HIBLOG("hibernate image major %d, minor %d, blocksize %ld, pollers %d\n",
+		    major, minor, vars->blockSize, vars->pollers->getCount());
+	if (vars->pollers->getCount() < kIOHibernateMinPollersNeeded)
+	    continue;
+
+	err = IOHibernatePollerProbe(vars, (IOService *) part);
+	if (kIOReturnSuccess != err)
+	    break;
+
+	err = IOHibernatePollerOpen(vars, kIOPolledPreflightState, ioBuffer);
+	if (kIOReturnSuccess != err)
+	    break;
+
+	*fileVars    = vars;
+	*fileExtents = extentsData;
+    
+	// make imagePath
+
+	if ((extentsData->getLength() >= sizeof(IOPolledFileExtent)))
+	{
+	    char str2[24];
+
+#if __i386__
+	    if (!gIOCreateEFIDevicePathSymbol)
+		gIOCreateEFIDevicePathSymbol = OSSymbol::withCString("CreateEFIDevicePath");
+
+	    snprintf(str2, sizeof(str2), "%qx", vars->extentMap[0].start);
+
+	    err = IOService::getPlatform()->callPlatformFunction(
+						gIOCreateEFIDevicePathSymbol, false,
+						(void *) part, (void *) str2, (void *) true,
+						(void *) &data);
+#else
+	    char str1[256];
+	    int len = sizeof(str1);
+
+	    if (!part->getPath(str1, &len, gIODTPlane))
+		err = kIOReturnNotFound;
+	    else
+	    {
+		snprintf(str2, sizeof(str2), ",%qx", vars->extentMap[0].start);
+		// (strip the plane name)
+		char * tail = strchr(str1, ':');
+		if (!tail)
+		    tail = str1 - 1;
+		data = OSData::withBytes(tail + 1, strlen(tail + 1));
+		data->appendBytes(str2, strlen(str2));
+	    }
+#endif
+	if (kIOReturnSuccess == err)
+	    *imagePath = data;
+	else
+	    HIBLOG("error 0x%x getting path\n", err);
+	}
+    }
+    while (false);
+
+    if (kIOReturnSuccess != err)
+    {
+        HIBLOG("error 0x%x opening hibernation file\n", err);
+	if (vars->fileRef)
+	    kern_close_file_for_direct_io(vars->fileRef);
+    }
+
+    if (part)
+	part->release();
+
+    return (err);
+}
+
+IOReturn
+IOPolledFileClose( IOPolledFileIOVars * vars )
+{
+    if (vars->pollers)
+    {
+	IOHibernatePollerClose(vars, kIOPolledPostflightState);
+        vars->pollers->release();
+    }
+
+    gIOHibernateFileRef = vars->fileRef;
+
+    bzero(vars, sizeof(IOPolledFileIOVars));
+
+    return (kIOReturnSuccess);
+}
+
+static IOReturn
+IOPolledFileSeek(IOPolledFileIOVars * vars, uint64_t position)
+{
+    IOPolledFileExtent * extentMap;
+
+    extentMap = vars->extentMap;
+
+    vars->position = position;
+
+    while (position >= extentMap->length)
+    {
+	position -= extentMap->length;
+	extentMap++;
+    }
+
+    vars->currentExtent   = extentMap;
+    vars->extentRemaining = extentMap->length - position;
+    vars->extentPosition  = vars->position - position;
+
+    if (vars->bufferSize <= vars->extentRemaining)
+	vars->bufferLimit = vars->bufferSize;
+    else
+	vars->bufferLimit = vars->extentRemaining;
+
+    return (kIOReturnSuccess);
+}
+
+static IOReturn
+IOPolledFileWrite(IOPolledFileIOVars * vars,
+                    const uint8_t * bytes, IOByteCount size,
+                    hibernate_cryptvars_t * cryptvars)
+{
+    IOReturn    err = kIOReturnSuccess;
+    IOByteCount copy;
+    bool	flush = false;
+
+    do
+    {
+	if (!bytes && !size)
+	{
+	    // seek to end of block & flush
+	    size = vars->position & (vars->blockSize - 1);
+	    if (size)
+		size = vars->blockSize - size;
+	    flush = true;
+            // use some garbage for the fill
+            bytes = vars->buffer + vars->bufferOffset;
+	}
+
+	copy = vars->bufferLimit - vars->bufferOffset;
+	if (copy > size)
+	    copy = size;
+	else
+	    flush = true;
+
+	if (bytes)
+	{
+	    bcopy(bytes, vars->buffer + vars->bufferHalf + vars->bufferOffset, copy);
+	    bytes += copy;
+	}
+        else
+	    bzero(vars->buffer + vars->bufferHalf + vars->bufferOffset, copy);
+        
+	size -= copy;
+	vars->bufferOffset += copy;
+	vars->position += copy;
+
+	if (flush && vars->bufferOffset)
+	{
+	    uint64_t offset = (vars->position - vars->bufferOffset 
+				- vars->extentPosition + vars->currentExtent->start);
+	    uint32_t length = (vars->bufferOffset);
+
+#if CRYPTO
+            if (cryptvars && vars->encryptStart && (vars->position > vars->encryptStart))
+            {
+                uint32_t encryptLen, encryptStart;
+                encryptLen = vars->position - vars->encryptStart;
+                if (encryptLen > length)
+                    encryptLen = length;
+                encryptStart = length - encryptLen;
+                
+                // encrypt the buffer
+                aes_encrypt_cbc(vars->buffer + vars->bufferHalf + encryptStart,
+                                &cryptvars->aes_iv[0],
+                                encryptLen / AES_BLOCK_SIZE,
+                                vars->buffer + vars->bufferHalf + encryptStart,
+                                &cryptvars->ctx.encrypt);
+                // save initial vector for following encrypts
+                bcopy(vars->buffer + vars->bufferHalf + encryptStart + encryptLen - AES_BLOCK_SIZE,
+                        &cryptvars->aes_iv[0],
+                        AES_BLOCK_SIZE);
+            }
+#endif /* CRYPTO */
+
+	    if (vars->io)
+            {
+		err = IOHibernatePollerIODone(vars, true);
+                if (kIOReturnSuccess != err)
+                    break;
+            }
+
+if (vars->position & (vars->blockSize - 1)) HIBLOG("misaligned file pos %qx\n", vars->position);
+//if (length != vars->bufferSize) HIBLOG("short write of %qx ends@ %qx\n", length, offset + length);
+
+	    err = IOHibernatePollerIO(vars, kIOPolledWrite, vars->bufferHalf, offset, length);
+            if (kIOReturnSuccess != err)
+                break;
+	    vars->io = true;
+
+	    vars->extentRemaining -= vars->bufferOffset;
+	    if (!vars->extentRemaining)
+	    {
+		vars->currentExtent++;
+		vars->extentRemaining = vars->currentExtent->length;
+		vars->extentPosition  = vars->position;
+                if (!vars->extentRemaining)
+                {
+                    err = kIOReturnOverrun;
+                    break;
+                }
+	    }
+
+	    vars->bufferHalf = vars->bufferHalf ? 0 : vars->bufferSize;
+	    vars->bufferOffset = 0;
+	    if (vars->bufferSize <= vars->extentRemaining)
+		vars->bufferLimit = vars->bufferSize;
+	    else
+		vars->bufferLimit = vars->extentRemaining;
+
+	    flush = false;
+	}
+    }
+    while (size);
+
+    return (err);
+}
+
+static IOReturn
+IOPolledFileRead(IOPolledFileIOVars * vars,
+                    uint8_t * bytes, IOByteCount size,
+                    hibernate_cryptvars_t * cryptvars)
+{
+    IOReturn    err = kIOReturnSuccess;
+    IOByteCount copy;
+
+//    bytesWritten += size;
+
+    do
+    {
+	copy = vars->bufferLimit - vars->bufferOffset;
+	if (copy > size)
+	    copy = size;
+
+	if (bytes)
+	{
+	    bcopy(vars->buffer + vars->bufferHalf + vars->bufferOffset, bytes, copy);
+	    bytes += copy;
+	}
+	size -= copy;
+	vars->bufferOffset += copy;
+//	vars->position += copy;
+
+	if (vars->bufferOffset == vars->bufferLimit)
+	{
+	    if (vars->io)
+            {
+		err = IOHibernatePollerIODone(vars, false);
+                if (kIOReturnSuccess != err)
+                    break;
+            }
+            else
+                cryptvars = 0;
+
+if (vars->position & (vars->blockSize - 1)) HIBLOG("misaligned file pos %qx\n", vars->position);
+
+	    vars->position += vars->lastRead;
+	    vars->extentRemaining -= vars->lastRead;
+	    vars->bufferLimit = vars->lastRead;
+
+	    if (!vars->extentRemaining)
+	    {
+		vars->currentExtent++;
+		vars->extentRemaining = vars->currentExtent->length;
+		vars->extentPosition  = vars->position;
+                if (!vars->extentRemaining)
+                {
+                    err = kIOReturnOverrun;
+                    break;
+                }
+	    }
+
+	    uint64_t length;
+	    uint64_t lastReadLength = vars->lastRead;
+	    uint64_t offset = (vars->position 
+				- vars->extentPosition + vars->currentExtent->start);
+	    if (vars->extentRemaining <= vars->bufferSize)
+		length = vars->extentRemaining;
+	    else
+		length = vars->bufferSize;
+	    vars->lastRead = length;
+
+//if (length != vars->bufferSize) HIBLOG("short read of %qx ends@ %qx\n", length, offset + length);
+
+	    err = IOHibernatePollerIO(vars, kIOPolledRead, vars->bufferHalf, offset, length);
+            if (kIOReturnSuccess != err)
+                break;
+	    vars->io = true;
+
+	    vars->bufferHalf = vars->bufferHalf ? 0 : vars->bufferSize;
+	    vars->bufferOffset = 0;
+
+#if CRYPTO
+            if (cryptvars)
+            {
+                uint8_t thisVector[AES_BLOCK_SIZE];
+                // save initial vector for following decrypts
+                bcopy(&cryptvars->aes_iv[0], &thisVector[0], AES_BLOCK_SIZE);
+                bcopy(vars->buffer + vars->bufferHalf + lastReadLength - AES_BLOCK_SIZE, 
+                        &cryptvars->aes_iv[0], AES_BLOCK_SIZE);
+                // decrypt the buffer
+                aes_decrypt_cbc(vars->buffer + vars->bufferHalf,
+                                &thisVector[0],
+                                lastReadLength / AES_BLOCK_SIZE,
+                                vars->buffer + vars->bufferHalf,
+                                &cryptvars->ctx.decrypt);
+            }
+#endif CRYPTO
+	}
+    }
+    while (size);
+
+    return (err);
+}
+
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+		
+>>>>>>> origin/10.5
 IOReturn
 IOHibernateSystemSleep(void)
 {
@@ -1156,6 +1775,7 @@ IOHibernateDone(IOHibernateVars * vars)
 	 */
 	if (gIOOptionsEntry) {
 
+<<<<<<< HEAD
 	    if (gIOHibernateRTCVariablesKey) {
 		if (gIOOptionsEntry->getProperty(gIOHibernateRTCVariablesKey)) {
 		    gIOOptionsEntry->removeProperty(gIOHibernateRTCVariablesKey);
@@ -1169,6 +1789,14 @@ IOHibernateDone(IOHibernateVars * vars)
 		    gIOOptionsEntry->setProperty(gIOHibernateBootNextKey, gIOHibernateBootNextSave);
 		    gIOHibernateBootNextSave->release();
 		    gIOHibernateBootNextSave = NULL;
+=======
+		if (sym) {
+			if (gIOOptionsEntry->getProperty(sym)) {
+				gIOOptionsEntry->removeProperty(sym);
+				gIOOptionsEntry->sync();
+			}
+			sym->release();
+>>>>>>> origin/10.5
 		}
 		else
 		    gIOOptionsEntry->removeProperty(gIOHibernateBootNextKey);
@@ -1983,8 +2611,13 @@ hibernate_write_image(void)
                uncompressedSize ? ((int) ((compressedSize * 100ULL) / uncompressedSize)) : 0,
                sum1, sum2);
 
+<<<<<<< HEAD
     HIBLOG("svPageCount %d, zvPageCount %d, wiredPagesEncrypted %d, wiredPagesClear %d, dirtyPagesEncrypted %d\n", 
 	   svPageCount, zvPageCount, wiredPagesEncrypted, wiredPagesClear, dirtyPagesEncrypted);
+=======
+    if (vars->fileVars->io)
+        (void) IOHibernatePollerIODone(vars->fileVars, false);
+>>>>>>> origin/10.5
 
     if (pollerOpen)
         IOPolledFilePollersClose(vars->fileVars, kIOPolledBeforeSleepState);
@@ -2254,13 +2887,27 @@ hibernate_machine_init(void)
 
 	    compressedSize = kIOHibernateTagLength & tag;
 	    if (kIOHibernateTagSignature != (tag & ~kIOHibernateTagLength))
+<<<<<<< HEAD
+=======
+	    {
+		err = kIOReturnIPCError;
+		break;
+	    }
+
+	    if (!compressedSize)
+>>>>>>> origin/10.5
 	    {
 		err = kIOReturnIPCError;
 		break;
 	    }
 
 	    err = IOPolledFileRead(vars->fileVars, src, (compressedSize + 3) & ~3, cryptvars);
+<<<<<<< HEAD
 	    if (kIOReturnSuccess != err) break;
+=======
+   	    if (kIOReturnSuccess != err)
+		break;
+>>>>>>> origin/10.5
 
 	    if (compressedSize < page_size)
 	    {
@@ -2290,8 +2937,13 @@ hibernate_machine_init(void)
 	    err = IOMemoryDescriptorReadToPhysical(vars->srcBuffer, decoOffset, ptoa_64(ppnum), page_size);
 	    if (err)
 	    {
+<<<<<<< HEAD
 		    HIBLOG("IOMemoryDescriptorReadToPhysical [%ld] %x\n", (long)ppnum, err);
 		    break;
+=======
+		HIBLOG("IOMemoryDescriptorReadToPhysical [%d] %x\n", ppnum, err);
+		break;
+>>>>>>> origin/10.5
 	    }
 
 	    ppnum++;
@@ -2318,6 +2970,11 @@ hibernate_machine_init(void)
 
     if (kIOReturnSuccess != err)
 	panic("Hibernate restore error %x", err);
+<<<<<<< HEAD
+=======
+
+    gIOHibernateCurrentHeader->actualImage2Sum = sum;
+>>>>>>> origin/10.5
 
     gIOHibernateCurrentHeader->actualImage2Sum = sum;
     gIOHibernateCompression = gIOHibernateCurrentHeader->compression;

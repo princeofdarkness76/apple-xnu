@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
 >>>>>>> origin/10.3
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -385,6 +389,7 @@ uint nfstracemask = 0;
 
 int nfsprnttimo = 1;
 
+<<<<<<< HEAD
 int nfsodata[1024];
 int nfsoprocnum, nfsolen;
 int nfsbt[32], nfsbtlen;
@@ -413,6 +418,40 @@ next_server:
 			loc++;
 			if (loc >= nlp->nl_numlocs)
 				loc = 0; /* after last location, wrap back around to first location */
+=======
+		lck_mtx_unlock(&nmp->nm_lock);
+		error = sock_connect(so, mbuf_data(nmp->nm_nam), MSG_DONTWAIT);
+		if (error && (error != EINPROGRESS))
+			goto bad;
+		lck_mtx_lock(&nmp->nm_lock);
+		while (!sock_isconnected(so)) {
+			if (tocnt++ == 15) /* log a warning if connect is taking a while */
+				log(LOG_INFO, "nfs_connect: socket connect taking a while for %s\n",
+					vfs_statfs(nmp->nm_mountp)->f_mntfromname);
+			/* check for error on socket */
+			sock_getsockopt(so, SOL_SOCKET, SO_ERROR, &error, &optlen);
+			if (error) {
+				log(LOG_INFO, "nfs_connect: socket error %d for %s\n",
+					error, vfs_statfs(nmp->nm_mountp)->f_mntfromname);
+				break;
+			}
+			if (tocnt > 60) {
+				/* abort if this is taking too long */
+				error = ENOTCONN;
+				break;
+			}
+			if ((error = nfs_sigintr(nmp, NULL, current_thread(), 1)))
+				break;
+			msleep(&nmp->nm_so, &nmp->nm_lock, PSOCK, "nfs_socket_connect", &ts);
+		}
+		if (tocnt > 15)
+			log(LOG_INFO, "nfs_connect: socket connect %s for %s\n",
+				error ? "aborted" : "completed",
+				vfs_statfs(nmp->nm_mountp)->f_mntfromname);
+		if (error) {
+			lck_mtx_unlock(&nmp->nm_lock);
+			goto bad;
+>>>>>>> origin/10.5
 		}
 	}
 	/*
@@ -461,6 +500,7 @@ nfs_location_mntfromname(struct nfs_fs_locations *locs, struct nfs_location_inde
 		p += cnt;
 		size -= cnt;
 	}
+<<<<<<< HEAD
 	if (fsl->nl_path.np_compcount == 0) {
 		/* mounting root export on server */
 		if (size > 0) {
@@ -468,6 +508,27 @@ nfs_location_mntfromname(struct nfs_fs_locations *locs, struct nfs_location_inde
 			*p++ = '\0';
 		}
 		return;
+=======
+	/* just playin' it safe */
+	sock_setsockopt(so, SOL_SOCKET, SO_UPCALLCLOSEWAIT, &on, sizeof(on));
+
+	if (!(nmp->nm_flag & NFSMNT_INT))
+		sock_nointerrupt(so, 1);
+
+	/* Initialize socket state variables */
+	nmp->nm_srtt[0] = nmp->nm_srtt[1] = nmp->nm_srtt[2] =
+		nmp->nm_srtt[3] = (NFS_TIMEO << 3);
+	nmp->nm_sdrtt[0] = nmp->nm_sdrtt[1] = nmp->nm_sdrtt[2] =
+		nmp->nm_sdrtt[3] = 0;
+	if (nmp->nm_sotype == SOCK_DGRAM) {
+		/* XXX do we really want to reset this on each reconnect? */
+		nmp->nm_cwnd = NFS_MAXCWND / 2;	    /* Initial send window */
+		nmp->nm_sent = 0;
+	} else if (nmp->nm_sotype == SOCK_STREAM) {
+		nmp->nm_markerleft = sizeof(nmp->nm_fragleft);
+		nmp->nm_fragleft = nmp->nm_reclen = 0;
+		nmp->nm_timeouts = 0;
+>>>>>>> origin/10.5
 	}
 	/* append each server path component */
 	for (i=0; (size > 0) && (i < (int)fsl->nl_path.np_compcount); i++) {
@@ -809,12 +870,23 @@ nfs_socket_create(
 	int resvport,
 	struct nfs_socket **nsop)
 {
+<<<<<<< HEAD
 	struct nfs_socket *nso;
 	struct timeval now;
 	int error;
 #ifdef NFS_SOCKET_DEBUGGING
 	char naddr[MAX_IPv6_STR_LEN];
 	void *sinaddr;
+=======
+	struct nfsmount *nmp;
+	socket_t so;
+	int error, error2, sotype, rexmit, slpflag = 0, needrecon;
+	struct msghdr msg;
+	struct sockaddr *sendnam;
+	mbuf_t mreqcopy;
+	size_t sentlen = 0;
+	struct timespec ts = { 2, 0 };
+>>>>>>> origin/10.5
 
 	if (sa->sa_family == AF_INET)
 		sinaddr = &((struct sockaddr_in*)sa)->sin_addr;
@@ -875,8 +947,17 @@ nfs_socket_create(
 			} else {
 				error = EINVAL;
 			}
+<<<<<<< HEAD
 			if (!error)
 				error = sock_bind(nso->nso_so, (struct sockaddr*)&ss);
+=======
+			/* make sure socket thread is running, then wait */
+			nfs_mount_sock_thread_wake(nmp);
+			if ((error = nfs_sigintr(req->r_nmp, req, req->r_thread, 1)))
+				break;
+			msleep(req, &nmp->nm_lock, slpflag|PSOCK, "nfsconnectwait", &ts);
+			slpflag = 0;
+>>>>>>> origin/10.5
 		}
 	}
 
@@ -898,6 +979,7 @@ nfs_socket_create(
 
 	thread_funnel_switch(NETWORK_FUNNEL, KERNEL_FUNNEL);
 
+<<<<<<< HEAD
 	/* Initialize other non-zero congestion variables */
 	nmp->nm_srtt[0] = nmp->nm_srtt[1] = nmp->nm_srtt[2] =
 		nmp->nm_srtt[3] = (NFS_TIMEO << 3);
@@ -908,6 +990,56 @@ nfs_socket_create(
 	FSDBG(529, nmp, nmp->nm_flag, nmp->nm_soflags, nmp->nm_cwnd);
 	nmp->nm_timeouts = 0;
 	return (0);
+=======
+	if (sotype == SOCK_DGRAM) {
+		lck_mtx_lock(&nmp->nm_lock);
+		if (!(req->r_flags & R_CWND) && (nmp->nm_sent >= nmp->nm_cwnd)) {
+			/* if we can't send this out yet, wait on the cwnd queue */
+			slpflag = ((nmp->nm_flag & NFSMNT_INT) && req->r_thread) ? PCATCH : 0;
+			lck_mtx_unlock(&nmp->nm_lock);
+			nfs_sndunlock(req);
+			req->r_flags |= R_MUSTRESEND;
+			lck_mtx_unlock(&req->r_mtx);
+			if (!wait) {
+				req->r_rtt = 0;
+				return (0);
+			}
+			lck_mtx_lock(&nmp->nm_lock);
+			while (nmp->nm_sent >= nmp->nm_cwnd) {
+				if ((error = nfs_sigintr(req->r_nmp, req, req->r_thread, 1)))
+					break;
+				TAILQ_INSERT_TAIL(&nmp->nm_cwndq, req, r_cchain);
+				msleep(req, &nmp->nm_lock, slpflag | (PZERO - 1), "nfswaitcwnd", &ts);
+				slpflag = 0;
+				if ((req->r_cchain.tqe_next != NFSREQNOLIST)) {
+					TAILQ_REMOVE(&nmp->nm_cwndq, req, r_cchain);
+					req->r_cchain.tqe_next = NFSREQNOLIST;
+				}
+			}
+			lck_mtx_unlock(&nmp->nm_lock);
+			goto again;
+		}
+		/*
+		 * We update these *before* the send to avoid racing
+		 * against others who may be looking to send requests.
+		 */
+		if (!rexmit) {
+			/* first transmit */
+			req->r_flags |= R_CWND;
+			nmp->nm_sent += NFS_CWNDSCALE;
+		} else {
+			/*
+			 * When retransmitting, turn timing off
+			 * and divide congestion window by 2. 
+			 */
+			req->r_flags &= ~R_TIMING;
+			nmp->nm_cwnd >>= 1;
+			if (nmp->nm_cwnd < NFS_CWNDSCALE)
+				nmp->nm_cwnd = NFS_CWNDSCALE;
+		}
+		lck_mtx_unlock(&nmp->nm_lock);
+	}
+>>>>>>> origin/10.5
 
 bad:
 	thread_funnel_switch(NETWORK_FUNNEL, KERNEL_FUNNEL);
@@ -1614,6 +1746,7 @@ tryagain:
 				nss.nss_version = nmp->nm_vers;
 			}
 		}
+<<<<<<< HEAD
 		NFS_SOCK_DBG("nfs connect first %s, so type %d port %d prot %d %d\n",
 			vfs_statfs(nmp->nm_mountp)->f_mntfromname, nss.nss_sotype, nss.nss_port,
 			nss.nss_protocol, nss.nss_version);
@@ -1632,6 +1765,13 @@ tryagain:
 		NFS_SOCK_DBG("nfs connect %s, so type %d port %d prot %d %d\n",
 			vfs_statfs(nmp->nm_mountp)->f_mntfromname, nss.nss_sotype, nss.nss_port,
 			nss.nss_protocol, nss.nss_version);
+=======
+		/* need to poll if we're P_NOREMOTEHANG */
+		if (nfs_noremotehang(req->r_thread))
+			ts.tv_sec = 1;
+		msleep(req, &req->r_mtx, slpflag | (PZERO - 1), "nfswaitreply", &ts);
+		slpflag = 0;
+>>>>>>> origin/10.5
 	}
 
 	/* Set next location to first valid location. */
@@ -5914,6 +6054,7 @@ nfs_aux_request(
 	size_t readlen, sentlen;
 	struct nfs_rpc_record_state nrrs;
 
+<<<<<<< HEAD
 	if (!so) {
 		/* create socket and set options */
 		soproto = (sotype == SOCK_DGRAM) ? IPPROTO_UDP : IPPROTO_TCP;
@@ -5980,6 +6121,32 @@ nfs_aux_request(
 					error = ETIMEDOUT;
 					break;
 				}
+=======
+	error = nfs_request_create(np, mp, nmrest, procnum, thd, cred, reqp);
+	req = *reqp;
+	FSDBG(274, (req ? R_XID32(req->r_xid) : 0), np, procnum, error);
+	if (error)
+		return (error);
+	req->r_flags |= R_ASYNC;
+	if (cb)
+		req->r_callback = *cb;
+	error = nfs_request_add_header(req);
+	if (!error) {
+		req->r_flags |= R_WAITSENT;
+		if (req->r_callback.rcb_func)
+			nfs_request_ref(req, 0);
+		error = nfs_request_send(req, 1);
+		lck_mtx_lock(&req->r_mtx);
+		if (!error && !(req->r_flags & R_SENT) && req->r_callback.rcb_func) {
+			/* make sure to wait until this async I/O request gets sent */
+			int slpflag = (req->r_nmp && (req->r_nmp->nm_flag & NFSMNT_INT) && req->r_thread) ? PCATCH : 0;
+			struct timespec ts = { 2, 0 };
+			while (!(req->r_flags & R_SENT)) {
+				if ((error = nfs_sigintr(req->r_nmp, req, req->r_thread, 0)))
+					break;
+				msleep(req, &req->r_mtx, slpflag | (PZERO - 1), "nfswaitsent", &ts);
+				slpflag = 0;
+>>>>>>> origin/10.5
 			}
 			nfsmout_if(error);
 		}
@@ -6024,6 +6191,7 @@ nfs_rephead(siz, nd, slp, err, cache, frev, mrq, mbp, bposp)
 	struct mbuf **mbp;
 	caddr_t *bposp;
 {
+<<<<<<< HEAD
 	register u_long *tl;
 	register struct mbuf *mreq;
 	caddr_t bpos;
@@ -6076,6 +6244,24 @@ nfs_rephead(siz, nd, slp, err, cache, frev, mrq, mbp, bposp)
 	if (sotype == SOCK_STREAM) {
 		sendat = 0; /* we only resend the request for UDP */
 		nfs_rpc_record_state_init(&nrrs);
+=======
+	int error = 0, asyncio = req->r_callback.rcb_func ? 1 : 0;
+
+	lck_mtx_lock(&req->r_mtx);
+	if (!asyncio)
+		req->r_flags |= R_ASYNCWAIT;
+	while (req->r_flags & R_RESENDQ) {  /* wait until the request is off the resend queue */
+		struct timespec ts = { 2, 0 };
+		if ((error = nfs_sigintr(req->r_nmp, req, req->r_thread, 0)))
+			break;
+		msleep(req, &req->r_mtx, PZERO-1, "nfsresendqwait", &ts);
+	}
+	lck_mtx_unlock(&req->r_mtx);
+
+	if (!error) {
+		nfs_request_wait(req);
+		error = nfs_request_finish(req, nmrepp, status);
+>>>>>>> origin/10.5
 	}
 
 	for (try=0; try < timeo; try++) {
@@ -6741,6 +6927,7 @@ nfs_down(struct nfsmount *nmp, thread_t thd, int error, int flags, const char *m
 
 	lck_mtx_lock(&nmp->nm_lock);
 
+<<<<<<< HEAD
 	timeoutmask = NFSSTA_TIMEO | NFSSTA_LOCKTIMEO | NFSSTA_JUKEBOXTIMEO;
 	if (NMFLAG(nmp, MUTEJUKEBOX)) /* jukebox timeouts don't count as unresponsive if muted */
 		   timeoutmask &= ~NFSSTA_JUKEBOXTIMEO;
@@ -6770,6 +6957,20 @@ nfs_down(struct nfsmount *nmp, thread_t thd, int error, int flags, const char *m
 				printf("nfs server %s: %sdead\n", vfs_statfs(nmp->nm_mountp)->f_mntfromname,
 				       (nmp->nm_curdeadtimeout != nmp->nm_deadtimeout) ? "squished " : "");
 			do_vfs_signal = VQ_DEAD;
+=======
+	if ((nmp->nm_flag & NFSMNT_INT) && req->r_thread)
+		slpflag = PCATCH;
+	while (*statep & NFSSTA_SNDLOCK) {
+		if ((error = nfs_sigintr(nmp, req, req->r_thread, 1)))
+			break;
+		*statep |= NFSSTA_WANTSND;
+		if (nfs_noremotehang(req->r_thread))
+			ts.tv_sec = 1;
+		msleep(statep, &nmp->nm_lock, slpflag | (PZERO - 1), "nfsndlck", &ts);
+		if (slpflag == PCATCH) {
+			slpflag = 0;
+			ts.tv_sec = 2;
+>>>>>>> origin/10.5
 		}
 	}
 	lck_mtx_unlock(&nmp->nm_lock);
@@ -7673,6 +7874,11 @@ nfs_down(rep, nmp, proc, msg, error, flags)
 	const char *msg;
 	int error, flags;
 {
+<<<<<<< HEAD
+=======
+	int ostate, do_vfs_signal;
+
+>>>>>>> origin/10.5
 	if (nmp == NULL)
 		return;
 	if ((flags & NFSSTA_TIMEO) && !(nmp->nm_state & NFSSTA_TIMEO)) {
@@ -7684,10 +7890,26 @@ nfs_down(rep, nmp, proc, msg, error, flags)
 		vfs_event_signal(&nmp->nm_mountp->mnt_stat.f_fsid,
 		    VQ_NOTRESPLOCK, 0);
 		nmp->nm_state |= NFSSTA_LOCKTIMEO;
+<<<<<<< HEAD
 	}
 	if (rep)
 		rep->r_flags |= R_TPRINTFMSG;
 	nfs_msg(proc, nmp->nm_mountp->mnt_stat.f_mntfromname, msg, error);
+=======
+	if ((flags & NFSSTA_JUKEBOXTIMEO) && !(ostate & NFSSTA_JUKEBOXTIMEO))
+		nmp->nm_state |= NFSSTA_JUKEBOXTIMEO;
+	lck_mtx_unlock(&nmp->nm_lock);
+
+	/* XXX don't allow users to know about/disconnect unresponsive, soft, nobrowse mounts */
+	if ((nmp->nm_flag & NFSMNT_SOFT) && (vfs_flags(nmp->nm_mountp) & MNT_DONTBROWSE))
+		do_vfs_signal = 0;
+	else
+		do_vfs_signal = !(ostate & (NFSSTA_TIMEO|NFSSTA_LOCKTIMEO|NFSSTA_JUKEBOXTIMEO));
+	if (do_vfs_signal)
+		vfs_event_signal(&vfs_statfs(nmp->nm_mountp)->f_fsid, VQ_NOTRESP, 0);
+
+	nfs_msg(thd, vfs_statfs(nmp->nm_mountp)->f_mntfromname, msg, error);
+>>>>>>> origin/10.5
 }
 
 void
@@ -7698,6 +7920,11 @@ nfs_up(rep, nmp, proc, msg, flags)
 	const char *msg;
 	int flags;
 {
+<<<<<<< HEAD
+=======
+	int ostate, state, do_vfs_signal;
+
+>>>>>>> origin/10.5
 	if (nmp == NULL)
 		return;
 	if ((rep == NULL) || (rep->r_flags & R_TPRINTFMSG) != 0)
@@ -7709,9 +7936,25 @@ nfs_up(rep, nmp, proc, msg, flags)
 	}
 	if ((flags & NFSSTA_LOCKTIMEO) && (nmp->nm_state & NFSSTA_LOCKTIMEO)) {
 		nmp->nm_state &= ~NFSSTA_LOCKTIMEO;
+<<<<<<< HEAD
 		vfs_event_signal(&nmp->nm_mountp->mnt_stat.f_fsid,
 		    VQ_NOTRESPLOCK, 1);
 	}
+=======
+	if ((flags & NFSSTA_JUKEBOXTIMEO) && (ostate & NFSSTA_JUKEBOXTIMEO))
+		nmp->nm_state &= ~NFSSTA_JUKEBOXTIMEO;
+	state = nmp->nm_state;
+	lck_mtx_unlock(&nmp->nm_lock);
+
+	/* XXX don't allow users to know about/disconnect unresponsive, soft, nobrowse mounts */
+	if ((nmp->nm_flag & NFSMNT_SOFT) && (vfs_flags(nmp->nm_mountp) & MNT_DONTBROWSE))
+		do_vfs_signal = 0;
+	else
+		do_vfs_signal = (ostate & (NFSSTA_TIMEO|NFSSTA_LOCKTIMEO|NFSSTA_JUKEBOXTIMEO)) &&
+			 !(state & (NFSSTA_TIMEO|NFSSTA_LOCKTIMEO|NFSSTA_JUKEBOXTIMEO));
+	if (do_vfs_signal)
+		vfs_event_signal(&vfs_statfs(nmp->nm_mountp)->f_fsid, VQ_NOTRESP, 1);
+>>>>>>> origin/10.5
 }
 
 >>>>>>> origin/10.3

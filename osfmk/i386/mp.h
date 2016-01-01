@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -79,7 +83,11 @@
 #include <i386/apic.h>
 #include <i386/mp_events.h>
 
+<<<<<<< HEAD
 #define MAX_CPUS	64		/* 8 * sizeof(cpumask_t) */
+=======
+#define MAX_CPUS	32		/* (8*sizeof(long)) */	
+>>>>>>> origin/10.5
 
 #ifndef	ASSEMBLER
 #include <stdint.h>
@@ -87,8 +95,12 @@
 #include <mach/boolean.h>
 #include <mach/kern_return.h>
 #include <mach/i386/thread_status.h>
+<<<<<<< HEAD
 #include <mach/vm_types.h>
 #include <kern/simple_lock.h>
+=======
+#include <kern/lock.h>
+>>>>>>> origin/10.5
 
 __BEGIN_DECLS
 
@@ -116,6 +128,7 @@ extern	int	kdb_debug;
 extern	int	kdb_active[];
 
 extern	volatile boolean_t mp_kdp_trap;
+<<<<<<< HEAD
 extern 	volatile boolean_t force_immediate_debugger_NMI;
 extern  volatile boolean_t pmap_tlb_flush_timeout;
 extern  volatile usimple_lock_t spinlock_timed_out;
@@ -123,6 +136,10 @@ extern  volatile uint32_t spinlock_owner_cpu;
 extern  uint32_t spinlock_timeout_NMI(uintptr_t thread_addr);
 
 extern	uint64_t	LastDebuggerEntryAllowance;
+=======
+extern  volatile boolean_t force_immediate_debugger_NMI;
+extern  volatile boolean_t pmap_tlb_flush_timeout;
+>>>>>>> origin/10.5
 
 extern	void	mp_kdp_enter(void);
 extern	void	mp_kdp_exit(void);
@@ -210,6 +227,15 @@ extern void mp_cpus_kick(cpumask_t cpus);
  */
 extern void PM_interrupt_register(void (*fn)(void));
 extern void cpu_PM_interrupt(int cpu);
+
+/*
+ * Power-management-specific SPI to:
+ *  - register a callout function, and
+ *  - request the callout (if registered) on a given cpu.
+ */
+extern void PM_interrupt_register(void (*fn)(void));
+extern void cpu_PM_interrupt(int cpu);
+
 
 __END_DECLS
 

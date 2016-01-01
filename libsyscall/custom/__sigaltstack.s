@@ -34,7 +34,11 @@ __SYSCALL(___sigaltstack, sigaltstack, 3)
 
 #elif defined(__i386__)
 
+<<<<<<< HEAD
 __SYSCALL_INT(___sigaltstack, sigaltstack, 3)
+=======
+__SYSCALL_INT(__sigaltstack, sigaltstack, 3)
+>>>>>>> origin/10.5
 
 #else
 #error Unsupported architecture

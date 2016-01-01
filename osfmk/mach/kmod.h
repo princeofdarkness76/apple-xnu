@@ -212,6 +212,13 @@ typedef void * kmod_args_t;
 typedef int kmod_control_flavor_t;
 typedef kmod_info_t * kmod_info_array_t;
 
+<<<<<<< HEAD
+=======
+void record_kext_unload(kmod_t kmod_id);
+void dump_kext_info(int (*printf_func)(const char *fmt, ...));
+
+extern void kmod_dump(vm_offset_t *addr, unsigned int dump_cnt);
+>>>>>>> origin/10.5
 __END_DECLS
 
 #endif    /* _MACH_KMOD_H_ */

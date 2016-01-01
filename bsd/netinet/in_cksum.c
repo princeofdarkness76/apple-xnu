@@ -256,8 +256,16 @@ in_cksumdata(const void *buf, int mlen)
 
 	VERIFY(mlen >= 0);
 
+<<<<<<< HEAD
 	needs_swap = FALSE;
 	started_on_odd = FALSE;
+=======
+	/* sanity check */
+	if ((m->m_flags & M_PKTHDR) && m->m_pkthdr.len < skip + len) {
+		panic("inet_cksum: mbuf len (%d) < off+len (%d+%d)\n",
+		    m->m_pkthdr.len, skip, len);
+	}
+>>>>>>> origin/10.5
 
 	sum = 0;
 	partial = 0;
@@ -456,6 +464,7 @@ in_pseudo64(uint64_t a, uint64_t b, uint64_t c)
 	return (sum);
 }
 
+<<<<<<< HEAD
 /*
  * May be used on IP header with options.
  */
@@ -481,6 +490,12 @@ ip_cksum_hdr_dir(struct mbuf *m, uint32_t hlen, int out)
 	} else {
 		ipstat.ips_rcv_swcsum++;
 		ipstat.ips_rcv_swcsum_bytes += hlen;
+=======
+	/* sanity check */
+	if ((m->m_flags & M_PKTHDR) && m->m_pkthdr.len < skip + len) {
+		panic("inet_cksum: mbuf len (%d) < off+len (%d+%d)\n",
+		    m->m_pkthdr.len, skip, len);
+>>>>>>> origin/10.5
 	}
 
 	if (hlen == sizeof (*ip) &&

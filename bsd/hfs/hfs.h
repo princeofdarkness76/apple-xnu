@@ -78,7 +78,10 @@
 #include <sys/quota.h>
 #include <sys/dirent.h>
 #include <sys/event.h>
+<<<<<<< HEAD
 #include <sys/disk.h>
+=======
+>>>>>>> origin/10.5
 #include <kern/thread_call.h>
 
 #include <kern/locks.h>
@@ -249,6 +252,7 @@ typedef struct hfsmount {
 >>>>>>> origin/10.2
 	/* Physical Description */
 	u_int32_t     hfs_logical_block_size;	/* Logical block size of the disk as reported by ioctl(DKIOCGETBLOCKSIZE), always a multiple of 512 */
+<<<<<<< HEAD
 	daddr64_t     hfs_logical_block_count;  /* Number of logical blocks on the disk, as reported by ioctl(DKIOCGETBLOCKCOUNT) */
 	u_int64_t     hfs_logical_bytes;	/* Number of bytes on the disk device this HFS is mounted on (blockcount * blocksize) */
 	/*
@@ -263,6 +267,10 @@ typedef struct hfsmount {
 	daddr64_t	hfs_partition_avh_sector;	/* location of Alt VH w.r.t partition size */
 	daddr64_t	hfs_fs_avh_sector;	/* location of Alt VH w.r.t filesystem size */
 
+=======
+	daddr64_t     hfs_logical_block_count;  /* Number of logical blocks on the disk */
+	daddr64_t     hfs_alt_id_sector;      	/* location of alternate VH/MDB */
+>>>>>>> origin/10.5
 	u_int32_t     hfs_physical_block_size;	/* Physical block size of the disk as reported by ioctl(DKIOCGETPHYSICALBLOCKSIZE) */ 
 	u_int32_t     hfs_log_per_phys;		/* Number of logical blocks per physical block size */
 
@@ -427,6 +435,7 @@ typedef struct hfsmount {
 	size_t         hfs_max_inline_attrsize;
 
 	lck_mtx_t      hfs_mutex;      /* protects access to hfsmount data */
+<<<<<<< HEAD
 
 	uint32_t       hfs_syncers;	// Count of the number of syncers running
 	enum {
@@ -509,6 +518,38 @@ typedef struct hfsmount {
 	};
 	// These lists are not sorted like a range list usually is
 	struct rl_head hfs_reserved_ranges[2];
+=======
+	void          *hfs_freezing_proc;  /* who froze the fs */
+	void          *hfs_downgrading_proc; /* process who's downgrading to rdonly */
+	lck_rw_t       hfs_insync;     /* protects sync/freeze interaction */
+
+	/* Resize variables: */
+	u_int32_t		hfs_resize_filesmoved;
+	u_int32_t		hfs_resize_totalfiles;
+
+	/*
+	 * About the sync counters:
+	 * hfs_sync_scheduled  keeps track whether a timer was scheduled but we
+	 *                     haven't started processing the callback (i.e. we
+	 *                     haven't begun the flush).  This will be non-zero
+	 *                     even if the callback has been invoked, before we
+	 *                    start the flush.
+	 * hfs_sync_incomplete keeps track of the number of callbacks that have
+	 *                     not completed yet (including callbacks not yet
+	 *                     invoked).  We cannot safely unmount until this
+	 *                     drops to zero.
+	 *
+	 * In both cases, we use counters, not flags, so that we can avoid
+	 * taking locks.
+	 */
+	int32_t		hfs_sync_scheduled;
+	int32_t		hfs_sync_incomplete;
+	u_int64_t       hfs_last_sync_request_time;
+	u_int64_t       hfs_last_sync_time;
+	uint32_t        hfs_active_threads;
+	thread_call_t   hfs_syncer;	      // removeable devices get sync'ed by this guy
+
+>>>>>>> origin/10.5
 } hfsmount_t;
 =======
 
@@ -574,6 +615,9 @@ enum {
     HFS_META_DELAY     = 100  * 1000,	// 0.1 secs
     HFS_MAX_META_DELAY = 5000 * 1000	// 5 secs
 };
+
+#define HFS_META_DELAY     (100)
+#define HFS_MILLISEC_SCALE (1000*1000)
 
 typedef hfsmount_t  ExtendedVCB;
 
@@ -658,6 +702,7 @@ enum privdirtype {FILE_HARDLINKS, DIR_HARDLINKS};
 /* When set, we're in hfs_changefs, so hfs_sync should do nothing. */
 #define HFS_IN_CHANGEFS           0x40000
 /* When set, we are in process of downgrading or have downgraded to read-only, 
+<<<<<<< HEAD
  * so hfs_start_transaction should return EROFS.
  */
 #define HFS_RDONLY_DOWNGRADE      0x80000
@@ -670,6 +715,11 @@ enum privdirtype {FILE_HARDLINKS, DIR_HARDLINKS};
 #define HFS_CS_HOTFILE_PIN      0x4000000	/* cooperative fusion (enables a hotfile variant) */
 #define HFS_FEATURE_BARRIER     0x8000000	/* device supports barrier-only flush */
 #define HFS_CS_SWAPFILE_PIN    0x10000000
+=======
+ * so hfs_start_transaction should return EROFS. */
+#define HFS_RDONLY_DOWNGRADE      0x80000
+
+>>>>>>> origin/10.5
 
 /* Macro to update next allocation block in the HFS mount structure.  If 
  * the HFS_SKIP_UPDATE_NEXT_ALLOCATION is set, do not update 
@@ -1229,6 +1279,7 @@ extern int  hfs_virtualmetafile(struct cnode *);
 
 extern int hfs_start_transaction(struct hfsmount *hfsmp);
 extern int hfs_end_transaction(struct hfsmount *hfsmp);
+<<<<<<< HEAD
 extern void hfs_journal_lock(struct hfsmount *hfsmp);
 extern void hfs_journal_unlock(struct hfsmount *hfsmp);
 extern void hfs_syncer_lock(struct hfsmount *hfsmp);
@@ -1258,6 +1309,9 @@ extern uint64_t hfs_usecs_to_deadline(uint64_t usecs);
 
 extern int hfs_freeze(struct hfsmount *hfsmp);
 extern int hfs_thaw(struct hfsmount *hfsmp, const struct proc *process);
+=======
+extern void hfs_sync_ejectable(struct hfsmount *hfsmp);
+>>>>>>> origin/10.5
 
 
 /*****************************************************************************

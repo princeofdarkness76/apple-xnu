@@ -107,6 +107,7 @@ class OSOrderedSet;
 #define APPLE_KEXT_COMPATIBILITY_VIRTUAL  virtual
 #endif
 
+<<<<<<< HEAD
 /*! @parseOnly */
 #define APPLE_KEXT_DEPRECATED  __attribute__((deprecated))
 
@@ -115,6 +116,19 @@ class OSOrderedSet;
 #define APPLE_KEXT_OVERRIDE  				override
 #if defined(__LP64__)
 #define APPLE_KEXT_COMPATIBILITY_OVERRIDE
+=======
+#if defined(__LP64__)
+#define	APPLE_KEXT_LEGACY_ABI	0
+#elif defined(__arm__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 2))
+#define	APPLE_KEXT_LEGACY_ABI	0
+#else
+#define	APPLE_KEXT_LEGACY_ABI	1
+#endif
+
+#if APPLE_KEXT_VTABLE_PADDING
+#define APPLE_KEXT_PAD_METHOD	    virtual
+#define APPLE_KEXT_PAD_IMPL(index)  gMetaClass.reservedCalled(index)
+>>>>>>> origin/10.5
 #else
 #define APPLE_KEXT_COMPATIBILITY_OVERRIDE	APPLE_KEXT_OVERRIDE
 #endif
@@ -312,6 +326,7 @@ public:
     */
 #define OSCheckTypeInst(typeinst, inst) \
     OSMetaClassBase::checkTypeInst(inst, typeinst)
+<<<<<<< HEAD
 
 /*! @function OSSafeRelease
  *  @abstract Release an object if not <code>NULL</code>.
@@ -325,6 +340,9 @@ public:
  */
 #define OSSafeReleaseNULL(inst)   do { if (inst) (inst)->release(); (inst) = NULL; } while (0)
 
+=======
+    
+>>>>>>> origin/10.5
 typedef void (*_ptf_t)(void);
 
 #if APPLE_KEXT_LEGACY_ABI
@@ -368,7 +386,11 @@ _ptmf2ptf(const OSMetaClassBase *self, void (OSMetaClassBase::*func)(void))
 }
 
 #else /* !APPLE_KEXT_LEGACY_ABI */
+<<<<<<< HEAD
 #if   defined(__i386__) || defined(__x86_64__)
+=======
+
+>>>>>>> origin/10.5
 
 // Slightly less arcane and slightly less evil code to do
 // the same for kexts compiled with the standard Itanium C++
@@ -378,20 +400,54 @@ static inline _ptf_t
 _ptmf2ptf(const OSMetaClassBase *self, void (OSMetaClassBase::*func)(void))
 {
     union {
+<<<<<<< HEAD
         void (OSMetaClassBase::*fIn)(void);
         uintptr_t fVTOffset;
         _ptf_t fPFN;
+=======
+	void (OSMetaClassBase::*fIn)(void);
+	uintptr_t fVTOffset;
+	_ptf_t fPFN;
+>>>>>>> origin/10.5
     } map;
 
     map.fIn = func;
 
     if (map.fVTOffset & 1) {
+<<<<<<< HEAD
         // virtual
         union {
             const OSMetaClassBase *fObj;
             _ptf_t **vtablep;
         } u;
         u.fObj = self;
+=======
+	// virtual
+	union {
+	    const OSMetaClassBase *fObj;
+	    _ptf_t **vtablep;
+	} u;
+	u.fObj = self;
+
+	// Virtual member function so dereference vtable
+	return *(_ptf_t *)(((uintptr_t)*u.vtablep) + map.fVTOffset - 1);
+    } else {
+	// Not virtual, i.e. plain member func
+	return map.fPFN;
+    }
+}
+
+
+#endif /* !APPLE_KEXT_LEGACY_ABI */
+
+/*! @function OSMemberFunctionCast
+    @abstract Convert a pointer to a member function to a c-style pointer to function.  No warnings are generated.
+    @param type The type of pointer function desired.
+    @param self The this pointer of the object whose function you wish to cache.
+    @param func The pointer to member function itself, something like &Base::func.
+    @result A pointer to function of the given type.  This function will panic if an attempt is made to call it with a multiply inherited class.
+*/
+>>>>>>> origin/10.5
 
         // Virtual member function so dereference vtable
         return *(_ptf_t *)(((uintptr_t)*u.vtablep) + map.fVTOffset - 1);

@@ -173,6 +173,11 @@ extern void (*lockstat_probe)(dtrace_id_t, uint64_t, uint64_t,
 #ifdef _KERNEL
 
 #if	CONFIG_DTRACE
+<<<<<<< HEAD
+=======
+extern int lockstat_depth(void);
+extern void lockstat_hot_patch(boolean_t);
+>>>>>>> origin/10.5
 
 extern void (lockstat_probe_wrapper)(int, uintptr_t, int);
 	

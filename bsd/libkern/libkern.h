@@ -98,7 +98,10 @@
 #include <sys/cdefs.h>
 #include <sys/types.h>
 #include <mach/vm_param.h>
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.5
 
 #ifdef __APPLE_API_OBSOLETE
 /* BCD conversions. */

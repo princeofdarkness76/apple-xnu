@@ -566,6 +566,19 @@ exit1_internal(proc_t p, int rv, int *retval, boolean_t thread_can_terminate, bo
 		}
 		sig_lock_to_exit(p);
 	}
+<<<<<<< HEAD
+=======
+	if (p == initproc) {
+		proc_unlock(p);
+		printf("pid 1 exited (signal %d, exit %d)",
+		    WTERMSIG(rv), WEXITSTATUS(rv));
+		panic("%s died\nState at Last Exception:\n\n%s", 
+							(p->p_comm[0] != '\0' ?
+								p->p_comm :
+								"launchd"),
+							init_task_failure_data);
+	}
+>>>>>>> origin/10.5
 
 	if (p == initproc && current_proc() == p) {
 		init_task_died = TRUE;
@@ -850,12 +863,20 @@ proc_exit(proc_t p)
 	if (uth->uu_lowpri_window) {
 	        /*
 		 * task is marked as a low priority I/O type
+<<<<<<< HEAD
 		 * and the I/O we issued while in flushing files on close
+=======
+		 * and the I/O we issued while flushing files on close
+>>>>>>> origin/10.5
 		 * collided with normal I/O operations...
 		 * no need to throttle this thread since its going away
 		 * but we do need to update our bookeeping w/r to throttled threads
 		 */
+<<<<<<< HEAD
 		throttle_lowpri_io(0);
+=======
+		throttle_lowpri_io(FALSE);
+>>>>>>> origin/10.5
 	}
 
 #if SYSV_SHM
@@ -1297,7 +1318,11 @@ proc_exit(proc_t p)
 		 * no need to throttle this thread since its going away
 		 * but we do need to update our bookeeping w/r to throttled threads
 		 */
+<<<<<<< HEAD
 		throttle_lowpri_io(0);
+=======
+		throttle_lowpri_io(FALSE);
+>>>>>>> origin/10.5
 	}
 
 	proc_rele(pp);

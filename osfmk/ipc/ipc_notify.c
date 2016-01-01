@@ -108,6 +108,7 @@ ipc_notify_port_deleted(
 {
 	(void)mach_notify_port_deleted(port, name);
 	/* send-once right consumed */
+<<<<<<< HEAD
 }
 
 /*
@@ -126,6 +127,8 @@ ipc_notify_send_possible(
 {
 	(void)mach_notify_send_possible(port, name);
 	/* send-once right consumed */
+=======
+>>>>>>> origin/10.5
 }
 
 /*

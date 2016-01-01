@@ -494,10 +494,28 @@ unsigned int not_in_kdp = 1;
 
 unsigned int vm_map_set_cache_attr_count = 0;
 
+<<<<<<< HEAD
+=======
+#if CONFIG_CODE_DECRYPTION
+/*
+ * vm_map_apple_protected:
+ * This remaps the requested part of the object with an object backed by 
+ * the decrypting pager.
+ * crypt_info contains entry points and session data for the crypt module.
+ * The crypt_info block will be copied by vm_map_apple_protected. The data structures
+ * referenced in crypt_info must remain valid until crypt_info->crypt_end() is called.
+ */
+>>>>>>> origin/10.5
 kern_return_t
 vm_map_set_cache_attr(
 	vm_map_t	map,
+<<<<<<< HEAD
 	vm_map_offset_t	va)
+=======
+	vm_map_offset_t	start,
+	vm_map_offset_t	end,
+	struct pager_crypt_info *crypt_info)
+>>>>>>> origin/10.5
 {
 	vm_map_entry_t	map_entry;
 	vm_object_t	object;
@@ -505,7 +523,15 @@ vm_map_set_cache_attr(
 
 	vm_map_lock_read(map);
 
+<<<<<<< HEAD
 	if (!vm_map_lookup_entry(map, va, &map_entry) ||
+=======
+	/* lookup the protected VM object */
+	if (!vm_map_lookup_entry(map,
+				 start,
+				 &map_entry) ||
+	    map_entry->vme_end < end ||
+>>>>>>> origin/10.5
 	    map_entry->is_sub_map) {
 		/*
 		 * that memory is not properly mapped
@@ -515,11 +541,25 @@ vm_map_set_cache_attr(
 	}
 	object = VME_OBJECT(map_entry);
 
+<<<<<<< HEAD
 	if (object == VM_OBJECT_NULL) {
 		/*
 		 * there should be a VM object here at this point
 		 */
 		kr = KERN_INVALID_ARGUMENT;
+=======
+	/*
+	 * Lookup (and create if necessary) the protected memory object
+	 * matching that VM object.
+	 * If successful, this also grabs a reference on the memory object,
+	 * to guarantee that it doesn't go away before we get a chance to map
+	 * it.
+	 */
+	 
+	protected_mem_obj = apple_protect_pager_setup(protected_object, crypt_info);
+	if (protected_mem_obj == NULL) {
+		kr = KERN_FAILURE;
+>>>>>>> origin/10.5
 		goto done;
 	}
 	vm_object_lock(object);
@@ -565,6 +605,7 @@ vm_map_apple_protected(
 	map_locked = FALSE;
 	unprotected_mem_obj = MEMORY_OBJECT_NULL;
 
+<<<<<<< HEAD
 	start_aligned = vm_map_trunc_page(start, PAGE_MASK_64);
 	end_aligned = vm_map_round_page(end, PAGE_MASK_64);
 	start_aligned = vm_map_trunc_page(start_aligned, VM_MAP_PAGE_MASK(map));
@@ -713,6 +754,29 @@ vm_map_apple_protected(
 		crypto_backing_offset -= crypto_start;
 	}
 	kr = KERN_SUCCESS;
+=======
+	/* map this memory object in place of the current one */
+	map_addr = start;
+	kr = vm_map_enter_mem_object(map,
+				     &map_addr,
+				     end - start,
+				     (mach_vm_offset_t) 0,
+				     VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE,
+				     (ipc_port_t) protected_mem_obj,
+				     (map_entry->offset +
+				      (start - map_entry->vme_start)),
+				     TRUE,
+				     map_entry->protection,
+				     map_entry->max_protection,
+				     map_entry->inheritance);
+	assert(map_addr == start);
+	/*
+	 * Release the reference obtained by apple_protect_pager_setup().
+	 * The mapping (if it succeeded) is now holding a reference on the
+	 * memory object.
+	 */
+	memory_object_deallocate(protected_mem_obj);
+>>>>>>> origin/10.5
 
 done:
 	if (map_locked) {
@@ -721,12 +785,15 @@ done:
 	return kr;
 }
 #endif	/* CONFIG_CODE_DECRYPTION */
+<<<<<<< HEAD
 
 
 lck_grp_t		vm_map_lck_grp;
 lck_grp_attr_t	vm_map_lck_grp_attr;
 lck_attr_t		vm_map_lck_attr;
 lck_attr_t		vm_map_lck_rw_attr;
+=======
+>>>>>>> origin/10.5
 
 
 /*
@@ -742,7 +809,11 @@ lck_attr_t		vm_map_lck_rw_attr;
  *
  *	vm_map_zone:		used to allocate maps.
  *	vm_map_entry_zone:	used to allocate map entries.
+<<<<<<< HEAD
  *	vm_map_entry_reserved_zone:	fallback zone for kernel map entries
+=======
+ *	vm_map_kentry_zone:	used to allocate map entries for the kernel.
+>>>>>>> origin/10.5
  *
  *	The kernel allocates map entries from a special zone that is initially
  *	"crammed" with memory.  It would be difficult (perhaps impossible) for
@@ -952,7 +1023,16 @@ vm_map_create(
 	result->max_offset = max;
 	result->wiring_required = FALSE;
 	result->no_zero_fill = FALSE;
+<<<<<<< HEAD
 	result->mapped_in_other_pmaps = FALSE;
+=======
+	result->mapped = FALSE;
+#if CONFIG_EMBEDDED
+	result->prot_copy_allow = FALSE;
+#else
+	result->prot_copy_allow = TRUE;
+#endif
+>>>>>>> origin/10.5
 	result->wait_for_space = FALSE;
 	result->switch_protect = FALSE;
 	result->disable_vmentry_reuse = FALSE;
@@ -1881,6 +1961,7 @@ vm_map_enter(
 	vm_tag_t        	alias, user_alias;
 	vm_map_offset_t		effective_min_offset, effective_max_offset;
 	kern_return_t		kr;
+<<<<<<< HEAD
 	boolean_t		clear_map_aligned = FALSE;
 	vm_map_entry_t		hole_entry;
 
@@ -1917,6 +1998,33 @@ vm_map_enter(
 			return KERN_PROTECTION_FAILURE;
 		}
 	}
+=======
+
+#if CONFIG_EMBEDDED
+	if (cur_protection & VM_PROT_WRITE) {
+		if (cur_protection & VM_PROT_EXECUTE) {
+			printf("EMBEDDED: %s curprot cannot be write+execute. turning off execute\n", __PRETTY_FUNCTION__);
+			cur_protection &= ~VM_PROT_EXECUTE;
+		}
+	}
+	if (max_protection & VM_PROT_WRITE) {
+		if (max_protection & VM_PROT_EXECUTE) {
+			/* Right now all kinds of data segments are RWX. No point in logging that. */
+			/* printf("EMBEDDED: %s maxprot cannot be write+execute. turning off execute\n", __PRETTY_FUNCTION__); */
+			
+			/* Try to take a hint from curprot. If curprot is not writable,
+			 * make maxprot not writable. Otherwise make it not executable. 
+			 */
+			if((cur_protection & VM_PROT_WRITE) == 0) {
+				max_protection &= ~VM_PROT_WRITE;
+			} else {
+				max_protection &= ~VM_PROT_EXECUTE;
+			}
+		}
+	}
+	assert ((cur_protection | max_protection) == max_protection);
+#endif /* CONFIG_EMBEDDED */
+>>>>>>> origin/10.5
 
 	if (is_submap) {
 		if (purgable) {
@@ -2307,7 +2415,11 @@ StartAgain: ;
 				if (entry == vm_map_to_entry(map) ||
 				    entry->vme_start != tmp_start ||
 				    entry->is_sub_map != is_submap ||
+<<<<<<< HEAD
 				    VME_OFFSET(entry) != tmp_offset ||
+=======
+				    entry->offset != tmp_offset ||
+>>>>>>> origin/10.5
 				    entry->needs_copy != needs_copy ||
 				    entry->protection != cur_protection ||
 				    entry->max_protection != max_protection ||
@@ -2321,17 +2433,29 @@ StartAgain: ;
 				 * Check if the same object is being mapped.
 				 */
 				if (is_submap) {
+<<<<<<< HEAD
 					if (VME_SUBMAP(entry) !=
+=======
+					if (entry->object.sub_map !=
+>>>>>>> origin/10.5
 					    (vm_map_t) object) {
 						/* not the same submap */
 						RETURN(KERN_NO_SPACE);
 					}
 				} else {
+<<<<<<< HEAD
 					if (VME_OBJECT(entry) != object) {
 						/* not the same VM object... */
 						vm_object_t obj2;
 
 						obj2 = VME_OBJECT(entry);
+=======
+					if (entry->object.vm_object != object) {
+						/* not the same VM object... */
+						vm_object_t obj2;
+
+						obj2 = entry->object.vm_object;
+>>>>>>> origin/10.5
 						if ((obj2 == VM_OBJECT_NULL ||
 						     obj2->internal) &&
 						    (object == VM_OBJECT_NULL ||
@@ -2615,6 +2739,7 @@ StartAgain: ;
 				}
 #endif /* NO_NESTED_PMAP */
 			}
+<<<<<<< HEAD
 			entry = new_entry;
 
 			if (superpage_size) {
@@ -2625,6 +2750,14 @@ StartAgain: ;
 
 				/* allocate one superpage */
 				kr = cpm_allocate(SUPERPAGE_SIZE, &pages, 0, SUPERPAGE_NBASEPAGES-1, TRUE, 0);
+=======
+			if (use_pmap && submap->pmap != NULL) {
+				kr = pmap_nest(map->pmap,
+					       submap->pmap,
+					       tmp_start,
+					       tmp_start,
+					       tmp_end - tmp_start);
+>>>>>>> origin/10.5
 				if (kr != KERN_SUCCESS) {
 					/* deallocate whole range... */
 					new_mapping_established = TRUE;
@@ -2722,6 +2855,7 @@ BailOut:
 		map_locked = FALSE;
 	}
 
+<<<<<<< HEAD
 	/*
 	 * We can't hold the map lock if we enter this block.
 	 */
@@ -2741,8 +2875,59 @@ BailOut:
 		}
 
 	}
+=======
+BailOut: ;
+	if (result == KERN_SUCCESS) {
+		vm_prot_t pager_prot;
+		memory_object_t pager;
+>>>>>>> origin/10.5
 
-	if (result != KERN_SUCCESS) {
+		if (pmap_empty &&
+		    !(flags & VM_FLAGS_NO_PMAP_CHECK)) {
+			assert(vm_map_pmap_is_empty(map,
+						    *address,
+						    *address+size));
+		}
+
+		/*
+		 * For "named" VM objects, let the pager know that the
+		 * memory object is being mapped.  Some pagers need to keep
+		 * track of this, to know when they can reclaim the memory
+		 * object, for example.
+		 * VM calls memory_object_map() for each mapping (specifying
+		 * the protection of each mapping) and calls
+		 * memory_object_last_unmap() when all the mappings are gone.
+		 */
+		pager_prot = max_protection;
+		if (needs_copy) {
+			/*
+			 * Copy-On-Write mapping: won't modify
+			 * the memory object.
+			 */
+			pager_prot &= ~VM_PROT_WRITE;
+		}
+		if (!is_submap &&
+		    object != VM_OBJECT_NULL &&
+		    object->named &&
+		    object->pager != MEMORY_OBJECT_NULL) {
+			vm_object_lock(object);
+			pager = object->pager;
+			if (object->named &&
+			    pager != MEMORY_OBJECT_NULL) {
+				assert(object->pager_ready);
+				vm_object_mapping_wait(object, THREAD_UNINT);
+				vm_object_mapping_begin(object);
+				vm_object_unlock(object);
+
+				kr = memory_object_map(pager, pager_prot);
+				assert(kr == KERN_SUCCESS);
+
+				vm_object_lock(object);
+				vm_object_mapping_end(object);
+			}
+			vm_object_unlock(object);
+		}
+	} else {
 		if (new_mapping_established) {
 			/*
 			 * We have to get rid of the new mappings since we
@@ -2896,6 +3081,7 @@ vm_map_enter_mem_object_helper(
 	    (try_prefault && (copy || !page_list)) ||
 	    initial_size == 0) {
 		return KERN_INVALID_ARGUMENT;
+<<<<<<< HEAD
 	}
 	
 	{
@@ -2905,6 +3091,12 @@ vm_map_enter_mem_object_helper(
 					     VM_MAP_PAGE_MASK(target_map));
 	}
 	size = vm_object_round_page(initial_size);
+=======
+
+	map_addr = vm_map_trunc_page(*address);
+	map_size = vm_map_round_page(initial_size);
+	size = vm_object_round_page(initial_size);	
+>>>>>>> origin/10.5
 
 	/*
 	 * Find the vm object (if any) corresponding to this port.
@@ -3359,6 +3551,9 @@ vm_map_enter_mem_object_helper(
 	}
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.5
 	if (object != VM_OBJECT_NULL &&
 	    object->named &&
 	    object->pager != MEMORY_OBJECT_NULL &&
@@ -3366,6 +3561,7 @@ vm_map_enter_mem_object_helper(
 		memory_object_t pager;
 		vm_prot_t	pager_prot;
 		kern_return_t	kr;
+<<<<<<< HEAD
 =======
 	/* coalesce the map entries, if possible */
 	current = entry;
@@ -3397,6 +3593,8 @@ vm_map_inherit(
 	register vm_map_entry_t	entry;
 	vm_map_entry_t	temp_entry;
 >>>>>>> origin/10.3
+=======
+>>>>>>> origin/10.5
 
 		/*
 		 * For "named" VM objects, let the pager know that the
@@ -4479,6 +4677,11 @@ vm_map_protect(
 
 	vm_map_lock(map);
 
+	if ((new_prot & VM_PROT_COPY) && !map->prot_copy_allow) {
+		vm_map_unlock(map);
+		return(KERN_PROTECTION_FAILURE);
+	}
+	
 	/* LP64todo - remove this check when vm_map_commpage64()
 	 * no longer has to stuff in a map_entry for the commpage
 	 * above the map's max_offset.
@@ -4539,6 +4742,17 @@ vm_map_protect(
 			}
 		}
 
+<<<<<<< HEAD
+=======
+#if CONFIG_EMBEDDED
+		if (new_prot & VM_PROT_WRITE) {
+			if (new_prot & VM_PROT_EXECUTE) {
+				printf("EMBEDDED: %s can't have both write and exec at the same time\n", __FUNCTION__);
+				new_prot &= ~VM_PROT_EXECUTE;
+			}
+		}
+#endif
+>>>>>>> origin/10.5
 
 		prev = current->vme_end;
 		current = current->vme_next;
@@ -8367,8 +8581,12 @@ vm_map_copy_overwrite_aligned(
 			entry->needs_copy = copy_entry->needs_copy;
 			entry->wired_count = 0;
 			entry->user_wired_count = 0;
+<<<<<<< HEAD
 			offset = VME_OFFSET(copy_entry);
 			VME_OFFSET_SET(entry, offset); 
+=======
+			offset = entry->offset = copy_entry->offset;
+>>>>>>> origin/10.5
 
 			vm_map_copy_entry_unlink(copy, copy_entry);
 			vm_map_copy_entry_dispose(copy, copy_entry);
@@ -11021,7 +11239,11 @@ submap_recurse:
 			entry->max_protection |= submap_entry->max_protection;
 
 			if(copied_slowly) {
+<<<<<<< HEAD
 				VME_OFFSET_SET(entry, local_start - old_start);
+=======
+				entry->offset = local_start - old_start;
+>>>>>>> origin/10.5
 				entry->needs_copy = FALSE;
 				entry->is_shared = FALSE;
 			} else {
@@ -14844,6 +15066,7 @@ vm_map_page_info(
 		disposition |= VM_PAGE_QUERY_PAGE_SPECULATIVE;
 
 	if (m->cs_validated)
+<<<<<<< HEAD
 		disposition |= VM_PAGE_QUERY_PAGE_CS_VALIDATED;
 	if (m->cs_tainted)
 		disposition |= VM_PAGE_QUERY_PAGE_CS_TAINTED;
@@ -14851,6 +15074,13 @@ vm_map_page_info(
 		disposition |= VM_PAGE_QUERY_PAGE_CS_NX;
 
 done_with_object:
+=======
+		*disposition |= VM_PAGE_QUERY_PAGE_CS_VALIDATED;
+	if (m->cs_tainted)
+		*disposition |= VM_PAGE_QUERY_PAGE_CS_TAINTED;
+
+page_query_done:
+>>>>>>> origin/10.5
 	vm_object_unlock(object);
 done:
 
@@ -15559,6 +15789,7 @@ vm_map_set_user_wire_limit(vm_map_t 	map,
 	map->user_wire_limit = limit;
 }
 
+<<<<<<< HEAD
 
 void vm_map_switch_protect(vm_map_t	map, 
 			   boolean_t	val) 
@@ -16345,3 +16576,12 @@ int vm_map_shadow_max(
 	return shadows_max;
 }
 #endif /* VM_SCAN_FOR_SHADOW_CHAIN */
+=======
+void		vm_map_set_prot_copy_allow(vm_map_t		map,
+					   boolean_t		allow)
+{
+	vm_map_lock(map);
+	map->prot_copy_allow = allow;
+	vm_map_unlock(map);
+};
+>>>>>>> origin/10.5

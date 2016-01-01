@@ -241,10 +241,15 @@ typedef struct vm_purgeable_info	*vm_purgeable_info_t;
 #define VM_PAGE_QUERY_PAGE_PAGED_OUT    0x10
 #define VM_PAGE_QUERY_PAGE_COPIED       0x20
 #define VM_PAGE_QUERY_PAGE_SPECULATIVE	0x40
+<<<<<<< HEAD
 #define VM_PAGE_QUERY_PAGE_EXTERNAL	0x80
 #define VM_PAGE_QUERY_PAGE_CS_VALIDATED	0x100
 #define VM_PAGE_QUERY_PAGE_CS_TAINTED	0x200
 #define VM_PAGE_QUERY_PAGE_CS_NX	0x400
+=======
+#define VM_PAGE_QUERY_PAGE_CS_VALIDATED	0x100
+#define VM_PAGE_QUERY_PAGE_CS_TAINTED	0x200
+>>>>>>> origin/10.5
 
 #ifdef	MACH_KERNEL_PRIVATE
 

@@ -1140,6 +1140,7 @@ semop(struct proc *p, struct semop_args *uap, int32_t *retval)
 	}
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	if (nsops < 0 || nsops > seminfo.semopm) {
 =======
 	if (nsops < 0 || nsops > MAX_SOPS) {
@@ -1147,10 +1148,16 @@ semop(struct proc *p, struct semop_args *uap, int32_t *retval)
 #ifdef SEM_DEBUG
 		printf("too many sops (max=%d, nsops=%d)\n",
 		    seminfo.semopm, nsops);
+=======
+	if (nsops < 0 || nsops > MAX_SOPS) {
+#ifdef SEM_DEBUG
+		printf("too many sops (max=%d, nsops=%d)\n", MAX_SOPS, nsops);
+>>>>>>> origin/10.5
 #endif
 		eval = E2BIG;
 		goto semopout;
 	}
+<<<<<<< HEAD
 	
 	/*  OK for LP64, since sizeof(struct sembuf) is currently invariant */
 	if ((eval = copyin(uap->sops, &sops, nsops * sizeof(struct sembuf))) != 0) {
@@ -1160,6 +1167,8 @@ semop(struct proc *p, struct semop_args *uap, int32_t *retval)
 #endif
 		goto semopout;
 	}
+=======
+>>>>>>> origin/10.5
 
 #if CONFIG_MACF
 	/*
@@ -1179,6 +1188,18 @@ semop(struct proc *p, struct semop_args *uap, int32_t *retval)
 		goto semopout;
 #endif
 
+<<<<<<< HEAD
+=======
+	/*  OK for LP64, since sizeof(struct sembuf) is currently invariant */
+	if ((eval = copyin(uap->sops, &sops, nsops * sizeof(struct sembuf))) != 0) {
+#ifdef SEM_DEBUG
+		printf("eval = %d from copyin(%08x, %08x, %ld)\n", eval,
+		    uap->sops, &sops, nsops * sizeof(struct sembuf));
+#endif
+		goto semopout;
+	}
+
+>>>>>>> origin/10.5
 	/*
 	 * Loop trying to satisfy the vector of requests.
 	 * If we reach a point where we must wait, any requests already

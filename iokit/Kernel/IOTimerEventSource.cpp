@@ -391,7 +391,11 @@ IOReturn IOTimerEventSource::wakeAtTime(AbsoluteTime inAbstime)
             reserved->workLoop = workLoop;
             reserved->calloutGeneration++;
             if (thread_call_enter1_delayed((thread_call_t) calloutEntry, 
+<<<<<<< HEAD
                     (void *)(uintptr_t) reserved->calloutGeneration, inAbstime))
+=======
+                    (void *) reserved->calloutGeneration, inAbstime))
+>>>>>>> origin/10.5
             {
                 release();
                 workLoop->release();

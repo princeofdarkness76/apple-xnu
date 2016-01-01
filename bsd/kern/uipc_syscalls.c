@@ -190,8 +190,11 @@ static int getsockaddr(struct socket *, struct sockaddr **, user_addr_t,
     size_t, boolean_t);
 static int getsockaddr_s(struct socket *, struct sockaddr_storage *,
     user_addr_t, size_t, boolean_t);
+<<<<<<< HEAD
 static int getsockaddrlist(struct socket *, struct sockaddr_list **,
     user_addr_t, socklen_t, boolean_t);
+=======
+>>>>>>> origin/10.5
 #if SENDFILE
 static void alloc_sendpkt(int, size_t, unsigned int *, struct mbuf **,
     boolean_t);
@@ -757,7 +760,11 @@ connect_nocancel(proc_t p, struct connect_nocancel_args *uap, int32_t *retval)
 		error = getsockaddr(so, &sa, uap->name, uap->namelen, !dgram);
 	} else {
 		error = getsockaddr_s(so, &ss, uap->name, uap->namelen, !dgram);
+<<<<<<< HEAD
 		if (error == 0)
+=======
+		if (error == 0) {
+>>>>>>> origin/10.5
 			sa = (struct sockaddr *)&ss;
 	}
 	if (error != 0)
@@ -2833,7 +2840,11 @@ getsockaddr(struct socket *so, struct sockaddr **namp, user_addr_t uaddr,
 		 * handle it.
 		 */
 		if (translate_unspec && sa->sa_family == AF_UNSPEC &&
+<<<<<<< HEAD
 		    SOCK_CHECK_DOM(so, PF_INET) &&
+=======
+		    INP_CHECK_SOCKAF(so, AF_INET) &&
+>>>>>>> origin/10.5
 		    len == sizeof (struct sockaddr_in))
 			sa->sa_family = AF_INET;
 
@@ -2870,7 +2881,11 @@ getsockaddr_s(struct socket *so, struct sockaddr_storage *ss,
 		 * handle it.
 		 */
 		if (translate_unspec && ss->ss_family == AF_UNSPEC &&
+<<<<<<< HEAD
 		    SOCK_CHECK_DOM(so, PF_INET) &&
+=======
+		    INP_CHECK_SOCKAF(so, AF_INET) &&
+>>>>>>> origin/10.5
 		    len == sizeof (struct sockaddr_in))
 			ss->ss_family = AF_INET;
 

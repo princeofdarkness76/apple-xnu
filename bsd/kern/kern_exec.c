@@ -1130,6 +1130,7 @@ grade:
 		goto badtoolate;
 	}	
 
+<<<<<<< HEAD
 	/*
 	 * deal with voucher on exec-calling thread.
 	 */
@@ -1140,6 +1141,22 @@ grade:
 	if (!vfexec && !spawn && (p->p_lflag & P_LTRACED))
 		psignal(p, SIGTRAP);
 
+=======
+	if (!vfexec && (p->p_lflag & P_LTRACED))
+		psignal(p, SIGTRAP);
+
+	if (error) {
+		goto badtoolate;
+	}
+	
+#if CONFIG_MACF
+	/* Determine if the map will allow VM_PROT_COPY */
+	error = mac_proc_check_map_prot_copy_allow(p);
+	vm_map_set_prot_copy_allow(get_task_map(task), 
+				   error ? FALSE : TRUE);
+#endif	
+
+>>>>>>> origin/10.5
 	if (load_result.unixproc &&
 		create_unix_stack(get_task_map(task),
 				  &load_result,
@@ -1348,6 +1365,7 @@ grade:
 	goto done;
 
 badtoolate:
+<<<<<<< HEAD
 	/* Don't allow child process to execute any instructions */
 	if (!spawn) {
 		if (vfexec) {
@@ -1369,6 +1387,11 @@ done:
 
 	/* Drop extra references for cases where we don't expect the caller to clean up */
 	if (vfexec || (spawn && error == 0)) {
+=======
+	proc_knote(p, NOTE_EXEC);
+
+	if (vfexec) {
+>>>>>>> origin/10.5
 		task_deallocate(new_task);
 		thread_deallocate(thread);
 	}
@@ -1445,7 +1468,11 @@ exec_activate_image(struct image_params *imgp)
 	int resid;
 	int once = 1;	/* save SGUID-ness for interpreted files */
 	int i;
+<<<<<<< HEAD
 	int itercount = 0;
+=======
+	int iterlimit = EAI_ITERLIMIT;
+>>>>>>> origin/10.5
 	proc_t p = vfs_context_proc(imgp->ip_vfs_context);
 
 	error = execargs_alloc(imgp);
@@ -1473,6 +1500,7 @@ again:
 	error = namei(ndp);
 	if (error)
 		goto bad_notrans;
+<<<<<<< HEAD
 	imgp->ip_ndp = ndp;	/* successful namei(); call nameidone() later */
 	imgp->ip_vp = ndp->ni_vp;	/* if set, need to vnode_put() at some point */
 
@@ -1492,6 +1520,12 @@ again:
 	proc_unlock(p);
 	if (error)
 		goto bad_notrans;
+=======
+	imgp->ip_ndp = &nd;	/* successful namei(); call nameidone() later */
+	imgp->ip_vp = nd.ni_vp;	/* if set, need to vnode_put() at some point */
+
+	proc_transstart(p, 0);
+>>>>>>> origin/10.5
 
 	error = exec_check_permissions(imgp);
 	if (error)
@@ -1566,6 +1600,11 @@ encapsulated_binary:
 			NDINIT(ndp, LOOKUP, OP_LOOKUP, FOLLOW | LOCKLEAF,
 				   UIO_SYSSPACE, CAST_USER_ADDR_T(excpath), imgp->ip_vfs_context);
 
+<<<<<<< HEAD
+=======
+			nd.ni_segflg = UIO_SYSSPACE32;
+			nd.ni_dirp = CAST_USER_ADDR_T(imgp->ip_interp_name);
+>>>>>>> origin/10.5
 			proc_transend(p, 0);
 			goto again;
 
@@ -2169,11 +2208,18 @@ posix_spawn(proc_t ap, struct posix_spawn_args *uap, int32_t *retval)
 {
 	proc_t p = ap;		/* quiet bogus GCC vfork() warning */
 	user_addr_t pid = uap->pid;
+<<<<<<< HEAD
 	int ival[2];		/* dummy retval for setpgid() */
 	char *bufp = NULL; 
 	struct image_params *imgp;
 	struct vnode_attr *vap;
 	struct vnode_attr *origvap;
+=======
+	register_t ival[2];		/* dummy retval for vfork() */
+	struct image_params image_params, *imgp;
+	struct vnode_attr va;
+	struct vnode_attr origva;
+>>>>>>> origin/10.5
 	struct uthread	*uthread = 0;	/* compiler complains if not set to 0*/
 	int error, sig;
 	int is_64 = IS_64BIT_PROCESS(p);
@@ -3065,8 +3111,29 @@ __mac_execve(proc_t p, struct __mac_execve_args *uap, int32_t *retval)
 	imgp->ip_mac_return = 0;
 
 	uthread = get_bsdthread_info(current_thread());
+<<<<<<< HEAD
 	if (uthread->uu_flag & UT_VFORK) {
 		imgp->ip_flags |= IMGPF_VFORK_EXEC;
+=======
+
+	/* If we're not in vfork, don't permit a mutithreaded task to exec */
+	if (!(uthread->uu_flag & UT_VFORK)) {
+		if (task != kernel_task) { 
+			proc_lock(p);
+			numthreads = get_task_numactivethreads(task);
+			if (numthreads <= 0 ) {
+				proc_unlock(p);
+				kauth_cred_unref(&context.vc_ucred);
+				return(EINVAL);
+			}
+			if (numthreads > 1) {
+				proc_unlock(p);
+				kauth_cred_unref(&context.vc_ucred);
+				return(ENOTSUP);
+			}
+			proc_unlock(p);
+		}
+>>>>>>> origin/10.5
 	}
 
 #if CONFIG_MACF
@@ -3966,11 +4033,18 @@ exec_handle_sugid(struct image_params *imgp)
 	proc_t			p = vfs_context_proc(imgp->ip_vfs_context);
 	int			i;
 	int			leave_sugid_clear = 0;
+<<<<<<< HEAD
 	int			mac_reset_ipc = 0;
+=======
+>>>>>>> origin/10.5
 	int			error = 0;
 #if CONFIG_MACF
+<<<<<<< HEAD
 	int			mac_transition, disjoint_cred = 0;
 	int 		label_update_return = 0;
+=======
+	int			mac_transition;
+>>>>>>> origin/10.5
 
 	/*
 	 * Determine whether a call to update the MAC label will result in the
@@ -3984,12 +4058,17 @@ exec_handle_sugid(struct image_params *imgp)
 	mac_transition = mac_cred_check_label_update_execve(
 							imgp->ip_vfs_context,
 							imgp->ip_vp,
+<<<<<<< HEAD
 							imgp->ip_arch_offset,
 							imgp->ip_scriptvp,
 							imgp->ip_scriptlabelp,
 							imgp->ip_execlabelp,
 							p,
 							imgp->ip_px_smpx);
+=======
+							imgp->ip_scriptlabelp,
+							imgp->ip_execlabelp, p);
+>>>>>>> origin/10.5
 #endif
 
 	OSBitAndAtomic(~((uint32_t)P_SUGID), &p->p_flag);
@@ -4012,7 +4091,16 @@ exec_handle_sugid(struct image_params *imgp)
 	     kauth_cred_getuid(cred) != imgp->ip_origvattr->va_uid) ||
 	    ((imgp->ip_origvattr->va_mode & VSGID) != 0 &&
 		 ((kauth_cred_ismember_gid(cred, imgp->ip_origvattr->va_gid, &leave_sugid_clear) || !leave_sugid_clear) ||
+<<<<<<< HEAD
 		 (kauth_cred_getgid(cred) != imgp->ip_origvattr->va_gid)))) {
+
+#if CONFIG_MACF
+/* label for MAC transition and neither VSUID nor VSGID */
+handle_mac_transition:
+#endif
+=======
+		 (cred->cr_gid != imgp->ip_origvattr->va_gid)))) {
+>>>>>>> origin/10.5
 
 #if CONFIG_MACF
 /* label for MAC transition and neither VSUID nor VSGID */
@@ -4054,6 +4142,7 @@ handle_mac_transition:
 		 * modifying any others sharing it.
 		 */
 		if (mac_transition) { 
+<<<<<<< HEAD
 			kauth_proc_label_update_execve(p,
 						imgp->ip_vfs_context,
 						imgp->ip_vp, 
@@ -4067,6 +4156,14 @@ handle_mac_transition:
 						&label_update_return);
 
 			if (disjoint_cred) {
+=======
+			kauth_cred_t	my_cred;
+			if (kauth_proc_label_update_execve(p,
+						imgp->ip_vfs_context,
+						imgp->ip_vp, 
+						imgp->ip_scriptlabelp,
+						imgp->ip_execlabelp)) {
+>>>>>>> origin/10.5
 				/*
 				 * If updating the MAC label resulted in a
 				 * disjoint credential, flag that we need to
@@ -4078,12 +4175,20 @@ handle_mac_transition:
 				 */
 				leave_sugid_clear = 0;
 			}
+<<<<<<< HEAD
 			
 			imgp->ip_mac_return = label_update_return;
 		}
 		
 		mac_reset_ipc = mac_proc_check_inherit_ipc_ports(p, p->p_textvp, p->p_textoff, imgp->ip_vp, imgp->ip_arch_offset, imgp->ip_scriptvp);
 
+=======
+
+			my_cred = kauth_cred_proc_ref(p);
+			mac_task_label_update_cred(my_cred, p->task);
+			kauth_cred_unref(&my_cred);
+		}
+>>>>>>> origin/10.5
 #endif	/* CONFIG_MACF */
 
 		/*
@@ -4107,11 +4212,25 @@ handle_mac_transition:
 				 	 imgp->ip_new_thread : current_thread());
 		}
 
+<<<<<<< HEAD
 		if (!leave_sugid_clear) {
 			/*
 			 * Flag the process as setuid.
 			 */
 			OSBitOrAtomic(P_SUGID, &p->p_flag);
+=======
+		/*
+		 * If 'leave_sugid_clear' is non-zero, then we passed the
+		 * VSUID and MACF checks, and successfully determined that
+		 * the previous cred was a member of the VSGID group, but
+		 * that it was not the default at the time of the execve,
+		 * and that the post-labelling credential was not disjoint.
+		 * So we don't set the P_SUGID on the basis of simply
+		 * running this code.
+		 */
+		if (!leave_sugid_clear)
+			OSBitOrAtomic(P_SUGID, (UInt32 *)&p->p_flag);
+>>>>>>> origin/10.5
 
 			/*
 			 * Radar 2261856; setuid security hole fix
@@ -4195,7 +4314,10 @@ handle_mac_transition:
 			goto handle_mac_transition;
 		}
 	}
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.5
 #endif	/* CONFIG_MACF */
 
 	/*

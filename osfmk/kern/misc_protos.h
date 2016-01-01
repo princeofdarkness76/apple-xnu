@@ -160,8 +160,11 @@ extern int kdb_printf(const char *format, ...) __printflike(1,2);
 
 extern int kdb_log(const char *format, ...) __printflike(1,2);
 
+<<<<<<< HEAD
 extern int kdb_printf_unbuffered(const char *format, ...) __printflike(1,2);
 
+=======
+>>>>>>> origin/10.5
 extern void printf_init(void);
 
 extern int snprintf(char *, size_t, const char *, ...) __printflike(3,4);
@@ -205,8 +208,11 @@ extern void consdebug_putc(char);
 
 extern void consdebug_log(char);
 
+<<<<<<< HEAD
 extern void consdebug_putc_unbuffered(char);
 
+=======
+>>>>>>> origin/10.5
 extern void cnputc(char);
 
 extern void cnputc_unbuffered(char);

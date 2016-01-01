@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -308,6 +312,122 @@ int diagCall(struct savearea *save) {
 	
 			return -1;								/* Return and check for ASTs... */
 		
+<<<<<<< HEAD
+=======
+/*
+ *		Bind current thread to a processor. Parm is processor port.  If port is 0, unbind. 
+ */
+	
+		case dgBind:
+
+			if(save->save_r4 == 0) {				/* Are we unbinding? */
+				thread_bind(PROCESSOR_NULL);		/* Unbind us */
+				save->save_r3 = KERN_SUCCESS;		/* Set success */
+				return -1;							/* Return and check asts */
+			}
+
+			ret = ipc_right_lookup_write(current_space(), (mach_port_name_t)save->save_r4, 
+				&ientry);							/* Look up the IPC entry */
+			
+			if(ret != KERN_SUCCESS) {				/* Couldn't find it */
+				save->save_r3 = ret;				/* Pass back return */
+				return -1;							/* Return and check asts */
+			}
+
+			port = (ipc_port_t)ientry->ie_object;	/* Get the actual port */
+
+			if (!ip_active(port) || (ip_kotype(port) != IKOT_PROCESSOR)) {	/* Active and a processor? */
+				is_write_unlock(current_space());	/* Unlock the space */
+				save->save_r3 = KERN_INVALID_ARGUMENT;	/* This port is not a processor */
+				return -1;							/* Return and check asts */
+			}
+
+			prssr = (processor_t)port->ip_kobject;	/* Extract the processor */
+			is_write_unlock(current_space());		/* All done with the space now, unlock it */
+			
+/*
+ *			The following probably isn't valid if a processor is in the processor going offline,
+ *			but who cares, this is a diagnostic interface...
+ */
+			
+			if(prssr->state == PROCESSOR_SHUTDOWN) {	/* Are we trying to bind to an offline processor? */
+				save->save_r3 = KERN_INVALID_ARGUMENT;	/* This processor is offline */
+				return -1;							/* Return and check asts */
+			}
+		
+			thread_bind(prssr);						/* Bind us to the processor */
+			thread_block(THREAD_CONTINUE_NULL);		/* Make it so */
+	
+			save->save_r3 = KERN_SUCCESS;			/* Set success */
+			return -1;								/* Return and check asts */
+			
+/*
+ *		Return per_proc for the named processor.  Pass in a port.  Returns per_proc or 0 if failure
+ */
+	
+		case dgPproc:
+
+			ret = ipc_right_lookup_write(current_space(), (mach_port_name_t)save->save_r4, 
+				&ientry);							/* Look up the IPC entry */
+			
+			if(ret != KERN_SUCCESS) {				/* Couldn't find it */
+				save->save_r3 = 0;					/* Pass back return */
+				return -1;							/* Return and check asts */
+			}
+
+			port = (ipc_port_t)ientry->ie_object;	/* Get the actualy port */
+
+			if (!ip_active(port) || (ip_kotype(port) != IKOT_PROCESSOR)) {	/* Active and a processor? */
+				is_write_unlock(current_space());	/* Unlock the space */
+				save->save_r3 = 0;					/* This port is not a processor */
+				return -1;							/* Return and check asts */
+			}
+
+			prssr = (processor_t)port->ip_kobject;	/* Extract the processor */
+			is_write_unlock(current_space());		/* All done with the space now, unlock it */
+			
+			save->save_r3 = (uint64_t)(uint32_t)PerProcTable[prssr->cpu_num].ppe_vaddr;	/* Pass back ther per proc */
+			return -1;								/* Return and check asts */
+
+/*
+ *		Allocate contiguous memory in the kernel. Pass in size, pass back vaddr or 0 for error
+ *		Note that this must be explicitly released by the user.  There is an "issue"
+ *		if we try to allocate directly into the user: the contiguous area has a kernel wire
+ *		on it.   If we terminate, we will hang waiting for wire to be released.  Ain't no
+ *		way that will happen,  so we do it in the kernel and make them release it.  That way
+ *		we will leak rather than hang. 
+ *		
+ */
+		case dgAcntg:
+					
+			addrs = 0;								/* Clear just in case */
+			
+			ret = kmem_alloc_contig(kernel_map, &addrs, (vm_size_t)save->save_r4,
+						PAGE_MASK, 0, 0);						/* That which does not make us stronger, kills us... */
+			if(ret != KERN_SUCCESS) addrs = 0;		/* Pass 0 if error */
+		
+			save->save_r3 = (uint64_t)addrs;		/* Pass back whatever */
+			return -1;								/* Return and check for ASTs... */
+		
+
+/*
+ *		Return physical address of a page in the kernel
+ */
+		case dgKlra:
+		
+			save->save_r3 = pmap_find_phys(kernel_pmap, save->save_r4);	/* Get read address */
+			return -1;								/* Return no AST checking... */
+
+/*
+ *		Release kernel memory - intent is to release congiguous memory
+ */
+		case dgKfree:
+		
+			kmem_free( kernel_map, (vm_address_t) save->save_r4, (vm_size_t)save->save_r5);
+			return -1;								/* Return no AST checking... */
+
+		
+>>>>>>> origin/10.5
 		case dgWar:									/* Set or reset workaround flags */
 		
 			save->save_r3 = (uint32_t)warFlags;		/* Get the old flags */

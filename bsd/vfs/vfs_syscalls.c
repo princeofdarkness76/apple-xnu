@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 1995-2015 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 1995-2004 Apple Computer, Inc. All rights reserved.
 >>>>>>> origin/10.3
+=======
+ * Copyright (c) 1995-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -126,6 +130,7 @@
 #include <sys/fsctl.h>
 #include <sys/ubc_internal.h>
 #include <sys/disk.h>
+<<<<<<< HEAD
 #include <sys/content_protection.h>
 =======
 
@@ -133,6 +138,8 @@
 #include <bsm/audit_kevents.h>
 
 >>>>>>> origin/10.3
+=======
+>>>>>>> origin/10.5
 #include <machine/cons.h>
 #include <machine/limits.h>
 #include <miscfs/specfs/specdev.h>
@@ -767,8 +774,12 @@ mount_common(char *fstypename, vnode_t pvp, vnode_t vp,
 	strlcpy(mp->mnt_vfsstat.f_mntonname, cnp->cn_pnbuf, MAXPATHLEN);
 	mp->mnt_vnodecovered = vp;
 	mp->mnt_vfsstat.f_owner = kauth_cred_getuid(vfs_context_ucred(ctx));
+<<<<<<< HEAD
 	mp->mnt_throttle_mask = LOWPRI_MAX_NUM_DEV - 1;
 	mp->mnt_devbsdunit = 0;
+=======
+	mp->mnt_devbsdunit = LOWPRI_MAX_NUM_DEV - 1;
+>>>>>>> origin/10.5
 
 	/* XXX 3762912 hack to support HFS filesystem 'owner' - filesystem may update later */
 	vfs_setowner(mp, KAUTH_UID_NONE, KAUTH_GID_NONE);
@@ -951,6 +962,11 @@ update:
 		}
 	}
 #endif
+	if (device_vnode != NULL) {
+		VNOP_IOCTL(device_vnode, DKIOCGETBSDUNIT, (caddr_t)&mp->mnt_devbsdunit, 0, NULL);
+		mp->mnt_devbsdunit %= LOWPRI_MAX_NUM_DEV;
+	}
+
 	/*
 	 * Mount the filesystem.
 	 */
@@ -1568,6 +1584,7 @@ relocate_imageboot_source(vnode_t pvp, vnode_t vp, struct componentname *cnp,
 		boolean_t is64bit, user_addr_t fsmountargs, boolean_t by_index)
 {
 	int error;
+<<<<<<< HEAD
 	mount_t mp;
 	boolean_t placed = FALSE;
 	vnode_t devvp = NULLVP;
@@ -1577,6 +1594,12 @@ relocate_imageboot_source(vnode_t pvp, vnode_t vp, struct componentname *cnp,
 	vnode_t rvp;
 	uint32_t height;
 	uint32_t flags;
+=======
+	int needwakeup = 0;
+	int forcedunmount = 0;
+	int lflags = 0;
+	struct vnode *devvp = NULLVP;
+>>>>>>> origin/10.5
 
 	/* If we didn't imageboot, nothing to move */
 	if (imgsrc_rootvnodes[0] == NULLVP) {
@@ -1662,11 +1685,23 @@ relocate_imageboot_source(vnode_t pvp, vnode_t vp, struct componentname *cnp,
 
 	IMGSRC_DEBUG("Starting updated.\n");
 
+<<<<<<< HEAD
 	/* Get exclusive rwlock on mount, authorize update on mp */
 	error = mount_begin_update(mp , ctx, 0);
 	if (error != 0) {
 		IMGSRC_DEBUG("Starting updated failed with %d\n", error);
 		goto out0;
+=======
+	if ( mp->mnt_devvp && mp->mnt_vtable->vfc_vfsflags & VFC_VFSLOCALARGS) {
+		/* hold an io reference and drop the usecount before close */
+		devvp = mp->mnt_devvp;
+		vnode_clearmountedon(devvp);
+		vnode_getalways(devvp);
+		vnode_rele(devvp);
+		VNOP_CLOSE(devvp, mp->mnt_flag & MNT_RDONLY ? FREAD : FREAD|FWRITE,
+                       ctx);
+		vnode_put(devvp);
+>>>>>>> origin/10.5
 	}
 
 	/* 
@@ -3650,6 +3685,24 @@ change_dir(struct nameidata *ndp, vfs_context_t ctx)
 {
 	vnode_t vp;
 	int error;
+<<<<<<< HEAD
+=======
+	struct componentname *cnp;
+	char  *path = NULL;
+	int  len;
+	fse_info  finfo;
+	int flags = 0;
+	int need_event = 0;
+	int has_listeners = 0;
+
+#if NAMEDRSRCFORK
+	/* unlink or delete is allowed on rsrc forks and named streams */
+	ndp->ni_cnd.cn_flags |= CN_ALLOWRSRCFORK;
+#endif
+
+	ndp->ni_cnd.cn_flags |= LOCKPARENT;
+	cnp = &ndp->ni_cnd;
+>>>>>>> origin/10.5
 
 	if ((error = namei(ndp)))
 		return (error);
@@ -3675,6 +3728,26 @@ change_dir(struct nameidata *ndp, vfs_context_t ctx)
 		return (error);
 	}
 
+<<<<<<< HEAD
+=======
+	/*
+	 * nameidone has to happen before we vnode_put(dvp)
+	 * since it may need to release the fs_nodelock on the dvp
+	 */
+out:
+#if NAMEDRSRCFORK
+	/* recycle deleted rsrc fork to force reclaim on shadow file if necessary */
+	if ((vnode_isnamedstream(ndp->ni_vp)) &&
+			(ndp->ni_vp->v_parent != NULLVP) &&
+			(vnode_isshadow(ndp->ni_vp))) {
+		vnode_recycle(ndp->ni_vp);
+	}	
+#endif
+
+	nameidone(ndp);
+	vnode_put(dvp);
+	vnode_put(vp);
+>>>>>>> origin/10.5
 	return (error);
 }
 
@@ -4078,9 +4151,35 @@ openat_internal(vfs_context_t ctx, user_addr_t path, int flags, int mode,
 int
 open(proc_t p, struct open_args *uap, int32_t *retval)
 {
+<<<<<<< HEAD
 	__pthread_testcancel(1);
 	return(open_nocancel(p, (struct open_nocancel_args *)uap, retval));
 }
+=======
+	int error;
+	struct nameidata nd;
+ 	int niopts;
+	struct vfs_context context;
+
+#if NAMEDRSRCFORK
+	int is_namedstream = 0;
+#endif
+
+ 	/*
+ 	 * Access is defined as checking against the process'
+ 	 * real identity, even if operations are checking the
+ 	 * effective identity.  So we need to tweak the credential
+ 	 * in the context.
+ 	 */
+	context.vc_ucred = kauth_cred_copy_real(kauth_cred_get());
+	context.vc_thread = current_thread();
+
+	niopts = FOLLOW | AUDITVNPATH1;
+ 	/* need parent for vnode_authorize for deletion test */
+ 	if (uap->flags & _DELETE_OK)
+ 		niopts |= WANTPARENT;
+ 	NDINIT(&nd, LOOKUP, niopts, UIO_USERSPACE, uap->path, &context);
+>>>>>>> origin/10.5
 
 int
 open_nocancel(__unused proc_t p, struct open_nocancel_args *uap,
@@ -4090,12 +4189,44 @@ open_nocancel(__unused proc_t p, struct open_nocancel_args *uap,
 	    uap->mode, AT_FDCWD, UIO_USERSPACE, retval));
 }
 
+<<<<<<< HEAD
 int
 openat_nocancel(__unused proc_t p, struct openat_nocancel_args *uap,
                 int32_t *retval)
 {
 	return (openat_internal(vfs_context_current(), uap->path, uap->flags,
 	    uap->mode, uap->fd, UIO_USERSPACE, retval));
+=======
+#if NAMEDRSRCFORK
+	/* Grab reference on the shadow stream file vnode to
+	 * force an inactive on release which will mark it for
+	 * recycle
+	 */
+	if (vnode_isnamedstream(nd.ni_vp) &&
+			(nd.ni_vp->v_parent != NULLVP) &&
+			(vnode_isshadow(nd.ni_vp))) {
+		is_namedstream = 1;
+		vnode_ref(nd.ni_vp);
+	}
+#endif
+
+	error = access1(nd.ni_vp, nd.ni_dvp, uap->flags, &context);
+ 	
+#if NAMEDRSRCFORK
+	if (is_namedstream) {
+		vnode_rele(nd.ni_vp);
+	}
+#endif
+
+ 	vnode_put(nd.ni_vp);
+ 	if (uap->flags & _DELETE_OK)
+ 		vnode_put(nd.ni_dvp);
+  	nameidone(&nd);
+  
+out:
+ 	kauth_cred_unref(&context.vc_ucred);
+ 	return(error);
+>>>>>>> origin/10.5
 }
 
 int
@@ -4139,9 +4270,49 @@ openbyid_np(__unused proc_t p, struct openbyid_np_args *uap, int *retval)
 	int pathlen = 0;
 	vfs_context_t ctx = vfs_context_current();
 
+<<<<<<< HEAD
 	if ((error = copyin(uap->fsid, (caddr_t)&fsid, sizeof(fsid)))) {
 		return (error);
 	}
+=======
+#if NAMEDRSRCFORK
+	int is_namedstream = 0;
+	/* stat calls are allowed for resource forks. */
+	ndp->ni_cnd.cn_flags |= CN_ALLOWRSRCFORK;
+#endif
+	error = namei(ndp);
+	if (error)
+		return (error);
+	fsec = KAUTH_FILESEC_NONE;
+	if (isstat64 != 0) 
+		statptr	 = (void *)&sb64;
+	else
+		statptr	 = (void *)&sb;
+
+#if NAMEDRSRCFORK
+	/* Grab reference on the shadow stream file vnode to
+	 * force an inactive on release which will mark it for
+	 * recycle.
+	 */
+	if (vnode_isnamedstream(ndp->ni_vp) &&
+			(ndp->ni_vp->v_parent != NULLVP) &&
+			(vnode_isshadow(ndp->ni_vp))) {
+		is_namedstream = 1;
+		vnode_ref (ndp->ni_vp);
+	}
+#endif
+
+	error = vn_stat(ndp->ni_vp, statptr, (xsecurity != USER_ADDR_NULL ? &fsec : NULL), isstat64, ctx);
+
+#if NAMEDRSRCFORK
+	if (is_namedstream) {
+		vnode_rele (ndp->ni_vp);
+	}
+#endif
+	
+	vnode_put(ndp->ni_vp);
+	nameidone(ndp);
+>>>>>>> origin/10.5
 
 	/*uap->obj is an fsobj_id_t defined as struct {uint32_t, uint32_t} */
 	if ((error = copyin(uap->objid, (caddr_t)&objid, sizeof(uint64_t)))) {
@@ -7660,12 +7831,38 @@ rename(__unused proc_t p, struct rename_args *uap, __unused int32_t *retval)
 #if CONFIG_SECLUDED_RENAME
 int rename_ext(__unused proc_t p, struct rename_ext_args *uap, __unused int32_t *retval)
 {
+<<<<<<< HEAD
 	return renameat_internal(
 		vfs_context_current(), 
 		AT_FDCWD, uap->from,
 		AT_FDCWD, uap->to, 
 		UIO_USERSPACE, uap->flags);
 }
+=======
+	vnode_t vp;
+	struct fileproc *fp;
+	vfs_context_t ctx = vfs_context_current();
+	int error;
+
+	if ( (error = fp_getfvp(p, uap->fd, &fp, &vp)) )
+		return (error);
+	if ( (error = vnode_getwithref(vp)) ) {
+		file_drop(uap->fd);
+		return(error);
+	}
+
+	error = VNOP_FSYNC(vp, MNT_WAIT, ctx);
+
+#if NAMEDRSRCFORK
+	/* Sync resource fork shadow file if necessary. */
+	if ((error == 0) &&
+	    (vp->v_flag & VISNAMEDSTREAM) && 
+	    (vp->v_parent != NULLVP) &&
+	    (vnode_isshadow(vp)) &&
+	    (fp->f_flags & FP_WRITTEN)) {
+		(void) vnode_flushnamedstream(vp->v_parent, vp, ctx);
+	}
+>>>>>>> origin/10.5
 #endif
  
 int
@@ -7809,9 +8006,34 @@ out:
 int
 mkdir_extended(proc_t p, struct mkdir_extended_args *uap, __unused int32_t *retval)
 {
+<<<<<<< HEAD
 	int ciferror;
 	kauth_filesec_t xsecdst;
 	struct vnode_attr va;
+=======
+	vnode_t tvp, tdvp;
+	vnode_t fvp, fdvp;
+	struct nameidata fromnd, tond;
+	vfs_context_t ctx = vfs_context_current();
+	int error;
+	int do_retry;
+	int mntrename;
+	int need_event;
+	const char *oname;
+	char *from_name = NULL, *to_name = NULL;
+	int from_len, to_len;
+	int holding_mntlock;
+	mount_t locked_mp = NULL;
+	vnode_t oparent;
+	fse_info from_finfo, to_finfo;
+	
+	holding_mntlock = 0;
+    do_retry = 0;
+retry:
+	fvp = tvp = NULL;
+	fdvp = tdvp = NULL;
+	mntrename = FALSE;
+>>>>>>> origin/10.5
 
 	AUDIT_ARG(owner, uap->uid, uap->gid);
 
@@ -7844,10 +8066,100 @@ mkdir(proc_t p, struct mkdir_args *uap, __unused int32_t *retval)
 	    UIO_USERSPACE));
 }
 
+<<<<<<< HEAD
 int
 mkdirat(proc_t p, struct mkdirat_args *uap, __unused int32_t *retval)
 {
 	struct vnode_attr va;
+=======
+		error = 0;
+		if ((tvp != NULL) && vnode_isdir(tvp)) {
+			if (tvp != fdvp)
+				moving = 1;
+		} else if (tdvp != fdvp) {
+			moving = 1;
+		}
+		/*
+		 * must have delete rights to remove the old name even in
+		 * the simple case of fdvp == tdvp.
+		 *
+		 * If fvp is a directory, and we are changing it's parent,
+		 * then we also need rights to rewrite its ".." entry as well.
+		 */
+		if (vnode_isdir(fvp)) {
+			if ((error = vnode_authorize(fvp, fdvp, KAUTH_VNODE_DELETE | KAUTH_VNODE_ADD_SUBDIRECTORY, ctx)) != 0)
+				goto auth_exit;
+		} else {
+		if ((error = vnode_authorize(fvp, fdvp, KAUTH_VNODE_DELETE, ctx)) != 0)
+			goto auth_exit;
+		}
+		if (moving) {
+			/* moving into tdvp or tvp, must have rights to add */
+			if ((error = vnode_authorize(((tvp != NULL) && vnode_isdir(tvp)) ? tvp : tdvp,
+				 NULL, 
+				 vnode_isdir(fvp) ? KAUTH_VNODE_ADD_SUBDIRECTORY : KAUTH_VNODE_ADD_FILE,
+				 ctx)) != 0) {
+                /*
+                 * We could encounter a race where after doing the namei, tvp stops
+                 * being valid. If so, simply re-drive the rename call from the
+                 * top.
+                 */
+                 if (error == ENOENT) {
+                     do_retry = 1;
+                 }
+				goto auth_exit;
+			}
+		} else {
+			/* node staying in same directory, must be allowed to add new name */
+			if ((error = vnode_authorize(fdvp, NULL,
+				 vnode_isdir(fvp) ? KAUTH_VNODE_ADD_SUBDIRECTORY : KAUTH_VNODE_ADD_FILE, ctx)) != 0)
+				goto auth_exit;
+		}
+		/* overwriting tvp */
+		if ((tvp != NULL) && !vnode_isdir(tvp) &&
+		    ((error = vnode_authorize(tvp, tdvp, KAUTH_VNODE_DELETE, ctx)) != 0)) {
+            /*
+             * We could encounter a race where after doing the namei, tvp stops
+             * being valid. If so, simply re-drive the rename call from the
+             * top.
+             */
+            if (error == ENOENT) {
+                do_retry = 1;
+            }
+			goto auth_exit;
+		}
+ 		    
+		/* XXX more checks? */
+
+auth_exit:
+		/* authorization denied */
+		if (error != 0)
+			goto out1;
+	}
+	/*
+	 * Allow the renaming of mount points.
+	 * - target must not exist
+	 * - target must reside in the same directory as source
+	 * - union mounts cannot be renamed
+	 * - "/" cannot be renamed
+	 */
+	if ((fvp->v_flag & VROOT) &&
+	    (fvp->v_type == VDIR) &&
+	    (tvp == NULL)  &&
+	    (fvp->v_mountedhere == NULL)  &&
+	    (fdvp == tdvp)  &&
+	    ((fvp->v_mount->mnt_flag & (MNT_UNION | MNT_ROOTFS)) == 0)  &&
+	    (fvp->v_mount->mnt_vnodecovered != NULLVP)) {
+		vnode_t coveredvp;
+	
+		/* switch fvp to the covered vnode */
+		coveredvp = fvp->v_mount->mnt_vnodecovered;
+		if ( (vnode_getwithref(coveredvp)) ) {
+		        error = ENOENT;
+			goto out1;
+		}
+		vnode_put(fvp);
+>>>>>>> origin/10.5
 
 	VATTR_INIT(&va);
 	VATTR_SET(&va, va_mode, (uap->mode & ACCESSPERMS) & ~p->p_fd->fd_cmask);
@@ -8022,6 +8334,7 @@ continue_lookup:
 		 * Call out to allow 3rd party notification of delete.
 		 * Ignore result of kauth_authorize_fileop call.
 		 */
+<<<<<<< HEAD
 		if (!error) {
 			if (has_listeners) {
 				kauth_authorize_fileop(vfs_context_ucred(ctx),
@@ -8029,6 +8342,23 @@ continue_lookup:
 						(uintptr_t)vp,
 						(uintptr_t)path);
 			}
+=======
+		mount_unlock_renames(locked_mp);
+		mount_drop(locked_mp, 0);
+		holding_mntlock = 0;
+	}
+	if (error) {
+        /*
+         * We may encounter a race in the VNOP where the destination didn't 
+         * exist when we did the namei, but it does by the time we go and 
+		 * try to create the entry. In this case, we should re-drive this rename
+		 * call from the top again.  Currently, only HFS bubbles out ERECYCLE,
+		 * but other filesystem susceptible to this race could return it, too.
+		 */
+        if (error == ERECYCLE) {
+            do_retry = 1;
+        }
+>>>>>>> origin/10.5
 
 			if (vp->v_flag & VISHARDLINK) {
 				// see the comment in unlink1() about why we update
@@ -8076,6 +8406,7 @@ out:
 
 }
 
+<<<<<<< HEAD
 /*
  * Remove a directory file.
  */
@@ -8108,6 +8439,25 @@ vnode_readdir64(struct vnode *vp, struct uio *uio, int flags, int *eofflag,
 		int bytesread;
 		int error;
 
+=======
+	        vnode_update_identity(fvp, tdvp, tond.ni_cnd.cn_nameptr, tond.ni_cnd.cn_namelen, tond.ni_cnd.cn_hash, update_flags);
+	}
+out1:
+	if (to_name != NULL) {
+		RELEASE_PATH(to_name);
+		to_name = NULL;
+	}
+	if (from_name != NULL) {
+		RELEASE_PATH(from_name);
+		from_name = NULL;
+	}
+	if (holding_mntlock) {
+	        mount_unlock_renames(locked_mp);
+		mount_drop(locked_mp, 0);
+		holding_mntlock = 0;
+	}
+	if (tdvp) {
+>>>>>>> origin/10.5
 		/*
 		 * Our kernel buffer needs to be smaller since re-packing
 		 * will expand each dirent.  The worse case (when the name
@@ -8169,6 +8519,20 @@ vnode_readdir64(struct vnode *vp, struct uio *uio, int flags, int *eofflag,
 		FREE(entry64, M_TEMP);
 		return (error);
 	}
+<<<<<<< HEAD
+=======
+
+    /*
+     * If things changed after we did the namei, then we will re-drive
+     * this rename call from the top.
+     */
+	if(do_retry) {
+        do_retry = 0;
+		goto retry;
+	}
+
+	return (error);
+>>>>>>> origin/10.5
 }
 
 #define GETDIRENTRIES_MAXBUFSIZE	(128 * 1024 * 1024U)

@@ -60,9 +60,13 @@ typedef struct sha1_ctxt {
 
 extern void SHA1Init(SHA1_CTX *);
 extern void SHA1Update(SHA1_CTX *, const void *, size_t);
+<<<<<<< HEAD
 #ifdef XNU_KERNEL_PRIVATE
 extern void SHA1UpdateUsePhysicalAddress(SHA1_CTX *, const void *, size_t);
 #endif
+=======
+extern void SHA1UpdateUsePhysicalAddress(SHA1_CTX *context, const void *inpp, size_t inputLen);
+>>>>>>> origin/10.5
 extern void SHA1Final(void *, SHA1_CTX *);
 
 #ifdef  __cplusplus

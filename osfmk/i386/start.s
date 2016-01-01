@@ -62,6 +62,7 @@
 
 #define	CX(addr,reg)	addr(,reg,4)
 
+<<<<<<< HEAD
 #else
 
 #define	CPU_NUMBER(reg)
@@ -70,6 +71,11 @@
 #endif	/* NCPUS > 1 */
 
 #include <i386/AT386/mp/mp.h>
+=======
+#include <i386/lapic.h>
+#include <i386/mp_slave_boot.h>
+#include <i386/cpuid.h>
+>>>>>>> origin/10.5
 
 /*
  * GAS won't handle an intersegment jump with a relocatable offset.

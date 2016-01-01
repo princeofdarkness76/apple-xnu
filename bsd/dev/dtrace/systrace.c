@@ -40,6 +40,11 @@
 #define SYSCALL_CLASS_MASK  (0xFF << SYSCALL_CLASS_SHIFT)
 #define SYSCALL_NUMBER_MASK (~SYSCALL_CLASS_MASK)
 #define I386_SYSCALL_NUMBER_MASK (0xFFFF)
+<<<<<<< HEAD
+=======
+
+typedef x86_saved_state_t savearea_t;
+>>>>>>> origin/10.5
 #endif
 
 #include <sys/param.h>
@@ -142,17 +147,23 @@ dtrace_systrace_syscall(struct proc *pp, void *uap, int *rv)
 	sy = (code >= NUM_SYSENT) ? &systrace_sysent[63] : &systrace_sysent[code];
 
 	if ((id = sy->stsy_entry) != DTRACE_IDNONE) {
+<<<<<<< HEAD
 		uthread_t uthread = (uthread_t)get_bsdthread_info(current_thread());		
 		if (uthread)
 			uthread->t_dtrace_syscall_args = (void *)ip;
 		
+=======
+>>>>>>> origin/10.5
 		if (ip)
 			(*systrace_probe)(id, *ip, *(ip+1), *(ip+2), *(ip+3), *(ip+4));
 		else
 			(*systrace_probe)(id, 0, 0, 0, 0, 0);
+<<<<<<< HEAD
 		
 		if (uthread)
 			uthread->t_dtrace_syscall_args = (void *)0;
+=======
+>>>>>>> origin/10.5
 	}
 
 #if 0 /* XXX */

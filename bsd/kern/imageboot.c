@@ -84,6 +84,7 @@ imageboot_needed(void)
 	if (root_path == NULL)
 		panic("%s: M_NAMEI zone exhausted", __FUNCTION__);
 
+<<<<<<< HEAD
 	/* Check for first layer */
 	if (!(PE_parse_boot_argn("rp0", root_path, MAXPATHLEN) || 
 			PE_parse_boot_argn("rp", root_path, MAXPATHLEN) ||
@@ -99,6 +100,10 @@ imageboot_needed(void)
 	}
 
 	result = 1;
+=======
+	if(PE_parse_boot_argn("rp", root_path, MAXPATHLEN) == TRUE) {
+		/* Got it, now verify scheme */
+>>>>>>> origin/10.5
 
 	/* Check for second layer */
 	if (!(PE_parse_boot_argn("rp1", root_path, MAXPATHLEN) ||
@@ -269,6 +274,7 @@ imageboot_setup()
 	MALLOC_ZONE(root_path, caddr_t, MAXPATHLEN, M_NAMEI, M_WAITOK);
 	assert(root_path != NULL);
 
+<<<<<<< HEAD
 	/*
 	 * Look for outermost disk image to root from.  If we're doing a nested boot,
 	 * there's some sense in which the outer image never needs to be the root filesystem,
@@ -279,6 +285,11 @@ imageboot_setup()
 	if((PE_parse_boot_argn("rp", root_path, MAXPATHLEN) == FALSE) &&
 		(PE_parse_boot_argn("rp0", root_path, MAXPATHLEN) == FALSE)) {
 		panic("%s: no valid path to image.\n", __FUNCTION__);
+=======
+	if(PE_parse_boot_argn("rp", root_path, MAXPATHLEN) == FALSE) {
+		error = ENOENT;
+		goto done;
+>>>>>>> origin/10.5
 	}
 
 	printf("%s: root image url is %s\n", __FUNCTION__, root_path);

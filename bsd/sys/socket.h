@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -962,6 +966,7 @@ struct cmsgcred {
 /* given pointer to struct cmsghdr, return pointer to data */
 #define	CMSG_DATA(cmsg)		((unsigned char *)(cmsg) + \
 				 __DARWIN_ALIGN32(sizeof(struct cmsghdr)))
+<<<<<<< HEAD
 
 /*
  * RFC 2292 requires to check msg_controllen, in case that the kernel returns
@@ -972,6 +977,16 @@ struct cmsgcred {
          (struct cmsghdr *)(mhdr)->msg_control : \
          (struct cmsghdr *)0L)
 
+=======
+
+/* given pointer to struct cmsghdr, return pointer to next cmsghdr */
+#define	CMSG_NXTHDR(mhdr, cmsg)	\
+	(((unsigned char *)(cmsg) + __DARWIN_ALIGN32((uint32_t)(cmsg)->cmsg_len) + \
+	  __DARWIN_ALIGN32(sizeof(struct cmsghdr)) > \
+	    (unsigned char *)(mhdr)->msg_control + (mhdr)->msg_controllen) ? \
+	    (struct cmsghdr *)0L /* NULL */ : \
+	    (struct cmsghdr *)((unsigned char *)(cmsg) + __DARWIN_ALIGN32((uint32_t)(cmsg)->cmsg_len)))
+>>>>>>> origin/10.5
 
 /* 
  * Given pointer to struct cmsghdr, return pointer to next cmsghdr

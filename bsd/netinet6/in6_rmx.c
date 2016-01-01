@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2003-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2003-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  *
@@ -145,11 +149,18 @@ static int in6_rtqkill(struct radix_node *, void *);
 
 #define	RTPRF_OURS		RTF_PROTO3	/* set on routes we manage */
 
+<<<<<<< HEAD
 /*
  * Accessed by in6_addroute(), in6_deleteroute() and in6_rtqkill(), during
  * which the routing lock (rnh_lock) is held and thus protects the variable.
  */
 static int in6dynroutes;
+=======
+static struct radix_node *in6_matroute_args(void *, struct radix_node_head *,
+    rn_matchf_t *, void *);
+
+#define RTPRF_OURS		RTF_PROTO3	/* set on routes we manage */
+>>>>>>> origin/10.5
 
 /*
  * Do what we need to do when inserting a route.
@@ -358,11 +369,32 @@ in6_deleteroute(void *v_arg, void *netmask_arg, struct radix_node_head *head)
 }
 
 /*
+<<<<<<< HEAD
  * Validate (unexpire) an expiring AF_INET6 route.
  */
 struct radix_node *
 in6_validate(struct radix_node *rn)
 {
+=======
+ * Similar to in6_matroute_args except without the leaf-matching parameters.
+ */
+static struct radix_node *
+in6_matroute(void *v_arg, struct radix_node_head *head)
+{
+	return (in6_matroute_args(v_arg, head, NULL, NULL));
+}
+
+/*
+ * This code is the inverse of in6_clsroute: on first reference, if we
+ * were managing the route, stop doing so and set the expiration timer
+ * back off again.
+ */
+static struct radix_node *
+in6_matroute_args(void *v_arg, struct radix_node_head *head,
+    rn_matchf_t *f, void *w)
+{
+	struct radix_node *rn = rn_match_args(v_arg, head, f, w);
+>>>>>>> origin/10.5
 	struct rtentry *rt = (struct rtentry *)rn;
 
 	RT_LOCK_ASSERT_HELD(rt);
@@ -390,6 +422,7 @@ in6_validate(struct radix_node *rn)
 		}
 	}
 	return (rn);
+<<<<<<< HEAD
 }
 
 /*
@@ -418,6 +451,8 @@ in6_matroute_args(void *v_arg, struct radix_node_head *head,
 		RT_UNLOCK((struct rtentry *)rn);
 	}
 	return (rn);
+=======
+>>>>>>> origin/10.5
 }
 
 SYSCTL_DECL(_net_inet6_ip6);

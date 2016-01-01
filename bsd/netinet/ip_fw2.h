@@ -493,6 +493,7 @@ struct _ipfw_dyn_rule {
 /*
  * Main firewall chains definitions and global var's definitions.
  */
+<<<<<<< HEAD
 #ifdef BSD_KERNEL_PRIVATE
 
 #pragma pack(4)
@@ -619,17 +620,46 @@ typedef struct  _ipfw_insn_pipe_32{
 
 #define IPFW_DEFAULT_RULE       65535
 
+=======
+#ifdef KERNEL
+>>>>>>> origin/10.5
 #if IPFIREWALL
 
 #define	IP_FW_PORT_DYNT_FLAG	0x10000
 #define	IP_FW_PORT_TEE_FLAG	0x20000
 #define	IP_FW_PORT_DENY_FLAG	0x40000
 
+<<<<<<< HEAD
 #ifdef PRIVATE
 #include <netinet/ip_flowid.h>
 #else
 struct ip_fw_args;
 #endif
+=======
+/*
+ * Arguments for calling ipfw_chk() and dummynet_io(). We put them
+ * all into a structure because this way it is easier and more
+ * efficient to pass variables around and extend the interface.
+ */
+struct ip_fw_args {
+	struct mbuf	*m;		/* the mbuf chain		*/
+	struct ifnet	*oif;		/* output interface		*/
+	struct sockaddr_in *next_hop;	/* forward address		*/
+	struct ip_fw	*rule;		/* matching rule		*/
+	struct ether_header *eh;	/* for bridged packets		*/
+
+	struct route	*ro;		/* for dummynet			*/
+	struct sockaddr_in *dst;	/* for dummynet			*/
+	int flags;			/* for dummynet			*/
+	struct ip_out_args *ipoa;	/* for dummynet			*/
+
+	struct ipfw_flow_id f_id;	/* grabbed from IP header	*/
+	u_int16_t	divert_rule;	/* divert cookie		*/
+	u_int32_t	retval;
+};
+//struct ip_fw_args;
+
+>>>>>>> origin/10.5
 /*
  * Function definitions.
  */
@@ -649,7 +679,11 @@ extern int fw_one_pass;
 extern int fw_enable;
 #define	IPFW_LOADED	(ip_fw_chk_ptr != NULL)
 #endif /* IPFIREWALL */
+<<<<<<< HEAD
 #endif /* BSD_KERNEL_PRIVATE */
+=======
+#endif /* KERNEL */
+>>>>>>> origin/10.5
 
 #endif /* __APPLE_API_OBSOLETE */
 #endif /* _IPFW2_H */

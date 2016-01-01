@@ -95,8 +95,13 @@ struct aiocb {
 
 struct user_aiocb {
 	int		aio_fildes;		/* File descriptor */
+<<<<<<< HEAD
 	off_t		aio_offset; /* File offset */
 	user_addr_t	aio_buf;		/* Location of buffer */
+=======
+	off_t		aio_offset __attribute((aligned(8))); /* File offset */
+	user_addr_t	aio_buf __attribute((aligned(8)));		/* Location of buffer */
+>>>>>>> origin/10.5
 	user_size_t	aio_nbytes;		/* Length of transfer */
 	int		aio_reqprio;	/* Request priority offset */
 	struct user_sigevent aio_sigevent;	/* Signal number and value */

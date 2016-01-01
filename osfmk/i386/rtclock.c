@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -78,6 +82,10 @@
 #include <vm/vm_kern.h>		/* for kernel_map */
 #include <architecture/i386/pio.h>
 #include <i386/machine_cpu.h>
+<<<<<<< HEAD
+=======
+#include <i386/lapic.h>
+>>>>>>> origin/10.5
 #include <i386/cpuid.h>
 #include <i386/cpu_threads.h>
 #include <i386/mp.h>
@@ -90,16 +98,74 @@
 #include <machine/commpage.h>
 #include <sys/kdebug.h>
 #include <i386/tsc.h>
+<<<<<<< HEAD
 #include <i386/rtclock_protos.h>
+=======
+#include <i386/rtclock.h>
+
+#define NSEC_PER_HZ			(NSEC_PER_SEC / 100) /* nsec per tick */
+
+>>>>>>> origin/10.5
 #define UI_CPUFREQ_ROUNDING_FACTOR	10000000
 
 int		rtclock_init(void);
 
+<<<<<<< HEAD
 uint64_t	tsc_rebase_abs_time = 0;
+=======
+uint64_t	rtc_decrementer_min;
+
+void			rtclock_intr(x86_saved_state_t *regs);
+static uint64_t		maxDec;			/* longest interval our hardware timer can handle (nsec) */
+>>>>>>> origin/10.5
 
 static void	rtc_set_timescale(uint64_t cycles);
 static uint64_t	rtc_export_speed(uint64_t cycles);
 
+<<<<<<< HEAD
+=======
+rtc_nanotime_t	rtc_nanotime_info = {0,0,0,0,1,0};
+
+/*
+ * tsc_to_nanoseconds:
+ *
+ * Basic routine to convert a raw 64 bit TSC value to a
+ * 64 bit nanosecond value.  The conversion is implemented
+ * based on the scale factor and an implicit 32 bit shift.
+ */
+static inline uint64_t
+_tsc_to_nanoseconds(uint64_t value)
+{
+    asm volatile("movl	%%edx,%%esi	;"
+		 "mull	%%ecx		;"
+		 "movl	%%edx,%%edi	;"
+		 "movl	%%esi,%%eax	;"
+		 "mull	%%ecx		;"
+		 "addl	%%edi,%%eax	;"	
+		 "adcl	$0,%%edx	 "
+		 : "+A" (value)
+		 : "c" (current_cpu_datap()->cpu_nanotime->scale)
+		 : "esi", "edi");
+
+    return (value);
+}
+
+static uint32_t
+deadline_to_decrementer(
+	uint64_t	deadline,
+	uint64_t	now)
+{
+	uint64_t	delta;
+
+	if (deadline <= now)
+		return rtc_decrementer_min;
+	else {
+		delta = deadline - now;
+		return MIN(MAX(rtc_decrementer_min,delta),maxDec); 
+	}
+}
+
+>>>>>>> origin/10.5
 void
 rtc_timer_start(void)
 {
@@ -170,8 +236,15 @@ _rtc_nanotime_init(pal_rtc_nanotime_t *rntp, uint64_t base)
 static void
 rtc_nanotime_init(uint64_t base)
 {
+<<<<<<< HEAD
 	_rtc_nanotime_init(&pal_rtc_nanotime_info, base);
 	rtc_nanotime_set_commpage(&pal_rtc_nanotime_info);
+=======
+	rtc_nanotime_t	*rntp = current_cpu_datap()->cpu_nanotime;
+
+	_rtc_nanotime_init(rntp, base);
+	rtc_nanotime_set_commpage(rntp);
+>>>>>>> origin/10.5
 }
 
 /*
@@ -186,7 +259,12 @@ rtc_nanotime_init_commpage(void)
 {
 	spl_t			s = splclock();
 
+<<<<<<< HEAD
 	rtc_nanotime_set_commpage(&pal_rtc_nanotime_info);
+=======
+	rtc_nanotime_set_commpage(current_cpu_datap()->cpu_nanotime);
+
+>>>>>>> origin/10.5
 	splx(s);
 }
 
@@ -199,7 +277,17 @@ rtc_nanotime_init_commpage(void)
 static inline uint64_t
 rtc_nanotime_read(void)
 {
+<<<<<<< HEAD
 	return	_rtc_nanotime_read(&pal_rtc_nanotime_info);
+=======
+	
+#if CONFIG_EMBEDDED
+	if (gPEClockFrequencyInfo.timebase_frequency_hz > SLOW_TSC_THRESHOLD)
+		return	_rtc_nanotime_read(current_cpu_datap()->cpu_nanotime, 1);	/* slow processor */
+	else
+#endif
+	return	_rtc_nanotime_read(current_cpu_datap()->cpu_nanotime, 0);	/* assume fast processor */
+>>>>>>> origin/10.5
 }
 
 /*
@@ -212,21 +300,31 @@ rtc_nanotime_read(void)
 void
 rtc_clock_napped(uint64_t base, uint64_t tsc_base)
 {
+<<<<<<< HEAD
 	pal_rtc_nanotime_t	*rntp = &pal_rtc_nanotime_info;
+=======
+	rtc_nanotime_t	*rntp = current_cpu_datap()->cpu_nanotime;
+>>>>>>> origin/10.5
 	uint64_t	oldnsecs;
 	uint64_t	newnsecs;
 	uint64_t	tsc;
 
 	assert(!ml_get_interrupts_enabled());
 	tsc = rdtsc64();
+<<<<<<< HEAD
 	oldnsecs = rntp->ns_base + _rtc_tsc_to_nanoseconds(tsc - rntp->tsc_base, rntp);
 	newnsecs = base + _rtc_tsc_to_nanoseconds(tsc - tsc_base, rntp);
+=======
+	oldnsecs = rntp->ns_base + _tsc_to_nanoseconds(tsc - rntp->tsc_base);
+	newnsecs = base + _tsc_to_nanoseconds(tsc - tsc_base);
+>>>>>>> origin/10.5
 	
 	/*
 	 * Only update the base values if time using the new base values
 	 * is later than the time using the old base values.
 	 */
 	if (oldnsecs < newnsecs) {
+<<<<<<< HEAD
 	    _pal_rtc_nanotime_store(tsc_base, base, rntp->scale, rntp->shift, rntp);
 	    rtc_nanotime_set_commpage(rntp);
 	}
@@ -247,6 +345,11 @@ rtc_clock_adjust(uint64_t tsc_base_delta)
     assert(tsc_base_delta < 100ULL);	/* i.e. it's small */
     _rtc_nanotime_adjust(tsc_base_delta, rntp);
     rtc_nanotime_set_commpage(rntp);
+=======
+	    _rtc_nanotime_store(tsc_base, base, rntp->scale, rntp->shift, rntp);
+	    rtc_nanotime_set_commpage(rntp);
+	}
+>>>>>>> origin/10.5
 }
 
 void
@@ -344,6 +447,7 @@ rtclock_init(void)
 static void
 rtc_set_timescale(uint64_t cycles)
 {
+<<<<<<< HEAD
 	pal_rtc_nanotime_t	*rntp = &pal_rtc_nanotime_info;
 	uint32_t    shift = 0;
     
@@ -367,6 +471,15 @@ rtc_set_timescale(uint64_t cycles)
 	if (tsc_rebase_abs_time == 0)
 		tsc_rebase_abs_time = _rtc_tsc_to_nanoseconds(
 						rdtsc64() - tsc_at_boot, rntp);
+=======
+	rtc_nanotime_t	*rntp = current_cpu_datap()->cpu_nanotime;
+	rntp->scale = ((uint64_t)NSEC_PER_SEC << 32) / cycles;
+
+	if (cycles <= SLOW_TSC_THRESHOLD)
+		rntp->shift = cycles;
+	else
+		rntp->shift = 32;
+>>>>>>> origin/10.5
 
 	rtc_nanotime_init(0);
 }

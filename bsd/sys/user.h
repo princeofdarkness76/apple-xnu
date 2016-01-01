@@ -238,11 +238,16 @@ struct uthread {
     
 	lck_mtx_t	*uu_mtx;
 
+<<<<<<< HEAD
 	TAILQ_ENTRY(uthread) uu_throttlelist;	/* List of uthreads currently throttled */
 	void	*	uu_throttle_info; 	/* pointer to throttled I/Os info */
 	int		uu_on_throttlelist;
 	int		uu_lowpri_window;
 	boolean_t	uu_throttle_bc;
+=======
+	int		uu_lowpri_window;
+	size_t		uu_devbsdunit; 		// to identify which device throttled I/Os are sent to
+>>>>>>> origin/10.5
 
 	u_int32_t	uu_network_marks;	/* network control flow marks */
 
@@ -309,10 +314,13 @@ struct uthread {
 	void *		t_dtrace_syscall_args;
 #endif /* CONFIG_DTRACE */
 	void *		uu_threadlist;
+<<<<<<< HEAD
 	char *		pth_name;
 
 	/* Document Tracking struct used to track a "tombstone" for a document */
 	struct doc_tombstone *t_tombstone;
+=======
+>>>>>>> origin/10.5
 };
 
 typedef struct uthread * uthread_t;

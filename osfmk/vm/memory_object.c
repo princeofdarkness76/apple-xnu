@@ -626,6 +626,7 @@ vm_object_update_extent(
 			}
 		}
 		while ((m = vm_page_lookup(object, offset)) != VM_PAGE_NULL) {
+<<<<<<< HEAD
 
 			dwp->dw_mask = 0;
 		        
@@ -706,6 +707,98 @@ vm_object_update_extent(
 					dwp = &dw_array[0];
 					dw_count = 0;
 				}
+=======
+		        page_lock_result = memory_object_lock_page(m, should_return, should_flush, prot);
+
+			XPR(XPR_MEMORY_OBJECT,
+			    "m_o_update: lock_page, obj 0x%X offset 0x%X result %d\n",
+			    (integer_t)object, offset, page_lock_result, 0, 0);
+
+			switch (page_lock_result)
+			{
+			  case MEMORY_OBJECT_LOCK_RESULT_DONE:
+			    /*
+			     *	End of a cluster of dirty pages.
+			     */
+			    if (data_cnt) {
+			            LIST_REQ_PAGEOUT_PAGES(object, 
+							   data_cnt, pageout_action, 
+							   paging_offset, offset_resid, io_errno, should_iosync);
+				    data_cnt = 0;
+				    continue;
+			    }
+			    break;
+
+			  case MEMORY_OBJECT_LOCK_RESULT_MUST_BLOCK:
+			    /*
+			     *	Since it is necessary to block,
+			     *	clean any dirty pages now.
+			     */
+			    if (data_cnt) {
+			            LIST_REQ_PAGEOUT_PAGES(object,
+							   data_cnt, pageout_action, 
+							   paging_offset, offset_resid, io_errno, should_iosync);
+				    data_cnt = 0;
+				    continue;
+			    }
+			    PAGE_SLEEP(object, m, THREAD_UNINT);
+			    continue;
+
+			  case MEMORY_OBJECT_LOCK_RESULT_MUST_CLEAN:
+			  case MEMORY_OBJECT_LOCK_RESULT_MUST_RETURN:
+			    /*
+			     * The clean and return cases are similar.
+			     *
+			     * if this would form a discontiguous block,
+			     * clean the old pages and start anew.
+			     *
+			     * Mark the page busy since we will unlock the
+			     * object if we issue the LIST_REQ_PAGEOUT
+			     */
+			    m->busy = TRUE;
+			    if (data_cnt && 
+				((last_offset != offset) || (pageout_action != page_lock_result))) {
+			            LIST_REQ_PAGEOUT_PAGES(object, 
+							   data_cnt, pageout_action, 
+							   paging_offset, offset_resid, io_errno, should_iosync);
+				    data_cnt = 0;
+			    }
+			    m->busy = FALSE;
+
+			    if (m->cleaning) {
+			            PAGE_SLEEP(object, m, THREAD_UNINT);
+				    continue;
+			    }
+			    if (data_cnt == 0) {
+			            pageout_action = page_lock_result;
+				    paging_offset = offset;
+			    }
+			    data_cnt += PAGE_SIZE;
+			    last_offset = offset + PAGE_SIZE_64;
+
+			    vm_page_lockspin_queues();
+			    /*
+			     * Clean
+			     */
+			    m->list_req_pending = TRUE;
+			    m->cleaning = TRUE;
+
+			    if (should_flush &&
+				/* let's no flush a wired page... */
+				!m->wire_count) {
+			            /*
+				     * and add additional state
+				     * for the flush
+				     */
+				    m->busy = TRUE;
+				    m->pageout = TRUE;
+				    vm_page_wire(m);
+			    }
+			    vm_page_unlock_queues();
+
+			    retval = 1;
+			    break;
+>>>>>>> origin/10.5
 			}
 			break;
 		}

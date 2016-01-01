@@ -75,6 +75,7 @@ int32_t gPESerialBaud = -1;
 
 void pe_init_debug(void)
 {
+<<<<<<< HEAD
 	boolean_t boot_arg_value;
 
 	if (!PE_parse_boot_argn("debug", &DEBUGFlag, sizeof (DEBUGFlag)))
@@ -111,6 +112,10 @@ void pe_init_debug(void)
 #endif
 	gPEKernelConfigurationBitmask |= (boot_arg_value ? kPEICanHasDiagnosticAPI : 0);
 
+=======
+  if (!PE_parse_boot_argn("debug", &DEBUGFlag, sizeof (DEBUGFlag)))
+    DEBUGFlag = 0;
+>>>>>>> origin/10.5
 }
 
 void PE_enter_debugger(const char *cause)

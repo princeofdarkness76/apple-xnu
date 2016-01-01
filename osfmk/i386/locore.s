@@ -63,6 +63,8 @@
 #include <i386/asm.h>
 #include <i386/cpuid.h>
 #include <i386/eflags.h>
+#include <i386/lapic.h>
+#include <i386/rtclock.h>
 #include <i386/proc_reg.h>
 #include <i386/trap.h>
 #include <assym.s>
@@ -88,11 +90,62 @@
 
 #define	CX(addr,reg)	addr(,reg,4)
 
+<<<<<<< HEAD
 #else
 #define	CPU_NUMBER(reg)
 #define	CX(addr,reg)	addr
 
 #endif	/* NCPUS > 1 */
+=======
+/*
+ * The following macros make calls into C code.
+ * They dynamically align the stack to 16 bytes.
+ * Arguments are moved (not pushed) onto the correctly aligned stack.
+ * NOTE: EDI is destroyed in the process, and hence cannot
+ * be directly used as a parameter. Users of this macro must
+ * independently preserve EDI (a non-volatile) if the routine is
+ * intended to be called from C, for instance.
+ */
+
+#define CCALL(fn)			\
+	movl	%esp, %edi		;\
+	andl	$0xFFFFFFF0, %esp	;\
+	call	EXT(fn)			;\
+	movl	%edi, %esp
+
+#define CCALL1(fn, arg1)		\
+	movl	%esp, %edi		;\
+	subl	$4, %esp		;\
+	andl	$0xFFFFFFF0, %esp	;\
+	movl	arg1, 0(%esp)		;\
+	call	EXT(fn)			;\
+	movl	%edi, %esp
+
+#define CCALL2(fn, arg1, arg2)		\
+	movl	%esp, %edi		;\
+	subl	$8, %esp		;\
+	andl	$0xFFFFFFF0, %esp	;\
+	movl	arg2, 4(%esp)		;\
+	movl	arg1, 0(%esp)		;\
+	call	EXT(fn)			;\
+	movl	%edi, %esp
+
+/*
+ * CCALL5 is used for callee functions with 3 arguments but
+ * where arg2 (a3:a2) and arg3 (a5:a4) are 64-bit values.
+ */
+#define CCALL5(fn, a1, a2, a3, a4, a5)	\
+	movl	%esp, %edi		;\
+	subl	$20, %esp		;\
+	andl	$0xFFFFFFF0, %esp	;\
+	movl	a5, 16(%esp)		;\
+	movl	a4, 12(%esp)		;\
+	movl	a3,  8(%esp)		;\
+	movl	a2,  4(%esp)		;\
+	movl	a1,  0(%esp)		;\
+	call	EXT(fn)			;\
+	movl	%edi, %esp
+>>>>>>> origin/10.5
 
 	.text
 locore_start:
@@ -177,6 +230,7 @@ LEXT(retry_table_end)			;\
  */
 
 /*
+<<<<<<< HEAD
  * There is only one current time-stamp per CPU, since only
  * the time-stamp in the current timer is used.
  * To save time, we allocate the current time-stamps here.
@@ -223,6 +277,67 @@ LEXT(retry_table_end)			;\
 0:	addl	$(TH_USER_TIMER-TH_SYS_TIMER),%ecx			;\
 						/* switch to user timer	*/;\
 	movl	%ecx,CX(EXT(current_timer),%edx) /* make it current */
+=======
+ * Nanotime returned in %edx:%eax.
+ * Computed from tsc based on the scale factor
+ * and an implicit 32 bit shift.
+ *
+ * Uses %eax, %ebx, %ecx, %edx, %esi, %edi.
+ */
+#define NANOTIME							\
+	mov	%gs:CPU_NANOTIME,%edi					; \
+	RTC_NANOTIME_READ_FAST()
+
+
+/*
+ * Add 64-bit delta in register dreg : areg to timer pointed to by register treg.
+ */
+#define TIMER_UPDATE(treg,dreg,areg)									  \
+	addl	TIMER_LOW(treg),areg		/* add low bits */				; \
+	adcl	dreg,TIMER_HIGH(treg)		/* add carry high bits */		; \
+	movl	areg,TIMER_LOW(treg)		/* store updated low bit */		; \
+	movl	TIMER_HIGH(treg),dreg		/* copy high bits */			; \
+	movl    dreg,TIMER_HIGHCHK(treg)	/* to high check */
+
+/*
+ * Add time delta to old timer and start new.
+ */
+#define TIMER_EVENT(old,new)											  \
+	NANOTIME							/* edx:eax nanosecs */			; \
+	movl	%eax,%esi					/* save timestamp */			; \
+	movl	%edx,%edi					/* save timestamp */			; \
+	movl	%gs:CPU_PROCESSOR,%ebx		/* get current processor */		; \
+	movl 	THREAD_TIMER(%ebx),%ecx		/* get current timer */			; \
+	subl	TIMER_TSTAMP(%ecx),%eax		/* compute elapsed time */		; \
+	sbbl	TIMER_TSTAMP+4(%ecx),%edx	/* compute elapsed time */		; \
+	TIMER_UPDATE(%ecx,%edx,%eax)		/* update timer */				; \
+	addl	$(new##_TIMER-old##_TIMER),%ecx	/* point to new timer */	; \
+	movl	%esi,TIMER_TSTAMP(%ecx)		/* set timestamp */				; \
+	movl	%edi,TIMER_TSTAMP+4(%ecx)	/* set timestamp */				; \
+	movl	%ecx,THREAD_TIMER(%ebx)		/* set current timer */			; \
+	movl	%esi,%eax					/* restore timestamp */			; \
+	movl	%edi,%edx					/* restore timestamp */			; \
+	movl	CURRENT_STATE(%ebx),%ecx	/* current state */				; \
+	subl	TIMER_TSTAMP(%ecx),%eax		/* compute elapsed time */		; \
+	sbbl	TIMER_TSTAMP+4(%ecx),%edx	/* compute elapsed time */		; \
+	TIMER_UPDATE(%ecx,%edx,%eax)		/* update timer */				; \
+	addl	$(new##_STATE-old##_STATE),%ecx /* point to new state */	; \
+	movl	%ecx,CURRENT_STATE(%ebx)	/* set current state */			; \
+	movl	%esi,TIMER_TSTAMP(%ecx)		/* set timestamp */				; \
+	movl	%edi,TIMER_TSTAMP+4(%ecx)	/* set timestamp */
+
+/*
+ * Update time on user trap entry.
+ * Uses %eax,%ebx,%ecx,%edx,%esi,%edi.
+ */
+#define	TIME_TRAP_UENTRY			TIMER_EVENT(USER,SYSTEM)
+
+/*
+ * update time on user trap exit.
+ * Uses %eax,%ebx,%ecx,%edx,%esi,%edi.
+ */
+#define	TIME_TRAP_UEXIT				TIMER_EVENT(SYSTEM,USER)
+>>>>>>> origin/10.5
 
 /*
  * update time on interrupt entry.
@@ -1361,6 +1476,7 @@ Entry(kdb_kintr)
 					/* returns to interrupt stack */
 	ret
 
+<<<<<<< HEAD
 /*
  * On return from keyboard interrupt, we will execute
  * kdb_from_iret_i
@@ -1441,16 +1557,55 @@ kdb_from_iret_i:			/* on interrupt stack */
 	iret
 
 #endif	/* MACH_KDB || MACH_KGDB */
+=======
+	CCALL1(diagCall, %ebx)		// Call diagnostics
+	
+	cmpl	$0,%eax			// What kind of return is this?
+	je	2f
+	cli				// Disable interruptions just in case they were enabled
+	popl	%esp			// Get back the original stack
+	jmp	EXT(return_to_user)	// Normal return, do not check asts...
+2:	
+	CCALL5(i386_exception, $EXC_SYSCALL, $0x6000, $0, $1, $0)
+		// pass what would be the diag syscall
+		// error return - cause an exception
+	/* no return */
+	
+>>>>>>> origin/10.5
 
 
 /*
  * Mach RPC enters through a call gate, like a system call.
  */
 
+<<<<<<< HEAD
 Entry(mach_rpc)
 	pushf				/* save flags as soon as possible */
 	pushl	%eax			/* save system call number */
 	pushl	$0			/* clear trap number slot */
+=======
+Entry(lo_syscall)
+	TIME_TRAP_UENTRY
+
+	/*
+	 * We can be here either for a mach, unix machdep or diag syscall,
+	 * as indicated by the syscall class:
+	 */
+	movl	R64_RAX(%esp), %eax		/* syscall number/class */
+	movl	%eax, %ebx
+	andl	$(SYSCALL_CLASS_MASK), %ebx	/* syscall class */
+	cmpl	$(SYSCALL_CLASS_MACH<<SYSCALL_CLASS_SHIFT), %ebx
+	je	EXT(lo64_mach_scall)
+	cmpl	$(SYSCALL_CLASS_UNIX<<SYSCALL_CLASS_SHIFT), %ebx
+	je	EXT(lo64_unix_scall)
+	cmpl	$(SYSCALL_CLASS_MDEP<<SYSCALL_CLASS_SHIFT), %ebx
+	je	EXT(lo64_mdep_scall)
+	cmpl	$(SYSCALL_CLASS_DIAG<<SYSCALL_CLASS_SHIFT), %ebx
+	je	EXT(lo64_diag_scall)
+
+	movl	%gs:CPU_KERNEL_STACK,%ebx
+	xchgl	%ebx,%esp		/* switch to kernel stack */
+>>>>>>> origin/10.5
 
 	pusha				/* save the general registers */
 	pushl	%ds			/* and the segment registers */
@@ -1458,16 +1613,23 @@ Entry(mach_rpc)
 	pushl	%fs
 	pushl	%gs
 
+<<<<<<< HEAD
 	mov	%ss,%dx			/* switch to kernel data segment */
 	mov	%dx,%ds
 	mov	%dx,%es
 	mov	$ CPU_DATA,%dx
 	mov	%dx,%gs
+=======
+	/* Syscall class unknown */
+	CCALL5(i386_exception, $(EXC_SYSCALL), %eax, $0, $1, $0)
+	/* no return */
+>>>>>>> origin/10.5
 
 /*
  * Shuffle eflags,eip,cs into proper places
  */
 
+<<<<<<< HEAD
 	movl	R_EIP(%esp),%ebx	/* eflags are in EIP slot */
 	movl	R_CS(%esp),%ecx		/* eip is in CS slot */
 	movl	R_EFLAGS(%esp),%edx	/* cs is in EFLAGS slot */
@@ -1477,6 +1639,12 @@ Entry(mach_rpc)
 
 	CPU_NUMBER(%edx)
         TIME_TRAP_UENTRY
+=======
+Entry(lo64_unix_scall)
+	movl	%gs:CPU_ACTIVE_THREAD,%ecx	/* get current thread     */
+	movl	ACT_TASK(%ecx),%ebx			/* point to current task  */
+	addl	$1,TASK_SYSCALLS_UNIX(%ebx)	/* increment call count   */
+>>>>>>> origin/10.5
 
         negl    %eax                    /* get system call number */
         shll    $4,%eax                 /* manual indexing */
@@ -1567,6 +1735,7 @@ Entry(mach_rpc)
 	movl	%eax,R_EAX(%esp)	/* save return value */
 	jmp	EXT(return_from_trap)	/* return to user */
 
+<<<<<<< HEAD
 
 /*
  * Special system call entry for "int 0x80", which has the "eflags"
@@ -1584,6 +1753,12 @@ Entry(mach_rpc)
 Entry(syscall_int80)
 	pushl	%eax			/* save system call number */
 	pushl	$0			/* clear trap number slot */
+=======
+Entry(lo64_mach_scall)
+	movl	%gs:CPU_ACTIVE_THREAD,%ecx	/* get current thread     */
+	movl	ACT_TASK(%ecx),%ebx			/* point to current task  */
+	addl	$1,TASK_SYSCALLS_MACH(%ebx)	/* increment call count   */
+>>>>>>> origin/10.5
 
 	pusha				/* save the general registers */
 	pushl	%ds			/* and the segment registers */
@@ -1665,6 +1840,7 @@ syscall_entry_3:
 	CPU_NUMBER(%edx)
 	jmp	1f
 
+<<<<<<< HEAD
 0:
 	TIME_TRAP_UENTRY
 
@@ -1674,6 +1850,11 @@ syscall_entry_3:
 	xchgl	%ebx,%esp		/* switch stacks - %ebx points to */
 					/* user registers. */
 					/* user regs pointer already set */
+=======
+Entry(lo64_mdep_scall)
+	movl	%gs:CPU_ACTIVE_THREAD,%ecx	/* get current thread     */
+	movl	ACT_TASK(%ecx),%ebx			/* point to current task  */
+>>>>>>> origin/10.5
 
 /*
  * Check for MACH or emulated system call
@@ -1777,6 +1958,7 @@ mach_call_call:
 	cmpl	$0x200, %eax			/* is this mach_msg? */
 	jz	make_syscall			/* if yes, don't record event */
 
+<<<<<<< HEAD
         pushal					/* Otherwise: save registers */
         pushl	%eax				/*   push syscall number on stack*/
         call	EXT(etap_machcall_probe1)	/*   call event begin probe */
@@ -1789,6 +1971,11 @@ mach_call_call:
         popal
 	jmp	skip_syscall			/* syscall already made */
 #endif	/* ETAP_EVENT_MONITOR */
+=======
+Entry(lo64_diag_scall)
+	movl	%gs:CPU_ACTIVE_THREAD,%ecx	/* get current thread     */
+	movl	ACT_TASK(%ecx),%ebx			/* point to current task  */
+>>>>>>> origin/10.5
 
 make_syscall:
 	call	*EXT(mach_trap_table)+4(%eax)	/* call procedure */
@@ -1903,6 +2090,7 @@ syscall_emul:
 	CAH(emul)
 	jmp	EXT(return_from_trap)	/* return to user */
 
+<<<<<<< HEAD
 
 /*
  * Address error - address is in %edi.
@@ -1917,6 +2105,20 @@ syscall_addr:
 					/* set error code - read user space */
 	CAH(addr)
 	jmp	EXT(take_trap)		/* treat as a trap */
+=======
+	CCALL1(diagCall64, %ebx)	// Call diagnostics
+		
+	cmpl	$0,%eax			// What kind of return is this?
+	je	2f
+	cli				// Disable interruptions just in case they were enabled
+	popl	%esp			// Get back the original stack
+	jmp	EXT(return_to_user)	// Normal return, do not check asts...
+2:	
+	CCALL5(i386_exception, $EXC_SYSCALL, $0x6000, $0, $1, $0)
+		// pass what would be the diag syscall
+		// error return - cause an exception
+	/* no return */
+>>>>>>> origin/10.5
 
 /**/
 /*

@@ -245,7 +245,11 @@ OSStatus	GetNode		(BTreeControlBlockPtr	 btreePtr,
 
 	if (err != noErr)
 	{
+<<<<<<< HEAD
 		Panic ("GetNode: getNodeProc returned error.");
+=======
+		Panic ("\pGetNode: getNodeProc returned error.");
+>>>>>>> origin/10.5
 		goto ErrorExit;
 	}
 	++btreePtr->numGetNodes;

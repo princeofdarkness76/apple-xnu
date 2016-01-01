@@ -283,10 +283,14 @@ struct	vnode *rootvp;
 int boothowto = RB_DEBUG;
 int minimalboot = 0;
 
+<<<<<<< HEAD
 #if PROC_REF_DEBUG
 __private_extern__ int proc_ref_tracking_disabled = 0; /* disable panics on leaked proc refs across syscall boundary */
 #endif
 
+=======
+void lightning_bolt(void *);
+>>>>>>> origin/10.5
 extern kern_return_t IOFindBSDRoot(char *, unsigned int, dev_t *, u_int32_t *);
 extern void IOSecureBSDRoot(const char * rootName);
 extern kern_return_t IOKitBSDInit(void );
@@ -1164,6 +1168,14 @@ setconf(void)
 	u_int32_t	flags;
 	kern_return_t	err;
 
+<<<<<<< HEAD
+=======
+	/*
+	 * calls into IOKit can generate networking registrations
+	 * which needs to be under network funnel. Right thing to do
+	 * here is to drop the funnel alltogether and regrab it afterwards
+	 */
+>>>>>>> origin/10.5
 	err = IOFindBSDRoot(rootdevice, sizeof(rootdevice), &rootdev, &flags);
 	if( err) {
 		printf("setconf: IOFindBSDRoot returned an error (%d);"
@@ -1224,7 +1236,11 @@ parse_bsd_args(void)
 	char namep[16];
 	int msgbuf;
 
+<<<<<<< HEAD
 	if ( PE_parse_boot_argn("-s", namep, sizeof (namep)))
+=======
+	if (PE_parse_boot_argn("-s", namep, sizeof (namep)))
+>>>>>>> origin/10.5
 		boothowto |= RB_SINGLE;
 
 	if (PE_parse_boot_argn("-b", namep, sizeof (namep)))
@@ -1233,6 +1249,7 @@ parse_bsd_args(void)
 	if (PE_parse_boot_argn("-x", namep, sizeof (namep))) /* safe boot */
 		boothowto |= RB_SAFEBOOT;
 
+<<<<<<< HEAD
 	if (PE_parse_boot_argn("-minimalboot", namep, sizeof(namep))) {
 		/*
 		 * -minimalboot indicates that we want userspace to be bootstrapped to a
@@ -1264,6 +1281,21 @@ parse_bsd_args(void)
 #endif
 #endif	/* CONFIG_MACF */
 
+=======
+	if (PE_parse_boot_argn("-l", namep, sizeof (namep))) /* leaks logging */
+		turn_on_log_leaks = 1;
+
+	PE_parse_boot_argn("srv", &srv, sizeof (srv));
+	PE_parse_boot_argn("ncl", &ncl, sizeof (ncl));
+	if (PE_parse_boot_argn("nbuf", &max_nbuf_headers, sizeof (max_nbuf_headers))) {
+		customnbuf = 1;
+	}
+#if !defined(SECURE_KERNEL)
+	PE_parse_boot_argn("kmem", &setup_kmem, sizeof (setup_kmem));
+#endif
+	PE_parse_boot_argn("trace", &new_nkdbufs, sizeof (new_nkdbufs));
+
+>>>>>>> origin/10.5
 	if (PE_parse_boot_argn("msgbuf", &msgbuf, sizeof (msgbuf))) {
 		log_setsize(msgbuf);
 	}

@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -177,6 +181,7 @@ hfs_swap_BTNode (
 				error = fsBTInvalidHeaderErr;
 				goto fail;
 			}
+<<<<<<< HEAD
 			if ((src->blockNum != 0) && (srcDesc->bLink == (u_int32_t) src->blockNum)) {
 #if DEVELOPMENT || DEBUG
 				panic("hfs_swap_BTNode: invalid backward link (0x%08x == 0x%08x)\n",
@@ -185,11 +190,26 @@ hfs_swap_BTNode (
 				printf("hfs_swap_BTNode: invalid backward link (0x%08x == 0x%08x)\n",
 						srcDesc->bLink, (u_int32_t) src->blockNum);
 #endif
+=======
+			
+			if ((src->blockNum != 0) && (srcDesc->fLink == (u_int32_t) src->blockNum)) {
+				printf("hfs_swap_BTNode: invalid forward link (0x%08x == 0x%08x)\n",
+						srcDesc->fLink, (u_int32_t) src->blockNum);
+				error = fsBTInvalidHeaderErr;
+				goto fail;
+			}
+			if ((src->blockNum != 0) && (srcDesc->bLink == (u_int32_t) src->blockNum)) {
+				printf("hfs_swap_BTNode: invalid backward link (0x%08x == 0x%08x)\n",
+						srcDesc->bLink, (u_int32_t) src->blockNum);
+>>>>>>> origin/10.5
 				error = fsBTInvalidHeaderErr;
 				goto fail;
 			}
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.5
 		}
 		
 		/* 
@@ -361,7 +381,11 @@ hfs_swap_BTNode (
 		/* 
 		 * Check srcDesc->height.  Don't swap it because it's only one byte.
 		 */
+<<<<<<< HEAD
 		if (srcDesc->height > kMaxTreeDepth) {
+=======
+		if (srcDesc->height > btcb->treeDepth) {
+>>>>>>> origin/10.5
 			panic("hfs_UNswap_BTNode: invalid node height (%d)\n", srcDesc->height);
 			error = fsBTInvalidHeaderErr;
 			goto fail;

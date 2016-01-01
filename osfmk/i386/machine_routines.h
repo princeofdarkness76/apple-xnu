@@ -378,7 +378,10 @@ extern void ml_set_maxbusdelay(uint32_t mdelay);
 extern uint32_t ml_get_maxbusdelay(void);
 extern void ml_set_maxintdelay(uint64_t mdelay);
 extern uint64_t ml_get_maxintdelay(void);
+<<<<<<< HEAD
 extern boolean_t ml_get_interrupt_prewake_applicable(void);
+=======
+>>>>>>> origin/10.5
 
 
 extern uint64_t tmrCvt(uint64_t time, uint64_t conversion);

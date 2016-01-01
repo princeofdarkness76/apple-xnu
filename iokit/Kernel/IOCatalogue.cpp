@@ -551,7 +551,36 @@ void IOCatalogue::moduleHasLoaded(const char * moduleName)
 // xxx - return is really OSReturn/kern_return_t
 IOReturn IOCatalogue::unloadModule(OSString * moduleName) const
 {
+<<<<<<< HEAD
     return OSKext::removeKextWithIdentifier(moduleName->getCStringNoCopy());
+=======
+    kmod_info_t          * k_info = 0;
+    kern_return_t          ret;
+    const char           * name;
+
+    ret = kIOReturnBadArgument;
+    if ( moduleName ) {
+        name = moduleName->getCStringNoCopy();
+        k_info = kmod_lookupbyname_locked((char *)name);
+        if ( k_info && (k_info->reference_count < 1) ) {
+            record_kext_unload(k_info->id);
+            if ( k_info->stop &&
+                 !((ret = k_info->stop(k_info, 0)) == kIOReturnSuccess) ) {
+
+                kfree(k_info, sizeof(kmod_info_t));
+                return ret;
+           }
+            
+           ret = kmod_destroy(host_priv_self(), k_info->id);
+        }
+    }
+ 
+    if (k_info) {
+        kfree(k_info, sizeof(kmod_info_t));
+    }
+
+    return ret;
+>>>>>>> origin/10.5
 }
 
 IOReturn IOCatalogue::_terminateDrivers(OSDictionary * matching)
@@ -984,6 +1013,37 @@ static bool isModuleLoadedNoOSKextLock(OSDictionary *theKexts,
     return( myResult );
 }
 
+<<<<<<< HEAD
+=======
+    PE_parse_boot_argn("keepsyms", &keepsyms, sizeof (keepsyms));
+ 
+    IOLog("Jettisoning kernel linker.\n");
+
+    kernelLinkerPresent = 0;
+
+   /* Set the kmod_load_extension function as the means for loading
+    * a kernel extension.
+    */
+    kmod_load_function = &kmod_load_extension;
+
+    record_startup_extensions_function = 0;
+    add_from_mkext_function = 0;
+    remove_startup_extension_function = 0;
+
+
+   /* Invoke destructors for the __KLD and __LINKEDIT segments.
+    * Do this for all segments before actually freeing their
+    * memory so that any cross-dependencies (not that there
+    * should be any) are handled.
+    */
+    segmentKLD = getsegbyname("__KLD");
+    if (!segmentKLD) {
+        IOLog("error removing kernel linker: can't find __KLD segment\n");
+        result = KERN_FAILURE;
+        goto finish;
+    }
+    OSRuntimeUnloadCPPForSegment(segmentKLD);
+>>>>>>> origin/10.5
 
 #if PRAGMA_MARK
 #pragma mark Obsolete Kext Loading Stuff

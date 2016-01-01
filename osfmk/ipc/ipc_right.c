@@ -708,7 +708,11 @@ ipc_right_terminate(
 	    }
 
 	    default:
+<<<<<<< HEAD
 		panic("ipc_right_terminate: strange type - 0x%x", type);
+=======
+		panic("ipc_right_clean: strange type - 0x%x", type);
+>>>>>>> origin/10.5
 	}
 }
 

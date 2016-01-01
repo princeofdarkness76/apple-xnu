@@ -286,7 +286,11 @@ void	lookup_compound_vnop_post_hook(int error, vnode_t dvp, vnode_t vp, struct n
  */
 void    cache_purgevfs(mount_t mp);
 int		cache_lookup_path(struct nameidata *ndp, struct componentname *cnp, vnode_t dp,
+<<<<<<< HEAD
 			  vfs_context_t context, int *dp_authorized, vnode_t last_dp);
+=======
+			  vfs_context_t context, int *trailing_slash, int *dp_authorized, vnode_t last_dp);
+>>>>>>> origin/10.5
 
 void		vnode_cache_authorized_action(vnode_t vp, vfs_context_t context, kauth_action_t action);
 void		vnode_uncache_authorized_action(vnode_t vp, kauth_action_t action);

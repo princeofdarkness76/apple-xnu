@@ -88,14 +88,23 @@ LEAF(_##name, 0)					;\
 2:
 
 #if defined(__SYSCALL_32BIT_ARG_BYTES) && ((__SYSCALL_32BIT_ARG_BYTES >= 4) && (__SYSCALL_32BIT_ARG_BYTES <= 20))
+<<<<<<< HEAD
 #define UNIX_SYSCALL_NONAME(name, nargs, cerror)			\
+=======
+#define UNIX_SYSCALL_NONAME(name, nargs)			\
+>>>>>>> origin/10.5
 	movl	$(SYS_##name | (__SYSCALL_32BIT_ARG_BYTES << I386_SYSCALL_ARG_BYTES_SHIFT)), %eax		;\
 	UNIX_SYSCALL_SYSENTER					;\
 	jnb	2f						;\
 	BRANCH_EXTERN(tramp_##cerror)				;\
 2:
 #else /* __SYSCALL_32BIT_ARG_BYTES < 4 || > 20 */
+<<<<<<< HEAD
 #define UNIX_SYSCALL_NONAME(name, nargs, cerror)	\
+=======
+#define UNIX_SYSCALL_NONAME(name, nargs)		\
+	.globl	cerror					;\
+>>>>>>> origin/10.5
 	movl	$ SYS_##name, %eax			;\
 	UNIX_SYSCALL_SYSENTER				;\
 	jnb	2f					;\
@@ -167,10 +176,13 @@ LEAF(pseudo, 0)					;\
 	PSEUDO(pseudo, name, nargs, cerror)			;\
 	ret
 
+<<<<<<< HEAD
 #define __SYSCALL(pseudo, name, nargs)			\
 	PSEUDO(pseudo, name, nargs, cerror)			;\
 	ret
 
+=======
+>>>>>>> origin/10.5
 #else
 #error Unsupported architecture
 #endif

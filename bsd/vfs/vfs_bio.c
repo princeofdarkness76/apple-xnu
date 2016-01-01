@@ -4389,9 +4389,18 @@ buf_biodone(buf_t bp)
 		INCR_PENDING_IO(-(pending_io_t)buf_count(bp), mp->mnt_pending_read_size);
 	}
 
+<<<<<<< HEAD
 	if (kdebug_enable) {
 		int code    = DKIO_DONE;
 		int io_tier = GET_BUFATTR_IO_TIER(bap);
+=======
+	if (bp->b_vp && bp->b_vp->v_mount && (bp->b_flags & B_READ) == 0) {
+		update_last_io_time(bp->b_vp->v_mount);
+	}
+
+        if (kdebug_enable) {
+	        int    code = DKIO_DONE;
+>>>>>>> origin/10.5
 
 		if (bp->b_flags & B_READ)
 		        code |= DKIO_READ;

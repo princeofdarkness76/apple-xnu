@@ -215,8 +215,12 @@ ux_handler_init(void)
 	thread_t	thread = THREAD_NULL;
 
 	ux_exception_port = MACH_PORT_NULL;
+<<<<<<< HEAD
 	(void) kernel_thread_start((thread_continue_t)ux_handler, NULL, &thread);
 	thread_deallocate(thread);
+=======
+	(void) kernel_thread(kernel_task, ux_handler);
+>>>>>>> origin/10.5
 	proc_list_lock();
 	if (ux_exception_port == MACH_PORT_NULL)  {
 		(void)msleep(&ux_exception_port, proc_list_mlock, 0, "ux_handler_wait", 0);

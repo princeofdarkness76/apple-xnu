@@ -51,8 +51,12 @@ extern struct savearea *
 find_user_regs(
 	thread_act_t act);
 
+<<<<<<< HEAD
 extern enter_funnel_section(funnel_t *funnel_lock);
 extern exit_funnel_section(funnel_t *funnel_lock);
+=======
+extern lck_spin_t * tz_slock;
+>>>>>>> origin/10.5
 
 /*
  * Function:	unix_syscall
@@ -190,6 +194,19 @@ unix_syscall(
 	else if (funnel_type == NETWORK_FUNNEL)
 		 exit_funnel_section(network_flock);
 
+<<<<<<< HEAD
+=======
+	if (uthread->uu_lowpri_window) {
+	        /*
+		 * task is marked as a low priority I/O type
+		 * and the I/O we issued while in this system call
+		 * collided with normal I/O operations... we'll
+		 * delay in order to mitigate the impact of this
+		 * task on the normal operation of the system
+		 */
+		throttle_lowpri_io(TRUE);
+	}
+>>>>>>> origin/10.5
 	if (kdebug_enable && (code != 180)) {
 		KERNEL_DEBUG_CONSTANT(BSDDBG_CODE(DBG_BSD_EXCP_SC, code) | DBG_FUNC_END,
 			error, uthread->uu_rval[0], uthread->uu_rval[1], 0, 0);
@@ -249,6 +266,19 @@ unix_syscall_return(error)
 	else if (funnel_type == NETWORK_FUNNEL)
 		 exit_funnel_section(network_flock);
 
+<<<<<<< HEAD
+=======
+	if (uthread->uu_lowpri_window) {
+	        /*
+		 * task is marked as a low priority I/O type
+		 * and the I/O we issued while in this system call
+		 * collided with normal I/O operations... we'll
+		 * delay in order to mitigate the impact of this
+		 * task on the normal operation of the system
+		 */
+		throttle_lowpri_io(TRUE);
+	}
+>>>>>>> origin/10.5
 	if (kdebug_enable && (code != 180)) {
 		KERNEL_DEBUG_CONSTANT(BSDDBG_CODE(DBG_BSD_EXCP_SC, code) | DBG_FUNC_END,
 			error, uthread->uu_rval[0], uthread->uu_rval[1], 0, 0);

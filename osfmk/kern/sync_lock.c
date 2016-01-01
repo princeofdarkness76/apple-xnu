@@ -78,7 +78,55 @@
 
 
 /*
+<<<<<<< HEAD
  *	OBSOLETE: lock set routines are obsolete
+=======
+ *	Lock set ownership MACROS
+ */
+
+#define lock_set_ownership_set(ls, t)				\
+	MACRO_BEGIN						\
+	task_lock((t));						\
+	enqueue_head(&(t)->lock_set_list, (queue_entry_t) (ls));\
+	(t)->lock_sets_owned++;					\
+	task_unlock((t));					\
+	(ls)->owner = (t);					\
+	MACRO_END
+
+#define lock_set_ownership_clear(ls, t)				\
+	MACRO_BEGIN						\
+	task_lock((t));						\
+	remqueue(&(t)->lock_set_list, (queue_entry_t) (ls));	\
+	(t)->lock_sets_owned--;					\
+	task_unlock((t));					\
+	MACRO_END
+
+unsigned int lock_set_event;
+#define LOCK_SET_EVENT CAST_EVENT64_T(&lock_set_event)
+
+unsigned int lock_set_handoff;
+#define LOCK_SET_HANDOFF CAST_EVENT64_T(&lock_set_handoff)
+
+/*
+ *	ROUTINE:	lock_set_init		[private]
+ *
+ *	Initialize the lock_set subsystem.
+ *
+ *	For now, we don't have anything to do here.
+ */
+void
+lock_set_init(void)
+{
+	return;
+}
+
+
+/*
+ *	ROUTINE:	lock_set_create		[exported]
+ *
+ *	Creates a lock set.
+ *	The port representing the lock set is returned as a parameter.
+>>>>>>> origin/10.5
  */      
 kern_return_t
 lock_set_create (

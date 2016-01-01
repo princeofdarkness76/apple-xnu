@@ -57,7 +57,10 @@
 #include <IOKit/IOMapper.h>
 #include <IOKit/IOBufferMemoryDescriptor.h>
 #include <libkern/OSDebug.h>
+<<<<<<< HEAD
 #include <mach/mach_vm.h>
+=======
+>>>>>>> origin/10.5
 
 #include "IOKitKernelInternal.h"
 
@@ -169,6 +172,7 @@ bool IOBufferMemoryDescriptor::initWithPhysicalMask(
     }
     needZero = (mapped || (0 != (kIOMemorySharingTypeMask & options)));
 
+<<<<<<< HEAD
     if (physicalMask && (alignment <= 1))
     {
 	alignment   = ((physicalMask ^ (-1ULL)) & (physicalMask - 1));
@@ -177,6 +181,10 @@ bool IOBufferMemoryDescriptor::initWithPhysicalMask(
 	if (alignment < page_size)
             alignment = page_size;
     }
+=======
+    // Grab IOMD bits from the Buffer MD options
+    iomdOptions  |= (options & kIOBufferDescriptorMemoryFlags);
+>>>>>>> origin/10.5
 
     if ((options & (kIOMemorySharingTypeMask | kIOMapCacheMask | kIOMemoryClearEncrypt)) && (alignment < page_size))
 	alignment = page_size;
@@ -495,6 +503,10 @@ void IOBufferMemoryDescriptor::free()
     IOOptionBits     options   = _options;
     vm_size_t        size      = _capacity;
     void *           buffer    = _buffer;
+<<<<<<< HEAD
+=======
+    mach_vm_address_t source   = (_ranges.v) ? _ranges.v64->address : 0;
+>>>>>>> origin/10.5
     IOMemoryMap *    map       = 0;
     IOAddressRange * range     = _ranges.v64;
     vm_offset_t      alignment = _alignment;
@@ -521,6 +533,7 @@ void IOBufferMemoryDescriptor::free()
     }
     else if (buffer)
     {
+<<<<<<< HEAD
 	if (kInternalFlagPageSized & internalFlags) size = round_page(size);
 
         if (kInternalFlagPhysical & internalFlags)
@@ -540,6 +553,12 @@ void IOBufferMemoryDescriptor::free()
 #endif
 	    IOStatisticsAlloc(kIOStatisticsFreeAligned, size);
 	}
+=======
+	if (kIOMemoryTypePhysical64 == (flags & kIOMemoryTypeMask))
+	    IOFreePhysical(source, size);
+        else if (options & kIOMemoryPhysicallyContiguous)
+            IOKernelFreeContiguous((mach_vm_address_t) buffer, size);
+>>>>>>> origin/10.5
         else if (alignment > 1)
 	{
             IOFreeAligned(buffer, size);

@@ -1211,9 +1211,14 @@ forkproc_free(proc_t p)
 proc_t
 forkproc(proc_t parent_proc)
 {
+<<<<<<< HEAD
 	proc_t child_proc;	/* Our new process */
 	static int nextpid = 0, pidwrap = 0, nextpidversion = 0;
 	static uint64_t nextuniqueid = 0;
+=======
+	struct proc *  child;	/* Our new process */
+	static int nextpid = 0, pidwrap = 0, nextpidversion = 0;
+>>>>>>> origin/10.5
 	int error = 0;
 	struct session *sessp;
 	uthread_t parent_uthread = (uthread_t)get_bsdthread_info(current_thread());
@@ -1290,11 +1295,16 @@ retry:
 		}	
 	}
 	nprocs++;
+<<<<<<< HEAD
 	child_proc->p_pid = nextpid;
 	child_proc->p_responsible_pid = nextpid;	/* initially responsible for self */
 	child_proc->p_idversion = nextpidversion++;
 	/* kernel process is handcrafted and not from fork, so start from 1 */
 	child_proc->p_uniqueid = ++nextuniqueid;
+=======
+	child->p_pid = nextpid;
+	child->p_idversion = nextpidversion++;
+>>>>>>> origin/10.5
 #if 1
 	if (child_proc->p_pid != 0) {
 		if (pfind_locked(child_proc->p_pid) != PROC_NULL)
@@ -1692,18 +1702,29 @@ uthread_free(task_t task, thread_t act, void *uthread, void * bsd_info)
 	}
 #endif
 
+<<<<<<< HEAD
 	if (uth->uu_lowpri_window || uth->uu_throttle_info) {
 		/*
+=======
+
+	if (uth->uu_lowpri_window) {
+	        /*
+>>>>>>> origin/10.5
 		 * task is marked as a low priority I/O type
 		 * and we've somehow managed to not dismiss the throttle
 		 * through the normal exit paths back to user space...
 		 * no need to throttle this thread since its going away
 		 * but we do need to update our bookeeping w/r to throttled threads
+<<<<<<< HEAD
 		 *
 		 * Calling this routine will clean up any throttle info reference
 		 * still inuse by the thread.
 		 */
 		throttle_lowpri_io(0);
+=======
+		 */
+		throttle_lowpri_io(FALSE);
+>>>>>>> origin/10.5
 	}
 	/*
 	 * Per-thread audit state should never last beyond system

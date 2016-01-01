@@ -21,11 +21,16 @@ NOT_EXPORT_HEADERS = \
 	IOPMinformeeList.h	\
 	IOPMlog.h		\
 <<<<<<< HEAD
+<<<<<<< HEAD
 	IOPMPrivate.h
 =======
 	IOPMpmChild.h		\
         IOPMPrivate.h
 
+=======
+	IOPMPagingPlexus.h
+	
+>>>>>>> origin/10.5
 INSTINC_SUBDIRS =
 INSTINC_SUBDIRS_PPC =
 INSTINC_SUBDIRS_I386 =
@@ -37,7 +42,11 @@ EXPINC_SUBDIRS_I386 = ${INSTINC_SUBDIRS_I386}
 
 ALL_HEADERS = $(shell (cd $(SOURCE); echo *.h))
 
+<<<<<<< HEAD
 INSTALL_MI_LIST	= IOPMLibDefs.h IOPM.h
+=======
+INSTALL_MI_LIST	= IOPMLibDefs.h IOPM.h IOPMDeprecated.h
+>>>>>>> origin/10.5
 INSTALL_MI_LCL_LIST = IOPMPrivate.h
 INSTALL_MI_DIR = $(MI_DIR)
 

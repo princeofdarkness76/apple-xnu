@@ -48,10 +48,18 @@
 #include <netat/atp.h>
 #include <netat/debug.h>
 
+<<<<<<< HEAD
 static void atp_trans_complete();
 void atp_x_done();
 void atp_x_done_funnel();
 extern void atp_req_timeout();
+=======
+__private_extern__ int atp_resp_seqno2big = 0;
+
+static void atp_trans_complete(struct atp_trans *);
+void atp_x_done_locked(void *);
+void atp_treq_event(void *);
+>>>>>>> origin/10.5
 
 /*
  *	Decide what to do about received messages
@@ -130,8 +138,13 @@ gbuf_t   *m;
 	    case ATP_CMD_TRESP:
 	    {   
 		register struct atp_trans *trp;
+<<<<<<< HEAD
 		register int    seqno;
 	        register at_ddp_t       *ddp;
+=======
+		register unsigned int    seqno;
+		register at_ddp_t       *ddp;
+>>>>>>> origin/10.5
 
 		/*
 		 * we just got a response, find the trans record
@@ -147,13 +160,29 @@ gbuf_t   *m;
 		 *	If we can't find one then ignore the message
 		 */
 		seqno = athp->bitmap;
+		if (seqno > 7) {
+			atp_resp_seqno2big++;
+			ddp = AT_DDP_HDR(m);
+			dPrintf(D_M_ATP_LOW, (D_L_INPUT|D_L_ERROR),
+				("atp_rput: dropping TRESP seqno too big, tid=%d,loc=%d,rem=%d.%d,seqno=%u\n",
+				 UAS_VALUE_NTOH(athp->tid),
+				 ddp->dst_socket, ddp->src_node, ddp->src_socket, seqno));
+			gbuf_freem(m);
+			return;
+		}
 		if (trp == NULL) {
 	        ATENABLE(s, atp->atp_lock);
 	        ddp = AT_DDP_HDR(m);
 		    dPrintf(D_M_ATP_LOW, (D_L_INPUT|D_L_ERROR),
+<<<<<<< HEAD
 		("atp_rput: dropping TRESP, no trp,tid=%d,loc=%d,rem=%d.%d,seqno=%d\n",
 			    UAS_VALUE(athp->tid),
 			    ddp->dst_socket,ddp->src_node,ddp->src_socket,seqno));
+=======
+		("atp_rput: dropping TRESP, no trp,tid=%d,loc=%d,rem=%d.%d,seqno=%u\n",
+			    UAS_VALUE_NTOH(athp->tid),
+			    ddp->dst_socket, ddp->src_node, ddp->src_socket, seqno));
+>>>>>>> origin/10.5
 		    gbuf_freem(m);
 		    return;
 		}
@@ -179,8 +208,13 @@ gbuf_t   *m;
 	        ATENABLE(s, atp->atp_lock);
 	        ddp = AT_DDP_HDR(m);
 		    dPrintf(D_M_ATP_LOW, (D_L_INPUT|D_L_ERROR),
+<<<<<<< HEAD
 		("atp_rput: dropping TRESP, duplicate,tid=%d,loc=%d,rem=%d.%d,seqno=%d\n",
 			    UAS_VALUE(athp->tid),
+=======
+		("atp_rput: dropping TRESP, duplicate,tid=%d,loc=%d,rem=%d.%d,seqno=%u\n",
+			    UAS_VALUE_NTOH(athp->tid),
+>>>>>>> origin/10.5
 			    ddp->dst_socket, ddp->src_node, ddp->src_socket, seqno));
 		    gbuf_freem(m);
 		    return;

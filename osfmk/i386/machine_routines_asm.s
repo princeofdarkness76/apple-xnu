@@ -20,6 +20,16 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 #include <i386/asm.h>
+<<<<<<< HEAD
+=======
+#include <i386/rtclock.h>
+#include <i386/proc_reg.h>
+#include <i386/eflags.h>
+       
+#include <i386/postcode.h>
+#include <i386/apic.h>
+#include <assym.s>
+>>>>>>> origin/10.5
 
 /*
 **      ml_get_timebase()
@@ -31,7 +41,20 @@
 */
 ENTRY(ml_get_timebase)
 
+<<<<<<< HEAD
         movl    S_ARG0, %ecx
+=======
+			movl    S_ARG0, %ecx
+			
+			lfence
+			rdtsc
+			lfence
+			
+			movl    %edx, 0(%ecx)
+			movl    %eax, 4(%ecx)
+			
+			ret
+>>>>>>> origin/10.5
 
         rdtsc
 
@@ -161,8 +184,17 @@ ENTRY(ml_phys_read_word)
 
 /* Read physical address double
  *
+<<<<<<< HEAD
  *      unsigned long long ml_phys_read_double(vm_offset_t paddr)
  *      unsigned long long ml_phys_read_double_64(addr64_t paddr)
+=======
+ * This is the same as the commpage nanotime routine, except that it uses the
+ * kernel internal "rtc_nanotime_info" data instead of the commpage data.  The two copies
+ * of data (one in the kernel and one in user space) are kept in sync by rtc_clock_napped().
+ *
+ * Warning!  There is another copy of this code in osfmk/i386/locore.s.  The
+ * two versions must be kept in sync with each other!
+>>>>>>> origin/10.5
  *
  *      Read the double word at physical address paddr. Memory should not be cache inhibited.
  */
@@ -270,6 +302,7 @@ ENTRY(ml_phys_write_word)
  *
  *      Write the double word at physical address paddr. Memory should not be cache inhibited.
  */
+<<<<<<< HEAD
 ENTRY(ml_phys_write_double_64)
 
         /* Only use lower 32 bits of address for now */
@@ -288,5 +321,85 @@ ENTRY(ml_phys_write_double)
         movl %eax, 0(%ecx)
         movl S_ARG2, %eax
         movl %eax, 4(%ecx)
+=======
+ 
+		.globl	EXT(_rtc_nanotime_read)
+		.align	FALIGN
+LEXT(_rtc_nanotime_read)
+		pushl		%ebp
+		movl		%esp,%ebp
+		pushl		%esi
+		pushl		%edi
+		pushl		%ebx
+		movl		8(%ebp),%edi				/* get ptr to rtc_nanotime_info */
+		movl		12(%ebp),%eax				/* get "slow" flag */
+		testl		%eax,%eax
+		jnz		Lslow
+		
+		/* Processor whose TSC frequency is faster than SLOW_TSC_THRESHOLD */
+		RTC_NANOTIME_READ_FAST()
+
+		popl		%ebx
+		popl		%edi
+		popl		%esi
+		popl		%ebp
+		ret
+
+		/* Processor whose TSC frequency is slower than or equal to SLOW_TSC_THRESHOLD */
+Lslow:
+		movl		RNT_GENERATION(%edi),%esi		/* get generation (0 if being changed) */
+		testl		%esi,%esi				/* if being changed, loop until stable */
+		jz		Lslow
+		pushl		%esi					/* save generation */
+		pushl		RNT_SHIFT(%edi)				/* save low 32 bits of tscFreq */
+
+		lfence
+		rdtsc	  						/* get TSC in %edx:%eax */
+		lfence
+		subl		RNT_TSC_BASE(%edi),%eax
+		sbbl		RNT_TSC_BASE+4(%edi),%edx
+
+		/*
+		* Do the math to convert tsc ticks to nanoseconds.  We first
+		* do long multiply of 1 billion times the tsc.  Then we do
+		* long division by the tsc frequency
+		*/
+		mov		$1000000000, %ecx			/* number of nanoseconds in a second */
+		mov		%edx, %ebx
+		mul		%ecx
+		mov		%edx, %edi
+		mov		%eax, %esi
+		mov		%ebx, %eax
+		mul		%ecx
+		add		%edi, %eax
+		adc		$0, %edx				/* result in edx:eax:esi */
+		mov		%eax, %edi
+		popl		%ecx					/* get low 32 tscFreq */
+		xor		%eax, %eax
+		xchg		%edx, %eax
+		div		%ecx
+		xor		%eax, %eax
+		mov		%edi, %eax
+		div		%ecx
+		mov		%eax, %ebx
+		mov		%esi, %eax
+		div		%ecx
+		mov		%ebx, %edx				/* result in edx:eax */
+		
+		movl		8(%ebp),%edi				/* recover ptr to rtc_nanotime_info */
+		popl		%esi					/* recover generation */
+
+		addl		RNT_NS_BASE(%edi),%eax
+		adcl		RNT_NS_BASE+4(%edi),%edx
+
+		cmpl		RNT_GENERATION(%edi),%esi		/* have the parameters changed? */
+		jne		Lslow					/* yes, loop until stable */
+
+		pop		%ebx
+		pop		%edi
+		pop		%esi
+		pop		%ebp
+		ret							/* result in edx:eax */
+>>>>>>> origin/10.5
 
 	ret

@@ -123,8 +123,12 @@ enum {
 
     kIOMemoryAsReference	= 0x00000100,
     kIOMemoryBufferPageable	= 0x00000400,
+<<<<<<< HEAD
     kIOMemoryMapperNone		= 0x00000800,	// Shared with Buffer MD
     kIOMemoryHostOnly           = 0x00001000,   // Never DMA accessible
+=======
+    kIOMemoryDontMap		= 0x00000800,
+>>>>>>> origin/10.5
 #ifdef XNU_KERNEL_PRIVATE
     kIOMemoryRedirected		= 0x00004000,
     kIOMemoryPreparedReadOnly	= 0x00008000,
@@ -134,6 +138,7 @@ enum {
     kIOMemoryReserved6156215	= 0x00020000,
 #endif
     kIOMemoryThreadSafe		= 0x00100000,	// Shared with Buffer MD
+<<<<<<< HEAD
     kIOMemoryClearEncrypt	= 0x00200000,	// Shared with Buffer MD
 
 #ifdef XNU_KERNEL_PRIVATE
@@ -141,6 +146,8 @@ enum {
     kIOMemoryBufferCacheMask	= 0x70000000,
     kIOMemoryBufferCacheShift	= 28,
 #endif
+=======
+>>>>>>> origin/10.5
 };
 
 #define kIOMapperSystem	((IOMapper *) 0)
@@ -977,6 +984,7 @@ public:
     OSMetaClassDeclareReservedUnused(IOMemoryMap, 7);
 };
 
+<<<<<<< HEAD
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 <<<<<<< HEAD
 #ifdef XNU_KERNEL_PRIVATE
@@ -1000,6 +1008,8 @@ enum {
 // might be created by IOMemoryDescriptor::withAddressRange(), but there should be 
 // no need to reference as anything but a generic IOMemoryDescriptor *.
 
+=======
+>>>>>>> origin/10.5
 class IOGeneralMemoryDescriptor : public IOMemoryDescriptor
 {
     OSDeclareDefaultStructors(IOGeneralMemoryDescriptor);

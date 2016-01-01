@@ -186,9 +186,14 @@ __attribute__((noinline)) int __KERNEL_WAITING_ON_TASKGATED_CHECK_ACCESS_UPCALL_
 #ifndef SECURE_KERNEL
 extern int allow_stack_exec, allow_data_exec;
 
+<<<<<<< HEAD
 SYSCTL_INT(_vm, OID_AUTO, allow_stack_exec, CTLFLAG_RW | CTLFLAG_LOCKED, &allow_stack_exec, 0, "");
 SYSCTL_INT(_vm, OID_AUTO, allow_data_exec, CTLFLAG_RW | CTLFLAG_LOCKED, &allow_data_exec, 0, "");
 
+=======
+SYSCTL_INT(_vm, OID_AUTO, allow_stack_exec, CTLFLAG_RW, &allow_stack_exec, 0, "");
+SYSCTL_INT(_vm, OID_AUTO, allow_data_exec, CTLFLAG_RW, &allow_data_exec, 0, "");
+>>>>>>> origin/10.5
 #endif /* !SECURE_KERNEL */
 
 static const char *prot_values[] = {
@@ -1327,9 +1332,18 @@ _shared_region_map_and_slide(
 	struct vnode_attr		va;
 	off_t				fs;
 	memory_object_size_t		file_size;
+<<<<<<< HEAD
 #if CONFIG_MACF
 	vm_prot_t			maxprot = VM_PROT_ALL;
 #endif
+=======
+	user_addr_t			user_mappings;
+	struct shared_file_mapping_np	*mappings;
+#define SFM_MAX_STACK	8
+	struct shared_file_mapping_np	stack_mappings[SFM_MAX_STACK];
+	unsigned int			mappings_count;
+	vm_size_t			mappings_size;
+>>>>>>> origin/10.5
 	memory_object_control_t		file_control;
 	struct vm_shared_region		*shared_region;
 

@@ -123,4 +123,11 @@ enum {
     kIOClassNameOverrideNone = 0x00000001,
 };
 
+#define kIOPlatformFunctionHandlerSet			"IOPlatformFunctionHandlerSet"
+#if defined(__i386__)
+#define kIOPlatformFunctionHandlerMaxBusDelay		"IOPlatformFunctionHandlerMaxBusDelay"
+#define kIOPlatformFunctionHandlerMaxInterruptDelay	"IOPlatformFunctionHandlerMaxInterruptDelay"
+#endif /* defined(__i386__) */
+
+
 #endif /* ! _IOKIT_IOKITKEYSPRIVATE_H */

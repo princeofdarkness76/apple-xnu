@@ -261,6 +261,19 @@ struct if_clonereq32 {
 /* extended flags definitions:  (all bits are reserved for internal/future use) */
 #define IFEF_AUTOCONFIGURING	0x1
 #define IFEF_DVR_REENTRY_OK	0x20	/* When set, driver may be reentered from its own thread */
+<<<<<<< HEAD
+=======
+#define IFEF_ACCEPT_RTADVD	0x40	/* set to accept IPv6 router advertisement on the interface */
+#define IFEF_DETACHING		0x80	/* Set when interface is detaching */
+#define IFEF_USEKPI			0x100	/* Set when interface is created through the KPIs */
+#define IFEF_VLAN		0x200	/* interface has one or more vlans */
+#define IFEF_BOND		0x400	/* interface is part of bond */
+#define	IFEF_ARPLL		0x800	/* ARP for IPv4LL addresses on this port */
+#define	IFEF_NOWINDOWSCALE	0x1000	/* TCP window scale disabled on this interface, see 5933937 & 5959897*/
+#define	IFEF_NOTIMESTAMPS	IFEF_NOWINDOWSCALE	/* We don't actualy disable timestamps, just window scale see 5959897 */
+#define	IFEF_SENDLIST	0x10000000 /* Interface supports sending a list of packets */
+#define IFEF_REUSE	0x20000000 /* DLIL ifnet recycler, ifnet is not new */
+>>>>>>> origin/10.5
 #define IFEF_INUSE	0x40000000 /* DLIL ifnet recycler, ifnet in use */
 #define IFEF_REUSE	0x20000000 /* DLIL ifnet recycler, ifnet is not new */
 #endif /* KERNEL_PRIVATE */

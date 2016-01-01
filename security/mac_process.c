@@ -385,7 +385,26 @@ mac_proc_check_expose_task(struct ucred *cred, struct proc *p)
 }
 
 int
+<<<<<<< HEAD
 mac_proc_check_inherit_ipc_ports(struct proc *p, struct vnode *cur_vp, off_t cur_offset, struct vnode *img_vp, off_t img_offset, struct vnode *scriptvp)
+=======
+mac_proc_check_map_prot_copy_allow(proc_t proc)
+{
+	kauth_cred_t cred;
+	int error;
+	
+	if (!mac_vm_enforce) return (0);
+	
+	cred = kauth_cred_proc_ref(proc);
+	MAC_CHECK(proc_check_map_prot_copy_allow, cred, proc);
+	kauth_cred_unref(&cred);
+	
+	return (error);
+}
+				   
+int
+mac_proc_check_sched(proc_t curp, struct proc *proc)
+>>>>>>> origin/10.5
 {
 	int error;
 

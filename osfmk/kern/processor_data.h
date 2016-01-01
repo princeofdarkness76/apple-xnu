@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2003-2009 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2003-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -82,6 +86,7 @@ struct processor_data {
 		unsigned int			avail;
 	}						ikm_cache;
 
+<<<<<<< HEAD
 	/* waitq prepost cache */
 #define WQP_CACHE_MAX	50
 	struct wqp_cache {
@@ -89,6 +94,9 @@ struct processor_data {
 		unsigned int		avail;
 	} wqp_cache;
 
+=======
+	unsigned long			page_grab_count;
+>>>>>>> origin/10.5
 	int						start_color;
 	unsigned long			page_grab_count;
 	void					*free_pages;

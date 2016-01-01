@@ -62,6 +62,7 @@
 
 #include <sys/cdefs.h>
 
+<<<<<<< HEAD
 struct thread_call;
 typedef struct thread_call *thread_call_t;
 
@@ -152,6 +153,55 @@ extern boolean_t	thread_call_enter1_delayed(
 						thread_call_param_t	param1,
 						uint64_t		deadline);
 #ifdef XNU_KERNEL_PRIVATE
+=======
+typedef struct call_entry	*thread_call_t;
+typedef void				*thread_call_param_t;
+typedef void				(*thread_call_func_t)(
+									thread_call_param_t		param0,
+									thread_call_param_t		param1);
+__BEGIN_DECLS
+
+extern boolean_t	thread_call_enter(
+						thread_call_t		call);
+
+extern boolean_t	thread_call_enter1(
+						thread_call_t			call,
+						thread_call_param_t		param1);
+
+extern boolean_t	thread_call_enter_delayed(
+						thread_call_t		call,
+						uint64_t			deadline);
+
+extern boolean_t	thread_call_enter1_delayed(
+						thread_call_t			call,
+						thread_call_param_t		param1,
+						uint64_t				deadline);
+
+extern boolean_t	thread_call_cancel(
+						thread_call_t		call);
+
+extern thread_call_t	thread_call_allocate(
+							thread_call_func_t		func,
+							thread_call_param_t		param0);
+
+extern boolean_t		thread_call_free(
+							thread_call_t		call);
+
+__END_DECLS
+
+#ifdef	MACH_KERNEL_PRIVATE
+
+#include <kern/call_entry.h>
+
+typedef struct call_entry	thread_call_data_t;
+
+extern void		thread_call_initialize(void);
+
+extern void		thread_call_setup(
+					thread_call_t			call,
+					thread_call_func_t		func,
+					thread_call_param_t		param0);
+>>>>>>> origin/10.5
 
 /*
  * Flags to alter the default timer/timeout coalescing behavior
@@ -296,6 +346,7 @@ boolean_t		thread_call_isactive(
 						thread_call_t call);
 __END_DECLS
 
+<<<<<<< HEAD
 #ifdef	MACH_KERNEL_PRIVATE
 
 #include <kern/call_entry.h>
@@ -310,6 +361,26 @@ struct thread_call {
 	uint32_t			tc_flags;
 	int32_t				tc_refs;
 }; 
+=======
+extern boolean_t	thread_call_is_delayed(
+						thread_call_t		call,
+						uint64_t			*deadline);
+
+extern void		thread_call_func(
+					thread_call_func_t		func,
+					thread_call_param_t		param,
+					boolean_t				unique_call);
+
+extern void		thread_call_func_delayed(
+					thread_call_func_t		func,
+					thread_call_param_t		param,
+					uint64_t				deadline);
+
+extern boolean_t	thread_call_func_cancel(
+						thread_call_func_t		func,
+						thread_call_param_t		param,
+						boolean_t				cancel_all);
+>>>>>>> origin/10.5
 
 #define THREAD_CALL_ALLOC		0x01
 #define THREAD_CALL_WAIT		0x02

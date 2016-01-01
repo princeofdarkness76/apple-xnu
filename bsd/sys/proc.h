@@ -506,6 +506,7 @@ extern int IS_64BIT_PROCESS(proc_t);
 extern int	tsleep(void *chan, int pri, const char *wmesg, int timo);
 extern int	msleep1(void *chan, lck_mtx_t *mtx, int pri, const char *wmesg, u_int64_t timo);
 
+<<<<<<< HEAD
 task_t proc_task(proc_t);
 extern int proc_pidversion(proc_t);
 extern int proc_getcdhash(proc_t, unsigned char *);
@@ -556,6 +557,11 @@ extern void proc_coalitionids(proc_t, uint64_t [COALITION_NUM_TYPES]);
 #ifdef KERNEL_PRIVATE
 extern vnode_t proc_getexecutablevnode(proc_t); /* Returned with iocount, use vnode_put() to drop */
 #endif
+=======
+extern int proc_pidversion(proc_t);
+extern int proc_getcdhash(proc_t, unsigned char *);
+#endif /* KERNEL_PRIVATE */
+>>>>>>> origin/10.5
 
 __END_DECLS
 

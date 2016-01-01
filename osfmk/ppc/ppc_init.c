@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -131,6 +135,7 @@ void ppc_init(boot_args *args)
 	 * Setup per_proc info for first cpu.
 	 */
 
+<<<<<<< HEAD
 	per_proc_info[0].cpu_number = 0;
 	per_proc_info[0].cpu_flags = 0;
 	per_proc_info[0].istackptr = 0;	/* we're on the interrupt stack */
@@ -161,6 +166,32 @@ void ppc_init(boot_args *args)
 	per_proc_info[0].rtcPop = 0xFFFFFFFFFFFFFFFFULL;
 	mp = (mapping *)per_proc_info[0].ppCIOmp;
 	mp->mpFlags = 0x01000000 | mpSpecial | 1;
+=======
+	BootProcInfo.cpu_number = 0;
+	BootProcInfo.cpu_flags = 0;
+	BootProcInfo.istackptr = 0;							/* we're on the interrupt stack */
+	BootProcInfo.intstack_top_ss = (vm_offset_t)&intstack + INTSTACK_SIZE - FM_SIZE;
+	BootProcInfo.debstack_top_ss = (vm_offset_t)&debstack + KERNEL_STACK_SIZE - FM_SIZE;
+	BootProcInfo.debstackptr = BootProcInfo.debstack_top_ss;
+	BootProcInfo.interrupts_enabled = 0;
+	BootProcInfo.pending_ast = AST_NONE;
+	BootProcInfo.FPU_owner = NULL;
+	BootProcInfo.VMX_owner = NULL;
+	BootProcInfo.pp_cbfr = console_per_proc_alloc(TRUE);
+	BootProcInfo.rtcPop = EndOfAllTime;
+	queue_init(&BootProcInfo.rtclock_timer.queue);
+	BootProcInfo.rtclock_timer.deadline = EndOfAllTime;
+	BootProcInfo.pp2ndPage = (addr64_t)(uintptr_t)&BootProcInfo;	/* Initial physical address of the second page */
+
+ 	BootProcInfo.pms.pmsStamp = 0;						/* Dummy transition time */
+ 	BootProcInfo.pms.pmsPop = EndOfAllTime;				/* Set the pop way into the future */
+ 	
+ 	BootProcInfo.pms.pmsState = pmsParked;				/* Park the power stepper */
+	BootProcInfo.pms.pmsCSetCmd = pmsCInit;				/* Set dummy initial hardware state */
+	
+	mp = (mapping_t *)BootProcInfo.ppUMWmp;
+	mp->mpFlags = 0x01000000 | mpLinkage | mpPerm | 1;
+>>>>>>> origin/10.5
 	mp->mpSpace = invalSpace;
 >>>>>>> origin/10.3
 
@@ -176,6 +207,7 @@ void ppc_init(boot_args *args)
 	master_cpu = 0;
 	master_processor = cpu_to_processor(master_cpu);
 
+<<<<<<< HEAD
 	/* Set up segment registers as VM through space 0 */
 	for (i=0; i<=15; i++) {
 	  isync();
@@ -288,6 +320,34 @@ void ppc_init(boot_args *args)
 	kprintf("version_variant = %s\n", version_variant);
 	kprintf("version         = %s\n", version);
 
+=======
+	static_memory_end = round_page(args->topOfKernelData);;
+      
+	PE_init_platform(FALSE, args);						/* Get platform expert set up */
+
+	if (!PE_parse_boot_argn("novmx", &novmx, sizeof (novmx))) novmx=0;	/* Special run without VMX? */
+	if(novmx) {											/* Yeah, turn it off */
+		BootProcInfo.pf.Available &= ~pfAltivec;		/* Turn off Altivec available */
+		__asm__ volatile("mtsprg 2,%0" : : "r" (BootProcInfo.pf.Available));	/* Set live value */
+	}
+
+	if (!PE_parse_boot_argn("fn", &forcenap, sizeof (forcenap))) forcenap = 0;	/* If force nap not set, make 0 */
+	else {
+		if(forcenap < 2) forcenap = forcenap + 1;		/* Else set 1 for off, 2 for on */
+		else forcenap = 0;								/* Clear for error case */
+	}
+	
+	if (!PE_parse_boot_argn("pmsx", &pmsExperimental, sizeof (pmsExperimental))) pmsExperimental = 0;	/* Check if we should start in experimental power management stepper mode */
+	if (!PE_parse_boot_argn("lcks", &LcksOpts, sizeof (LcksOpts))) LcksOpts = 0;	/* Set lcks options */
+	if (!PE_parse_boot_argn("diag", &dgWork.dgFlags, sizeof (dgWork.dgFlags))) dgWork.dgFlags = 0;	/* Set diagnostic flags */
+	if(dgWork.dgFlags & enaExpTrace) trcWork.traceMask = 0xFFFFFFFF;	/* If tracing requested, enable it */
+
+	if(PE_parse_boot_argn("ctrc", &cputrace, sizeof (cputrace))) {			/* See if tracing is limited to a specific cpu */
+		trcWork.traceMask = (trcWork.traceMask & 0xFFFFFFF0) | (cputrace & 0xF);	/* Limit to 4 */
+	}
+
+	if(!PE_parse_boot_argn("tb", &trcWork.traceSize, sizeof (trcWork.traceSize))) {	/* See if non-default trace buffer size */
+>>>>>>> origin/10.5
 #if DEBUG
 	printf("\n\n\nThis program was compiled using gcc %d.%d for powerpc\n",
 	       __GNUC__,__GNUC_MINOR__);
@@ -310,7 +370,24 @@ void ppc_init(boot_args *args)
 	if(trcWork.traceSize < 1) trcWork.traceSize = 1;	/* Minimum size of 1 page */
 	if(trcWork.traceSize > 256) trcWork.traceSize = 256;	/* Maximum size of 256 pages */
 	trcWork.traceSize = trcWork.traceSize * 4096;		/* Change page count to size */
+<<<<<<< HEAD
 >>>>>>> origin/10.3
+=======
+
+	if (!PE_parse_boot_argn("maxmem", &maxmem, sizeof (maxmem)))
+		xmaxmem=0;
+	else
+		xmaxmem = (uint64_t)maxmem * (1024 * 1024);
+
+	if (!PE_parse_boot_argn("wcte", &wcte, sizeof (wcte))) wcte = 0;	/* If write combine timer enable not supplied, make 1 */
+	else wcte = (wcte != 0);							/* Force to 0 or 1 */
+
+	if (!PE_parse_boot_argn("mcklog", &mckFlags, sizeof (mckFlags))) mckFlags = 0;	/* If machine check flags not specified, clear */
+	else if(mckFlags > 1) mckFlags = 0;					/* If bogus, clear */
+    
+    if (!PE_parse_boot_argn("ht_shift", &hash_table_shift, sizeof (hash_table_shift)))  /* should we use a non-default hash table size? */
+        hash_table_shift = 0;                           /* no, use default size */
+>>>>>>> origin/10.5
 
 	/*   
 	 * VM initialization, after this we're using page tables...
@@ -326,10 +403,24 @@ void ppc_init(boot_args *args)
 =======
 	ppc_vm_init(xmaxmem, args);
 	
+<<<<<<< HEAD
 	if(per_proc_info[0].pf.Available & pf64Bit) {		/* Are we on a 64-bit machine */
 		if(PE_parse_boot_arg("fhrdl1", &fhrdl1)) {		/* Have they supplied "Force Hardware Recovery of Data cache level 1 errors? */
 			newhid = per_proc_info[0].pf.pfHID5;		/* Get the old HID5 */
 			if(fhrdl1 < 2) {
+=======
+	if(BootProcInfo.pf.Available & pf64Bit) {			/* Are we on a 64-bit machine */
+		
+		if(!wcte) {
+			(void)ml_scom_read(GUSModeReg << 8, &scdata);	/* Get GUS mode register */
+			scdata = scdata | GUSMstgttoff;					/* Disable the NCU store gather timer */
+			(void)ml_scom_write(GUSModeReg << 8, scdata);	/* Get GUS mode register */
+		}
+		
+		if(PE_parse_boot_argn("mcksoft", &mcksoft, sizeof (mcksoft))) {	/* Have they supplied "machine check software recovery? */
+			newhid = BootProcInfo.pf.pfHID5;			/* Get the old HID5 */
+			if(mcksoft < 2) {
+>>>>>>> origin/10.5
 				newhid &= 0xFFFFFFFFFFFFDFFFULL;		/* Clear the old one */
 				newhid |= (fhrdl1 ^ 1) << 13;			/* Set new value to enable machine check recovery */
 				for(i = 0; i < NCPUS; i++)	per_proc_info[i].pf.pfHID5 = newhid;	/* Set all shadows */
@@ -362,6 +453,7 @@ ppc_init_cpu(
 	
 	cpu_init();
 	
+<<<<<<< HEAD
 	proc_info->Lastpmap = 0;				/* Clear last used space */
 
 	/* Set up segment registers as VM through space 0 */
@@ -376,4 +468,7 @@ ppc_init_cpu(
 	ml_thrm_init();							/* Start thermal monitoring on this processor */
 
 	slave_main();
+=======
+	slave_main(NULL);
+>>>>>>> origin/10.5
 }

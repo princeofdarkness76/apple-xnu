@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -1663,9 +1667,15 @@ machine_thread_switch_addrmode(thread_t thread)
 
 	/* If we're switching ourselves, reset the pcb addresses etc. */
 	if (thread == current_thread()) {
+<<<<<<< HEAD
 		boolean_t istate = ml_set_interrupts_enabled(FALSE);
 		act_machine_switch_pcb(NULL, thread);
 		ml_set_interrupts_enabled(istate);
+=======
+	  if (current_cpu_datap()->cpu_active_cr3 != kernel_pmap->pm_cr3)
+		pmap_load_kernel_cr3();
+	  act_machine_switch_pcb(thread);
+>>>>>>> origin/10.5
 	}
 	enable_preemption();
 }

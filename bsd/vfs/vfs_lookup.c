@@ -201,6 +201,10 @@ namei(struct nameidata *ndp)
 	struct vnode *usedvp = ndp->ni_dvp;  /* store pointer to vp in case we must loop due to
 										   	heavy vnode pressure */
 	u_long cnpflags = ndp->ni_cnd.cn_flags; /* store in case we have to restore after loop */
+<<<<<<< HEAD
+=======
+	uio_t auio;
+>>>>>>> origin/10.5
 	int error;
 	struct componentname *cnp = &ndp->ni_cnd;
 	vfs_context_t ctx = cnp->cn_context;
@@ -253,6 +257,8 @@ namei(struct nameidata *ndp)
 		return 0;
 
 	}
+
+vnode_recycled:
 
 vnode_recycled:
 
@@ -435,6 +441,7 @@ out_drop:
 	}
 	cnp->cn_pnbuf = NULL;
 	ndp->ni_vp = NULLVP;
+<<<<<<< HEAD
 	ndp->ni_dvp = NULLVP;
 
 #if CONFIG_VOLFS
@@ -468,6 +475,8 @@ out_drop:
 	}
 #endif
 
+=======
+>>>>>>> origin/10.5
 	if (error == ERECYCLE){
 		/* vnode was recycled underneath us. re-drive lookup to start at 
 		   the beginning again, since recycling invalidated last lookup*/
@@ -487,6 +496,7 @@ namei_compound_available(vnode_t dp, struct nameidata *ndp)
 		return vnode_compound_open_available(dp);
 	}
 
+<<<<<<< HEAD
 	return 0;
 }
 static int
@@ -495,6 +505,86 @@ lookup_authorize_search(vnode_t dp, struct componentname *cnp, int dp_authorized
 #if !CONFIG_MACF
 #pragma unused(cnp)
 #endif
+=======
+/*
+ * Search a pathname.
+ * This is a very central and rather complicated routine.
+ *
+ * The pathname is pointed to by ni_ptr and is of length ni_pathlen.
+ * The starting directory is taken from ni_startdir. The pathname is
+ * descended until done, or a symbolic link is encountered. The variable
+ * ni_more is clear if the path is completed; it is set to one if a
+ * symbolic link needing interpretation is encountered.
+ *
+ * The flag argument is LOOKUP, CREATE, RENAME, or DELETE depending on
+ * whether the name is to be looked up, created, renamed, or deleted.
+ * When CREATE, RENAME, or DELETE is specified, information usable in
+ * creating, renaming, or deleting a directory entry may be calculated.
+ * If flag has LOCKPARENT or'ed into it, the parent directory is returned
+ * locked. If flag has WANTPARENT or'ed into it, the parent directory is
+ * returned unlocked. Otherwise the parent directory is not returned. If
+ * the target of the pathname exists and LOCKLEAF is or'ed into the flag
+ * the target is returned locked, otherwise it is returned unlocked.
+ * When creating or renaming and LOCKPARENT is specified, the target may not
+ * be ".".  When deleting and LOCKPARENT is specified, the target may be ".".
+ * 
+ * Overall outline of lookup:
+ *
+ * dirloop:
+ *	identify next component of name at ndp->ni_ptr
+ *	handle degenerate case where name is null string
+ *	if .. and crossing mount points and on mounted filesys, find parent
+ *	call VNOP_LOOKUP routine for next component name
+ *	    directory vnode returned in ni_dvp, unlocked unless LOCKPARENT set
+ *	    component vnode returned in ni_vp (if it exists), locked.
+ *	if result vnode is mounted on and crossing mount points,
+ *	    find mounted on vnode
+ *	if more components of name, do next level at dirloop
+ *	return the answer in ni_vp, locked if LOCKLEAF set
+ *	    if LOCKPARENT set, return locked parent in ni_dvp
+ *	    if WANTPARENT set, return unlocked parent in ni_dvp
+ *
+ * Returns:	0			Success
+ *		ENOENT			No such file or directory
+ *		EBADF			Bad file descriptor
+ *		ENOTDIR			Not a directory
+ *		EROFS			Read-only file system [CREATE]
+ *		EISDIR			Is a directory [CREATE]
+ *		cache_lookup_path:ERECYCLE  (vnode was recycled from underneath us, redrive lookup again)
+ *		vnode_authorize:EROFS
+ *		vnode_authorize:EACCES
+ *		vnode_authorize:EPERM
+ *		vnode_authorize:???
+ *		VNOP_LOOKUP:ENOENT	No such file or directory
+ *		VNOP_LOOKUP:EJUSTRETURN	Restart system call (INTERNAL)
+ *		VNOP_LOOKUP:???
+ *		VFS_ROOT:ENOTSUP
+ *		VFS_ROOT:ENOENT
+ *		VFS_ROOT:???
+ */
+int
+lookup(struct nameidata *ndp)
+{
+	char	*cp;		/* pointer into pathname argument */
+	vnode_t		tdp;		/* saved dp */
+	vnode_t		dp;		/* the directory we are searching */
+	mount_t		mp;		/* mount table entry */
+	int docache = 1;		/* == 0 do not cache last component */
+	int wantparent;			/* 1 => wantparent or lockparent flag */
+	int rdonly;			/* lookup read-only flag bit */
+	int trailing_slash = 0;
+	int dp_authorized = 0;
+	int error = 0;
+	struct componentname *cnp = &ndp->ni_cnd;
+	vfs_context_t ctx = cnp->cn_context;
+	int mounted_on_depth = 0;
+	int dont_cache_mp = 0;
+	vnode_t	mounted_on_dp = NULLVP;
+	int current_mount_generation = 0;
+	int vbusyflags = 0;
+	int nc_generation = 0;
+	vnode_t last_dp = NULLVP;
+>>>>>>> origin/10.5
 
 	int error;
 
@@ -531,6 +621,7 @@ lookup_consider_update_cache(vnode_t dvp, vnode_t vp, struct componentname *cnp,
 				vnode_update_identity(vp, dvp, cnp->cn_nameptr, cnp->cn_namelen, cnp->cn_hash, update_flags);
 		}
 	}
+<<<<<<< HEAD
 	if ( (cnp->cn_flags & MAKEENTRY) && (vp->v_flag & VNCACHEABLE) && LIST_FIRST(&vp->v_nclinks) == NULL) {
 		/*
 		 * missing from name cache, but should
@@ -547,6 +638,14 @@ lookup_consider_update_cache(vnode_t dvp, vnode_t vp, struct componentname *cnp,
 		 */
 		if (dvp != NULLVP && (nc_generation == dvp->v_nc_generation) && (!isdot_or_dotdot))
 			cache_enter_with_gen(dvp, vp, cnp, nc_generation);
+=======
+dirloop: 
+	ndp->ni_vp = NULLVP;
+
+	if ( (error = cache_lookup_path(ndp, cnp, dp, ctx, &trailing_slash, &dp_authorized, last_dp)) ) {
+		dp = NULLVP;
+		goto bad;
+>>>>>>> origin/10.5
 	}
 
 }
@@ -1481,11 +1580,21 @@ lookup_handle_symlink(struct nameidata *ndp, vnode_t *new_dp, vfs_context_t ctx)
 
 	uio_addiov(auio, CAST_USER_ADDR_T(cp), MAXPATHLEN);
 
+<<<<<<< HEAD
 	error = VNOP_READLINK(ndp->ni_vp, auio, ctx);
 	if (error) {
 		if (need_newpathbuf)
 			FREE_ZONE(cp, MAXPATHLEN, M_NAMEI);
 		return error;
+=======
+		/*
+		 * cache_lookup_path is now responsible for dropping io ref on dp
+		 * when it is called again in the dirloop.  This ensures we hold
+		 * a ref on dp until we complete the next round of lookup.
+		 */
+		last_dp = dp;
+		goto dirloop;
+>>>>>>> origin/10.5
 	}
 
 	/* 
@@ -1522,7 +1631,52 @@ lookup_handle_symlink(struct nameidata *ndp, vnode_t *new_dp, vfs_context_t ctx)
 	 * starting point for 'relative'
 	 * symbolic link path
 	 */
+<<<<<<< HEAD
 	dp = ndp->ni_dvp;
+=======
+	if ((cnp->cn_flags & CN_WANTSRSRCFORK) && (dp != NULLVP)) {
+		vnode_t svp = NULLVP;
+		enum nsoperation nsop;
+
+		if (dp->v_type != VREG) {
+			error = ENOENT;
+			goto bad2;
+		}
+		switch (cnp->cn_nameiop) {
+		case DELETE:
+			if (cnp->cn_flags & CN_ALLOWRSRCFORK) {
+				nsop = NS_DELETE;
+			}
+			else {
+				error = EPERM;
+				goto bad;
+			}
+			break;
+		case CREATE:
+			if (cnp->cn_flags & CN_ALLOWRSRCFORK) {
+				nsop = NS_CREATE;
+			}
+			else {
+				error = EPERM;
+				goto bad;
+			}
+			break;
+		case LOOKUP:
+			/* Make sure our lookup of "/..namedfork/rsrc" is allowed. */
+			if (cnp->cn_flags & CN_ALLOWRSRCFORK) {
+				nsop = NS_OPEN;
+			} else {
+				error = EPERM;
+				goto bad2;
+			}
+			break;
+		default:
+			error = EPERM;
+			goto bad2;
+		}
+		/* Ask the file system for the resource fork. */
+		error = vnode_getnamedstream(dp, &svp, XATTR_RESOURCEFORK_NAME, nsop, 0, ctx);
+>>>>>>> origin/10.5
 
 	/*
 	 * get rid of references returned via 'lookup'

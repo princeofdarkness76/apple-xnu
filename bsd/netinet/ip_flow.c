@@ -278,6 +278,7 @@ ipflow_reap(
 	splx(s);
 	ipflow_addstats(ipf);
 	rtfree(ipf->ipf_ro.ro_rt);
+	ipf->ipf_ro.ro_rt = NULL;
 	return ipf;
 }
 
@@ -344,6 +345,7 @@ ipflow_create(
 		splx(s);
 		ipflow_addstats(ipf);
 		rtfree(ipf->ipf_ro.ro_rt);
+		ipf->ipf_ro.ro_rt = NULL;
 		ipf->ipf_uses = ipf->ipf_last_uses = 0;
 		ipf->ipf_errors = ipf->ipf_dropped = 0;
 	}

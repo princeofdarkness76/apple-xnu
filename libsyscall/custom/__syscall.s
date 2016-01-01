@@ -48,7 +48,11 @@ END(___syscall)
 // For x86-64, the kernel slides the argument list for us.
 // The number of arguments here is variable, but our macros ignore
 // that value anyway.
+<<<<<<< HEAD
 __SYSCALL(___syscall, syscall, 0);
+=======
+__SYSCALL(__syscall, syscall, 0);
+>>>>>>> origin/10.5
 
 #else
 #error Unsupported architecture

@@ -74,10 +74,14 @@ boolean_t get_range_bounds(char * c, int64_t * lower, int64_t * upper);
 extern int IODTGetDefault(const char *key, void *infoAddr, unsigned int infoSize);
 
 
+<<<<<<< HEAD
 struct i24 {
 	int32_t	i24 : 24;
 	int32_t _pad : 8;
 };
+=======
+static int argstrcpy2(char *from,char *to, unsigned maxlen);
+>>>>>>> origin/10.5
 
 #define	NUM	0
 #define	STR	1

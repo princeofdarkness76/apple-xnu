@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -184,10 +188,17 @@ host_info(host_t host, host_flavor_t flavor, host_info_t info, mach_msg_type_num
 	if (host == HOST_NULL)
 		return (KERN_INVALID_ARGUMENT);
 
+<<<<<<< HEAD
 	switch (flavor) {
 	case HOST_BASIC_INFO: {
 		register host_basic_info_t basic_info;
 		register int master_id;
+=======
+	case HOST_BASIC_INFO:
+	{
+		register host_basic_info_t	basic_info;
+		register int				master_num;
+>>>>>>> origin/10.5
 
 		/*
 		 *	Basic information about this host.
@@ -200,12 +211,21 @@ host_info(host_t host, host_flavor_t flavor, host_info_t info, mach_msg_type_num
 		basic_info->memory_size = machine_info.memory_size;
 		basic_info->max_cpus = machine_info.max_cpus;
 		basic_info->avail_cpus = processor_avail_count;
+<<<<<<< HEAD
 		master_id = master_processor->cpu_id;
 		basic_info->cpu_type = slot_type(master_id);
 		basic_info->cpu_subtype = slot_subtype(master_id);
 
 		if (*count >= HOST_BASIC_INFO_COUNT) {
 			basic_info->cpu_threadtype = slot_threadtype(master_id);
+=======
+		master_num = master_processor->cpu_num;
+		basic_info->cpu_type = slot_type(master_num);
+		basic_info->cpu_subtype = slot_subtype(master_num);
+
+		if (*count >= HOST_BASIC_INFO_COUNT) {
+			basic_info->cpu_threadtype = slot_threadtype(master_num);
+>>>>>>> origin/10.5
 			basic_info->physical_cpu = machine_info.physical_cpu;
 			basic_info->physical_cpu_max = machine_info.physical_cpu_max;
 			basic_info->logical_cpu = machine_info.logical_cpu;

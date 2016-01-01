@@ -271,6 +271,17 @@ MACRO_BEGIN								\
 	}								\
 MACRO_END
 
+<<<<<<< HEAD
+=======
+/*
+ *	extern void
+ *	ipc_kmsg_send_always(ipc_kmsg_t);
+ */
+#define	ipc_kmsg_send_always(kmsg)					\
+	ipc_kmsg_send((kmsg), MACH_SEND_ALWAYS, MACH_MSG_TIMEOUT_NONE)
+
+
+>>>>>>> origin/10.5
 /* Allocate a kernel message */
 extern ipc_kmsg_t ipc_kmsg_alloc(
         mach_msg_size_t size);

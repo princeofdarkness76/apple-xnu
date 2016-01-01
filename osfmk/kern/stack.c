@@ -64,9 +64,12 @@ static vm_offset_t		stack_free_list;
 static unsigned int		stack_free_count, stack_free_hiwat;		/* free list count */
 static unsigned int		stack_hiwat;
 unsigned int			stack_total;				/* current total count */
+<<<<<<< HEAD
 unsigned long long		stack_allocs;				/* total count of allocations */
 
 static int			stack_fake_zone_index = -1;	/* index in zone_info array */
+=======
+>>>>>>> origin/10.5
 
 static unsigned int		stack_free_target;
 static int				stack_free_delta;

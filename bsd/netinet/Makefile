@@ -33,9 +33,13 @@ PRIVATE_DATAFILES = \
 	mptcp_var.h \
 	tcp.h \
 	tcp_debug.h \
+<<<<<<< HEAD
 	tcp_var.h \
 	tcp_cache.h \
 	udp.h
+=======
+	in_gif.h ip_compat.h ip_edgehole.h
+>>>>>>> origin/10.5
 
 PRIVATE_KERNELFILES = ${KERNELFILES} \
 	ip_ecn.h ip_encap.h

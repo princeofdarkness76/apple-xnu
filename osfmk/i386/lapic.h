@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2008-2010 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -32,10 +36,13 @@
 #ifndef _I386_LAPIC_H_
 #define _I386_LAPIC_H_
 
+<<<<<<< HEAD
 /*
  * Legacy mode definitions.
  * The register offsets are no longer used by XNU - see LAPIC_MMIO_OFFSET().
  */
+=======
+>>>>>>> origin/10.5
 #define LAPIC_START			0xFEE00000
 #define LAPIC_SIZE			0x00000400
 
@@ -110,9 +117,12 @@
 #define		LAPIC_LVT_TM_LEVEL	0x08000
 #define		LAPIC_LVT_MASKED	0x10000
 #define		LAPIC_LVT_PERIODIC	0x20000
+<<<<<<< HEAD
 #define		LAPIC_LVT_TSC_DEADLINE	0x40000
 #define		LAPIC_LVT_TMR_SHIFT	17
 #define		LAPIC_LVT_TMR_MASK	3
+=======
+>>>>>>> origin/10.5
 #define LAPIC_TIMER_INITIAL_COUNT	0x00000380
 #define LAPIC_TIMER_CURRENT_COUNT	0x00000390
 #define LAPIC_TIMER_DIVIDE_CONFIG	0x000003E0
@@ -132,6 +142,7 @@
 #define CPU_NUMBER(r)				\
 	movl	%gs:CPU_NUMBER_GS,r
 
+<<<<<<< HEAD
 #ifndef	ASSEMBLER
 typedef enum {
 	ID			= 0x02,
@@ -189,6 +200,20 @@ extern  lapic_ops_table_t *lapic_ops;
 #define LAPIC_READ_ICR()		lapic_ops->read_icr()
 #define LAPIC_WRITE_ICR(dst,cmd)	lapic_ops->write_icr(dst, cmd)
 
+=======
+#define CPU_NUMBER_FROM_LAPIC(r)		\
+    	movl	EXT(lapic_id),r;		\
+    	movl	0(r),r;				\
+    	shrl	$(LAPIC_ID_SHIFT),r;		\
+    	andl	$(LAPIC_ID_MASK),r;		\
+	movl	EXT(lapic_to_cpu)(,r,4),r
+
+#ifndef	ASSEMBLER
+#include <stdint.h>
+#include <sys/cdefs.h>
+#include <mach/boolean.h>
+#include <mach/kern_return.h>
+>>>>>>> origin/10.5
 typedef enum {
 	periodic,
 	one_shot
@@ -220,12 +245,18 @@ typedef uint32_t lapic_timer_count_t;
  */
 
 #define LAPIC_PERFCNT_INTERRUPT		0xF
+<<<<<<< HEAD
 #define LAPIC_INTERPROCESSOR_INTERRUPT	0xE
 #define LAPIC_TIMER_INTERRUPT		0xD
+=======
+#define LAPIC_TIMER_INTERRUPT		0xE
+#define LAPIC_INTERPROCESSOR_INTERRUPT	0xD
+>>>>>>> origin/10.5
 #define LAPIC_THERMAL_INTERRUPT		0xC
 #define LAPIC_ERROR_INTERRUPT		0xB
 #define LAPIC_SPURIOUS_INTERRUPT	0xA
 #define LAPIC_CMCI_INTERRUPT		0x9
+<<<<<<< HEAD
 #define LAPIC_PMC_SW_INTERRUPT		0x8
 #define LAPIC_PM_INTERRUPT		0x7
 #define LAPIC_KICK_INTERRUPT		0x6
@@ -233,26 +264,48 @@ typedef uint32_t lapic_timer_count_t;
 #define LAPIC_PMC_SWI_VECTOR		(LAPIC_DEFAULT_INTERRUPT_BASE + LAPIC_PMC_SW_INTERRUPT)
 #define LAPIC_TIMER_VECTOR		(LAPIC_DEFAULT_INTERRUPT_BASE + LAPIC_TIMER_INTERRUPT)
 
+=======
+>>>>>>> origin/10.5
 /* The vector field is ignored for NMI interrupts via the LAPIC
  * or otherwise, so this is not an offset from the interrupt
  * base.
  */
 #define LAPIC_NMI_INTERRUPT		0x2
+<<<<<<< HEAD
 #define LAPIC_FUNC_TABLE_SIZE		(LAPIC_PERFCNT_INTERRUPT + 1)
+=======
+#define LAPIC_FUNC_TABLE_SIZE		LAPIC_PERFCNT_INTERRUPT
+
+#define LAPIC_WRITE(reg,val) \
+	*((volatile uint32_t *)(lapic_start + LAPIC_##reg)) = (val)
+#define LAPIC_READ(reg) \
+	(*((volatile uint32_t *)(lapic_start + LAPIC_##reg)))
+#define LAPIC_READ_OFFSET(reg,off) \
+	(*((volatile uint32_t *)(lapic_start + LAPIC_##reg + (off))))
+>>>>>>> origin/10.5
 
 #define LAPIC_VECTOR(src) \
 	(lapic_interrupt_base + LAPIC_##src##_INTERRUPT)
 
 #define LAPIC_ISR_IS_SET(base,src) \
+<<<<<<< HEAD
 	(LAPIC_READ_OFFSET(ISR_BASE,(base+LAPIC_##src##_INTERRUPT)/32) \
 		& (1 <<((base + LAPIC_##src##_INTERRUPT)%32)))
 
+=======
+	(LAPIC_READ_OFFSET(ISR_BASE,((base+LAPIC_##src##_INTERRUPT)/32)*0x10) \
+		& (1 <<((base + LAPIC_##src##_INTERRUPT)%32)))
+
+extern vm_offset_t	lapic_start;
+
+>>>>>>> origin/10.5
 extern void		lapic_init(void);
 extern void		lapic_configure(void);
 extern void		lapic_shutdown(void);
 extern void		lapic_smm_restore(void);
 extern boolean_t	lapic_probe(void);
 extern void		lapic_dump(void);
+<<<<<<< HEAD
 extern void		lapic_cpu_map_dump(void);
 extern int		lapic_interrupt(
 				int interrupt, x86_saved_state_t *state);
@@ -276,6 +329,16 @@ extern void		lapic_config_timer(
 
 extern void		lapic_set_timer_fast(
 				lapic_timer_count_t	initial_count);
+=======
+extern int		lapic_interrupt(
+				int interrupt, x86_saved_state_t *state);
+extern void		lapic_end_of_interrupt(void);
+extern int		lapic_to_cpu[];
+extern int		cpu_to_lapic[];
+extern int		lapic_interrupt_base;
+extern void		lapic_cpu_map(int lapic, int cpu_num);
+extern uint32_t		ml_get_apicid(uint32_t cpu);
+>>>>>>> origin/10.5
 
 extern void		lapic_set_timer(
 				boolean_t		interrupt,
@@ -289,6 +352,7 @@ extern void		lapic_get_timer(
 				lapic_timer_count_t	*initial_count,
 				lapic_timer_count_t	*current_count);
 
+<<<<<<< HEAD
 extern void		lapic_config_tsc_deadline_timer(void);
 extern void		lapic_set_tsc_deadline_timer(uint64_t deadline);
 extern uint64_t		lapic_get_tsc_deadline_timer(void);
@@ -298,10 +362,16 @@ extern void		lapic_set_intr_func(int intr, i386_intr_func_t func);
 
 extern void		lapic_set_pmi_func(i386_intr_func_t);
 
+=======
+typedef	int (*i386_intr_func_t)(x86_saved_state_t *state);
+extern void		lapic_set_intr_func(int intr, i386_intr_func_t func);
+
+>>>>>>> origin/10.5
 static inline void	lapic_set_timer_func(i386_intr_func_t func)
 {
 	lapic_set_intr_func(LAPIC_VECTOR(TIMER), func);
 }
+<<<<<<< HEAD
 /* We don't support dynamic adjustment of the LAPIC timer base vector here
  * it's effectively incompletely supported elsewhere as well.
  */
@@ -309,6 +379,12 @@ static inline void	lapic_timer_swi(void) {
 	__asm__ __volatile__("int %0" :: "i"(LAPIC_DEFAULT_INTERRUPT_BASE + LAPIC_TIMER_INTERRUPT):"memory");
 }
 
+=======
+static inline void	lapic_set_pmi_func(i386_intr_func_t func)
+{
+	lapic_set_intr_func(LAPIC_VECTOR(PERFCNT), func);
+}
+>>>>>>> origin/10.5
 static inline void	lapic_set_thermal_func(i386_intr_func_t func)
 {
 	lapic_set_intr_func(LAPIC_VECTOR(THERMAL), func);
@@ -317,6 +393,7 @@ static inline void	lapic_set_cmci_func(i386_intr_func_t func)
 {
 	lapic_set_intr_func(LAPIC_VECTOR(CMCI), func);
 }
+<<<<<<< HEAD
 static inline void	lapic_set_pm_func(i386_intr_func_t func)
 {
 	lapic_set_intr_func(LAPIC_VECTOR(PM), func);
@@ -330,6 +407,9 @@ extern void		lapic_disable_timer(void);
 extern uint8_t		lapic_get_cmci_vector(void);
 
 #define	MAX_LAPICIDS	(LAPIC_ID_MAX+1)
+=======
+
+>>>>>>> origin/10.5
 #ifdef MP_DEBUG
 #define LAPIC_CPU_MAP_DUMP()	lapic_cpu_map_dump()
 #define LAPIC_DUMP()		lapic_dump()

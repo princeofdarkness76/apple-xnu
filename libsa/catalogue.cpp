@@ -124,12 +124,218 @@ bool validateExtensionDict(OSDictionary * extension) {
         result = false;
         goto finish;
     }
+<<<<<<< HEAD
     if (!VERS_parse_string(stringValue->getCStringNoCopy(),
         &vers)) {
         IOLog(VTYELLOW "Extension \"%s\" has an invalid "
             "\"CFBundleVersion\" property.\n" VTRESET,
             name->getCStringNoCopy());
         LOG_DELAY();
+=======
+    // CFBundleVersion is of valid form
+    vers = VERS_parse_string(stringValue->getCStringNoCopy());
+    if (vers < 0) {
+        result = false;
+        goto finish;
+    }
+
+    // OSBundleCompatibleVersion is a string - OPTIONAL
+    rawValue = extension->getObject("OSBundleCompatibleVersion");
+    if (rawValue) {
+        stringValue = OSDynamicCast(OSString, rawValue);
+        if (!stringValue) {
+            result = false;
+            goto finish;
+        }
+
+        // OSBundleCompatibleVersion is of valid form
+        compatible_vers = VERS_parse_string(stringValue->getCStringNoCopy());
+        if (compatible_vers < 0) {
+            result = false;
+            goto finish;
+        }
+
+        // OSBundleCompatibleVersion <= CFBundleVersion
+        if (compatible_vers > vers) {
+            result = false;
+            goto finish;
+        }
+    }
+
+    // CFBundleExecutable is a string - OPTIONAL
+    rawValue = extension->getObject("CFBundleExecutable");
+    if (rawValue) {
+        stringValue = OSDynamicCast(OSString, rawValue);
+        if (!stringValue || stringValue->getLength() == 0) {
+            result = false;
+            goto finish;
+        }
+        has_executable = true;
+    }
+
+    // OSKernelResource is a boolean value - OPTIONAL
+    rawValue = extension->getObject("OSKernelResource");
+    if (rawValue) {
+        booleanValue = OSDynamicCast(OSBoolean, rawValue);
+        if (!booleanValue) {
+            result = false;
+            goto finish;
+        }
+        is_kernel_resource = booleanValue->isTrue();
+    }
+
+    // IOKitPersonalities is a dictionary - OPTIONAL
+    rawValue = extension->getObject("IOKitPersonalities");
+    if (rawValue) {
+        personalities = OSDynamicCast(OSDictionary, rawValue);
+        if (!personalities) {
+            result = false;
+            goto finish;
+        }
+
+        keyIterator = OSCollectionIterator::withCollection(personalities);
+        if (!keyIterator) {
+            IOLog("Error: Failed to allocate iterator for personalities.\n");
+            LOG_DELAY();
+            result = false;
+            goto finish;
+        }
+
+        while ((key = OSDynamicCast(OSString, keyIterator->getNextObject()))) {
+            OSDictionary * personality = NULL;  // do not release
+
+            // Each personality is a dictionary
+            personality = OSDynamicCast(OSDictionary,
+                personalities->getObject(key));
+            if (!personality) {
+                result = false;
+                goto finish;
+            }
+
+            //   IOClass exists as a string - REQUIRED
+            if (!OSDynamicCast(OSString, personality->getObject("IOClass"))) {
+                result = false;
+                goto finish;
+            }
+
+            //   IOProviderClass exists as a string - REQUIRED
+            if (!OSDynamicCast(OSString,
+                personality->getObject("IOProviderClass"))) {
+
+                result = false;
+                goto finish;
+            }
+
+            // CFBundleIdentifier is a string - OPTIONAL - INSERT IF ABSENT!
+            rawValue = personality->getObject("CFBundleIdentifier");
+            if (!rawValue) {
+                personality->setObject("CFBundleIdentifier", bundleIdentifier);
+            } else {
+                OSString * personalityID = NULL;    // do not release
+                personalityID = OSDynamicCast(OSString, rawValue);
+                if (!personalityID) {
+                    result = false;
+                    goto finish;
+                } else {
+                    // Length of CFBundleIdentifier is not >= KMOD_MAX_NAME
+                    if (personalityID->getLength() >= KMOD_MAX_NAME) {
+                        result = false;
+                        goto finish;
+                    }
+                }
+            }
+
+            // IOKitDebug is a number - OPTIONAL
+            rawValue = personality->getObject("IOKitDebug");
+            if (rawValue && !OSDynamicCast(OSNumber, rawValue)) {
+                result = false;
+                goto finish;
+            }
+        }
+
+        keyIterator->release();
+        keyIterator = NULL;
+    }
+
+
+    // OSBundleLibraries is a dictionary - REQUIRED if
+    // not kernel resource & has executable
+    //
+    rawValue = extension->getObject("OSBundleLibraries");
+    if (!rawValue && !is_kernel_resource && has_executable) {
+        result = false;
+        goto finish;
+    }
+
+    if (rawValue) {
+        libraries = OSDynamicCast(OSDictionary, rawValue);
+        if (!libraries) {
+            result = false;
+            goto finish;
+        }
+
+        keyIterator = OSCollectionIterator::withCollection(libraries);
+        if (!keyIterator) {
+            IOLog("Error: Failed to allocate iterator for libraries.\n");
+            LOG_DELAY();
+            result = false;
+            goto finish;
+        }
+
+        while ((key = OSDynamicCast(OSString,
+            keyIterator->getNextObject()))) {
+
+            OSString * libraryVersion = NULL;  // do not release
+
+            // Each key's length is not >= KMOD_MAX_NAME
+            if (key->getLength() >= KMOD_MAX_NAME) {
+                result = false;
+                goto finish;
+            }
+
+            libraryVersion = OSDynamicCast(OSString,
+                libraries->getObject(key));
+            if (!libraryVersion) {
+                result = false;
+                goto finish;
+            }
+
+            // Each value is a valid version string
+            vers = VERS_parse_string(libraryVersion->getCStringNoCopy());
+            if (vers < 0) {
+                result = false;
+                goto finish;
+            }
+        }
+
+        keyIterator->release();
+        keyIterator = NULL;
+    }
+
+    // OSBundleRequired, if present, must have a legal value.
+    // If it is not present and if we are safe-booting,
+    // then the kext is not eligible.
+    //
+    rawValue = extension->getObject("OSBundleRequired");
+    if (rawValue) {
+        stringValue = OSDynamicCast(OSString, rawValue);
+        if (!stringValue) {
+            result = false;
+            goto finish;
+        }
+        if (!stringValue->isEqualTo("Root") &&
+            !stringValue->isEqualTo("Local-Root") &&
+            !stringValue->isEqualTo("Network-Root") &&
+            !stringValue->isEqualTo("Safe Boot") &&
+            !stringValue->isEqualTo("Console")) {
+
+            result = false;
+            goto finish;
+        }
+
+    } else if (PE_parse_boot_argn("-x", namep, sizeof (namep))) { /* safe boot */
+        ineligible_for_safe_boot = true;
+>>>>>>> origin/10.5
         result = false;
         goto finish;
     }
@@ -685,7 +891,25 @@ bool extractExtensionsFromArchive(MemoryMapFileInfo * mkext_file_info,
     OSData         * moduleInfo = 0;  // must release
     MkextEntryInfo   module_info;
 
+<<<<<<< HEAD
     mkext_data = (mkext_header *)mkext_file_info->paddr;
+=======
+    IORegistryEntry * root;
+    OSData * checksumObj;
+
+    if (vaddr) {
+	// addExtensionsFromArchive passes a kernel virtual address
+	mkext_data = (mkext_header *)mkext_file_info->paddr;
+    } else {
+#if defined (__ppc__) || defined (__arm__)
+	mkext_data = (mkext_header *)ml_static_ptovirt(mkext_file_info->paddr);
+#elif defined (__i386__)
+	mkext_data = (mkext_header *)ml_boot_ptovirt(mkext_file_info->paddr);
+#else
+#error unsupported architecture
+#endif
+    }
+>>>>>>> origin/10.5
 
     if (OSSwapBigToHostInt32(mkext_data->magic) != MKEXT_MAGIC ||
         OSSwapBigToHostInt32(mkext_data->signature) != MKEXT_SIGN) {
@@ -715,6 +939,19 @@ bool extractExtensionsFromArchive(MemoryMapFileInfo * mkext_file_info,
         goto finish;
     }
 
+<<<<<<< HEAD
+=======
+    root = IORegistryEntry::getRegistryRoot();
+    assert(root);
+    checksumObj = OSData::withBytes((void *)&checksum,
+        sizeof(checksum));
+    assert(checksumObj);
+    if (checksumObj) {
+        root->setProperty(kIOStartupMkextCRC, checksumObj);
+        checksumObj->release();
+    }
+
+>>>>>>> origin/10.5
    /* If the MKEXT archive isn't fat, check that the CPU type & subtype
     * match that of the running kernel.
     */

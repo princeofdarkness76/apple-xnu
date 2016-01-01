@@ -69,5 +69,8 @@ kdp_reset(void);
 
 void
 kdp_init(void);
+<<<<<<< HEAD
 
 void kdp_machine_init(void);
+=======
+>>>>>>> origin/10.5

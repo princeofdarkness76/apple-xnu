@@ -38,6 +38,7 @@
 
 #include <kern/queue.h>
 
+<<<<<<< HEAD
 /* Kernel trace events associated with timers and timer queues */
 #define DECR_TRAP_LATENCY	MACHDBG_CODE(DBG_MACH_EXCP_DECI, 0)
 #define DECR_SET_DEADLINE	MACHDBG_CODE(DBG_MACH_EXCP_DECI, 1)
@@ -59,11 +60,14 @@
 #define DECR_TIMER_OVERDUE	MACHDBG_CODE(DBG_MACH_EXCP_DECI,14)
 #define DECR_TIMER_RESCAN	MACHDBG_CODE(DBG_MACH_EXCP_DECI,15)
 
+=======
+>>>>>>> origin/10.5
 /*
  *	Invoked by kernel, implemented by platform.
  */
 
 /* Request an expiration deadline, returns queue association */
+<<<<<<< HEAD
 extern mpqueue_head_t *	timer_queue_assign(
 				uint64_t		deadline);
 
@@ -96,11 +100,22 @@ extern void		timer_call_nosync_cpu(
 				int			cpu,
 				void			(*fn)(void *),
 				void			*arg);
+=======
+extern queue_t		timer_queue_assign(
+						uint64_t		deadline);
+
+/* Cancel an associated expiration deadline and specify new deadline */
+extern void			timer_queue_cancel(
+						queue_t			queue,
+						uint64_t		deadline,
+						uint64_t		new_deadline);
+>>>>>>> origin/10.5
 
 /*
  *	Invoked by platform, implemented by kernel.
  */
 
+<<<<<<< HEAD
 /*
  *	Invoked by kernel, implemented by platform.
  */
@@ -183,6 +198,16 @@ extern void		timer_queue_trace_cpu(int cpu);
 
 extern uint64_t		timer_sysctl_get(int oid);
 extern int		timer_sysctl_set(int oid, uint64_t value);
+=======
+/* Process deadline expiration for queue, returns new deadline */
+extern uint64_t		timer_queue_expire(
+						queue_t			queue,
+						uint64_t		deadline);
+
+/* Shutdown a timer queue and reassign existing activities */
+extern void			timer_queue_shutdown(
+						queue_t			queue);
+>>>>>>> origin/10.5
 
 #endif	/* MACH_KERNEL_PRIVATE */
 

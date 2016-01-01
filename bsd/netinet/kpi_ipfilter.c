@@ -351,12 +351,21 @@ ipf_injectv4_out(mbuf_t data, ipfilter_t filter_ref, ipf_pktopts_t options)
 	    IP_ALLOWBROADCAST | IP_RAWOUTPUT | IP_OUTARGS, imo, &ipoa);
 
 	/* Release the route */
+<<<<<<< HEAD
 	ROUTE_RELEASE(&ro);
 
 	if (imo != NULL)
 		IMO_REMREF(imo);
 
 	return (error);
+=======
+	if (ro.ro_rt) {
+		rtfree(ro.ro_rt);
+		ro.ro_rt = NULL;
+	}
+	
+	return error;
+>>>>>>> origin/10.5
 }
 
 #if INET6
@@ -423,12 +432,21 @@ ipf_injectv6_out(mbuf_t data, ipfilter_t filter_ref, ipf_pktopts_t options)
 	error = ip6_output(m, NULL, &ro, IPV6_OUTARGS, im6o, NULL, &ip6oa);
 
 	/* Release the route */
+<<<<<<< HEAD
 	ROUTE_RELEASE(&ro);
 
 	if (im6o != NULL)
 		IM6O_REMREF(im6o);
 
 	return (error);
+=======
+	if (ro.ro_rt) {
+		rtfree(ro.ro_rt);
+		ro.ro_rt = NULL;
+	}
+	
+	return error;
+>>>>>>> origin/10.5
 }
 #endif /* INET6 */
 

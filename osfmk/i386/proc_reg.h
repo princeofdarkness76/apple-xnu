@@ -424,9 +424,12 @@ static inline void stac(void)
 
 #define rdtsc(lo,hi) \
 	__asm__ volatile("lfence; rdtsc; lfence" : "=a" (lo), "=d" (hi))
+<<<<<<< HEAD
 
 #define rdtsc_nofence(lo,hi) \
 	__asm__ volatile("rdtsc" : "=a" (lo), "=d" (hi))
+=======
+>>>>>>> origin/10.5
 
 #define write_tsc(lo,hi) wrmsr(0x10, lo, hi)
 
@@ -459,9 +462,25 @@ static inline void wrmsr64(uint32_t msr, uint64_t val)
 
 static inline uint64_t rdtsc64(void)
 {
+<<<<<<< HEAD
 	uint64_t lo, hi;
 	rdtsc(lo, hi);
 	return ((hi) << 32) | (lo);
+=======
+	uint64_t ret;
+	__asm__ volatile("lfence; rdtsc; lfence" : "=A" (ret));
+	return ret;
+}
+
+static inline uint64_t rdtscp64(uint32_t *aux)
+{
+	uint64_t ret;
+	__asm__ volatile("rdtscp; mov %%ecx, %1"
+				: "=A" (ret), "=m" (*aux)
+				:
+				: "ecx");
+	return ret;
+>>>>>>> origin/10.5
 }
 
 static inline uint64_t rdtscp64(uint32_t *aux)
@@ -647,5 +666,11 @@ __END_DECLS
 #define MSR_IA32_GS_BASE			0xC0000101
 #define MSR_IA32_KERNEL_GS_BASE			0xC0000102
 #define MSR_IA32_TSC_AUX			0xC0000103
+
+#define MSR_IA32_BIOS_SIGN_ID	0x08B
+
+#define MSR_FLEX_RATIO		0x194
+#define MSR_PLATFORM_INFO	0x0ce
+#define MSR_CORE_THREAD_COUNT	0x035
 
 #endif	/* _I386_PROC_REG_H_ */

@@ -167,13 +167,37 @@ dtrace_ptss_allocate_page(struct proc* p)
 	vm_prot_t cur_protection = VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE;
 	vm_prot_t max_protection = VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE;
 
+<<<<<<< HEAD
 	mach_vm_offset_t addr = 0;
 	mach_vm_size_t size = PAGE_SIZE; // We need some way to assert that this matches vm_map_round_page() !!!
 	kern_return_t kr = mach_vm_map(map, &addr, size, 0, VM_FLAGS_ANYWHERE, IPC_PORT_NULL, 0, FALSE, cur_protection, max_protection, VM_INHERIT_DEFAULT);
+=======
+#if CONFIG_EMBEDDED
+	/* The embedded OS has extra permissions for writable and executable pages. We can't pass in the flags
+	 * we need for the correct permissions from mach_vm_allocate, so need to call mach_vm_map directly. */
+	vm_map_offset_t map_addr = 0;
+	kern_return_t kr = mach_vm_map(map, &map_addr, size, 0, VM_FLAGS_ANYWHERE, IPC_PORT_NULL, 0, FALSE, VM_PROT_READ|VM_PROT_EXECUTE, VM_PROT_READ|VM_PROT_EXECUTE, VM_INHERIT_DEFAULT);
+	if (kr != KERN_SUCCESS) {
+		goto err;
+	}
+	addr = map_addr;
+#else
+	kern_return_t kr = mach_vm_allocate(map, &addr, size, VM_FLAGS_ANYWHERE);
+>>>>>>> origin/10.5
 	if (kr != KERN_SUCCESS) {
 		goto err;
 	}
 
+<<<<<<< HEAD
+=======
+	kr = mach_vm_protect(map, addr, size, 0, VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
+	if (kr != KERN_SUCCESS) {
+		mach_vm_deallocate(map, addr, size);
+		goto err;
+	}	
+#endif
+
+>>>>>>> origin/10.5
 	// Chain the page entries.
 	int i;
 	for (i=0; i<DTRACE_PTSS_ENTRIES_PER_PAGE; i++) {

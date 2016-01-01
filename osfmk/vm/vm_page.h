@@ -273,6 +273,7 @@ struct vm_page {
 	 */
 			clustered:1,	/* page is not the faulted page (O) or (O-shared AND pmap_page) */
 			pmapped:1,     	/* page has been entered at some
+<<<<<<< HEAD
                				 * point into a pmap (O) or (O-shared AND pmap_page) */
 		        xpmapped:1,	/* page has been entered with execute permission (O)
 					   or (O-shared AND pmap_page) */
@@ -280,6 +281,11 @@ struct vm_page {
 			wpmapped:1,     /* page has been entered at some
 					 * point into a pmap for write (O) */
 			pageout:1,	/* page wired & busy for pageout (O) */
+=======
+					 * point into a pmap (O) */
+			wpmapped:1,     /* page has been entered at some
+					 * point into a pmap for write (O) */
+>>>>>>> origin/10.5
 			absent:1,	/* Data has been requested, but is
 					 *  not yet available (O) */
 			error:1,	/* Data manager was unable to provide
@@ -300,6 +306,7 @@ struct vm_page {
 			encrypted_cleaning:1,	/* encrypting page */
 			cs_validated:1,    /* code-signing: page was checked */	
 			cs_tainted:1,	   /* code-signing: page is tainted */
+<<<<<<< HEAD
 			cs_nx:1,	   /* code-signing: page is nx */
 			reusable:1,
 		        lopage:1,
@@ -307,6 +314,17 @@ struct vm_page {
 		        compressor:1,	/* page owned by compressor pool */
 		        written_by_kernel:1,	/* page was written by kernel (i.e. decompressed) */
 			__unused_object_bits:4;  /* 5 bits available here */
+=======
+			no_cache:1,	   /* page is not to be cached and */
+					   /* should be reused ahead of    */
+					   /* other pages		   */
+	                deactivated:1,
+			zero_fill:1,
+			__unused_object_bits:8;  /* 8 bits available here */
+
+	ppnum_t		phys_page;	/* Physical address of page, passed
+					 *  to pmap_enter (read-only) */
+>>>>>>> origin/10.5
 };
 
 #define DEBUG_ENCRYPTED_SWAP	1
@@ -673,6 +691,7 @@ extern void		vm_page_insert(
 					vm_object_t		object,
 					vm_object_offset_t	offset);
 
+<<<<<<< HEAD
 extern void		vm_page_insert_wired(
 					vm_page_t		page,
 					vm_object_t		object,
@@ -689,6 +708,13 @@ extern void		vm_page_insert_internal(
 					boolean_t		batch_pmap_op,
 					boolean_t               delayed_accounting,
 					uint64_t		*delayed_ledger_update);
+=======
+extern void		vm_page_insert_internal(
+	                                vm_page_t		page,
+					vm_object_t		object,
+					vm_object_offset_t	offset,
+					boolean_t		queues_lock_held);
+>>>>>>> origin/10.5
 
 extern void		vm_page_replace(
 					vm_page_t		mem,
@@ -736,6 +762,7 @@ extern void		vm_page_validate_cs(vm_page_t	page);
 extern void		vm_page_validate_cs_mapped(
 	vm_page_t	page,
 	const void	*kaddr);
+<<<<<<< HEAD
 extern void		vm_page_validate_cs_mapped_chunk(
 	vm_page_t	page,
 	const void	*kaddr,
@@ -777,6 +804,8 @@ extern void memorystatus_pages_update(unsigned int pages_avail);
 
 
 #endif /* CONFIG_JETSAM */
+=======
+>>>>>>> origin/10.5
 
 /*
  *	Functions implemented as macros. m->wanted and m->busy are
@@ -862,7 +891,68 @@ extern void vm_page_queues_assert(vm_page_t mem, int val);
 #if DEVELOPMENT || DEBUG
 #define VM_PAGE_SPECULATIVE_USED_ADD()				\
 	MACRO_BEGIN						\
+<<<<<<< HEAD
 	OSAddAtomic(1, &vm_page_speculative_used);	\
+=======
+	assert(!mem->laundry);					\
+	if (mem->active) {					\
+		assert(mem->object != kernel_object);		\
+		assert(!mem->inactive && !mem->speculative);	\
+		assert(!mem->throttled);			\
+		queue_remove(&vm_page_queue_active,		\
+			mem, vm_page_t, pageq);			\
+		mem->active = FALSE;				\
+		if (!mem->fictitious) {				\
+			vm_page_active_count--;			\
+		} else {					\
+			assert(mem->phys_page ==		\
+			       vm_page_fictitious_addr);	\
+		}						\
+	}							\
+								\
+	else if (mem->inactive) {				\
+		assert(mem->object != kernel_object);		\
+		assert(!mem->active && !mem->speculative);	\
+		assert(!mem->throttled);			\
+		if (mem->zero_fill) {				\
+			queue_remove(&vm_page_queue_zf,		\
+			mem, vm_page_t, pageq);			\
+			vm_zf_queue_count--;			\
+		} else {					\
+			queue_remove(&vm_page_queue_inactive,	\
+			mem, vm_page_t, pageq);			\
+		}						\
+		mem->inactive = FALSE;				\
+		if (!mem->fictitious) {				\
+			vm_page_inactive_count--;		\
+			vm_purgeable_q_advance_all();		\
+		} else {					\
+			assert(mem->phys_page ==		\
+			       vm_page_fictitious_addr);	\
+		}						\
+	}							\
+								\
+	else if (mem->throttled) {				\
+		assert(!mem->active && !mem->inactive);		\
+		assert(!mem->speculative);			\
+		queue_remove(&vm_page_queue_throttled,		\
+			     mem, vm_page_t, pageq);		\
+		mem->throttled = FALSE;				\
+		if (!mem->fictitious)				\
+			vm_page_throttled_count--;		\
+	}							\
+								\
+	else if (mem->speculative) {				\
+		assert(!mem->active && !mem->inactive);		\
+		assert(!mem->throttled);			\
+		assert(!mem->fictitious);			\
+                remque(&mem->pageq);				\
+		mem->speculative = FALSE;			\
+		vm_page_speculative_count--;			\
+	}							\
+	mem->pageq.next = NULL;					\
+	mem->pageq.prev = NULL;					\
+>>>>>>> origin/10.5
 	MACRO_END
 #else
 #define	VM_PAGE_SPECULATIVE_USED_ADD()

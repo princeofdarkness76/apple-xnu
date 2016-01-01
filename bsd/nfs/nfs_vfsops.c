@@ -2,6 +2,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 2000-2001 Apple Computer, Inc. All rights reserved.
@@ -12,6 +13,9 @@
 =======
  * Copyright (c) 2000-2004 Apple Computer, Inc. All rights reserved.
 >>>>>>> origin/10.3
+=======
+ * Copyright (c) 2000-2008 Apple Inc.  All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -5740,9 +5744,13 @@ int
 nfs_vfs_sysctl(int *name, u_int namelen, user_addr_t oldp, size_t *oldlenp,
            user_addr_t newp, size_t newlen, vfs_context_t ctx)
 {
+<<<<<<< HEAD
 	int error = 0, val;
 <<<<<<< HEAD
 	int softnobrowse;
+=======
+	int error = 0, val, softnobrowse;
+>>>>>>> origin/10.5
 	struct sysctl_req *req = NULL;
 	union union_vfsidctl vc;
 	mount_t mp;
@@ -6163,11 +6171,19 @@ ustat_skip:
 	case VFS_CTL_QUERY:
 		lck_mtx_lock(&nmp->nm_lock);
 		/* XXX don't allow users to know about/disconnect unresponsive, soft, nobrowse mounts */
+<<<<<<< HEAD
 		softnobrowse = (NMFLAG(nmp, SOFT) && (vfs_flags(nmp->nm_mountp) & MNT_DONTBROWSE));
 		if (!softnobrowse && (nmp->nm_state & NFSSTA_TIMEO))
 			vq.vq_flags |= VQ_NOTRESP;
 <<<<<<< HEAD
 		if (!softnobrowse && (nmp->nm_state & NFSSTA_JUKEBOXTIMEO) && !NMFLAG(nmp, MUTEJUKEBOX))
+=======
+		softnobrowse = ((nmp->nm_flag & NFSMNT_SOFT) && (vfs_flags(nmp->nm_mountp) & MNT_DONTBROWSE));
+		if (!softnobrowse && (nmp->nm_state & (NFSSTA_TIMEO|NFSSTA_JUKEBOXTIMEO)))
+			vq.vq_flags |= VQ_NOTRESP;
+		if (!softnobrowse && !(nmp->nm_flag & (NFSMNT_NOLOCKS|NFSMNT_LOCALLOCKS)) &&
+		    (nmp->nm_state & NFSSTA_LOCKTIMEO))
+>>>>>>> origin/10.5
 			vq.vq_flags |= VQ_NOTRESP;
 		if (!softnobrowse && (nmp->nm_state & NFSSTA_LOCKTIMEO) &&
 		    (nmp->nm_lockmode == NFS_LOCK_MODE_ENABLED))

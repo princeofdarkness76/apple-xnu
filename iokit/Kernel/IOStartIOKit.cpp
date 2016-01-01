@@ -76,8 +76,11 @@ OSSet *          gIORemoveOnReadProperties;
 extern "C" {
 
 extern void OSlibkernInit (void);
+<<<<<<< HEAD
 
 void iokit_post_constructor_init(void);
+=======
+>>>>>>> origin/10.5
 
 #include <kern/clock.h>
 #include <sys/time.h>

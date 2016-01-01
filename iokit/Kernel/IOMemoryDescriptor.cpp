@@ -1686,6 +1686,12 @@ void IOGeneralMemoryDescriptor::free()
 #endif /* !__LP64__ */
 	else
 	    IODelete(_ranges.v, IOVirtualRange, _rangesCount);
+<<<<<<< HEAD
+=======
+
+	_ranges.v = NULL;
+    }
+>>>>>>> origin/10.5
 
 	_ranges.v = NULL;
     }
@@ -3658,6 +3664,132 @@ bool IOMemoryMap::setMemoryDescriptor(IOMemoryDescriptor * _memory, mach_vm_size
     return( true );
 }
 
+<<<<<<< HEAD
+=======
+struct IOMemoryDescriptorMapAllocRef
+{
+    ipc_port_t		sharedMem;
+    mach_vm_address_t	mapped;
+    mach_vm_size_t	size;
+    mach_vm_size_t	sourceOffset;
+    IOOptionBits	options;
+};
+
+static kern_return_t IOMemoryDescriptorMapAlloc(vm_map_t map, void * _ref)
+{
+    IOMemoryDescriptorMapAllocRef * ref = (IOMemoryDescriptorMapAllocRef *)_ref;
+    IOReturn			    err;
+
+    do {
+        if( ref->sharedMem)
+	{
+            vm_prot_t prot = VM_PROT_READ
+                            | ((ref->options & kIOMapReadOnly) ? 0 : VM_PROT_WRITE);
+
+	    // VM system requires write access to change cache mode
+	    if (kIOMapDefaultCache != (ref->options & kIOMapCacheMask))
+		prot |= VM_PROT_WRITE;
+
+            // set memory entry cache
+            vm_prot_t memEntryCacheMode = prot | MAP_MEM_ONLY;
+            switch (ref->options & kIOMapCacheMask)
+            {
+		case kIOMapInhibitCache:
+                    SET_MAP_MEM(MAP_MEM_IO, memEntryCacheMode);
+                    break;
+	
+		case kIOMapWriteThruCache:
+                    SET_MAP_MEM(MAP_MEM_WTHRU, memEntryCacheMode);
+                    break;
+
+		case kIOMapWriteCombineCache:
+                    SET_MAP_MEM(MAP_MEM_WCOMB, memEntryCacheMode);
+                    break;
+
+		case kIOMapCopybackCache:
+                    SET_MAP_MEM(MAP_MEM_COPYBACK, memEntryCacheMode);
+                    break;
+
+		case kIOMapDefaultCache:
+		default:
+                    SET_MAP_MEM(MAP_MEM_NOOP, memEntryCacheMode);
+                    break;
+            }
+
+            vm_size_t unused = 0;
+
+            err = mach_make_memory_entry( NULL /*unused*/, &unused, 0 /*unused*/, 
+                                            memEntryCacheMode, NULL, ref->sharedMem );
+            if (KERN_SUCCESS != err)
+                IOLog("MAP_MEM_ONLY failed %d\n", err);
+
+            err = mach_vm_map( map,
+                            &ref->mapped,
+                            ref->size, 0 /* mask */, 
+                            (( ref->options & kIOMapAnywhere ) ? VM_FLAGS_ANYWHERE : VM_FLAGS_FIXED)
+                            | VM_MAKE_TAG(VM_MEMORY_IOKIT), 
+                            ref->sharedMem, ref->sourceOffset,
+                            false, // copy
+                            prot, // cur
+                            prot, // max
+                            VM_INHERIT_NONE);
+
+            if( KERN_SUCCESS != err) {
+                ref->mapped = 0;
+                continue;
+            }
+    
+        }
+	else
+	{
+            err = mach_vm_allocate( map, &ref->mapped, ref->size,
+                            ((ref->options & kIOMapAnywhere) ? VM_FLAGS_ANYWHERE : VM_FLAGS_FIXED)
+                            | VM_MAKE_TAG(VM_MEMORY_IOKIT) );
+            if( KERN_SUCCESS != err) {
+                ref->mapped = 0;
+                continue;
+            }
+            // we have to make sure that these guys don't get copied if we fork.
+            err = vm_inherit( map, ref->mapped, ref->size, VM_INHERIT_NONE);
+            assert( KERN_SUCCESS == err );
+        }
+    }
+    while( false );
+
+    return( err );
+}
+
+kern_return_t 
+IOMemoryDescriptorMapMemEntry(vm_map_t map, ipc_port_t entry, IOOptionBits options, bool pageable,
+				mach_vm_size_t offset, 
+				mach_vm_address_t * address, mach_vm_size_t length)
+{
+    IOReturn err;
+    IOMemoryDescriptorMapAllocRef ref;
+
+    ref.sharedMem	 = entry;
+    ref.sourceOffset = trunc_page_64(offset);
+    ref.options		 = options;
+
+    ref.size = length;
+
+    if (options & kIOMapAnywhere)
+	// vm_map looks for addresses above here, even when VM_FLAGS_ANYWHERE
+	ref.mapped = 0;
+    else
+	ref.mapped = *address;
+
+    if( ref.sharedMem && (map == kernel_map) && pageable)
+	err = IOIteratePageableMaps( ref.size, &IOMemoryDescriptorMapAlloc, &ref );
+    else
+	err = IOMemoryDescriptorMapAlloc( map, &ref );
+
+    *address = ref.mapped;
+    return (err);
+}
+
+
+>>>>>>> origin/10.5
 IOReturn IOMemoryDescriptor::doMap(
 	vm_map_t		__addressMap,
 	IOVirtualAddress *	__address,
@@ -3699,7 +3831,11 @@ IOReturn IOMemoryDescriptor::handleFault(
     return (kIOReturnSuccess);
 }
 
+<<<<<<< HEAD
 IOReturn IOMemoryDescriptor::populateDevicePager(
+=======
+IOReturn IOMemoryDescriptor::handleFault(
+>>>>>>> origin/10.5
         void *			_pager,
 	vm_map_t		addressMap,
 	mach_vm_address_t	address,

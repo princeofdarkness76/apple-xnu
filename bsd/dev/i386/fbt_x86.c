@@ -642,9 +642,28 @@ fbt_perfCallback(
 static void
 __provide_probe_64(struct modctl *ctl, uintptr_t instrLow, uintptr_t instrHigh, char *modname, char* symbolName, machine_inst_t* symbolStart)
 {
+<<<<<<< HEAD
 	unsigned int			j;
 	unsigned int			doenable = 0;
 	dtrace_id_t			thisid;
+=======
+#pragma unused(arg)
+	struct mach_header			*mh;
+	struct load_command         *cmd;
+	struct segment_command      *orig_ts = NULL, *orig_le = NULL;
+	struct symtab_command       *orig_st = NULL;
+	struct nlist                *sym = NULL;
+	char						*strings;
+	uintptr_t					instrLow, instrHigh;
+	char						*modname;
+	unsigned int i, j;
+
+	int gIgnoreFBTBlacklist = 0;
+	PE_parse_boot_argn("IgnoreFBTBlacklist", &gIgnoreFBTBlacklist, sizeof (gIgnoreFBTBlacklist));
+
+	mh = (struct mach_header *)(ctl->address);
+	modname = ctl->mod_modname;
+>>>>>>> origin/10.5
 
 	fbt_probe_t *newfbt, *retfbt, *entryfbt;
 	machine_inst_t *instr, *limit, theInstr, i1, i2, i3;
@@ -973,6 +992,109 @@ __kernel_syms_provide_module(void *arg, struct modctl *ctl)
 		if (*name == '_')
 			name += 1;
 		
+<<<<<<< HEAD
+=======
+		if (0 == strcmp(name, "ZN9IOService14newTemperatureElPS_") || /* IOService::newTemperature */
+			0 == strcmp(name, "ZN9IOService26temperatureCriticalForZoneEPS_")) /* IOService::temperatureCriticalForZone */
+			continue; /* Per the fire code */
+
+		/*
+		 * Place no probes (illegal instructions) in the exception handling path!
+		 */
+		if (0 == strcmp(name, "t_invop") ||
+			0 == strcmp(name, "enter_lohandler") ||
+			0 == strcmp(name, "lo_alltraps") ||
+			0 == strcmp(name, "kernel_trap") ||
+			0 == strcmp(name, "i386_astintr"))
+			continue;
+
+		if (0 == strcmp(name, "current_thread") ||
+			0 == strcmp(name, "ast_pending") ||
+			0 == strcmp(name, "fbt_perfCallback") ||
+			0 == strcmp(name, "machine_thread_get_kern_state") ||
+			0 == strcmp(name, "ml_set_interrupts_enabled") ||
+			0 == strcmp(name, "dtrace_invop") ||
+			0 == strcmp(name, "fbt_invop") ||
+			0 == strcmp(name, "sdt_invop") ||
+			0 == strcmp(name, "max_valid_stack_address"))
+			continue;
+
+		/*
+		 * Voodoo.
+		 */
+		if (strstr(name, "machine_stack_") == name ||
+			strstr(name, "mapping_") == name ||
+			0 == strcmp(name, "tmrCvt") ||
+
+			strstr(name, "tsc_") == name ||
+
+			strstr(name, "pmCPU") == name ||
+			0 == strcmp(name, "Cstate_table_set") ||
+			0 == strcmp(name, "pmKextRegister") ||
+			0 == strcmp(name, "pmSafeMode") ||
+			0 == strcmp(name, "pmUnregister") ||
+			strstr(name, "pms") == name ||
+			0 == strcmp(name, "power_management_init") ||
+			strstr(name, "usimple_") == name ||
+
+			strstr(name, "rtc_") == name ||
+			strstr(name, "_rtc_") == name ||
+			strstr(name, "rtclock_") == name ||
+			strstr(name, "clock_") == name ||
+			strstr(name, "absolutetime_to_") == name ||
+			0 == strcmp(name, "setPop") ||
+			0 == strcmp(name, "nanoseconds_to_absolutetime") ||
+			0 == strcmp(name, "nanotime_to_absolutetime") ||
+
+			strstr(name, "etimer_") == name ||
+
+			strstr(name, "commpage_") == name ||
+			strstr(name, "pmap_") == name ||
+			strstr(name, "ml_") == name ||
+			strstr(name, "PE_") == name ||
+			strstr(name, "lapic_") == name ||
+			strstr(name, "acpi_") == name)
+			continue;
+
+        /*
+         * Avoid machine_ routines. PR_5346750.
+         */
+        if (strstr(name, "machine_") == name)
+            continue;
+
+		if (0 == strcmp(name, "handle_pending_TLB_flushes"))
+			continue;
+
+        /*
+         * Place no probes on critical routines. PR_5221096
+         */
+        if (!gIgnoreFBTBlacklist &&
+            bsearch( name, critical_blacklist, CRITICAL_BLACKLIST_COUNT, sizeof(name), _cmp ) != NULL)
+                continue;
+
+        /*
+		 * Place no probes that could be hit in probe context.
+		 */
+		if (!gIgnoreFBTBlacklist && 
+			bsearch( name, probe_ctx_closure, PROBE_CTX_CLOSURE_COUNT, sizeof(name), _cmp ) != NULL)
+			continue;
+
+		/*
+		 * Place no probes that could be hit on the way to the debugger.
+		 */
+		if (strstr(name, "kdp_") == name ||
+			strstr(name, "kdb_") == name ||
+			strstr(name, "kdbg_") == name ||
+			strstr(name, "kdebug_") == name ||
+			0 == strcmp(name, "kernel_debug") ||
+			0 == strcmp(name, "Debugger") ||
+			0 == strcmp(name, "Call_DebuggerC") ||
+			0 == strcmp(name, "lock_debugger") ||
+			0 == strcmp(name, "unlock_debugger") ||
+			0 == strcmp(name, "SysChoked")) 
+			continue;
+
+>>>>>>> origin/10.5
 		/*
 		 * We're only blacklisting functions in the kernel for now.
 		 */

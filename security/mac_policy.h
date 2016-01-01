@@ -580,9 +580,12 @@ typedef int mpo_cred_label_update_execve_t(
 	struct label *vnodelabel,
 	struct label *scriptvnodelabel,
 	struct label *execlabel,
+<<<<<<< HEAD
 	u_int *csflags,
 	void *macpolicyattr,
 	size_t macpolicyattrlen,
+=======
+>>>>>>> origin/10.5
 	int *disjointp
 );
 /**
@@ -4223,6 +4226,34 @@ typedef int mpo_proc_check_get_task_t(
 	kauth_cred_t cred,
 	struct proc *p
 );
+<<<<<<< HEAD
+=======
+
+
+/**
+ @brief Access control check for manipulating a proc's vm_map
+ @param cred Subject credential
+ @param proc Object process
+ 
+ Determine whether the vm_map map belonging to process proc with 
+ credential cred allows the VM_PROT_COPY operation.
+ 
+ @return Return 0 if access is granted, otherwise an appropriate value for
+ errno should be returned.
+ */
+typedef int mpo_proc_check_map_prot_copy_allow_t(
+	kauth_cred_t cred,
+	struct proc *p
+);
+
+
+/**
+  @brief Assign a label to a new kernelspace Mach task
+  @param kproc New task
+  @param tasklabel Label for new task
+  @param portlabel Label for new task port
+  @see mpo_cred_label_associate_kernel_t
+>>>>>>> origin/10.5
 
 /**
   @brief Access control check for exposing a process's task port
@@ -4475,9 +4506,14 @@ typedef int mpo_vnode_check_fsgetpath_t(
   @brief Access control check after determining the code directory hash
  */
 typedef int mpo_vnode_check_signature_t(struct vnode *vp,  struct label *label, 
+<<<<<<< HEAD
 					off_t macho_offset, unsigned char *sha1, 
 					const void *signature, int size,
 					int flags, int *is_platform_binary);
+=======
+					unsigned char *sha1, void *signature, 
+					int size);
+>>>>>>> origin/10.5
 
 /**
   @brief Access control check for retrieving file attributes
@@ -6095,6 +6131,7 @@ struct mac_policy_ops {
 	mpo_vnode_label_update_t		*mpo_vnode_label_update;
 	mpo_vnode_notify_create_t		*mpo_vnode_notify_create;
 	mpo_vnode_check_signature_t		*mpo_vnode_check_signature;
+<<<<<<< HEAD
 	mpo_vnode_check_uipc_bind_t		*mpo_vnode_check_uipc_bind;
 	mpo_vnode_check_uipc_connect_t		*mpo_vnode_check_uipc_connect;
 
@@ -6145,6 +6182,17 @@ struct mac_policy_ops {
 	mpo_vnode_notify_link_t			*mpo_vnode_notify_link;
 	mpo_iokit_check_filter_properties_t	*mpo_iokit_check_filter_properties;
 	mpo_iokit_check_get_property_t		*mpo_iokit_check_get_property;
+=======
+	mpo_proc_check_map_prot_copy_allow_t	*mpo_proc_check_map_prot_copy_allow;
+	mpo_reserved_hook_t			*mpo_reserved2;
+	mpo_reserved_hook_t			*mpo_reserved3;
+	mpo_reserved_hook_t			*mpo_reserved4;
+	mpo_reserved_hook_t			*mpo_reserved5;
+	mpo_reserved_hook_t			*mpo_reserved6;
+	mpo_reserved_hook_t			*mpo_reserved7;
+	mpo_reserved_hook_t			*mpo_reserved8;
+	mpo_reserved_hook_t			*mpo_reserved9;
+>>>>>>> origin/10.5
 };
 
 /**

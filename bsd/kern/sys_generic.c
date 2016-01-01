@@ -289,9 +289,12 @@ pread_nocancel(struct proc *p, struct pread_nocancel_args *uap, user_ssize_t *re
 
 	if ( (error = preparefileread(p, &fp, fd, 1)) )
 		goto out;
+<<<<<<< HEAD
 
 	context = *(vfs_context_current());
 	context.vc_ucred = fp->f_fglob->fg_cred;
+=======
+>>>>>>> origin/10.5
 
 	error = dofileread(&context, fp, uap->buf, uap->nbyte,
 			uap->offset, FOF_OFFSET, retval);

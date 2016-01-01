@@ -125,15 +125,44 @@ hertz_tick(
 	boolean_t			inkernel;
 #endif	/* MACH_PROF */
 #if GPROF
+<<<<<<< HEAD
 	struct profile_vars	*pv;
 	prof_uptrint_t		s;
 #endif
+=======
+	natural_t		pc)
+#else
+	__unused natural_t		pc)
+#endif
+{
+	processor_t		processor = current_processor();
+	thread_t		thread = current_thread();
+	timer_t			state;
+>>>>>>> origin/10.5
 
 #ifdef	lint
 	pc++;
 #endif	/* lint */
 
+<<<<<<< HEAD
 	my_cpu = cpu_number();
+=======
+		state = &PROCESSOR_DATA(processor, user_state);
+	}
+	else {
+		/* If this thread is idling, do not charge that time as system time */
+		if ((thread->state & TH_IDLE) == 0) {
+			TIMER_BUMP(&thread->system_timer, ticks);
+		}
+        
+		if (processor->state == PROCESSOR_IDLE)
+			state = &PROCESSOR_DATA(processor, idle_state);
+		else
+			state = &PROCESSOR_DATA(processor, system_state);
+	}
+
+	TIMER_BUMP(state, ticks);
+>>>>>>> origin/10.5
 
 	/*
 	 *	The system startup sequence initializes the clock

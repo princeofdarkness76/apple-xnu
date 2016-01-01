@@ -275,10 +275,14 @@ OSStatus UpdateHeader(BTreeControlBlockPtr btreePtr, Boolean forceWrite)
 	
 	
 <<<<<<< HEAD
+<<<<<<< HEAD
 	err = GetNode (btreePtr, kHeaderNodeNum, 0, &node );
 =======
 	err = GetNode (btreePtr, kHeaderNodeNum, &node );
 >>>>>>> origin/10.2
+=======
+	err = GetNode (btreePtr, kHeaderNodeNum, 0, &node );
+>>>>>>> origin/10.5
 	if (err != noErr) {
 		return	err;
 	}

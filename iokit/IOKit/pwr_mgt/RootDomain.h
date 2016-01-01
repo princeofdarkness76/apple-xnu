@@ -117,14 +117,23 @@ enum {
 };
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 /*
+=======
+
+
+/* 
+>>>>>>> origin/10.5
  *IOPMrootDomain registry property keys
  */
 #define kRootDomainSupportedFeatures        "Supported Features"
 #define kRootDomainSleepReasonKey           "Last Sleep Reason"
 #define kRootDomainSleepOptionsKey          "Last Sleep Options"
+<<<<<<< HEAD
 #define kIOPMRootDomainWakeReasonKey        "Wake Reason"
 #define kIOPMRootDomainWakeTypeKey          "Wake Type"
+=======
+>>>>>>> origin/10.5
 #define kIOPMRootDomainPowerStatusKey       "Power Status"
 
 /*
@@ -222,6 +231,13 @@ public:
     virtual bool        serializeProperties( OSSerialize * s ) const APPLE_KEXT_OVERRIDE;
     virtual OSObject *  copyProperty( const char * aKey ) const APPLE_KEXT_OVERRIDE;
 
+<<<<<<< HEAD
+=======
+    virtual IOReturn setProperties ( OSObject * );
+    IOReturn shutdownSystem ( void );
+    IOReturn restartSystem ( void );
+
+>>>>>>> origin/10.5
 /*! @function systemPowerEventOccurred
     @abstract Other drivers may inform IOPMrootDomain of system PM events
     @discussion systemPowerEventOccurred is a richer alternative to receivePowerNotification()
@@ -232,6 +248,7 @@ public:
         to interested parties. Pass false if you're calling systemPowerEventOccurred
         several times in succession; and pass true only on the last invocatino.
     @result kIOReturnSuccess on success */
+<<<<<<< HEAD
 
     IOReturn            systemPowerEventOccurred(
                                     const OSSymbol *event,
@@ -316,6 +333,21 @@ public:
     virtual IOOptionBits getSleepSupported( void );
 
     void                wakeFromDoze( void );
+=======
+    IOReturn systemPowerEventOccurred(const OSSymbol *event, 
+                                    uint32_t intValue);
+    IOReturn systemPowerEventOccurred(const OSSymbol *event, 
+                                    OSObject *value);
+    
+    virtual IOReturn receivePowerNotification (UInt32 msg);
+    virtual void setSleepSupported( IOOptionBits flags );
+    virtual IOOptionBits getSleepSupported();
+    virtual IOReturn requestPowerDomainState ( IOPMPowerFlags, IOPowerConnection *, unsigned long );
+    virtual void handleSleepTimerExpiration ( void );
+    void stopIgnoringClamshellEventsDuringWakeup ( void );
+    void wakeFromDoze( void );
+    void broadcast_it (unsigned long, unsigned long );
+>>>>>>> origin/10.5
 
     // KEXT driver announces support of power management feature
 

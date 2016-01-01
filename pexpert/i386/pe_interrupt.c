@@ -50,6 +50,12 @@
 #include <pexpert/pexpert.h>
 #include <pexpert/protos.h>
 #include <machine/machine_routines.h>
+<<<<<<< HEAD
+=======
+#include <i386/lapic.h>
+#include <sys/kdebug.h>
+
+>>>>>>> origin/10.5
 
 #if CONFIG_DTRACE && DEVELOPMENT
 #include <mach/sdt.h>

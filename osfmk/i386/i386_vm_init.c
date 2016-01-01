@@ -337,6 +337,12 @@ i386_vm_init(uint64_t	maxmem,
 	 * Compute the memory size.
 	 */
 
+<<<<<<< HEAD
+=======
+	if ((1 == vm_himemory_mode) || PE_parse_boot_argn("-x", &safeboot, sizeof (safeboot))) {
+	        maxpg = 1 << (32 - I386_PGSHIFT);
+	}
+>>>>>>> origin/10.5
 	avail_remaining = 0;
 	avail_end = 0;
 	pmptr = pmap_memory_regions;
@@ -623,7 +629,14 @@ i386_vm_init(uint64_t	maxmem,
 #endif
 
 	avail_start = first_avail;
+<<<<<<< HEAD
 	mem_actual = args->PhysicalMemorySize;
+=======
+	mem_actual = sane_size;
+
+#define MEG		(1024*1024ULL)
+#define GIG		(1024*MEG)
+>>>>>>> origin/10.5
 
 	/*
 	 * For user visible memory size, round up to 128 Mb
@@ -648,6 +661,19 @@ i386_vm_init(uint64_t	maxmem,
 			sane_size, (uint32_t) (KERNEL_MAXMEM/GB));
 	}
 
+#if defined(__i386__)
+#define K32_MAXMEM	(32*GIG)
+	/*
+	 * For K32 we cap at K32_MAXMEM GB (currently 32GB).
+	 * Unless overriden by the maxmem= boot-arg
+	 * -- which is a non-zero maxmem argument to this function.
+	 */
+	if (maxmem == 0 && sane_size > K32_MAXMEM) {
+		maxmem = K32_MAXMEM;
+		printf("Physical memory %lld bytes capped at %dGB for 32-bit kernel\n",
+			sane_size, (uint32_t) (K32_MAXMEM/GIG));
+	}
+#endif
 	/*
 	 * if user set maxmem, reduce memory sizes
 	 */
@@ -699,6 +725,7 @@ i386_vm_init(uint64_t	maxmem,
 
 	kprintf("Physical memory %llu MB\n", sane_size/MB);
 
+<<<<<<< HEAD
 	max_valid_low_ppnum = (2 * GB) / PAGE_SIZE;
 
 	if (!PE_parse_boot_argn("max_valid_dma_addr", &maxdmaaddr, sizeof (maxdmaaddr))) {
@@ -710,6 +737,27 @@ i386_vm_init(uint64_t	maxmem,
 			max_valid_low_ppnum = (ppnum_t)(max_valid_dma_address / PAGE_SIZE);
 	}
 	if (avail_end >= max_valid_dma_address) {
+=======
+	if (!PE_parse_boot_argn("max_valid_dma_addr", &maxdmaaddr, sizeof (maxdmaaddr)))
+	        max_valid_dma_address = 1024ULL * 1024ULL * 4096ULL;
+	else
+	        max_valid_dma_address = ((uint64_t) maxdmaaddr) * 1024ULL * 1024ULL;
+
+	if (!PE_parse_boot_argn("maxbouncepool", &maxbouncepoolsize, sizeof (maxbouncepoolsize)))
+	        maxbouncepoolsize = MAXBOUNCEPOOL;
+	else
+	        maxbouncepoolsize = maxbouncepoolsize * (1024 * 1024);
+
+	/*
+	 * bsd_mbuf_cluster_reserve depends on sane_size being set
+	 * in order to correctly determine the size of the mbuf pool
+	 * that will be reserved
+	 */
+	if (!PE_parse_boot_argn("maxloreserve", &maxloreserve, sizeof (maxloreserve)))
+	        maxloreserve = MAXLORESERVE + bsd_mbuf_cluster_reserve();
+	else
+	        maxloreserve = maxloreserve * (1024 * 1024);
+>>>>>>> origin/10.5
 
 		if (!PE_parse_boot_argn("maxloreserve", &maxloreserve, sizeof (maxloreserve))) {
 

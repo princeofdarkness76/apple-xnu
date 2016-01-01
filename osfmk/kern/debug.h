@@ -396,6 +396,7 @@ enum {
 #ifdef	KERNEL_PRIVATE
 
 extern unsigned int	systemLogDiags;
+<<<<<<< HEAD
 #if (!defined(__arm64__) && !defined(NAND_PANIC_DEVICE)) || defined(LEGACY_PANIC_LOGS)
 extern char debug_buf[];
 #endif
@@ -403,6 +404,9 @@ extern char *debug_buf_addr;
 extern unsigned int	debug_boot_arg;
 extern unsigned char *kernel_uuid;
 extern char kernel_uuid_string[];
+=======
+extern char debug_buf[];
+>>>>>>> origin/10.5
 
 #ifdef MACH_KERNEL_PRIVATE
 
@@ -455,6 +459,7 @@ void	unpackA(char *inbuf, uint32_t length);
 
 void	panic_display_system_configuration(void);
 void	panic_display_zprint(void);
+<<<<<<< HEAD
 void	panic_display_kernel_aslr(void);
 void	panic_display_hibb(void);
 void	panic_display_model_name(void);
@@ -465,6 +470,9 @@ void	panic_display_ztrace(void);
 #if CONFIG_ECC_LOGGING
 void 	panic_display_ecc_errors(void);
 #endif /* CONFIG_ECC_LOGGING */
+=======
+
+>>>>>>> origin/10.5
 #endif /* MACH_KERNEL_PRIVATE */
 
 #define DB_HALT		0x1
@@ -534,6 +542,7 @@ enum {
 	DEBUG_KPRINT_SYSCALL_MASK(DEBUG_KPRINT_SYSCALL_MDEP_MASK,fmt,args)
 #define DEBUG_KPRINT_SYSCALL_IPC(fmt, args...)				\
 	DEBUG_KPRINT_SYSCALL_MASK(DEBUG_KPRINT_SYSCALL_IPC_MASK,fmt,args)
+
 
 #endif	/* KERNEL_PRIVATE */
 

@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -28,6 +32,11 @@
 #include <kern/machine.h>
 #include <kern/misc_protos.h>
 #include <kern/thread.h>
+<<<<<<< HEAD
+=======
+#include <kern/sched_prim.h>
+#include <kern/timer_queue.h>
+>>>>>>> origin/10.5
 #include <kern/processor.h>
 #include <mach/machine.h>
 #include <mach/processor_info.h>
@@ -383,9 +392,16 @@ cpu_init(
 
 	cpu = cpu_number();
 
+<<<<<<< HEAD
 	machine_slot[cpu].running = TRUE;
 	machine_slot[cpu].cpu_type = CPU_TYPE_POWERPC;
 	machine_slot[cpu].cpu_subtype = (cpu_subtype_t)per_proc_info[cpu].pf.rptdProc;
+=======
+	queue_init(&proc_info->rtclock_timer.queue);
+	proc_info->rtclock_timer.deadline = EndOfAllTime;
+
+	return proc_info;
+>>>>>>> origin/10.5
 
 }
 
@@ -532,8 +548,72 @@ cpu_start(
 		ret = PE_cpu_start(proc_info->cpu_id, 
 					proc_info->start_paddr, (vm_offset_t)proc_info);
 
+<<<<<<< HEAD
 		if (ret != KERN_SUCCESS && 
 		    proc_info->start_paddr == EXCEPTION_VECTOR(T_RESET)) {
+=======
+		}
+		return(ret);
+	}
+}
+
+/*
+ *	Routine:	cpu_exit_wait
+ *	Function:
+ */
+void
+cpu_exit_wait(
+	int	cpu)
+{
+	struct per_proc_info	*tpproc;
+
+	if ( cpu != master_cpu) {
+		tpproc = PerProcTable[cpu].ppe_vaddr;
+		while (!((*(volatile short *)&tpproc->cpu_flags) & SleepState)) {};
+	}
+}
+
+
+/*
+ *	Routine:	cpu_doshutdown
+ *	Function:
+ */
+void
+cpu_doshutdown(
+	void)
+{
+	enable_preemption();
+	processor_offline(current_processor());
+}
+
+
+/*
+ *	Routine:	cpu_sleep
+ *	Function:
+ */
+void
+cpu_sleep(
+	void)
+{
+	struct per_proc_info	*proc_info;
+	unsigned int			i;
+	unsigned int			wait_ncpus_sleep, ncpus_sleep;
+	facility_context		*fowner;
+
+	proc_info = getPerProc();
+
+	proc_info->running = FALSE;
+
+	if (proc_info->cpu_number != master_cpu) {
+		timer_queue_shutdown(&proc_info->rtclock_timer.queue);
+		proc_info->rtclock_timer.deadline = EndOfAllTime;
+	}
+
+	fowner = proc_info->FPU_owner;					/* Cache this */
+	if(fowner) /* If anyone owns FPU, save it */
+		fpu_save(fowner);
+	proc_info->FPU_owner = NULL;						/* Set no fpu owner now */
+>>>>>>> origin/10.5
 
 			/* TODO: realese mutex lock reset_handler_lock */
 		} else {

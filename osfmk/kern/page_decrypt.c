@@ -44,7 +44,11 @@ dsmos_page_transform_hook(dsmos_page_transform_hook_t hook)
 }
 
 int
+<<<<<<< HEAD
 dsmos_page_transform(const void* from, void *to, unsigned long long src_offset, void *ops)
+=======
+dsmos_page_transform(const void* from, void *to, __unused unsigned long long src_offset, __unused void *ops)
+>>>>>>> origin/10.5
 {
 	static boolean_t first_wait = TRUE;
 
@@ -63,4 +67,8 @@ text_crypter_create_hook_t text_crypter_create=NULL;
 void text_crypter_create_hook_set(text_crypter_create_hook_t hook)
 {
 	text_crypter_create=hook;
+<<<<<<< HEAD
 }
+=======
+};
+>>>>>>> origin/10.5

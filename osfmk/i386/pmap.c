@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -162,7 +166,30 @@ void	set_dirbase(vm_offset_t	dirbase);
 #define	PA_TO_PTE(pa)	(pa_to_pte((pa) - VM_MIN_KERNEL_ADDRESS))
 #define	iswired(pte)	((pte) & INTEL_PTE_WIRED)
 
+<<<<<<< HEAD
 pmap_t	real_pmap[NCPUS];
+=======
+int nx_enabled = 1;			/* enable no-execute protection */
+#ifdef CONFIG_EMBEDDED
+int allow_data_exec  = 0;	/* no exec from data, embedded is hardcore like that */
+#else
+int allow_data_exec  = VM_ABI_32;	/* 32-bit apps may execute data by default, 64-bit apps may not */
+#endif
+int allow_stack_exec = 0;		/* No apps may execute from the stack by default */
+
+int cpu_64bit  = 0;
+
+/*
+ * when spinning through pmap_remove
+ * ensure that we don't spend too much
+ * time with preemption disabled.
+ * I'm setting the current threshold
+ * to 20us
+ */
+#define MAX_PREEMPTION_LATENCY_NS 20000
+
+uint64_t max_preemption_latency_tsc = 0;
+>>>>>>> origin/10.5
 
 #define	WRITE_PTE(pte_p, pte_entry)		*(pte_p) = (pte_entry);
 #define	WRITE_PTE_FAST(pte_p, pte_entry)	*(pte_p) = (pte_entry);
@@ -669,6 +696,7 @@ pmap_bootstrap(
 	 *	No other physical memory has been allocated.
 	 */
 
+<<<<<<< HEAD
 	/*
 	 * Start mapping virtual memory to physical memory, 1-1,
 	 * at end of mapped memory.
@@ -712,6 +740,28 @@ pmap_bootstrap(
 	    WRITE_PTE_FAST(pte, template)
 	    pte++;
 	    pte_increment_pa(template);
+=======
+	/* DMAP user for debugger */
+	SYSMAP(caddr_t, DMAP1, DADDR1, 1);
+	SYSMAP(caddr_t, DMAP2, DADDR2, 1);  /* XXX temporary - can remove */
+
+	virtual_avail = va;
+
+	if (PE_parse_boot_argn("npvhash", &npvhash, sizeof (npvhash))) {
+	  if (0 != ((npvhash+1) & npvhash)) {
+	    kprintf("invalid hash %d, must be ((2^N)-1), using default %d\n",npvhash,NPVHASH);
+	    npvhash = NPVHASH;
+	  }
+	} else {
+	  npvhash = NPVHASH;
+	}
+	printf("npvhash=%d\n",npvhash);
+
+	wpkernel = 1;
+	if (PE_parse_boot_argn("wpkernel", &boot_arg, sizeof (boot_arg))) {
+		if (boot_arg == 0)
+			wpkernel = 0;
+>>>>>>> origin/10.5
 	}
 
 	avail_start = virtual_avail - VM_MIN_KERNEL_ADDRESS;
@@ -778,6 +828,7 @@ pmap_bootstrap(
 	/*
 	 *	invalidate user virtual addresses 
 	 */
+<<<<<<< HEAD
 	memset((char *)kpde,
 	       0,
 	       pdenum(kernel_pmap,VM_MIN_KERNEL_ADDRESS)*sizeof(pt_entry_t));
@@ -791,6 +842,17 @@ pmap_bootstrap(
 
 	kernel_pmap->pdirbase = kvtophys((vm_offset_t)kernel_pmap->dirbase);
 
+=======
+	if (PE_parse_boot_argn("-no_shared_cr3", &no_shared_cr3, sizeof (no_shared_cr3))) {
+		kprintf("Shared kernel address space disabled\n");
+	}	
+
+#ifdef	PMAP_TRACES
+	if (PE_parse_boot_argn("-pmap_trace", &pmap_trace, sizeof (pmap_trace))) {
+		kprintf("Kernel traces for pmap operations enabled\n");
+	}	
+#endif	/* PMAP_TRACES */
+>>>>>>> origin/10.5
 }
 
 void
@@ -2457,6 +2519,7 @@ phys_attribute_clear(
 		    register vm_offset_t va;
 
 		    va = pv_e->va;
+<<<<<<< HEAD
 		    pte = pmap_pte(pmap, va);
 
 #if	0
@@ -2466,11 +2529,26 @@ phys_attribute_clear(
 		    assert(*pte & INTEL_PTE_VALID);
 		    /* assert(pte_to_phys(*pte) == phys); */
 #endif
+=======
+>>>>>>> origin/10.5
 
 		    /*
 		     * Invalidate TLBs for all CPUs using this mapping.
 		     */
+<<<<<<< HEAD
 		    PMAP_INVALIDATE_PAGE(pmap, va);
+=======
+
+		    pte = pmap_pte(pmap, va);
+		    pmap_update_pte(pte, *pte, (*pte & ~bits));
+		    /* Ensure all processors using this translation
+		     * invalidate this TLB entry. The invalidation *must* follow
+		     * the PTE update, to ensure that the TLB shadow of the
+		     * 'D' bit (in particular) is synchronized with the
+		     * updated PTE.
+		     */
+		    PMAP_UPDATE_TLBS(pmap, va, va + PAGE_SIZE);
+>>>>>>> origin/10.5
 		}
 
 		/*
@@ -2923,8 +3001,25 @@ pmap_movepage(unsigned long from, unsigned long to, vm_size_t size)
 		saved_pte = *pte;
 		PMAP_READ_UNLOCK(kernel_pmap, spl);
 
+<<<<<<< HEAD
 		pmap_enter(kernel_pmap, to, i386_trunc_page(*pte),
 			VM_PROT_READ|VM_PROT_WRITE, *pte & INTEL_PTE_WIRED);
+=======
+static inline void
+pmap_cpuset_NMIPI(cpu_set cpu_mask) {
+	unsigned int cpu, cpu_bit;
+	uint64_t deadline;
+
+	for (cpu = 0, cpu_bit = 1; cpu < real_ncpus; cpu++, cpu_bit <<= 1) {
+		if (cpu_mask & cpu_bit)
+			cpu_NMI_interrupt(cpu);
+	}
+	deadline = mach_absolute_time() + (LockTimeOut >> 2);
+	while (mach_absolute_time() < deadline)
+		cpu_pause();
+}
+
+>>>>>>> origin/10.5
 
 		pmap_remove(kernel_pmap, from, from+PAGE_SIZE);
 
@@ -2936,14 +3031,53 @@ pmap_movepage(unsigned long from, unsigned long to, vm_size_t size)
 		*pte = saved_pte;
 		PMAP_READ_UNLOCK(kernel_pmap, spl);
 
+<<<<<<< HEAD
 		from += PAGE_SIZE;
 		to += PAGE_SIZE;
 		size -= PAGE_SIZE;
+=======
+	if (cpus_to_signal) {
+		cpu_set	cpus_to_respond = cpus_to_signal;
+
+		deadline = mach_absolute_time() + LockTimeOut;
+		/*
+		 * Wait for those other cpus to acknowledge
+		 */
+		while (cpus_to_respond != 0) {
+			if (mach_absolute_time() > deadline) {
+				if (!panic_active()) {
+					pmap_tlb_flush_timeout = TRUE;
+					pmap_cpuset_NMIPI(cpus_to_respond);
+				}
+				panic("pmap_flush_tlbs() timeout: "
+				    "cpu(s) failing to respond to interrupts, pmap=%p cpus_to_respond=0x%lx",
+				    pmap, cpus_to_respond);
+			}
+
+			for (cpu = 0, cpu_bit = 1; cpu < real_ncpus; cpu++, cpu_bit <<= 1) {
+				if ((cpus_to_respond & cpu_bit) != 0) {
+					if (!cpu_datap(cpu)->cpu_running ||
+					    cpu_datap(cpu)->cpu_tlb_invalid == FALSE ||
+					    !CPU_CR3_IS_ACTIVE(cpu)) {
+						cpus_to_respond &= ~cpu_bit;
+					}
+					cpu_pause();
+				}
+				if (cpus_to_respond == 0)
+					break;
+			}
+		}
+>>>>>>> origin/10.5
 	}
 
 	/* Get the processors to update the TLBs */
 	PMAP_FLUSH_TLBS();
 
+<<<<<<< HEAD
+=======
+	PMAP_TRACE(PMAP_CODE(PMAP__FLUSH_TLBS) | DBG_FUNC_END,
+		   (int) pmap, cpus_to_signal, flush_self, 0, 0);
+>>>>>>> origin/10.5
 }
 
 kern_return_t bmapvideo(vm_offset_t *info);

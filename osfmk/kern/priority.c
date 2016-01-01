@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -135,6 +139,7 @@ thread_quantum_expire(
 	 * thread, we must credit the ledger before taking the thread lock. The ledger
 	 * pointers are only manipulated by the thread itself at the ast boundary.
 	 */
+<<<<<<< HEAD
 	ledger_credit(thread->t_ledger, task_ledgers.cpu_time, thread->quantum_remaining);
 	ledger_credit(thread->t_threadledger, thread_ledgers.cpu_time, thread->quantum_remaining);
 #ifdef CONFIG_BANK
@@ -144,6 +149,10 @@ thread_quantum_expire(
 	}
 	thread->t_deduct_bank_ledger_time = 0;
 #endif
+=======
+	if (!(thread->sched_mode & (TH_MODE_TIMESHARE|TH_MODE_PROMOTED))) {
+		uint64_t			new_computation;
+>>>>>>> origin/10.5
 
 	ctime = mach_absolute_time();
 
@@ -160,6 +169,7 @@ thread_quantum_expire(
 	processor->last_dispatch = ctime;
 	thread->last_run_time = ctime;
 
+<<<<<<< HEAD
 	/*
 	 *	Check for fail-safe trip.
 	 */
@@ -177,6 +187,10 @@ thread_quantum_expire(
 			thread->safe_release = ctime + sched_safe_duration;
 
 			sched_thread_mode_demote(thread, TH_SFLAG_FAILSAFE);
+=======
+			thread->safe_release = sched_tick + sched_safe_duration;
+			thread->sched_mode |= (TH_MODE_FAILSAFE|TH_MODE_TIMESHARE);
+>>>>>>> origin/10.5
 		}
 	}
 
@@ -226,7 +240,11 @@ thread_quantum_expire(
 	/*
 	 *	Context switch check.
 	 */
+<<<<<<< HEAD
 	if ((preempt = csw_check(processor, AST_QUANTUM)) != AST_NONE)
+=======
+	if ((preempt = csw_check(processor)) != AST_NONE)
+>>>>>>> origin/10.5
 		ast_on(preempt);
 
 	thread_unlock(thread);
@@ -278,10 +296,15 @@ thread_recompute_sched_pri(
 {
 	int priority;
 
+<<<<<<< HEAD
 	if (thread->sched_mode == TH_MODE_TIMESHARE)
 		priority = SCHED(compute_timeshare_priority)(thread);
 	else
 		priority = thread->base_pri;
+=======
+		pset_pri_hint(pset, processor, processor->current_pri);
+		pset_count_hint(pset, processor, processor->runq.count);
+>>>>>>> origin/10.5
 
 	if ((!(thread->sched_flags & TH_SFLAG_PROMOTED_MASK)  || (priority > thread->sched_pri)) &&
 	    (!(thread->sched_flags & TH_SFLAG_DEPRESSED_MASK) || override_depress)) {

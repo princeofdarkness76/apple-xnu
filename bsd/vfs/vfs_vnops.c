@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -644,6 +648,7 @@ continue_create_lookup:
 	if (!did_create && (vp->v_flag & VOPENEVT) && (current_proc()->p_flag & P_CHECKOPENEVT)) {
 		fmode |= O_EVTONLY;
 	}
+<<<<<<< HEAD
 
 	/*
 	 * Grab reference, etc.
@@ -652,6 +657,10 @@ continue_create_lookup:
 	if (error) {
 		ref_failed = TRUE;
 		goto bad;
+=======
+	if ( (error = vnode_ref_ext(vp, fmode)) ) {
+		goto bad2;
+>>>>>>> origin/10.5
 	}
 
 	/* Compound VNOP open is responsible for doing the truncate */
@@ -660,7 +669,12 @@ continue_create_lookup:
 
 	*fmodep = fmode;
 	return (0);
+<<<<<<< HEAD
 
+=======
+bad2:
+	VNOP_CLOSE(vp, fmode, ctx);
+>>>>>>> origin/10.5
 bad:
 	/* Opened either explicitly or by a batched create */
 	if (!need_vnop_open) {
@@ -670,11 +684,17 @@ bad:
 	ndp->ni_vp = NULL;
 	if (vp) {
 #if NAMEDRSRCFORK
+<<<<<<< HEAD
 		/* Aggressively recycle shadow files if we error'd out during open() */
 		if ((vnode_isnamedstream(vp)) &&
 			(vp->v_parent != NULLVP) && 
 			(vnode_isshadow(vp))) {
 				vnode_recycle(vp);
+=======
+		if ((vnode_isnamedstream(vp)) && (vp->v_parent != NULLVP) &&
+					(vnode_isshadow (vp))) {
+			vnode_recycle(vp);
+>>>>>>> origin/10.5
 		}
 #endif
 		vnode_put(vp);
@@ -685,6 +705,7 @@ bad:
 		 *
 		 * EREDRIVEOPEN: means that we were hit by the tty allocation race.
 		 */
+<<<<<<< HEAD
 		if (((error == ENOENT) && (*fmodep & O_CREAT)) || (error == EREDRIVEOPEN) || ref_failed) {
 			/*
 			 * We'll retry here but it may be possible that we get
@@ -707,6 +728,9 @@ bad:
 				tsleep(&nretries, PVFS, "vn_open_auth_retry",
 				    MIN((nretries * (hz/100)), hz));
 			}
+=======
+		if (((error == ENOENT) && (*fmodep & O_CREAT)) || (error == EREDRIVEOPEN)) {
+>>>>>>> origin/10.5
 			goto again;
 		}
 	}
@@ -790,12 +814,35 @@ vn_close(struct vnode *vp, int flags, vfs_context_t ctx)
 	}
 #endif
 
+<<<<<<< HEAD
 	if (!vnode_isspec(vp))
 		(void)vnode_rele_ext(vp, flags, 0);
 	
 	if (flusherror) {
 		error = flusherror;
 	}
+=======
+#if NAMEDRSRCFORK
+	/* Sync data from resource fork shadow file if needed. */
+	if ((vp->v_flag & VISNAMEDSTREAM) && 
+	    (vp->v_parent != NULLVP) &&
+	    (vnode_isshadow(vp))) {
+		if (flags & FWASWRITTEN) {
+			(void) vnode_flushnamedstream(vp->v_parent, vp, ctx);
+		}
+	}
+#endif
+	
+	/* work around for foxhound */
+	if (vp->v_type == VBLK)
+		(void)vnode_rele_ext(vp, flags, 0);
+
+	error = VNOP_CLOSE(vp, flags, ctx);
+
+	if (vp->v_type != VBLK)
+		(void)vnode_rele_ext(vp, flags, 0);
+	
+>>>>>>> origin/10.5
 	return (error);
 }
 

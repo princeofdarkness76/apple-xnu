@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2008, 2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -253,6 +257,9 @@ OSStatus BTOpenPath(FCB *filePtr, KeyCompareProcPtr keyCompareProc)
 	filePtr->fcbBTCBPtr			= (Ptr) btreePtr;	// attach btree cb to file
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.5
 	/* Prefer doing I/O a physical block at a time */
 	nodeRec.blockSize = VTOHFS(btreePtr->fileRefNum)->hfs_physical_block_size;
 
@@ -334,6 +341,7 @@ OSStatus BTOpenPath(FCB *filePtr, KeyCompareProcPtr keyCompareProc)
 	// set kBadClose attribute bit, and UpdateNode
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	/* b-tree node size must be at least as big as the logical block size */
 	if (btreePtr->nodeSize < VTOHFS(btreePtr->fileRefNum)->hfs_logical_block_size)
 =======
@@ -347,6 +355,10 @@ OSStatus BTOpenPath(FCB *filePtr, KeyCompareProcPtr keyCompareProc)
 
 	if ( btreePtr->nodeSize == nodeRec.blockSize )
 >>>>>>> origin/10.1
+=======
+	/* b-tree node size must be at least as big as the logical block size */
+	if (btreePtr->nodeSize < VTOHFS(btreePtr->fileRefNum)->hfs_logical_block_size)
+>>>>>>> origin/10.5
 	{
 		/*
 		 * If this tree has any records or the media is writeable then

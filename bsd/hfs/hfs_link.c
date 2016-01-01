@@ -613,11 +613,18 @@ hfs_vnop_link(struct vnop_link_args *ap)
 		}
 	}
 	tdcp = VTOC(tdvp);
+<<<<<<< HEAD
 	/* grab the parent CNID from originlist after grabbing cnode locks */
 	parentcnid = hfs_currentparent(cp, /* have_lock: */ true);
 
 	/* 
 	 * Make sure we didn't race the src or dst parent directories with rmdir.
+=======
+	cp = VTOC(vp);
+	
+	/*
+	 * Make sure we don't race the src or dst parent directories with rmdir.
+>>>>>>> origin/10.5
 	 * Note that we should only have a src parent directory cnode lock 
 	 * if we're dealing with a directory hardlink here.
 	 */
@@ -627,15 +634,24 @@ hfs_vnop_link(struct vnop_link_args *ap)
 			goto out;
 		}
 	}
+<<<<<<< HEAD
 
+=======
+	
+>>>>>>> origin/10.5
 	if (tdcp->c_flag & (C_NOEXISTS | C_DELETED)) {
 		error = ENOENT;
 		goto out;
 	}
+<<<<<<< HEAD
 
 	/* Check the source for errors: 
 	 * too many links, immutable, race with unlink
 	 */
+=======
+	
+	/* Check src for errors: too many links, immutable, race with unlink */
+>>>>>>> origin/10.5
 	if (cp->c_linkcount >= HFS_LINK_MAX) {
 		error = EMLINK;
 		goto out;
@@ -1298,6 +1314,10 @@ hfs_savelinkorigin(cnode_t *cp, cnid_t parentcnid)
 	thread_t thread = current_thread();
 	int count = 0;
 	int maxorigins = (S_ISDIR(cp->c_mode)) ? MAX_CACHED_ORIGINS : MAX_CACHED_FILE_ORIGINS;
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.5
 	/*
 	 *  Look for an existing origin first.  If not found, create/steal one.
 	 */
@@ -1350,10 +1370,18 @@ void
 hfs_relorigin(struct cnode *cp, cnid_t parentcnid)
 {
 	linkorigin_t *origin, *prev;
+<<<<<<< HEAD
 	thread_t thread = current_thread();
 
 	TAILQ_FOREACH_SAFE(origin, &cp->c_originlist, lo_link, prev) {
 		if (origin->lo_thread == thread) {
+=======
+	void * thread = current_thread();
+
+	TAILQ_FOREACH_SAFE(origin, &cp->c_originlist, lo_link, prev) {
+		if ((origin->lo_thread == thread) ||
+		    (origin->lo_parentcnid == parentcnid)) {
+>>>>>>> origin/10.5
 			TAILQ_REMOVE(&cp->c_originlist, origin, lo_link);
 			FREE(origin, M_TEMP);
 			break;

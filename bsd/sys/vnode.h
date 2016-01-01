@@ -1075,6 +1075,7 @@ int	vnode_isswap(vnode_t vp);
  @return Nonzero if the vnode is a named stream, 0 otherwise.
  */
 int	vnode_isnamedstream(vnode_t);
+int     vnode_isshadow(vnode_t);
 #endif
 
 /*!
@@ -1824,7 +1825,10 @@ int	vnode_iterate(struct mount *, int, int (*)(struct vnode *, void *), void *);
 #define VNODE_ITERATE_INACTIVE	0x200
 #ifdef BSD_KERNEL_PRIVATE
 #define VNODE_ALWAYS		0x400
+<<<<<<< HEAD
 #define VNODE_DRAINO		0x800
+=======
+>>>>>>> origin/10.5
 #endif /* BSD_KERNEL_PRIVATE */
 
 /*

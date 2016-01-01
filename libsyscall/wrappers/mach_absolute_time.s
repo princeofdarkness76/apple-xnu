@@ -98,6 +98,7 @@ _mach_absolute_time:
 
 #elif defined(__x86_64__)
 
+<<<<<<< HEAD:libsyscall/wrappers/mach_absolute_time.s
 /*
  * 64-bit version _mach_absolute_time.  We return the 64-bit nanotime in %rax.
  *
@@ -114,6 +115,65 @@ _mach_absolute_time:
  *
  *	rnt_tsc_scale = (10e9 * 2**32) / (tscFreq << rnt_shift);
  *
+=======
+0:
+	movl	_COMM_PAGE_NT_GENERATION,%esi
+	testl	%esi,%esi			/* if generation is 0, data being changed */
+	jz	0b				/* so loop until stable */
+
+	lfence
+	rdtsc					/* get TSC in %edx:%eax */
+	lfence
+	subl	_COMM_PAGE_NT_TSC_BASE,%eax
+	sbbl	_COMM_PAGE_NT_TSC_BASE+4,%edx
+
+	pushl	%esi				/* save generation */
+	/*
+	 * Do the math to convert tsc ticks to nanoseconds.  We first
+	 * do long multiply of 1 billion times the tsc.  Then we do
+	 * long division by the tsc frequency
+	 */
+	mov	$1000000000, %ecx		/* number of nanoseconds in a second */
+	mov	%edx, %ebx
+	mul	%ecx
+	mov	%edx, %edi
+	mov	%eax, %esi
+	mov	%ebx, %eax
+	mul	%ecx
+	add	%edi, %eax
+	adc	$0, %edx			/* result in edx:eax:esi */
+	mov	%eax, %edi
+	mov	_COMM_PAGE_NT_SHIFT,%ecx	/* overloaded as the low 32 tscFreq */
+	xor	%eax, %eax
+	xchg	%edx, %eax
+	div	%ecx
+	xor	%eax, %eax
+	mov	%edi, %eax
+	div	%ecx
+	mov	%eax, %ebx
+	mov	%esi, %eax
+	div	%ecx
+	mov	%ebx, %edx			/* result in edx:eax */
+	popl	%esi				/* recover generation */
+
+	add	_COMM_PAGE_NT_NS_BASE,%eax
+	adc	_COMM_PAGE_NT_NS_BASE+4,%edx
+
+	cmpl	_COMM_PAGE_NT_GENERATION,%esi	/* have the parameters changed? */
+	jne	0b				/* yes, loop until stable */
+
+	pop	%ebx
+	pop	%edi
+	pop	%esi
+	pop	%ebp
+	ret					/* result in edx:eax */
+
+	COMMPAGE_DESCRIPTOR(nanotime_slow,_COMM_PAGE_NANOTIME,kSlow,0)
+
+
+/* The 64-bit version.  We return the 64-bit nanotime in %rax,
+ * and by convention we must preserve %r9, %r10, and %r11.
+>>>>>>> origin/10.5:osfmk/i386/commpage/commpage_mach_absolute_time.s
  */
 	.globl	_mach_absolute_time
 _mach_absolute_time:
@@ -123,7 +183,11 @@ _mach_absolute_time:
 1:
 	movl	_NT_GENERATION(%rsi),%r8d	// get generation
 	testl	%r8d,%r8d			// if 0, data is being changed...
+<<<<<<< HEAD:libsyscall/wrappers/mach_absolute_time.s
 	jz      1b				// ...so loop until stable
+=======
+	jz	1b				// ...so loop until stable
+>>>>>>> origin/10.5:osfmk/i386/commpage/commpage_mach_absolute_time.s
 	lfence
 	rdtsc					// edx:eax := tsc
 	lfence

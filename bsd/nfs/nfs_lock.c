@@ -682,6 +682,7 @@ nfs_lockdmsg_enqueue(LOCKD_MSG_REQUEST *msgreq)
 <<<<<<< HEAD
 }
 
+<<<<<<< HEAD
 /*
  * remove a lock request message from the pending queue
  * (nfs_lock_mutex must be held)
@@ -721,6 +722,18 @@ nfs_lockdmsg_find_by_xid(uint64_t lockxid)
 	msgreq.lmr_answered = 0;
 	msgreq.lmr_errno = 0;
 	msgreq.lmr_saved_errno = 0;
+=======
+	/*
+	 * Fill in the information structure.
+	 * We set all values to zero with bzero to clear
+	 * out any information in the sockaddr_storage 
+	 * and nfs_filehandle contained in msgreq so that
+	 * we will not leak extraneous information out of 
+	 * the kernel when calling up to lockd via our mig
+	 * generated routine.
+	 */
+	bzero(&msgreq, sizeof(msgreq));
+>>>>>>> origin/10.5
 	msg = &msgreq.lmr_msg;
 	msg->lm_version = LOCKD_MSG_VERSION;
 	msg->lm_flags = 0;

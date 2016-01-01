@@ -880,6 +880,7 @@ do {									\
 /* compatiblity with 4.3 */
 #define	m_copy(m, o, l)		m_copym((m), (o), (l), M_DONTWAIT)
 
+<<<<<<< HEAD
 #define	MBSHIFT		20				/* 1MB */
 #define	MBSIZE		(1 << MBSHIFT)
 #define	GBSHIFT		30				/* 1GB */
@@ -1036,6 +1037,11 @@ struct name {							\
 #define	max_linkhdr	P2ROUNDUP(_max_linkhdr, sizeof (u_int32_t))
 #define	max_protohdr	P2ROUNDUP(_max_protohdr, sizeof (u_int32_t))
 #endif /* XNU_KERNEL_PRIVATE */
+=======
+#define MBSHIFT         20                              /* 1MB */
+
+#endif /* KERNEL_PRIVATE */
+>>>>>>> origin/10.5
 
 /*
  * Mbuf statistics (legacy).

@@ -495,7 +495,11 @@ typedef struct mcl_slab {
  * whenever a new piece of memory mapped in from the VM crosses the 1MB
  * boundary.
  */
+<<<<<<< HEAD
 #define	NSLABSPMB	((1 << MBSHIFT) >> PAGE_SHIFT)
+=======
+#define	NSLABSPMB	((1 << MBSHIFT) >> MCLSHIFT)	/* 512 slabs/grp */
+>>>>>>> origin/10.5
 
 typedef struct mcl_slabg {
 	mcl_slab_t	*slg_slab;	/* group of slabs */
@@ -1874,6 +1878,7 @@ mbinit(void)
 	    M_TEMP, M_WAITOK | M_ZERO);
 	VERIFY(slabstbl != NULL);
 
+<<<<<<< HEAD
 	/*
 	 * Allocate audit structures, if needed:
 	 *
@@ -1881,6 +1886,9 @@ mbinit(void)
 	 *
 	 * This yields mcl_audit_t units, each one representing a page.
 	 */
+=======
+	/* Allocate audit structures if needed */
+>>>>>>> origin/10.5
 	PE_parse_boot_argn("mbuf_debug", &mbuf_debug, sizeof (mbuf_debug));
 	mbuf_debug |= mcache_getflags();
 	if (mbuf_debug & MCF_DEBUG) {
@@ -1929,6 +1937,7 @@ mbinit(void)
 	embutl = (mbutl + (nmbclusters * MCLBYTES));
 	VERIFY(((embutl - mbutl) % MBIGCLBYTES) == 0);
 
+<<<<<<< HEAD
 	/* Prime up the freelist */
 	PE_parse_boot_argn("initmcl", &initmcl, sizeof (initmcl));
 	if (initmcl != 0) {
@@ -1938,6 +1947,9 @@ mbinit(void)
 	}
 	if (initmcl < m_minlimit(MC_BIGCL))
 		initmcl = m_minlimit(MC_BIGCL);
+=======
+	PE_parse_boot_argn("initmcl", &initmcl, sizeof (initmcl));
+>>>>>>> origin/10.5
 
 	lck_mtx_lock(mbuf_mlock);
 
@@ -4154,6 +4166,7 @@ m_copy_pkthdr(struct mbuf *to, struct mbuf *from)
 		m_tag_delete_chain(to, NULL);
 	}
 	to->m_pkthdr = from->m_pkthdr;		/* especially tags */
+<<<<<<< HEAD
 	m_classifier_init(from, 0);		/* purge classifier info */
 	m_tag_init(from, 1);			/* purge all tags from src */
 	m_scratch_init(from);			/* clear src scratch area */
@@ -4161,6 +4174,12 @@ m_copy_pkthdr(struct mbuf *to, struct mbuf *from)
 	if ((to->m_flags & M_EXT) == 0)
 		to->m_data = to->m_pktdat;
 	m_redzone_init(to);			/* setup red zone on dst */
+=======
+	m_tag_init(from);			/* purge tags from src */
+	to->m_flags = (from->m_flags & M_COPYFLAGS) | (to->m_flags & M_EXT);
+	if ((to->m_flags & M_EXT) == 0)
+		to->m_data = to->m_pktdat;
+>>>>>>> origin/10.5
 }
 
 /*

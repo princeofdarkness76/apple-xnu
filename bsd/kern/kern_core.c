@@ -172,9 +172,18 @@ kern_return_t thread_getstatus(register thread_act_t act, int flavor,
 	thread_state_t tstate, mach_msg_type_number_t *count);
 
 
+<<<<<<< HEAD
 __private_extern__ do_coredump = 1;	/* default: dump cores */
 __private_extern__ sugid_coredump = 0;	/* deafult: but not on SGUID binaries */
 >>>>>>> origin/10.3
+=======
+#ifdef SECURE_KERNEL
+__private_extern__ int do_coredump = 0;	/* default: don't dump cores */
+#else
+__private_extern__ int do_coredump = 1;	/* default: dump cores */
+#endif
+__private_extern__ int sugid_coredump = 0; /* default: but not SGUID binaries */
+>>>>>>> origin/10.5
 
 void
 collectth_state(thread_t th_act, void *tirp)

@@ -66,8 +66,11 @@ enum {
 					| kIOMemoryAutoPrepare
 #endif
 					| kIOMemoryThreadSafe
+<<<<<<< HEAD
 					| kIOMemoryClearEncrypt
 					| kIOMemoryMapperNone
+=======
+>>>>>>> origin/10.5
 };
 
 #define _IOBUFFERMEMORYDESCRIPTOR_INTASKWITHOPTIONS_		1

@@ -199,6 +199,7 @@ typedef struct _cframe_t {
 static unsigned panic_io_port;
 static unsigned	commit_paniclog_to_nvram;
 
+<<<<<<< HEAD
 unsigned int debug_boot_arg;
 
 /*
@@ -288,6 +289,10 @@ print_one_backtrace(pmap_t pmap, vm_offset_t topfp, const char *cur_marker,
 		}
 	} while ((++i < FP_MAX_NUM_TO_EVALUATE) && (fp != topfp));
 }
+=======
+int debug_boot_arg;
+
+>>>>>>> origin/10.5
 void
 machine_startup(void)
 {
@@ -298,6 +303,7 @@ machine_startup(void)
             halt_in_debugger = halt_in_debugger ? 0 : 1;
 #endif
 
+<<<<<<< HEAD
 	if (PE_parse_boot_argn("debug", &debug_boot_arg, sizeof (debug_boot_arg))) {
 		panicDebugging = TRUE;
 #if DEVELOPMENT || DEBUG
@@ -314,6 +320,15 @@ machine_startup(void)
 #endif
 	} else {
 		debug_boot_arg = 0;
+=======
+	if (PE_parse_boot_argn("debug", &boot_arg, sizeof (boot_arg))) {
+		if (boot_arg & DB_HALT) halt_in_debugger=1;
+		if (boot_arg & DB_PRT) disable_debug_output=FALSE; 
+		if (boot_arg & DB_SLOG) systemLogDiags=TRUE; 
+		if (boot_arg & DB_NMI) panicDebugging=TRUE; 
+		if (boot_arg & DB_LOG_PI_SCRN) logPanicDataToScreen=TRUE;
+		debug_boot_arg = boot_arg;
+>>>>>>> origin/10.5
 	}
 
 	if (!PE_parse_boot_argn("nvram_paniclog", &commit_paniclog_to_nvram, sizeof (commit_paniclog_to_nvram)))
@@ -331,6 +346,33 @@ machine_startup(void)
 #endif
 	hw_lock_init(&pbtlock);		/* initialize print backtrace lock */
 
+<<<<<<< HEAD
+=======
+#if	MACH_KDB
+	/*
+	 * Initialize KDB
+	 */
+#if	DB_MACHINE_COMMANDS
+	db_machine_commands_install(ppc_db_commands);
+#endif	/* DB_MACHINE_COMMANDS */
+	ddb_init();
+
+	if (boot_arg & DB_KDB)
+		current_debugger = KDB_CUR_DB;
+
+	/*
+	 * Cause a breakpoint trap to the debugger before proceeding
+	 * any further if the proper option bit was specified in
+	 * the boot flags.
+	 */
+	if (halt_in_debugger && (current_debugger == KDB_CUR_DB)) {
+	        Debugger("inline call to debugger(machine_startup)");
+		halt_in_debugger = 0;
+		active_debugger =1;
+	}
+#endif /* MACH_KDB */
+
+>>>>>>> origin/10.5
 	if (PE_parse_boot_argn("preempt", &boot_arg, sizeof (boot_arg))) {
 		default_preemption_rate = boot_arg;
 	}
@@ -343,6 +385,12 @@ machine_startup(void)
 	if (PE_parse_boot_argn("yield", &boot_arg, sizeof (boot_arg))) {
 		sched_poll_yield_shift = boot_arg;
 	}
+<<<<<<< HEAD
+=======
+	if (PE_parse_boot_argn("idlehalt", &boot_arg, sizeof (boot_arg))) {
+		idlehalt = boot_arg;
+	}
+>>>>>>> origin/10.5
 /* The I/O port to issue a read from, in the event of a panic. Useful for
  * triggering logic analyzers.
  */
@@ -864,10 +912,14 @@ panic_io_port_read(void) {
 /* For use with the MP rendezvous mechanism
  */
 
+<<<<<<< HEAD
 uint64_t panic_restart_timeout = ~(0ULL);
 
 #define PANIC_RESTART_TIMEOUT (3ULL * NSEC_PER_SEC)
 
+=======
+#if !CONFIG_EMBEDDED
+>>>>>>> origin/10.5
 static void
 machine_halt_cpu(void) {
 	uint64_t deadline;
@@ -897,6 +949,7 @@ machine_halt_cpu(void) {
 		(*PE_halt_restart)(kPERestartCPU);
 	pmCPUHalt(PM_HALT_DEBUG);
 }
+#endif
 
 static int pid_from_task(task_t task)
 {
@@ -970,12 +1023,16 @@ Debugger(
 		__asm__ volatile("movq %%rbp, %0" : "=m" (stackptr));
 
 		/* Print backtrace - callee is internally synchronized */
+<<<<<<< HEAD
 		if (task_pid == 1 && (init_task_died)) {
 			/* Special handling of launchd died panics */
 			print_launchd_info();
 		} else {
 			panic_i386_backtrace(stackptr, ((panic_double_fault_cpu == cn) ? 80: 48), NULL, FALSE, NULL);
 		}
+=======
+		panic_i386_backtrace(stackptr, 16, NULL, FALSE, NULL);
+>>>>>>> origin/10.5
 
 		/* everything should be printed now so copy to NVRAM
 		 */
@@ -987,8 +1044,13 @@ Debugger(
 		    if (commit_paniclog_to_nvram) {
 			unsigned int bufpos;
 			uintptr_t cr0;
+<<<<<<< HEAD
 			
 			debug_putc(0);
+=======
+
+                        debug_putc(0);
+>>>>>>> origin/10.5
 
 			/* Now call the compressor */
 			/* XXX Consider using the WKdm compressor in the
@@ -1021,8 +1083,21 @@ Debugger(
 			clear_ts();
 
 			kprintf("Attempting to commit panic log to NVRAM\n");
+<<<<<<< HEAD
 			pi_size = PESavePanicInfo((unsigned char *)debug_buf,
 					(uint32_t)pi_size );
+=======
+/* The following sequence is a workaround for:
+ * <rdar://problem/5915669> SnowLeopard10A67: AppleEFINVRAM should not invoke
+ * any routines that use floating point (MMX in this case) when saving panic
+ * logs to nvram/flash.
+ */
+			cr0 = get_cr0();
+			clear_ts();
+
+                        pi_size = PESavePanicInfo((unsigned char *)debug_buf,
+			    pi_size );
+>>>>>>> origin/10.5
 			set_cr0(cr0);
 
 			/* Uncompress in-place, to permit examination of
@@ -1208,6 +1283,7 @@ panic_i386_backtrace(void *_frame, int nframes, const char *msg, boolean_t regdu
 		pbtcpu = cn;
 	}
 
+<<<<<<< HEAD
 	if (__improbable(doprnt_hide_pointers == TRUE)) {
 		/* If we're called directly, the Debugger() function will not be called,
 		 * so we need to reset the value in here. */
@@ -1245,6 +1321,29 @@ panic_i386_backtrace(void *_frame, int nframes, const char *msg, boolean_t regdu
 #else
 	"Frame : Return Address\n", cn);
 #endif
+=======
+	PE_parse_boot_argn("keepsyms", &keepsyms, sizeof (keepsyms));
+
+	if (msg != NULL) {
+		kdb_printf(msg);
+	}
+
+	if ((regdump == TRUE) && (regs != NULL)) {
+		x86_saved_state32_t	*ss32p = saved_state32(regs);
+
+		kdb_printf(
+		    "EAX: 0x%08x, EBX: 0x%08x, ECX: 0x%08x, EDX: 0x%08x\n"
+		    "CR2: 0x%08x, EBP: 0x%08x, ESI: 0x%08x, EDI: 0x%08x\n"
+		    "EFL: 0x%08x, EIP: 0x%08x, CS:  0x%08x, DS:  0x%08x\n",
+		    ss32p->eax,ss32p->ebx,ss32p->ecx,ss32p->edx,
+		    ss32p->cr2,ss32p->ebp,ss32p->esi,ss32p->edi,
+		    ss32p->efl,ss32p->eip,ss32p->cs, ss32p->ds);
+		PC = ss32p->eip;
+	}
+
+	kdb_printf("Backtrace (CPU %d), "
+		"Frame : Return Address (4 potential args on stack)\n", cpu_number());
+>>>>>>> origin/10.5
 
 	for (frame_index = 0; frame_index < nframes; frame_index++) {
 		vm_offset_t curframep = (vm_offset_t) frame;
@@ -1306,9 +1405,17 @@ out:
 	if (PC != 0)
 		kmod_panic_dump(&PC, 1);
 
+	if (PC != 0)
+		kmod_dump(&PC, 1);
+
 	panic_display_system_configuration();
+<<<<<<< HEAD
 
 	doprnt_hide_pointers = old_doprnt_hide_pointers;
+=======
+	panic_display_zprint();
+	dump_kext_info(&kdb_log);
+>>>>>>> origin/10.5
 
 	/* Release print backtrace lock, to permit other callers in the
 	 * event of panics on multiple processors.

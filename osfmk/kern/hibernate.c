@@ -53,7 +53,56 @@ hibernate_alloc_page_lists(
 		hibernate_page_list_t ** page_list_wired_ret,
 		hibernate_page_list_t ** page_list_pal_ret)
 {
+<<<<<<< HEAD
     kern_return_t	retval = KERN_SUCCESS;
+=======
+    uint64_t start, end, nsec;
+    vm_page_t m;
+    uint32_t pages = page_list->page_count;
+    uint32_t count_zf = 0, count_throttled = 0;
+    uint32_t count_inactive = 0, count_active = 0, count_speculative = 0;
+    uint32_t count_wire = pages;
+    uint32_t count_discard_active    = 0;
+    uint32_t count_discard_inactive  = 0;
+    uint32_t count_discard_purgeable = 0;
+    uint32_t count_discard_speculative = 0;
+    uint32_t i;
+    uint32_t             bank;
+    hibernate_bitmap_t * bitmap;
+    hibernate_bitmap_t * bitmap_wired;
+
+
+    HIBLOG("hibernate_page_list_setall start\n");
+
+    clock_get_uptime(&start);
+
+    hibernate_page_list_zero(page_list);
+    hibernate_page_list_zero(page_list_wired);
+
+    m = (vm_page_t) hibernate_gobble_queue;
+    while(m)
+    {
+	pages--;
+	count_wire--;
+	hibernate_page_bitset(page_list,       TRUE, m->phys_page);
+	hibernate_page_bitset(page_list_wired, TRUE, m->phys_page);
+	m = (vm_page_t) m->pageq.next;
+    }
+
+    for( i = 0; i < vm_colors; i++ )
+    {
+	queue_iterate(&vm_page_queue_free[i],
+		      m,
+		      vm_page_t,
+		      pageq)
+	{
+	    pages--;
+	    count_wire--;
+	    hibernate_page_bitset(page_list,       TRUE, m->phys_page);
+	    hibernate_page_bitset(page_list_wired, TRUE, m->phys_page);
+	}
+    }
+>>>>>>> origin/10.5
 
     hibernate_page_list_t * page_list = NULL;
     hibernate_page_list_t * page_list_wired = NULL;
@@ -62,25 +111,167 @@ hibernate_alloc_page_lists(
     page_list = hibernate_page_list_allocate(TRUE);
     if (!page_list) {
 
+<<<<<<< HEAD
 	    retval = KERN_RESOURCE_SHORTAGE;
 	    goto done;
+=======
+    queue_iterate( &vm_page_queue_zf,
+                    m,
+                    vm_page_t,
+		    pageq )
+    {
+        if ((kIOHibernateModeDiscardCleanInactive & gIOHibernateMode) 
+         && consider_discard(m))
+        {
+            hibernate_page_bitset(page_list, TRUE, m->phys_page);
+	    if (m->dirty)
+		count_discard_purgeable++;
+	    else
+		count_discard_inactive++;
+        }
+        else
+            count_zf++;
+	count_wire--;
+	hibernate_page_bitset(page_list_wired, TRUE, m->phys_page);
+>>>>>>> origin/10.5
     }
     page_list_wired = hibernate_page_list_allocate(FALSE);
     if (!page_list_wired)
     {
 	    kfree(page_list, page_list->list_size);
 
+<<<<<<< HEAD
 	    retval = KERN_RESOURCE_SHORTAGE;
 	    goto done;
+=======
+    for( i = 0; i <= VM_PAGE_MAX_SPECULATIVE_AGE_Q; i++ )
+    {
+	queue_iterate(&vm_page_queue_speculative[i].age_q,
+		      m,
+		      vm_page_t,
+		      pageq)
+	{
+	    if ((kIOHibernateModeDiscardCleanInactive & gIOHibernateMode) 
+	     && consider_discard(m))
+	    {
+		hibernate_page_bitset(page_list, TRUE, m->phys_page);
+		count_discard_speculative++;
+	    }
+	    else
+		count_speculative++;
+	    count_wire--;
+	    hibernate_page_bitset(page_list_wired, TRUE, m->phys_page);
+	}
+    }
+
+    queue_iterate( &vm_page_queue_active,
+                    m,
+                    vm_page_t,
+                    pageq )
+    {
+        if ((kIOHibernateModeDiscardCleanActive & gIOHibernateMode) 
+         && consider_discard(m))
+        {
+            hibernate_page_bitset(page_list, TRUE, m->phys_page);
+	    if (m->dirty)
+		count_discard_purgeable++;
+	    else
+		count_discard_active++;
+        }
+        else
+            count_active++;
+	count_wire--;
+	hibernate_page_bitset(page_list_wired, TRUE, m->phys_page);
+>>>>>>> origin/10.5
     }
     page_list_pal = hibernate_page_list_allocate(FALSE);
     if (!page_list_pal)
     {
+<<<<<<< HEAD
 	    kfree(page_list, page_list->list_size);
 	    kfree(page_list_wired, page_list_wired->list_size);
 
 	    retval = KERN_RESOURCE_SHORTAGE;
 	    goto done;
+=======
+	for (i = 0; i < bitmap->bitmapwords; i++)
+	    bitmap->bitmap[i] = bitmap->bitmap[i] | ~bitmap_wired->bitmap[i];
+	bitmap       = (hibernate_bitmap_t *) &bitmap->bitmap      [bitmap->bitmapwords];
+	bitmap_wired = (hibernate_bitmap_t *) &bitmap_wired->bitmap[bitmap_wired->bitmapwords];
+    }
+
+    // machine dependent adjustments
+    hibernate_page_list_setall_machine(page_list, page_list_wired, &pages);
+
+    clock_get_uptime(&end);
+    absolutetime_to_nanoseconds(end - start, &nsec);
+    HIBLOG("hibernate_page_list_setall time: %qd ms\n", nsec / 1000000ULL);
+
+    HIBLOG("pages %d, wire %d, act %d, inact %d, spec %d, zf %d, throt %d, could discard act %d inact %d purgeable %d spec %d\n", 
+                pages, count_wire, count_active, count_inactive, count_speculative, count_zf, count_throttled,
+                count_discard_active, count_discard_inactive, count_discard_purgeable, count_discard_speculative);
+
+    *pagesOut = pages - count_discard_active - count_discard_inactive - count_discard_purgeable - count_discard_speculative;
+}
+
+void
+hibernate_page_list_discard(hibernate_page_list_t * page_list)
+{
+    uint64_t  start, end, nsec;
+    vm_page_t m;
+    vm_page_t next;
+    uint32_t  i;
+    uint32_t  count_discard_active    = 0;
+    uint32_t  count_discard_inactive  = 0;
+    uint32_t  count_discard_purgeable = 0;
+    uint32_t  count_discard_speculative = 0;
+
+    clock_get_uptime(&start);
+
+    m = (vm_page_t) queue_first(&vm_page_queue_zf);
+    while (m && !queue_end(&vm_page_queue_zf, (queue_entry_t)m))
+    {
+        next = (vm_page_t) m->pageq.next;
+        if (hibernate_page_bittst(page_list, m->phys_page))
+        {
+	    if (m->dirty)
+		count_discard_purgeable++;
+	    else
+		count_discard_inactive++;
+            discard_page(m);
+        }
+        m = next;
+    }
+
+    for( i = 0; i <= VM_PAGE_MAX_SPECULATIVE_AGE_Q; i++ )
+    {
+	m = (vm_page_t) queue_first(&vm_page_queue_speculative[i].age_q);
+	while (m && !queue_end(&vm_page_queue_speculative[i].age_q, (queue_entry_t)m))
+	{
+	    next = (vm_page_t) m->pageq.next;
+	    if (hibernate_page_bittst(page_list, m->phys_page))
+	    {
+		count_discard_speculative++;
+		discard_page(m);
+	    }
+	    m = next;
+	}
+    }
+
+    m = (vm_page_t) queue_first(&vm_page_queue_inactive);
+    while (m && !queue_end(&vm_page_queue_inactive, (queue_entry_t)m))
+    {
+        next = (vm_page_t) m->pageq.next;
+        if (hibernate_page_bittst(page_list, m->phys_page))
+        {
+	    if (m->dirty)
+		count_discard_purgeable++;
+	    else
+		count_discard_inactive++;
+            discard_page(m);
+        }
+        m = next;
+>>>>>>> origin/10.5
     }
     *page_list_ret        = page_list;
     *page_list_wired_ret  = page_list_wired;
@@ -89,6 +280,14 @@ hibernate_alloc_page_lists(
 done:
     return (retval);
 
+<<<<<<< HEAD
+=======
+    clock_get_uptime(&end);
+    absolutetime_to_nanoseconds(end - start, &nsec);
+    HIBLOG("hibernate_page_list_discard time: %qd ms, discarded act %d inact %d purgeable %d spec %d\n",
+                nsec / 1000000ULL,
+                count_discard_active, count_discard_inactive, count_discard_purgeable, count_discard_speculative);
+>>>>>>> origin/10.5
 }
 
 extern int sync_internal(void);

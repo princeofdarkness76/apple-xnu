@@ -65,6 +65,7 @@ typedef void		(*call_entry_func_t)(
 				call_entry_param_t	param1);
 
 typedef struct call_entry {
+<<<<<<< HEAD
     queue_chain_t	q_link;
     queue_head_t	*queue;
     call_entry_func_t	func;
@@ -87,6 +88,35 @@ MACRO_BEGIN							\
 	(entry)->queue		= NULL;				\
 	(entry)->deadline	= 0;				\
 	queue_chain_init((entry)->q_link);			\
+=======
+    queue_chain_t		q_link;
+	queue_t				queue;
+    call_entry_func_t	func;
+    call_entry_param_t	param0;
+    call_entry_param_t	param1;
+    uint64_t			deadline;
+} call_entry_data_t;
+
+typedef struct call_entry		*call_entry_t;
+
+extern queue_t		call_entry_enqueue_deadline(
+							call_entry_t		entry,
+							queue_t				queue,
+							uint64_t			deadline);
+
+extern queue_t		call_entry_enqueue_tail(
+							call_entry_t	entry,
+							queue_t			queue);
+
+extern queue_t		call_entry_dequeue(
+							call_entry_t	entry);
+
+#define	call_entry_setup(entry, pfun, p0)				\
+MACRO_BEGIN												\
+	(entry)->func		= (call_entry_func_t)(pfun);	\
+	(entry)->param0		= (call_entry_param_t)(p0);		\
+	(entry)->queue		= NULL;							\
+>>>>>>> origin/10.5
 MACRO_END
 
 #define qe(x)		((queue_entry_t)(x))

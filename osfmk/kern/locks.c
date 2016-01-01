@@ -367,9 +367,12 @@ lck_attr_setdefault(
 #else
  	attr->lck_attr_val =  LCK_ATTR_DEBUG;
 #endif	/* !DEBUG */
+<<<<<<< HEAD
 #else
 #error Unknown architecture.
 #endif	/* __arm__ */
+=======
+>>>>>>> origin/10.5
 }
 
 
@@ -656,8 +659,13 @@ lck_mtx_lock_wait (
 	KERNEL_DEBUG(MACHDBG_CODE(DBG_MACH_LOCKS, LCK_MTX_LCK_WAIT_CODE) | DBG_FUNC_START, trace_lck, trace_holder, 0, 0, 0);
 
 	priority = self->sched_pri;
+<<<<<<< HEAD
 	if (priority < self->base_pri)
 		priority = self->base_pri;
+=======
+	if (priority < self->priority)
+		priority = self->priority;
+>>>>>>> origin/10.5
 	if (priority < BASEPRI_DEFAULT)
 		priority = BASEPRI_DEFAULT;
 
@@ -667,11 +675,21 @@ lck_mtx_lock_wait (
 	thread_lock(holder);
 	if (mutex->lck_mtx_pri == 0)
 		holder->promotions++;
+<<<<<<< HEAD
 	holder->sched_flags |= TH_SFLAG_PROMOTED;
 	if (mutex->lck_mtx_pri < priority && holder->sched_pri < priority) {
 		KERNEL_DEBUG_CONSTANT(
 			MACHDBG_CODE(DBG_MACH_SCHED,MACH_PROMOTE) | DBG_FUNC_NONE,
 					holder->sched_pri, priority, trace_holder, trace_lck, 0);
+=======
+	holder->sched_mode |= TH_MODE_PROMOTED;
+	if (		mutex->lck_mtx_pri < priority	&&
+				holder->sched_pri < priority		) {
+		KERNEL_DEBUG_CONSTANT(
+			MACHDBG_CODE(DBG_MACH_SCHED,MACH_PROMOTE) | DBG_FUNC_NONE,
+					holder->sched_pri, priority, (int)holder, (int)lck, 0);
+
+>>>>>>> origin/10.5
 		set_sched_pri(holder, priority);
 	}
 	thread_unlock(holder);
@@ -754,6 +772,7 @@ lck_mtx_lock_acquire(
 	if (priority || thread->was_promoted_on_wakeup) {
 		s = splsched();
 		thread_lock(thread);
+<<<<<<< HEAD
 
 		if (priority) {
 			thread->promotions++;
@@ -766,6 +785,16 @@ lck_mtx_lock_acquire(
 				assert(priority <= MAXPRI_PROMOTE);
 				set_sched_pri(thread, priority);
 			}
+=======
+		thread->promotions++;
+		thread->sched_mode |= TH_MODE_PROMOTED;
+		if (thread->sched_pri < priority) {
+			KERNEL_DEBUG_CONSTANT(
+				MACHDBG_CODE(DBG_MACH_SCHED,MACH_PROMOTE) | DBG_FUNC_NONE,
+						thread->sched_pri, priority, 0, (int)lck, 0);
+
+			set_sched_pri(thread, priority);
+>>>>>>> origin/10.5
 		}
 		if (thread->was_promoted_on_wakeup) {
 			thread->was_promoted_on_wakeup = 0;

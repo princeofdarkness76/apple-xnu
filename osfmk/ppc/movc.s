@@ -394,7 +394,81 @@ ENTRY2(copyin, copyinmsg, TAG_NO_FRAME_USED)
 
 ENTRY2(copyout, copyoutmsg, TAG_NO_FRAME_USED)
 
+<<<<<<< HEAD
 /* Preamble allowing us to call a sub-function */
+=======
+			.align	5
+			.globl	EXT(copyin)
+			.globl	EXT(copyinmsg)
+
+LEXT(copyin)
+LEXT(copyinmsg)
+
+        mfcr	r2,0x10                         // save caller's cr3, which we use for flags
+        mr      r10,r3                          // move high word of 64-bit user address to r10
+        crclr	kkString						// not a string version
+        mr      r11,r4                          // move low word of 64-bit user address to r11
+        crset	kkIn							// flag as copyin
+        
+        
+// Common code to handle setup for all the copy variants:
+//		r2 = caller's cr3
+//      r3 = source if copyout
+//      r5 = dest if copyin
+//      r6 = buffer length or count
+//      r7 = count output ptr (if kkString set)
+//	   r10 = high word of 64-bit user-space address (source if copyin, dest if copyout)
+//	   r11 = low word of 64-bit user-space address
+//     cr3 = kkIn, kkString, kkNull flags
+
+copyJoin:
+        crclr	kkNull							// (dst==NULL) convention not used with this call
+copyJoin1:										// enter from copyinstr with kkNull set
+		mflr	r0								// get return address
+        cmplwi	r6,0							// buffer length 0?
+        lis		r9,0x1000						// r9 <- 0x10000000 (256MB)
+		stw		r0,FM_LR_SAVE(r1)				// save return
+        cmplw	cr1,r6,r9						// buffer length > 256MB ?
+        mfsprg	r8,2							// get the features
+        beq--	copyinout_0						// 0 length is degenerate case
+		stwu	r1,-kkFrameSize(r1)				// set up stack frame
+        stw		r2,kkCR3(r1)                    // save caller's cr3, which we use for flags
+        mtcrf	0x02,r8							// move pf64Bit to cr6
+        stw		r3,kkSource(r1)					// save args across MapUserMemoryWindow
+        stw		r5,kkDest(r1)
+        stw		r6,kkBufSize(r1)
+        crmove	kk64bit,pf64Bitb				// remember if this is a 64-bit processor
+        stw		r7,kkCountPtr(r1)
+        stw		r31,kkR31Save(r1)				// we use r31 globally for mapped user ptr
+
+        
+        
+// Handle buffer length > 256MB.  This is an error (ENAMETOOLONG) on copyin and copyout.
+// The string ops are passed -1 lengths by some BSD callers, so for them we silently clamp
+// the buffer length to 256MB.  This isn't an issue if the string is less than 256MB
+// (as most are!), but if they are >256MB we eventually return ENAMETOOLONG.  This restriction
+// is due to MapUserMemoryWindow; we don't want to consume more than two segments for
+// the mapping. 
+
+        ble++	cr1,copyin0						// skip if buffer length <= 256MB
+        bf		kkString,copyinout_too_big		// error if not string op
+        mr		r6,r9							// silently clamp buffer length to 256MB
+        stw		r9,kkBufSize(r1)				// update saved copy too
+
+
+// Set up thread_recover in case we hit an illegal address.
+
+copyin0:
+		li		r31,0							// no mapped ptr yet
+		mfsprg  r8,1							// Get the current thread 
+		lis		r2,hi16(copyinout_error)
+		ori		r2,r2,lo16(copyinout_error)
+		lwz		r4,THREAD_RECOVER(r8)
+		lwz		r3,ACT_VMMAP(r8)				// r3 <- vm_map virtual address
+		stw		r2,THREAD_RECOVER(r8)
+		stw		r4,kkThrErrJmp(r1)
+
+>>>>>>> origin/10.5
 
 		mflr	r0
 		stw		r0,FM_LR_SAVE(r1)

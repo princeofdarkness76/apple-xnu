@@ -644,7 +644,17 @@ kern_return_t IOUnmapPages(vm_map_t map, vm_offset_t va, vm_size_t length)
     boolean_t	b;
 
 #if __ppc__
+<<<<<<< HEAD
     b = mapping_remove(pmap, va);
+=======
+    for (idx = 0; idx < pmap_mem_regions_count; idx++)
+    {
+	lastPage = pmap_mem_regions[idx].mrEnd;
+#elif __i386__
+    for (idx = 0; idx < pmap_memory_region_count; idx++)
+    {
+	lastPage = pmap_memory_regions[idx].end - 1;
+>>>>>>> origin/10.5
 #else
     pmap_remove(pmap, va, va + length);
     b = TRUE;

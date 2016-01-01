@@ -714,9 +714,12 @@ hibernate_kernel_entrypoint(uint32_t p1,
     // flush caches
     __asm__("wbinvd");
     proc();
+<<<<<<< HEAD
 #else
 // implement me
 #endif
+=======
+>>>>>>> origin/10.5
 #endif
 
     return -1;

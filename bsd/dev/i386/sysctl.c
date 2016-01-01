@@ -45,6 +45,7 @@
 #include <sys/sysctl.h>
 #include <i386/cpuid.h>
 #include <i386/tsc.h>
+<<<<<<< HEAD
 #include <i386/rtclock_protos.h>
 #include <i386/machine_routines.h>
 #include <i386/pal_routines.h>
@@ -53,6 +54,8 @@
 #include <libkern/libkern.h>
 #include <i386/lapic.h>
 
+=======
+>>>>>>> origin/10.5
 
 static int
 _i386_cpu_info SYSCTL_HANDLER_ARGS
@@ -199,21 +202,34 @@ cpu_logical_per_package SYSCTL_HANDLER_ARGS
 }
 
 static int
+<<<<<<< HEAD
 cpu_flex_ratio_desired SYSCTL_HANDLER_ARGS
 {
 	__unused struct sysctl_oid *unused_oidp = oidp;
 	__unused void *unused_arg1 = arg1;
 	__unused int unused_arg2 = arg2;
+=======
+hw_cpu_sysctl_nehalem SYSCTL_HANDLER_ARGS
+{
+>>>>>>> origin/10.5
 	i386_cpu_info_t *cpu_info = cpuid_info();
 
 	if (cpu_info->cpuid_model != 26)
 		return ENOENT;
 
+<<<<<<< HEAD
 	return SYSCTL_OUT(req, &flex_ratio, sizeof(flex_ratio));
 }
 
 static int
 cpu_flex_ratio_min SYSCTL_HANDLER_ARGS
+=======
+	hw_cpu_sysctl(oidp, arg1, arg2, req);
+}
+
+static int
+hw_cpu_flex_ratio_desired SYSCTL_HANDLER_ARGS
+>>>>>>> origin/10.5
 {
 	__unused struct sysctl_oid *unused_oidp = oidp;
 	__unused void *unused_arg1 = arg1;
@@ -223,11 +239,19 @@ cpu_flex_ratio_min SYSCTL_HANDLER_ARGS
 	if (cpu_info->cpuid_model != 26)
 		return ENOENT;
 
+<<<<<<< HEAD
 	return SYSCTL_OUT(req, &flex_ratio_min, sizeof(flex_ratio_min));
 }
 
 static int
 cpu_flex_ratio_max SYSCTL_HANDLER_ARGS
+=======
+	return SYSCTL_OUT(req, &flex_ratio, sizeof(flex_ratio));
+}
+
+static int
+hw_cpu_flex_ratio_min SYSCTL_HANDLER_ARGS
+>>>>>>> origin/10.5
 {
 	__unused struct sysctl_oid *unused_oidp = oidp;
 	__unused void *unused_arg1 = arg1;
@@ -237,15 +261,24 @@ cpu_flex_ratio_max SYSCTL_HANDLER_ARGS
 	if (cpu_info->cpuid_model != 26)
 		return ENOENT;
 
+<<<<<<< HEAD
 	return SYSCTL_OUT(req, &flex_ratio_max, sizeof(flex_ratio_max));
 }
 
 static int
 cpu_ucode_update SYSCTL_HANDLER_ARGS
+=======
+	return SYSCTL_OUT(req, &flex_ratio_min, sizeof(flex_ratio_min));
+}
+
+static int
+hw_cpu_flex_ratio_max SYSCTL_HANDLER_ARGS
+>>>>>>> origin/10.5
 {
 	__unused struct sysctl_oid *unused_oidp = oidp;
 	__unused void *unused_arg1 = arg1;
 	__unused int unused_arg2 = arg2;
+<<<<<<< HEAD
 	uint64_t addr;
 	int error;
 	
@@ -318,6 +351,16 @@ misc_machine_check_panic(__unused struct sysctl_oid *oidp, __unused void *arg1, 
 }
 
 
+=======
+	i386_cpu_info_t *cpu_info = cpuid_info();
+
+	if (cpu_info->cpuid_model != 26)
+		return ENOENT;
+
+	return SYSCTL_OUT(req, &flex_ratio_max, sizeof(flex_ratio_max));
+}
+
+>>>>>>> origin/10.5
 SYSCTL_NODE(_machdep, OID_AUTO, cpu, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
 	"CPU info");
 
@@ -414,6 +457,12 @@ SYSCTL_PROC(_machdep_cpu, OID_AUTO, processor_flag,
 	    (void *)offsetof(i386_cpu_info_t, cpuid_processor_flag),
 	    sizeof(uint32_t),
 	    i386_cpu_info, "I", "CPU processor flag");
+
+SYSCTL_PROC(_machdep_cpu, OID_AUTO, microcode_version,
+	    CTLTYPE_INT | CTLFLAG_RD, 
+	    (void *)offsetof(i386_cpu_info_t, cpuid_microcode_version),
+	    sizeof(uint32_t),
+	    hw_cpu_sysctl, "I", "Microcode version number");
 
 
 SYSCTL_NODE(_machdep_cpu, OID_AUTO, mwait, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
@@ -654,6 +703,34 @@ SYSCTL_PROC(_machdep_cpu_tlb, OID_AUTO, shared,
 	    "Number of shared TLBs");
 
 
+SYSCTL_NODE(_machdep_cpu, OID_AUTO, tlb, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
+	"tlb");
+
+SYSCTL_PROC(_machdep_cpu_tlb, OID_AUTO, inst_small,
+	    CTLTYPE_INT | CTLFLAG_RD, 
+	    (void *)offsetof(i386_cpu_info_t, cpuid_itlb_small),
+	    sizeof(uint32_t),
+	    hw_cpu_sysctl, "I", "Number of small page instruction TLBs");
+
+SYSCTL_PROC(_machdep_cpu_tlb, OID_AUTO, data_small,
+	    CTLTYPE_INT | CTLFLAG_RD, 
+	    (void *)offsetof(i386_cpu_info_t, cpuid_dtlb_small),
+	    sizeof(uint32_t),
+	    hw_cpu_sysctl, "I", "Number of small page data TLBs");
+
+SYSCTL_PROC(_machdep_cpu_tlb, OID_AUTO, inst_large,
+	    CTLTYPE_INT | CTLFLAG_RD, 
+	    (void *)offsetof(i386_cpu_info_t, cpuid_itlb_large),
+	    sizeof(uint32_t),
+	    hw_cpu_sysctl, "I", "Number of large page instruction TLBs");
+
+SYSCTL_PROC(_machdep_cpu_tlb, OID_AUTO, data_large,
+	    CTLTYPE_INT | CTLFLAG_RD, 
+	    (void *)offsetof(i386_cpu_info_t, cpuid_dtlb_large),
+	    sizeof(uint32_t),
+	    hw_cpu_sysctl, "I", "Number of large page data TLBs");
+
+
 SYSCTL_NODE(_machdep_cpu, OID_AUTO, address_bits, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
 	"address_bits");
 
@@ -727,6 +804,36 @@ SYSCTL_NODE(_machdep, OID_AUTO, vectors, CTLFLAG_RD | CTLFLAG_LOCKED, 0,
 
 SYSCTL_UINT     (_machdep_vectors, OID_AUTO, timer, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, __DECONST(uint32_t *,&apic_timer_vector), 0, "");
 SYSCTL_UINT     (_machdep_vectors, OID_AUTO, IPI, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, __DECONST(uint32_t *,&apic_IPI_vector), 0, "");
+
+SYSCTL_PROC(_machdep_cpu, OID_AUTO, core_count,
+	    CTLTYPE_INT | CTLFLAG_RD, 
+	    (void *)offsetof(i386_cpu_info_t, core_count),
+	    sizeof(uint32_t),
+	    hw_cpu_sysctl, "I", "Number of enabled cores per package");
+
+SYSCTL_PROC(_machdep_cpu, OID_AUTO, thread_count,
+	    CTLTYPE_INT | CTLFLAG_RD, 
+	    (void *)offsetof(i386_cpu_info_t, thread_count),
+	    sizeof(uint32_t),
+	    hw_cpu_sysctl, "I", "Number of enabled threads per package");
+
+SYSCTL_NODE(_machdep_cpu, OID_AUTO, flex_ratio, CTLFLAG_RW|CTLFLAG_LOCKED, 0,
+	"Flex ratio");
+
+SYSCTL_PROC(_machdep_cpu_flex_ratio, OID_AUTO, desired,
+	    CTLTYPE_INT | CTLFLAG_RD, 
+	    0, 0,
+	    hw_cpu_flex_ratio_desired, "I", "Flex ratio desired (0 disabled)");
+
+SYSCTL_PROC(_machdep_cpu_flex_ratio, OID_AUTO, min,
+	    CTLTYPE_INT | CTLFLAG_RD, 
+	    0, 0,
+	    hw_cpu_flex_ratio_min, "I", "Flex ratio min (efficiency)");
+
+SYSCTL_PROC(_machdep_cpu_flex_ratio, OID_AUTO, max,
+	    CTLTYPE_INT | CTLFLAG_RD, 
+	    0, 0,
+	    hw_cpu_flex_ratio_max, "I", "Flex ratio max (non-turbo)");
 
 uint64_t pmap_pv_hashlist_walks;
 uint64_t pmap_pv_hashlist_cnts;

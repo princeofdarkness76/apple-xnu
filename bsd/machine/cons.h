@@ -47,6 +47,7 @@
  * 
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
+<<<<<<< HEAD
 /* 
  * Copyright (c) 1987 NeXT, Inc.
  */
@@ -101,5 +102,16 @@ int kmwrite(dev_t, struct uio *, int);
 int kmioctl(dev_t, u_long, caddr_t, int, struct proc *);
 int kmputc(dev_t, char);
 
+=======
+#ifndef _BSD_MACHINE_CONS_H_
+#define _BSD_MACHINE_CONS_H_
+
+#if defined (__ppc__) || defined (__ppc64__)
+#include <dev/ppc/cons.h>
+#elif defined (__i386__) || defined(__x86_64__)
+#include <dev/i386/cons.h>
+#else
+#error architecture not supported
+>>>>>>> origin/10.5
 #endif
 

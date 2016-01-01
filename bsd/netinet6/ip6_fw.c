@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2003-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2003-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -877,7 +881,11 @@ got_match:
 			tra.ifscope = IFSCOPE_NONE;
 			tra.awdl_unrestricted = 1;
 			tcp_respond(NULL, ip6, (struct tcphdr *)(ip6 + 1),
+<<<<<<< HEAD
 				*m, ack, seq, flags, &tra);
+=======
+				*m, ack, seq, flags, IFSCOPE_NONE);
+>>>>>>> origin/10.5
 			*m = NULL;
 			break;
 		  }

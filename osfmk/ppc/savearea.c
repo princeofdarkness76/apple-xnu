@@ -138,10 +138,15 @@ void savearea_init(vm_offset_t *addrx) {
 
 	saveanchor.savefree = 0;							/* Remember the start of the free chain */
 	saveanchor.savefreecnt = 0;							/* Remember the length */
+<<<<<<< HEAD
 	saveanchor.savepoolfwd = (unsigned int *)&saveanchor;	/* Remember pool forward */
 	saveanchor.savepoolbwd = (unsigned int *)&saveanchor;	/* Remember pool backward */
 
 	addr = *addrx;										/* Make this easier for ourselves */
+=======
+	saveanchor.savepoolfwd = (addr64_t)(uintptr_t)&saveanchor;		/* Remember pool forward */
+	saveanchor.savepoolbwd = (addr64_t)(uintptr_t)&saveanchor;		/* Remember pool backward */
+>>>>>>> origin/10.5
 
 	save = 	addr;										/* Point to the whole block of blocks */	
 
@@ -175,8 +180,13 @@ void savearea_init(vm_offset_t *addrx) {
 	saveanchor.savefree = 0;							/* Remember the start of the free chain */
 	saveanchor.savefreecnt = 0;							/* Remember the length */
 	saveanchor.saveadjust = 0;							/* Set none needed yet */
+<<<<<<< HEAD
 	saveanchor.savepoolfwd = (unsigned int *)&saveanchor;	/* Remember pool forward */
 	saveanchor.savepoolbwd = (unsigned int *)&saveanchor;	/* Remember pool backward */
+=======
+	saveanchor.savepoolfwd = (addr64_t)(uintptr_t)&saveanchor;		/* Remember pool forward */
+	saveanchor.savepoolbwd = (addr64_t)(uintptr_t)&saveanchor;		/* Remember pool backward */
+>>>>>>> origin/10.5
 
 	for(i=0; i < InitialSaveBloks; i++) {				/* Initialize the saveareas */
 

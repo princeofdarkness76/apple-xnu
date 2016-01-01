@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -399,6 +403,7 @@
 #define __DARWIN_ONLY_64_BIT_INO_T	0
 #define __DARWIN_ONLY_UNIX_CONFORMANCE	0
 #define __DARWIN_ONLY_VERS_1050		0
+<<<<<<< HEAD
 #if defined(__x86_64__)
 #define	__DARWIN_SUF_DARWIN14	"_darwin14"
 #define	__DARWIN14_ALIAS(sym)	__asm("_" __STRING(sym) __DARWIN_SUF_DARWIN14)
@@ -472,6 +477,27 @@
 /* #undef __DARWIN_ONLY_UNIX_CONFORMANCE (automatically set for 64-bit) */
 #define __DARWIN_ONLY_VERS_1050		0
 #endif /* PLATFORM_MacOSX */
+=======
+#else /* !KERNEL */
+#ifdef PRODUCT_AppleTV
+/* Product: AppleTV */
+#define __DARWIN_ONLY_64_BIT_INO_T	1
+#define __DARWIN_ONLY_UNIX_CONFORMANCE	1
+#define __DARWIN_ONLY_VERS_1050		1
+#endif /* PRODUCT_AppleTV */
+#ifdef PRODUCT_iPhone
+/* Product: iPhone */
+#define __DARWIN_ONLY_64_BIT_INO_T	1
+#define __DARWIN_ONLY_UNIX_CONFORMANCE	1
+#define __DARWIN_ONLY_VERS_1050		1
+#endif /* PRODUCT_iPhone */
+#ifdef PRODUCT_MacOSX
+/* Product: MacOSX */
+#define __DARWIN_ONLY_64_BIT_INO_T	0
+/* #undef __DARWIN_ONLY_UNIX_CONFORMANCE (automatically set for 64-bit) */
+#define __DARWIN_ONLY_VERS_1050		0
+#endif /* PRODUCT_MacOSX */
+>>>>>>> origin/10.5
 #endif /* KERNEL */
 
 /*
@@ -508,8 +534,11 @@
 #      error "Can't define _NONSTD_SOURCE when only UNIX conformance is available."
 #    endif /* _NONSTD_SOURCE */
 #    define __DARWIN_UNIX03	1
+<<<<<<< HEAD
 #  elif defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) && ((__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__-0) < 1040)
 #    define __DARWIN_UNIX03	0
+=======
+>>>>>>> origin/10.5
 #  elif defined(_DARWIN_C_SOURCE) || defined(_XOPEN_SOURCE) || defined(_POSIX_C_SOURCE)
 #    if defined(_NONSTD_SOURCE)
 #      error "Can't define both _NONSTD_SOURCE and any of _DARWIN_C_SOURCE, _XOPEN_SOURCE or _POSIX_C_SOURCE."
@@ -542,10 +571,15 @@
 #  else /* default */
 #    if __DARWIN_ONLY_64_BIT_INO_T
 #      define __DARWIN_64_BIT_INO_T 1
+<<<<<<< HEAD
 #    elif defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) && ((__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__-0) < 1060) || __DARWIN_UNIX03 == 0
 #      define __DARWIN_64_BIT_INO_T 0
 #    else /* default */
 #      define __DARWIN_64_BIT_INO_T 1
+=======
+#    else /* !__DARWIN_ONLY_64_BIT_INO_T */
+#      define __DARWIN_64_BIT_INO_T 0
+>>>>>>> origin/10.5
 #    endif /* __DARWIN_ONLY_64_BIT_INO_T */
 #  endif
 #endif /* !__DARWIN_64_BIT_INO_T */
@@ -555,10 +589,17 @@
 #    define __DARWIN_VERS_1050 0
 #  elif __DARWIN_ONLY_VERS_1050
 #    define __DARWIN_VERS_1050 1
+<<<<<<< HEAD
 #  elif defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) && ((__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__-0) < 1050) || __DARWIN_UNIX03 == 0
 #    define __DARWIN_VERS_1050 0
 #  else /* default */
 #    define __DARWIN_VERS_1050 1
+=======
+#  elif defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) && ((__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__-0) >= 1050)
+#    define __DARWIN_VERS_1050 1
+#  else /* default */
+#    define __DARWIN_VERS_1050 0
+>>>>>>> origin/10.5
 #  endif
 #endif /* !__DARWIN_VERS_1050 */
 
@@ -753,11 +794,40 @@
  *****************************************/
 
 /*
+<<<<<<< HEAD
  * _DARWIN_FEATURE_64_BIT_INODE indicates that the ino_t type is 64-bit, and
  * structures modified for 64-bit inodes (like struct stat) will be used.
  */
 #if __DARWIN_64_BIT_INO_T
 #define _DARWIN_FEATURE_64_BIT_INODE		1
+=======
+ * Long double compatibility macro allow selecting variant symbols based
+ * on the old (compatible) 64-bit long doubles, or the new 128-bit
+ * long doubles.  This applies only to ppc; i386 already has long double
+ * support, while ppc64 doesn't have any backwards history.
+ */
+#if   defined(__ppc__)
+#  if defined(__LDBL_MANT_DIG__) && defined(__DBL_MANT_DIG__) && \
+	__LDBL_MANT_DIG__ > __DBL_MANT_DIG__
+#    if __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__-0 < 1040
+#      define	__DARWIN_LDBL_COMPAT(x)	__asm("_" __STRING(x) "$LDBLStub")
+#    else
+#      define	__DARWIN_LDBL_COMPAT(x)	__asm("_" __STRING(x) "$LDBL128")
+#    endif
+#    define	__DARWIN_LDBL_COMPAT2(x) __asm("_" __STRING(x) "$LDBL128")
+#    define	__DARWIN_LONG_DOUBLE_IS_DOUBLE	0
+#  else
+#   define	__DARWIN_LDBL_COMPAT(x) /* nothing */
+#   define	__DARWIN_LDBL_COMPAT2(x) /* nothing */
+#   define	__DARWIN_LONG_DOUBLE_IS_DOUBLE	1
+#  endif
+#elif defined(__i386__) || defined(__ppc64__) || defined(__x86_64__)
+#  define	__DARWIN_LDBL_COMPAT(x)	/* nothing */
+#  define	__DARWIN_LDBL_COMPAT2(x) /* nothing */
+#  define	__DARWIN_LONG_DOUBLE_IS_DOUBLE	0
+#else
+#  error Unknown architecture
+>>>>>>> origin/10.5
 #endif
 
 /*
@@ -779,19 +849,34 @@
 #endif
 
 /*
+<<<<<<< HEAD
  * _DARWIN_FEATURE_ONLY_UNIX_CONFORMANCE indicates only UNIX conforming API
  * are available (the legacy BSD APIs are not available)
+=======
+ * _DARWIN_FEATURE_64_BIT_INODE indicates that the ino_t type is 64-bit, and
+ * structures modified for 64-bit inodes (like struct stat) will be used.
+ */
+#if __DARWIN_64_BIT_INO_T
+#define _DARWIN_FEATURE_64_BIT_INODE		1
+#endif
+
+/*
+ * _DARWIN_FEATURE_LONG_DOUBLE_IS_DOUBLE indicates when the long double type
+ * is the same as the double type (ppc and arm only)
+>>>>>>> origin/10.5
  */
 #if __DARWIN_ONLY_UNIX_CONFORMANCE
 #define _DARWIN_FEATURE_ONLY_UNIX_CONFORMANCE	1
 #endif
 
 /*
- * _DARWIN_FEATURE_UNIX_CONFORMANCE indicates whether UNIX conformance is on,
- * and specifies the conformance level (3 is SUSv3)
+ * _DARWIN_FEATURE_64_ONLY_BIT_INODE indicates that the ino_t type may only
+ * be 64-bit; there is no support for 32-bit ino_t when this macro is defined
+ * (and non-zero).  There is no struct stat64 either, as the regular
+ * struct stat will already be the 64-bit version.
  */
-#if __DARWIN_UNIX03
-#define _DARWIN_FEATURE_UNIX_CONFORMANCE	3
+#if __DARWIN_ONLY_64_BIT_INO_T
+#define _DARWIN_FEATURE_ONLY_64_BIT_INODE	1
 #endif
 
 /* 
@@ -805,6 +890,7 @@
 #endif
 
 /*
+<<<<<<< HEAD
  * __XNU_PRIVATE_EXTERN is a linkage decoration indicating that a symbol can be
  * used from other compilation units, but not other libraries or executables.
  */
@@ -829,6 +915,29 @@
                                _Pragma("clang diagnostic ignored \"-Wcast-align\"") \
                                x;                                                   \
                                _Pragma("clang diagnostic pop")
+=======
+ * _DARWIN_FEATURE_ONLY_VERS_1050 indicates that only those APIs updated
+ * in 10.5 exists; no pre-10.5 variants are available.
+ */
+#if __DARWIN_ONLY_VERS_1050
+#define _DARWIN_FEATURE_ONLY_VERS_1050		1
+#endif
+
+/*
+ * _DARWIN_FEATURE_ONLY_UNIX_CONFORMANCE indicates only UNIX conforming API
+ * are available (the legacy BSD APIs are not available)
+ */
+#if __DARWIN_ONLY_UNIX_CONFORMANCE
+#define _DARWIN_FEATURE_ONLY_UNIX_CONFORMANCE	1
+#endif
+
+/*
+ * _DARWIN_FEATURE_UNIX_CONFORMANCE indicates whether UNIX conformance is on,
+ * and specifies the conformance level (3 is SUSv3)
+ */
+#if __DARWIN_UNIX03
+#define _DARWIN_FEATURE_UNIX_CONFORMANCE	3
+>>>>>>> origin/10.5
 #endif
 
 #endif /* !_CDEFS_H_ */

@@ -127,6 +127,7 @@ int	ubc_setcred(struct vnode *, struct proc *) __deprecated;
 /* code signing */
 struct cs_blob;
 struct cs_blob *ubc_cs_blob_get(vnode_t, cpu_type_t, off_t);
+<<<<<<< HEAD
 
 /* apis to handle generation count for cs blob */
 void cs_blob_reset_cache(void);
@@ -138,6 +139,8 @@ int cs_blob_get(proc_t, void **, size_t *);
 const char *cs_identity_get(proc_t);
 
 #endif
+=======
+>>>>>>> origin/10.5
 
 /* cluster IO routines */
 int	advisory_read(vnode_t, off_t, off_t, int);

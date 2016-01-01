@@ -713,6 +713,12 @@ extern void OSSpinLockUnlock(volatile OSSpinLock * lock);
  */
 static __inline__ void OSSynchronizeIO(void)
 {
+<<<<<<< HEAD
+=======
+#if defined(__ppc__)
+        __asm__ ("eieio");
+#endif
+>>>>>>> origin/10.5
 }
 
 #if	defined(KERNEL_PRIVATE)

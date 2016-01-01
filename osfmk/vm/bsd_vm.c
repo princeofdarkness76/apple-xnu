@@ -130,7 +130,10 @@ const struct memory_object_pager_ops vnode_pager_ops = {
 	vnode_pager_synchronize,
 	vnode_pager_map,
 	vnode_pager_last_unmap,
+<<<<<<< HEAD
 	NULL, /* data_reclaim */
+=======
+>>>>>>> origin/10.5
 	"vnode pager"
 };
 
@@ -378,6 +381,8 @@ trigger_name_to_port(
 extern int	uiomove64(addr64_t, int, void *);
 #define	MAX_RUN	32
 
+unsigned long vm_cs_tainted_forces = 0;
+
 int
 memory_object_control_uiomove(
 	memory_object_control_t	control,
@@ -459,6 +464,7 @@ memory_object_control_uiomove(
 			assert(!dst_page->encrypted);
 
 		        if (mark_dirty) {
+<<<<<<< HEAD
 				if (dst_page->dirty == FALSE)
 					dirty_count++;
 				SET_PAGE_DIRTY(dst_page, FALSE);
@@ -474,6 +480,17 @@ memory_object_control_uiomove(
                                         vm_cs_validated_resets++;
 #endif
 					pmap_disconnect(dst_page->phys_page);
+=======
+			        dst_page->dirty = TRUE;
+				if (dst_page->cs_validated) {
+					/*
+					 * CODE SIGNING:
+					 * We're modifying a code-signed
+					 * page:  assume that it is now tainted.
+					 */
+					dst_page->cs_tainted = TRUE;
+					vm_cs_tainted_forces++;
+>>>>>>> origin/10.5
 				}
 			}
 			dst_page->busy = TRUE;
@@ -560,6 +577,7 @@ vnode_pager_bootstrap(void)
 	size = (vm_size_t) sizeof(struct vnode_pager);
 	vnode_pager_zone = zinit(size, (vm_size_t) MAX_VNODE*size,
 				PAGE_SIZE, "vnode pager structures");
+<<<<<<< HEAD
 	zone_change(vnode_pager_zone, Z_CALLERACCT, FALSE);
 	zone_change(vnode_pager_zone, Z_NOENCRYPT, TRUE);
 
@@ -568,6 +586,11 @@ vnode_pager_bootstrap(void)
 	apple_protect_pager_bootstrap();
 #endif	/* CONFIG_CODE_DECRYPTION */
 	swapfile_pager_bootstrap();
+=======
+#if CONFIG_CODE_DECRYPTION
+	apple_protect_pager_bootstrap();
+#endif	/* CONFIG_CODE_DECRYPTION */
+>>>>>>> origin/10.5
 	return;
 }
 

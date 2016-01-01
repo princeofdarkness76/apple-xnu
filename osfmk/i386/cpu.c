@@ -167,6 +167,7 @@ cpu_exit_wait(
 	int cpu)
 {
     	cpu_data_t	*cdp = cpu_datap(cpu);
+<<<<<<< HEAD
 	boolean_t	intrs_enabled;
 	uint64_t	tsc_timeout;
 
@@ -180,6 +181,13 @@ cpu_exit_wait(
 	simple_lock(&x86_topo_lock);
 	/* Set a generous timeout of several seconds (in TSC ticks) */
 	tsc_timeout = rdtsc64() + (10ULL * 1000 * 1000 * 1000);
+=======
+
+	/*
+	 * Wait until the CPU indicates that it has stopped.
+	 */
+	simple_lock(&x86_topo_lock);
+>>>>>>> origin/10.5
 	while ((cdp->lcpu.state != LCPU_HALT)
 	       && (cdp->lcpu.state != LCPU_OFF)
 	       && !cdp->lcpu.stopped) {

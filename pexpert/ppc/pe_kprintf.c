@@ -56,6 +56,7 @@ void PE_init_kprintf(boolean_t vm_initialized)
 	if (PE_state.initialized == FALSE)
 		panic("Platform Expert not initialized");
 
+<<<<<<< HEAD
 	if (!vm_initialized)
 	{
 	    if (PE_parse_boot_arg("debug", &boot_arg)) 
@@ -64,6 +65,43 @@ void PE_init_kprintf(boolean_t vm_initialized)
 	    if( (scc = PE_find_scc()))
             {
 		initialize_serial( (void *) scc );
+=======
+	if (PE_parse_boot_argn("debug", &boot_arg, sizeof (boot_arg)))
+		if(boot_arg & DB_KPRT) disable_serial_output = FALSE; 
+
+	if (DTLookupEntry(NULL, "/options", &options) == kSuccess) {
+	  if (DTGetProperty(options, "input-device", (void **)&str, &size) == kSuccess) {
+		if ((size > 5) && !strncmp("scca:", str, 5)) {
+		  size -= 5;
+		  str += 5;
+		  if (size <= 6) {
+			strncpy(baud, str, size);
+			baud[size] = '\0';
+			gPESerialBaud = strtol(baud, NULL, 0);
+		  }
+		}
+	  }
+	  if (DTGetProperty(options, "output-device", (void **)&str, &size) == kSuccess) {
+		if ((size > 5) && !strncmp("scca:", str, 5)) {
+		  size -= 5;
+		  str += 5;
+		  if (size <= 6) {
+			strncpy(baud, str, size);
+			baud[size] = '\0';
+			gPESerialBaud = strtol(baud, NULL, 0);
+		  }
+		}
+	  }	  
+	}
+
+	/* Check the boot-args for new serial baud. */
+	if (PE_parse_boot_argn("serialbaud", &serial_baud, sizeof (serial_baud)))
+		if (serial_baud != -1) gPESerialBaud = serial_baud; 
+
+	if( (scc = PE_find_scc())) {				/* See if we can find the serial port */
+		scc = io_map_spec(scc, 0x1000, VM_WIMG_IO);	/* Map it in */
+		initialize_serial((void *)scc, gPESerialBaud); /* Start up the serial driver */
+>>>>>>> origin/10.5
 		PE_kputc = serial_putc;
 
 		simple_lock_init(&kprintf_lock, 0);

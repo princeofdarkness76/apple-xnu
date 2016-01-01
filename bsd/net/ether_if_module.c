@@ -191,12 +191,28 @@ struct ether_desc_blk_str {
 	struct en_desc  block_ptr[1];
 };
 
+<<<<<<< HEAD
 /* Size of the above struct before the array of struct en_desc */
 #define ETHER_DESC_HEADER_SIZE	\
 	((size_t) offsetof(struct ether_desc_blk_str, block_ptr))
 
 __private_extern__ u_char etherbroadcastaddr[ETHER_ADDR_LEN] =
     { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+=======
+static __inline__ int
+_ether_cmp(const void * a, const void * b)
+{
+	const u_int16_t * a_s = (const u_int16_t *)a;
+	const u_int16_t * b_s = (const u_int16_t *)b;
+	
+	if (a_s[0] != b_s[0]
+	    || a_s[1] != b_s[1]
+	    || a_s[2] != b_s[2]) {
+		return (1);
+	}
+	return (0);
+}
+>>>>>>> origin/10.5
 
 /*
  * Release all descriptor entries owned by this protocol (there may be several).
@@ -640,7 +656,11 @@ ether_demux(ifnet_t ifp, mbuf_t m, char *frame_header,
 			m->m_flags |= M_PROMISC;
 		}
 	}
+<<<<<<< HEAD
 
+=======
+	
+>>>>>>> origin/10.5
 	/* check for VLAN */
 	if ((m->m_pkthdr.csum_flags & CSUM_VLAN_TAG_VALID) != 0) {
 		if (EVL_VLANOFTAG(m->m_pkthdr.vlan_tag) != 0) {
@@ -649,6 +669,7 @@ ether_demux(ifnet_t ifp, mbuf_t m, char *frame_header,
 		}
 		/* the packet is just priority-tagged, clear the bit */
 		m->m_pkthdr.csum_flags &= ~CSUM_VLAN_TAG_VALID;
+<<<<<<< HEAD
 	} else if (ether_type == htons(ETHERTYPE_VLAN)) {
 		struct ether_vlan_header *	evl;
 
@@ -658,6 +679,18 @@ ether_demux(ifnet_t ifp, mbuf_t m, char *frame_header,
 		    EVL_VLANOFTAG(ntohs(evl->evl_tag)) != 0) {
 			*protocol_family = PF_VLAN;
 			return (0);
+=======
+	}
+	else if (ether_type == htons(ETHERTYPE_VLAN)) {
+		struct ether_vlan_header *	evl;
+
+		evl = (struct ether_vlan_header *)frame_header;
+		if (m->m_len < ETHER_VLAN_ENCAP_LEN
+		    || ntohs(evl->evl_proto) == ETHERTYPE_VLAN
+		    || EVL_VLANOFTAG(ntohs(evl->evl_tag)) != 0) {
+			*protocol_family = PF_VLAN;
+			return 0;
+>>>>>>> origin/10.5
 		}
 		/* the packet is just priority-tagged */
 
@@ -669,9 +702,14 @@ ether_demux(ifnet_t ifp, mbuf_t m, char *frame_header,
 		m->m_data += ETHER_VLAN_ENCAP_LEN;
 		m->m_pkthdr.len -= ETHER_VLAN_ENCAP_LEN;
 		m->m_pkthdr.csum_flags = 0; /* can't trust hardware checksum */
+<<<<<<< HEAD
 	} else if (ether_type == htons(ETHERTYPE_ARP))
 		m->m_pkthdr.pkt_flags |= PKTF_INET_RESOLVE; /* ARP packet */
 
+=======
+	}
+	
+>>>>>>> origin/10.5
 	data = mtod(m, u_int8_t*);
 =======
     register struct ether_header *eh = (struct ether_header *)frame_header;

@@ -401,8 +401,12 @@ socketinit(void)
 	}
 	socketinit_done = 1;
 
+<<<<<<< HEAD
 	PE_parse_boot_argn("socket_debug", &socket_debug,
 	    sizeof (socket_debug));
+=======
+	PE_parse_boot_argn("socket_debug", &socket_debug, sizeof (socket_debug));
+>>>>>>> origin/10.5
 
 	/*
 	 * allocate lock group attribute and group for socket cache mutex
@@ -1172,7 +1176,12 @@ soclose_wait_locked(struct socket *so)
 	 * Double check here and return if there's no outstanding upcall;
 	 * otherwise proceed further only if SOF_UPCALLCLOSEWAIT is set.
 	 */
+<<<<<<< HEAD
 	if (!so->so_upcallusecount || !(so->so_flags & SOF_UPCALLCLOSEWAIT))
+=======
+	if (!(so->so_flags & SOF_UPCALLINUSE) ||
+	    !(so->so_flags & SOF_UPCALLCLOSEWAIT))
+>>>>>>> origin/10.5
 		return;
 	so->so_rcv.sb_flags &= ~SB_UPCALL;
 	so->so_snd.sb_flags &= ~SB_UPCALL;
@@ -6528,6 +6537,7 @@ filt_socktouch(struct knote *kn, struct kevent_internal_s *kev, long type)
 		uint32_t changed_flags;
 		changed_flags = (kn->kn_sfflags ^ kn->kn_hookid);
 
+<<<<<<< HEAD
 		/*
 		 * Since we keep track of events that are already
 		 * delivered, if any of those events are not requested
@@ -6560,6 +6570,28 @@ filt_socktouch(struct knote *kn, struct kevent_internal_s *kev, long type)
 		break;
 	default:
 		break;
+=======
+#ifdef __APPLE_API_PRIVATE
+		case SO_UPCALLCLOSEWAIT:
+			error = sooptcopyin(sopt, &optval, sizeof (optval),
+			    sizeof (optval));
+			if (error)
+				goto bad;
+			if (optval)
+				so->so_flags |= SOF_UPCALLCLOSEWAIT;
+			else
+				so->so_flags &= ~SOF_UPCALLCLOSEWAIT;
+			break;
+#endif
+
+		default:
+			error = ENOPROTOOPT;
+			break;
+		}
+		if (error == 0 && so->so_proto && so->so_proto->pr_ctloutput) {
+			(void) ((*so->so_proto->pr_ctloutput)(so, sopt));
+		}
+>>>>>>> origin/10.5
 	}
 }
 
@@ -6931,9 +6963,24 @@ soresume(struct proc *p, struct socket *so, int locked)
 		so->so_extended_bk_start = 0;
 		OSBitAndAtomic(~P_LXBKIDLEINPROG, &p->p_ladvflag);
 
+<<<<<<< HEAD
 		OSIncrementAtomic(&soextbkidlestat.so_xbkidle_resumed);
 		OSDecrementAtomic(&soextbkidlestat.so_xbkidle_active);
 		VERIFY(soextbkidlestat.so_xbkidle_active >= 0);
+=======
+#ifdef __APPLE_API_PRIVATE
+		case SO_UPCALLCLOSEWAIT:
+			optval = (so->so_flags & SOF_UPCALLCLOSEWAIT);
+			goto integer;
+#endif
+
+		default:
+			error = ENOPROTOOPT;
+			break;
+		}
+		socket_unlock(so, 1);
+		return (error);
+>>>>>>> origin/10.5
 	}
 	if (locked == 0)
 		socket_unlock(so, 1);

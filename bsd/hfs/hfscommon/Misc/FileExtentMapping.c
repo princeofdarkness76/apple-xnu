@@ -561,6 +561,9 @@ OSErr MapFileBlockC (
 
 	allocBlockSize = vcb->blockSize;
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.5
 	sectorSize = VCBTOHFS(vcb)->hfs_logical_block_size;
 
 =======

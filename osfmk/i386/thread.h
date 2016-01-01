@@ -100,7 +100,36 @@
 #include <i386/tss.h>
 #include <i386/eflags.h>
 
+<<<<<<< HEAD
 #include <i386/cpu_data.h>
+=======
+/*
+ *	x86_saved_state32/64:
+ *
+ *	Has been exported to servers.  See: mach/i386/thread_status.h
+ *
+ *	This structure corresponds to the state of user registers
+ *	as saved upon kernel entry.  It lives in the pcb.
+ *	It is also pushed onto the stack for exceptions in the kernel.
+ *	For performance, it is also used directly in syscall exceptions
+ *	if the server has requested i386_THREAD_STATE flavor for the exception
+ *	port.
+ */
+
+/*
+ *	Save area for user floating-point state.
+ *	Allocated only when necessary.
+ */
+
+struct x86_fpsave_state {
+	boolean_t		fp_valid;
+	enum {
+		FXSAVE32 = 1,
+		FXSAVE64 = 2
+	} fp_save_layout;
+        struct x86_fx_save 	fx_save_state __attribute__ ((aligned (16)));
+};
+>>>>>>> origin/10.5
 
 #include <machine/pal_routines.h>
 

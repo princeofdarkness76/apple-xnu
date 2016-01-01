@@ -270,6 +270,14 @@ void *exec_spawnattr_getmacpolicyinfo(const void *macextensions, const char *pol
 #define THROTTLE_IO_DISABLE	0
 void sys_override_io_throttle(int flag);
 
+<<<<<<< HEAD
+=======
+void	load_init_program(struct proc *p);
+void __pthread_testcancel(int presyscall);
+void syscall_exit_funnelcheck(void);
+void throttle_info_get_last_io_time(mount_t mp, struct timeval *tv);
+void update_last_io_time(mount_t mp);
+>>>>>>> origin/10.5
 #endif /* BSD_KERNEL_PRIVATE */
 
 __END_DECLS

@@ -669,6 +669,7 @@ map_file_retry:
 						 VM_INHERIT_SHARE : 
 						 VM_INHERIT_DEFAULT);
 
+<<<<<<< HEAD
 		/* If a non-binding address was specified for this file backed
 		 * mapping, retry the mapping with a zero base
 		 * in the event the mapping operation failed due to
@@ -677,6 +678,11 @@ map_file_retry:
 		if ((result == KERN_NO_SPACE) && ((flags & MAP_FIXED) == 0) && user_addr && (num_retries++ == 0)) {
 			user_addr = vm_map_page_size(user_map);
 			goto map_file_retry;
+=======
+		if (result != KERN_SUCCESS)  {
+				(void)vnode_put(vp);
+				goto out;
+>>>>>>> origin/10.5
 		}
 	}
 
@@ -1492,6 +1498,7 @@ map_fd_funneled(
 		}
 	}
 
+<<<<<<< HEAD
 	ubc_setcred(vp, current_proc());
 	ubc_map(vp);
 >>>>>>> origin/10.2
@@ -1537,5 +1544,13 @@ map_fd_funneled(
         return (EPERM);
     }
     return 0;
+=======
+	ubc_setthreadcred(vp, current_proc(), current_thread());
+	(void)vnode_put(vp);
+	err = 0;
+bad:
+	fp_drop(p, fd, fp, 0);
+	return (err);
+>>>>>>> origin/10.5
 }
 #endif /* CONFIG_CODE_DECRYPTION */

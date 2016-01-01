@@ -34,7 +34,11 @@ __SYSCALL(___sigreturn, sigreturn, 2)
 
 #elif defined(__i386__)
 
+<<<<<<< HEAD
 __SYSCALL_INT(___sigreturn, sigreturn, 2)
+=======
+__SYSCALL_INT(__sigreturn, sigreturn, 2)
+>>>>>>> origin/10.5
 
 #else
 #error Unsupported architecture

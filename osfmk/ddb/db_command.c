@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -502,6 +506,7 @@ struct db_command db_command_table[] = {
 #if 0	/* until CR1440 is fixed, to avoid toe-stubbing			*/
 	{ "next",	db_trace_until_matching_cmd,	0,			0 },
 #endif
+<<<<<<< HEAD
 	{ "match",	db_trace_until_matching_cmd,	0	,		0 },
 	{ "trace",	db_stack_trace_cmd,		0,			0 },
 	{ "cond",	(db_func) db_cond_cmd,		CS_OWN,			0 },
@@ -526,6 +531,146 @@ struct db_command db_command_table[] = {
 	{ "gs",		db_gsnoop,				CS_MORE,			0 },
 #endif
 	{ (char *)0, }
+=======
+	{
+		.name = "match",
+		.fcn = db_trace_until_matching_cmd,
+	},
+	{
+		.name = "trace",
+		.fcn = db_stack_trace_cmd,
+	},
+	{
+		.name = "cond",
+		.fcn = (db_func)db_cond_cmd,
+		.flag = CS_OWN,
+	},
+	{
+		.name = "call",
+		.fcn = (db_func)db_fncall,
+		.flag = CS_OWN,
+	},
+	{
+		.name = "macro",
+		.fcn = (db_func)db_def_macro_cmd,
+		.flag = CS_OWN,
+	},
+	{
+		.name = "dmacro",
+		.fcn = (db_func)db_del_macro_cmd,
+		.flag = CS_OWN,
+	},
+	{
+		.name = "show",
+		.more = db_show_cmds
+	},
+	{
+		.name = "cpu",
+		.fcn = (db_func)db_switch_cpu,
+	},
+	{
+		.name = "dr",
+		.fcn = db_display_real,
+		.flag = CS_MORE|CS_SET_DOT,
+	},
+	{
+		.name = "di",
+		.fcn = db_display_iokit,
+		.flag = CS_MORE,
+	},
+	{
+		.name = "dk",
+		.fcn = db_display_kmod,
+		.flag = CS_MORE,
+	},
+
+	{
+		.name = "reboot",
+		(db_func)db_reboot,
+	},
+#if !defined(__ppc__)	
+	{
+		.name = "ms",
+		.fcn = db_msr,
+		.flag = CS_MORE,
+	},
+	{
+		.name = "cp",
+		.fcn = db_cpuid,
+		.flag = CS_MORE,
+	},
+	{
+		.name = "da",
+		.fcn = db_apic,
+		.flag = CS_MORE,
+	},
+#endif /* !__ppc__ */
+#if defined(__ppc__)	
+	{
+		.name = "lt",
+		.fcn = db_low_trace,
+		.flag = CS_MORE|CS_SET_DOT,
+	},
+	{
+		.name = "dl",
+		.fcn = db_display_long,
+		.flag = CS_MORE|CS_SET_DOT,
+	},
+	{
+		.name = "dc",
+		.fcn = db_display_char,
+		.flag = CS_MORE|CS_SET_DOT,
+	},
+	{
+		.name = "dv",
+		.fcn = db_display_virtual,
+		.flag = CS_MORE|CS_SET_DOT,
+	},
+	{
+		.name = "dm",
+		.fcn = db_display_mappings,
+		.flag = CS_MORE|CS_SET_DOT,
+	},
+	{
+		.name = "dh",
+		.fcn = db_display_hash,
+		.flag = CS_MORE|CS_SET_DOT,
+	},
+	{
+		.name = "dp",
+		.fcn = db_display_pmap,
+		.flag = CS_MORE,
+	},
+	{
+		.name = "ds",
+		.fcn = db_display_save,
+		.flag = CS_MORE|CS_SET_DOT,
+	},
+	{
+		.name = "dx",
+		.fcn = db_display_xregs,
+		.flag = CS_MORE|CS_SET_DOT,
+	},
+	{
+		.name = "gs",
+		.fcn = db_gsnoop,
+		.flag = CS_MORE,
+	},
+	{
+		.name = "cm",
+		.fcn = db_check_mappings,
+		.flag = CS_MORE,
+	},
+	{
+		.name = "cp",
+		.fcn = db_check_pmaps,
+		.flag = CS_MORE,
+	},
+#endif /* __ppc__ */
+	{
+		.name = (const char *)NULL,
+	},
+>>>>>>> origin/10.5
 };
 
 /* this function should be called to install the machine dependent

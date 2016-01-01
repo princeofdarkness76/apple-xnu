@@ -1883,8 +1883,16 @@ send_pkt(struct ip_flow_id *id, u_int32_t seq, u_int32_t ack, int flags)
 	ip->ip_ttl = ip_defttl;
 	ip->ip_len = m->m_pkthdr.len;
 	m->m_flags |= M_SKIP_FIREWALL;
+<<<<<<< HEAD
 	
 	return m;
+=======
+	ip_output_list(m, 0, NULL, &sro, 0, NULL, NULL);
+	if (sro.ro_rt) {
+		RTFREE(sro.ro_rt);
+		sro.ro_rt = NULL;
+	}
+>>>>>>> origin/10.5
 }
 
 /*

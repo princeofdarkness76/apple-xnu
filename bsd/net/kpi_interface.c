@@ -91,6 +91,9 @@ static errno_t ifnet_set_lladdr_internal(ifnet_t, const void *, size_t,
     u_char, int);
 static errno_t ifnet_awdl_check_eflags(ifnet_t, u_int32_t *, u_int32_t *);
 
+static errno_t
+ifnet_list_get_common(ifnet_family_t, boolean_t, ifnet_t **, u_int32_t *);
+
 /*
  * Temporary work around until we have real reference counting
  *
@@ -2092,11 +2095,14 @@ ifnet_list_get_all(ifnet_family_t family, ifnet_t **list, u_int32_t *count)
 	return (ifnet_list_get_common(family, TRUE, list, count));
 }
 
+<<<<<<< HEAD
 struct ifnet_list {
 	SLIST_ENTRY(ifnet_list)	ifl_le;
 	struct ifnet		*ifl_ifp;
 };
 
+=======
+>>>>>>> origin/10.5
 static errno_t
 ifnet_list_get_common(ifnet_family_t family, boolean_t get_all, ifnet_t **list,
     u_int32_t *count)
@@ -2105,6 +2111,7 @@ ifnet_list_get_common(ifnet_family_t family, boolean_t get_all, ifnet_t **list,
 	SLIST_HEAD(, ifnet_list) ifl_head;
 	struct ifnet_list *ifl, *ifl_tmp;
 	struct ifnet *ifp;
+<<<<<<< HEAD
 	int cnt = 0;
 	errno_t err = 0;
 
@@ -2113,10 +2120,36 @@ ifnet_list_get_common(ifnet_family_t family, boolean_t get_all, ifnet_t **list,
 	if (list == NULL || count == NULL) {
 		err = EINVAL;
 		goto done;
+=======
+	u_int32_t cmax = 0;
+	*count = 0;
+	errno_t	result = 0;
+
+	if (list == NULL || count == NULL)
+		return (EINVAL);
+
+	ifnet_head_lock_shared();
+	TAILQ_FOREACH(ifp, &ifnet, if_link) {
+		if ((ifp->if_eflags & IFEF_DETACHING) && !get_all)
+			continue;
+		if (family == IFNET_FAMILY_ANY || ifp->if_family == family)
+			cmax++;
+	}
+
+	if (cmax == 0)
+		result = ENXIO;
+
+	if (result == 0) {
+		MALLOC(*list, ifnet_t*, sizeof(ifnet_t) * (cmax + 1),
+		    M_TEMP, M_NOWAIT);
+		if (*list == NULL)
+			result = ENOMEM;
+>>>>>>> origin/10.5
 	}
 	*count = 0;
 	*list = NULL;
 
+<<<<<<< HEAD
 	ifnet_head_lock_shared();
 	TAILQ_FOREACH(ifp, &ifnet_head, if_link) {
 		if (family == IFNET_FAMILY_ANY || ifp->if_family == family) {
@@ -2126,6 +2159,19 @@ ifnet_list_get_common(ifnet_family_t family, boolean_t get_all, ifnet_t **list,
 				ifnet_head_done();
 				err = ENOMEM;
 				goto done;
+=======
+	if (result == 0) {
+		TAILQ_FOREACH(ifp, &ifnet, if_link) {
+			if ((ifp->if_eflags & IFEF_DETACHING) && !get_all)
+				continue;
+			if (*count + 1 > cmax)
+				break;
+			if (family == IFNET_FAMILY_ANY ||
+			    ((ifnet_family_t)ifp->if_family) == family) {
+				(*list)[*count] = (ifnet_t)ifp;
+				ifnet_reference((*list)[*count]);
+				(*count)++;
+>>>>>>> origin/10.5
 			}
 			ifl->ifl_ifp = ifp;
 			ifnet_reference(ifp);
@@ -2135,6 +2181,7 @@ ifnet_list_get_common(ifnet_family_t family, boolean_t get_all, ifnet_t **list,
 	}
 	ifnet_head_done();
 
+<<<<<<< HEAD
 	if (cnt == 0) {
 		err = ENXIO;
 		goto done;
@@ -2160,6 +2207,9 @@ done:
 	}
 
 	return (err);
+=======
+	return (result);
+>>>>>>> origin/10.5
 }
 
 void
@@ -2170,8 +2220,14 @@ ifnet_list_free(ifnet_t *interfaces)
 	if (interfaces == NULL)
 		return;
 
+<<<<<<< HEAD
 	for (i = 0; interfaces[i]; i++)
 		ifnet_release(interfaces[i]);
+=======
+	for (i = 0; interfaces[i]; i++) {
+		ifnet_release(interfaces[i]);
+	}
+>>>>>>> origin/10.5
 
 	FREE(interfaces, M_TEMP);
 }

@@ -54,6 +54,7 @@
 #include <IOKit/IOPlatformExpert.h>
 #include <IOKit/IOUserClient.h>
 #include <IOKit/IOKitKeys.h>
+<<<<<<< HEAD
 #include <IOKit/IOKitKeysPrivate.h>
 #include <kern/debug.h>
 #include <pexpert/pexpert.h>
@@ -64,6 +65,10 @@ extern "C" {
 #include <security/mac_framework.h>
 };
 #endif /* MAC */
+=======
+#include <kern/debug.h>
+#include <pexpert/pexpert.h>
+>>>>>>> origin/10.5
 
 #define super IOService
 
@@ -345,12 +350,17 @@ bool IODTNVRAM::serializeProperties(OSSerialize *s) const
   bool                 result, hasPrivilege;
   UInt32               variablePerm;
   const OSSymbol       *key;
+<<<<<<< HEAD
   OSDictionary         *dict;
+=======
+  OSDictionary         *dict = 0, *tmpDict = 0;
+>>>>>>> origin/10.5
   OSCollectionIterator *iter = 0;
   
   // Verify permissions.
   hasPrivilege = (kIOReturnSuccess == IOUserClient::clientHasPrivilege(current_task(), kIONVRAMPrivilege));
 
+<<<<<<< HEAD
   if (_ofDict == 0) {
     /* No nvram. Return an empty dictionary. */
     dict = OSDictionary::withCapacity(1);
@@ -383,6 +393,24 @@ bool IODTNVRAM::serializeProperties(OSSerialize *s) const
         iter->reset();
       }
     }
+=======
+  tmpDict = OSDictionary::withCapacity(1);
+  if (tmpDict == 0) return false;
+    
+  iter = OSCollectionIterator::withCollection(_ofDict);
+  if (iter == 0) return false;
+    
+  while (1) {
+    key = OSDynamicCast(OSSymbol, iter->getNextObject());
+    if (key == 0) break;
+      
+    variablePerm = getOFVariablePerm(key);
+    if ((hasPrivilege || (variablePerm != kOFVariablePermRootOnly)) &&
+	( ! (variablePerm == kOFVariablePermKernelOnly && current_task() != kernel_task) )) {
+      tmpDict->setObject(key, _ofDict->getObject(key));
+    }
+    dict = tmpDict;
+>>>>>>> origin/10.5
   }
 
   result = dict->serialize(s);
@@ -408,6 +436,7 @@ OSObject *IODTNVRAM::copyProperty(const OSSymbol *aKey) const
     if (variablePerm == kOFVariablePermRootOnly) return 0;
   }
   if (variablePerm == kOFVariablePermKernelOnly && current_task() != kernel_task) return 0;
+<<<<<<< HEAD
 
 #if CONFIG_MACF
   if (current_task() != kernel_task &&
@@ -421,6 +450,10 @@ OSObject *IODTNVRAM::copyProperty(const OSSymbol *aKey) const
   IOLockUnlock(_ofLock);
 
   return theObject;
+=======
+  
+  return _ofDict->getObject(aKey);
+>>>>>>> origin/10.5
 }
 
 OSObject *IODTNVRAM::copyProperty(const char *aKey) const
@@ -474,6 +507,14 @@ bool IODTNVRAM::setProperty(const OSSymbol *aKey, OSObject *anObject)
   }
   if (propPerm == kOFVariablePermKernelOnly && current_task() != kernel_task) return 0;
 
+<<<<<<< HEAD
+=======
+  // Don't allow creation of new properties on old world machines.
+  if (getPlatform()->getBootROMType() == 0) {
+    if (_ofDict->getObject(aKey) == 0) return false;
+  }
+  
+>>>>>>> origin/10.5
   // Don't allow change of 'aapl,panic-info'.
   if (aKey->isEqualTo(kIODTNVRAMPanicInfoKey)) return false;
 
@@ -537,6 +578,12 @@ void IODTNVRAM::removeProperty(const OSSymbol *aKey)
     if (propPerm != kOFVariablePermUserWrite) return;
   }
   if (propPerm == kOFVariablePermKernelOnly && current_task() != kernel_task) return;
+<<<<<<< HEAD
+=======
+  
+  // Don't allow removal of properties on old world machines.
+  if (getPlatform()->getBootROMType() == 0) return;
+>>>>>>> origin/10.5
   
   // Don't allow change of 'aapl,panic-info'.
   if (aKey->isEqualTo(kIODTNVRAMPanicInfoKey)) return;
@@ -1023,6 +1070,12 @@ OFVariable gOFVariables[] = {
   {"security-password", kOFVariableTypeData, kOFVariablePermRootOnly, -1},
   {"boot-image", kOFVariableTypeData, kOFVariablePermUserWrite, -1},
   {"com.apple.System.fp-state", kOFVariableTypeData, kOFVariablePermKernelOnly, -1},
+<<<<<<< HEAD
+=======
+#if CONFIG_EMBEDDED
+  {"backlight-level", kOFVariableTypeData, kOFVariablePermUserWrite, -1},
+#endif
+>>>>>>> origin/10.5
   {0, kOFVariableTypeData, kOFVariablePermUserRead, -1}
 };
 

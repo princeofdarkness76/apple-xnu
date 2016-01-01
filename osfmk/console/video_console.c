@@ -2800,11 +2800,14 @@ initialize_screen(PE_Video * boot_vinfo, unsigned int op)
 		else
 		    new_vinfo.v_baseaddr = lastVideoVirt + boot_vinfo->v_offset;				/* Set the new framebuffer address */
 
+<<<<<<< HEAD
 #if defined(__x86_64__)
 		// Adjust the video buffer pointer to point to where it is in high virtual (above the hole)
 		new_vinfo.v_baseaddr |= (VM_MIN_KERNEL_ADDRESS & ~LOW_4GB_MASK);
 #endif
 
+=======
+>>>>>>> origin/10.5
 		/* Update the vinfo structure atomically with respect to the vc_progress task if running */
 		if (vc_progress)
 		{

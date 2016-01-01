@@ -77,7 +77,11 @@
  * DKIOCISWRITABLE                       is media writable?
  *
  * DKIOCREQUESTIDLE                      idle media
+<<<<<<< HEAD
  * DKIOCUNMAP                            delete unused data
+=======
+ * DKIOCDISCARD                          delete unused data
+>>>>>>> origin/10.5
  *
  * DKIOCGETMAXBLOCKCOUNTREAD             get maximum block count for reads
  * DKIOCGETMAXBLOCKCOUNTWRITE            get maximum block count for writes
@@ -92,9 +96,13 @@
  * DKIOCGETMINSEGMENTALIGNMENTBYTECOUNT  get minimum segment alignment in bytes
  * DKIOCGETMAXSEGMENTADDRESSABLEBITCOUNT get maximum segment width in bits
  *
+<<<<<<< HEAD
  * DKIOCGETFEATURES                      get device's feature set
  * DKIOCGETPHYSICALBLOCKSIZE             get device's block size
  * DKIOCGETCOMMANDPOOLSIZE               get device's queue depth
+=======
+ * DKIOCGETPHYSICALBLOCKSIZE             get device's block size
+>>>>>>> origin/10.5
  */
 
 #define DK_FEATURE_BARRIER                    0x00000002
@@ -107,7 +115,13 @@ typedef struct
 {
     uint64_t               offset;
     uint64_t               length;
+<<<<<<< HEAD
 } dk_extent_t;
+=======
+
+    uint8_t                reserved0128[16];       /* reserved, clear to zero */
+} dk_discard_t;
+>>>>>>> origin/10.5
 
 typedef struct
 {
@@ -206,8 +220,12 @@ typedef struct
 #define DKIOCISWRITABLE                       _IOR('d', 29, uint32_t)
 
 #define DKIOCREQUESTIDLE                      _IO('d', 30)
+<<<<<<< HEAD
 #define DKIOCUNMAP                            _IOW('d', 31, dk_unmap_t)
 #define DKIOCCORESTORAGE                      _IOR('d', 32, dk_corestorage_info_t)
+=======
+#define DKIOCDISCARD                          _IOW('d', 31, dk_discard_t)
+>>>>>>> origin/10.5
 
 #define DKIOCGETMAXBLOCKCOUNTREAD             _IOR('d', 64, uint64_t)
 #define DKIOCGETMAXBLOCKCOUNTWRITE            _IOR('d', 65, uint64_t)
@@ -222,13 +240,18 @@ typedef struct
 #define DKIOCGETMINSEGMENTALIGNMENTBYTECOUNT  _IOR('d', 74, uint64_t)
 #define DKIOCGETMAXSEGMENTADDRESSABLEBITCOUNT _IOR('d', 75, uint64_t)
 
+<<<<<<< HEAD
 #define DKIOCGETFEATURES                      _IOR('d', 76, uint32_t)
 #define DKIOCGETPHYSICALBLOCKSIZE             _IOR('d', 77, uint32_t)
 #define DKIOCGETCOMMANDPOOLSIZE               _IOR('d', 78, uint32_t)
 
 #define DKIOCSYNCHRONIZECACHE                 _IO('d', 22)
+=======
+#define DKIOCGETPHYSICALBLOCKSIZE             _IOR('d', 77, uint32_t)
+>>>>>>> origin/10.5
 
 #ifdef KERNEL
+#define DK_FEATURE_DISCARD                    0x00000010
 #define DK_FEATURE_FORCE_UNIT_ACCESS          0x00000001
 
 #define DK_ENCRYPTION_TYPE_AES_CBC            1

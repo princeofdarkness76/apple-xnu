@@ -392,7 +392,11 @@ add_fsevent(int type, vfs_context_t ctx, ...)
     // (as long as it's not an event type that can never be the
     // same as a previous event)
     //
+<<<<<<< HEAD
     if (type != FSE_CREATE_FILE && type != FSE_DELETE && type != FSE_RENAME && type != FSE_EXCHANGE && type != FSE_CHOWN && type != FSE_DOCID_CHANGED && type != FSE_DOCID_CREATED) {
+=======
+    if (type != FSE_CREATE_FILE && type != FSE_DELETE && type != FSE_RENAME && type != FSE_EXCHANGE && type != FSE_CHOWN) {
+>>>>>>> origin/10.5
 	void *ptr=NULL;
 	int   vid=0, was_str=0, nlen=0;
 
@@ -643,7 +647,10 @@ add_fsevent(int type, vfs_context_t ctx, ...)
 		VATTR_WANTED(&va, va_mode);
 		VATTR_WANTED(&va, va_uid);
 		VATTR_WANTED(&va, va_gid);
+<<<<<<< HEAD
 		VATTR_WANTED(&va, va_nlink);
+=======
+>>>>>>> origin/10.5
 		if ((ret = vnode_getattr(vp, &va, vfs_context_kernel())) != 0) {
 		    // printf("add_fsevent: failed to getattr on vp %p (%d)\n", cur->fref.vp, ret);
 		    cur->str = NULL;

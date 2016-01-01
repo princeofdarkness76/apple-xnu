@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -178,9 +182,19 @@ extern void tcp_sbrcv_trim(struct tcpcb *tp, struct sockbuf *sb);
 #define	TCPDEBUG2(req)
 #endif
 
+<<<<<<< HEAD
 SYSCTL_PROC(_net_inet_tcp, OID_AUTO, info,
     CTLFLAG_RW | CTLFLAG_LOCKED | CTLFLAG_ANYBODY | CTLFLAG_KERN,
     0 , 0, tcp_sysctl_info, "S", "TCP info per tuple");
+=======
+#if CONFIG_USESOCKTHRESHOLD
+__private_extern__ unsigned int	tcp_sockthreshold = 64;
+#else
+__private_extern__ unsigned int	tcp_sockthreshold = 0;
+#endif
+SYSCTL_INT(_net_inet_tcp, OID_AUTO, sockthreshold, CTLFLAG_RW, 
+    &tcp_sockthreshold , 0, "TCP Socket size increased if less than threshold");
+>>>>>>> origin/10.5
 
 /*
  * TCP attaches to socket via pru_attach(), reserving space,

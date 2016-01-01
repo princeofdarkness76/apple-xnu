@@ -113,8 +113,11 @@ kdp_getstate(
     state->esi = saved_state->esi;
     state->ebp = saved_state->ebp;
 
-    if ((saved_state->cs & 0x3) == 0){	/* Kernel State */
-    	state->esp = (unsigned int) &saved_state->uesp;
+    if ((saved_state->cs & SEL_PL) == SEL_PL_K) { /* Kernel state? */
+	    if (cpu_mode_is64bit())
+		    state->esp = (uint32_t) saved_state->uesp;
+	    else
+		    state->esp = ((uint32_t)saved_state) + offsetof(x86_saved_state_t, ss_32) + sizeof(x86_saved_state32_t);
         state->ss = KERNEL_DS;
     } else {
     	state->esp = saved_state->uesp;
@@ -153,8 +156,6 @@ kdp_setstate(
     saved_state->frame.eflags |=  ( EFL_IF | EFL_SET );
 #endif
     saved_state->eip = state->eip;
-    saved_state->fs = state->fs;
-    saved_state->gs = state->gs;
 }
 
 
@@ -432,3 +433,220 @@ unsigned int kdp_ml_get_breakinsn()
 {
   return 0xcc;
 }
+<<<<<<< HEAD
+=======
+
+extern pmap_t kdp_pmap;
+extern uint32_t kdp_src_high32;
+
+#define RETURN_OFFSET 4
+int
+machine_trace_thread(thread_t thread, char *tracepos, char *tracebound, int nframes, boolean_t user_p)
+{
+	uint32_t *tracebuf = (uint32_t *)tracepos;
+	uint32_t fence = 0;
+	uint32_t stackptr = 0;
+	uint32_t stacklimit = 0xfc000000;
+	int framecount = 0;
+	uint32_t init_eip = 0;
+	uint32_t prevsp = 0;
+	uint32_t framesize = 2 * sizeof(vm_offset_t);
+	
+	if (user_p) {
+	        x86_saved_state32_t	*iss32;
+		
+		iss32 = USER_REGS32(thread);
+
+			init_eip = iss32->eip;
+			stackptr = iss32->ebp;
+
+		/* This bound isn't useful, but it doesn't hinder us*/
+		stacklimit = 0xffffffff;
+		kdp_pmap = thread->task->map->pmap;
+	}
+	else {
+		/*Examine the i386_saved_state at the base of the kernel stack*/
+		stackptr = STACK_IKS(thread->kernel_stack)->k_ebp;
+		init_eip = STACK_IKS(thread->kernel_stack)->k_eip;
+	}
+
+	*tracebuf++ = init_eip;
+
+	for (framecount = 0; framecount < nframes; framecount++) {
+
+		if ((uint32_t)(tracebound - ((char *)tracebuf)) < (4 * framesize)) {
+			tracebuf--;
+			break;
+		}
+
+		*tracebuf++ = stackptr;
+/* Invalid frame, or hit fence */
+		if (!stackptr || (stackptr == fence)) {
+			break;
+		}
+		/* Stack grows downward */
+		if (stackptr < prevsp) {
+			break;
+		}
+		/* Unaligned frame */
+		if (stackptr & 0x0000003) {
+			break;
+		}
+		if (stackptr > stacklimit) {
+			break;
+		}
+
+		if (kdp_vm_read((caddr_t) (stackptr + RETURN_OFFSET), (caddr_t) tracebuf, sizeof(caddr_t)) != sizeof(caddr_t)) {
+			break;
+		}
+		tracebuf++;
+		
+		prevsp = stackptr;
+		if (kdp_vm_read((caddr_t) stackptr, (caddr_t) &stackptr, sizeof(caddr_t)) != sizeof(caddr_t)) {
+			*tracebuf++ = 0;
+			break;
+		}
+	}
+
+	kdp_pmap = 0;
+
+	return (uint32_t) (((char *) tracebuf) - tracepos);
+}
+
+#define RETURN_OFFSET64	8
+/* Routine to encapsulate the 64-bit address read hack*/
+unsigned
+machine_read64(addr64_t srcaddr, caddr_t dstaddr, uint32_t len)
+{
+	uint32_t kdp_vm_read_low32;
+	unsigned retval;
+	
+	kdp_src_high32 = srcaddr >> 32;
+	kdp_vm_read_low32 = srcaddr & 0x00000000FFFFFFFFUL;
+	retval = kdp_vm_read((caddr_t)kdp_vm_read_low32, dstaddr, len);
+	kdp_src_high32 = 0;
+	return retval;
+}
+
+int
+machine_trace_thread64(thread_t thread, char *tracepos, char *tracebound, int nframes, boolean_t user_p)
+{
+	uint64_t *tracebuf = (uint64_t *)tracepos;
+	uint32_t fence = 0;
+	addr64_t stackptr = 0;
+	uint64_t stacklimit = 0xfc000000;
+	int framecount = 0;
+	addr64_t init_rip = 0;
+	addr64_t prevsp = 0;
+	unsigned framesize = 2 * sizeof(addr64_t);
+	
+	if (user_p) {
+		x86_saved_state64_t	*iss64;
+		iss64 = USER_REGS64(thread);
+		init_rip = iss64->isf.rip;
+		stackptr = iss64->rbp;
+		stacklimit = 0xffffffffffffffffULL;
+		kdp_pmap = thread->task->map->pmap;
+	}
+	else {
+		/* DRK: This would need to adapt for a 64-bit kernel, if any */
+		stackptr = STACK_IKS(thread->kernel_stack)->k_ebp;
+		init_rip = STACK_IKS(thread->kernel_stack)->k_eip;
+	}
+
+	*tracebuf++ = init_rip;
+
+	for (framecount = 0; framecount < nframes; framecount++) {
+
+		if ((uint32_t)(tracebound - ((char *)tracebuf)) < (4 * framesize)) {
+			tracebuf--;
+			break;
+		}
+
+		*tracebuf++ = stackptr;
+
+		if (!stackptr || (stackptr == fence)){
+			break;
+		}
+		if (stackptr < prevsp) {
+			break;
+		}
+		if (stackptr & 0x0000003) {
+			break;
+		}
+		if (stackptr > stacklimit) {
+			break;
+		}
+
+		if (machine_read64(stackptr + RETURN_OFFSET64, (caddr_t) tracebuf, sizeof(addr64_t)) != sizeof(addr64_t)) {
+			break;
+		}
+		tracebuf++;
+
+		prevsp = stackptr;
+		if (machine_read64(stackptr, (caddr_t) &stackptr, sizeof(addr64_t)) != sizeof(addr64_t)) {
+			*tracebuf++ = 0;
+			break;
+		}
+	}
+
+	kdp_pmap = NULL;
+
+	return (uint32_t) (((char *) tracebuf) - tracepos);
+}
+
+static struct kdp_callout {
+	struct kdp_callout	*callout_next;
+	kdp_callout_fn_t	callout_fn;
+	void			*callout_arg;
+} *kdp_callout_list = NULL;
+
+
+/*
+ * Called from kernel context to register a kdp event callout.
+ */
+void
+kdp_register_callout(
+	kdp_callout_fn_t	fn,
+	void			*arg)
+{
+	struct kdp_callout	*kcp;
+	struct kdp_callout	*list_head;
+
+	kcp = kalloc(sizeof(*kcp));
+	if (kcp == NULL)
+		panic("kdp_register_callout() kalloc failed");
+
+	kcp->callout_fn  = fn;
+	kcp->callout_arg = arg;
+
+	/* Lock-less list insertion using compare and exchange. */
+	do {
+		list_head = kdp_callout_list;
+		kcp->callout_next = list_head;
+	} while(!atomic_cmpxchg((uint32_t *) &kdp_callout_list,
+				(uint32_t) list_head,
+				(uint32_t) kcp));
+}
+
+/*
+ * Called at exception/panic time when extering or exiting kdp.  
+ * We are single-threaded at this time and so we don't use locks.
+ */
+static void
+kdp_callouts(kdp_event_t event)
+{
+	struct kdp_callout	*kcp = kdp_callout_list;
+
+	while (kcp) {
+		kcp->callout_fn(kcp->callout_arg, event); 
+		kcp = kcp->callout_next;
+	}	
+}
+
+void
+kdp_ml_enter_debugger(void)
+{
+	__asm__ __volatile__("int3");
+}
+>>>>>>> origin/10.5

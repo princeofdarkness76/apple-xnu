@@ -845,6 +845,7 @@ consdebug_putc(char c)
 			PE_kputc(c);
 }
 
+<<<<<<< HEAD
 void
 consdebug_putc_unbuffered(char c)
 {
@@ -857,6 +858,8 @@ consdebug_putc_unbuffered(char c)
 		if (!disable_serial_output)
 			PE_kputc(c);
 }
+=======
+>>>>>>> origin/10.5
 
 void
 consdebug_log(char c)
@@ -887,17 +890,28 @@ kdb_log(const char *fmt, ...)
 }
 
 int
+<<<<<<< HEAD
 kdb_printf_unbuffered(const char *fmt, ...)
+=======
+kdb_log(const char *fmt, ...)
+>>>>>>> origin/10.5
 {
 	va_list	listp;
 
 	va_start(listp, fmt);
+<<<<<<< HEAD
 	_doprnt(fmt, &listp, consdebug_putc_unbuffered, 16);
+=======
+	_doprnt(fmt, &listp, consdebug_log, 16);
+>>>>>>> origin/10.5
 	va_end(listp);
 	return 0;
 }
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/10.5
 static void
 copybyte(int c, void *arg)
 {

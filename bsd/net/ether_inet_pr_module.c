@@ -144,8 +144,17 @@ extern void *kdp_get_interface(void);
 extern void kdp_set_ip_and_mac_addresses(struct in_addr *ipaddr,
     struct ether_addr *macaddr);
 
+<<<<<<< HEAD
 #define	_ip_copy(dst, src)	\
 	bcopy(src, dst, sizeof (struct in_addr))
+=======
+static __inline__ void
+_ip_copy(struct in_addr * dst, const struct in_addr * src)
+{
+	*dst = *src;
+	return;
+}
+>>>>>>> origin/10.5
 
 static void
 ether_inet_arp_input(struct ifnet *ifp, struct mbuf *m)

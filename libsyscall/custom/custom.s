@@ -62,6 +62,7 @@ LABEL(__sysenter_trap)
 	movl %esp, %ecx
 	sysenter
 
+<<<<<<< HEAD
 	.globl _i386_get_ldt
 	ALIGN
 _i386_get_ldt:
@@ -80,6 +81,30 @@ _i386_set_ldt:
 	jnb		2f
 	jmp		tramp_cerror
 2:	ret
+=======
+#elif defined(__x86_64__)
+
+	.globl	_errno
+
+LABEL(cerror)
+	REG_TO_EXTERN(%rax, _errno)
+	mov		%rsp,%rdx
+	andq	$-16,%rsp
+	subq	$16,%rsp
+	// Preserve the original stack
+	movq	%rdx,(%rsp)
+	movq	%rax,%rdi
+	CALL_EXTERN(_cthread_set_errno_self)
+	// Restore the original stack
+	movq	(%rsp),%rsp
+	movq	$-1,%rax
+	movq	$-1,%rdx /* in case a 128-bit value is returned */
+	ret
+
+#else
+#error Unsupported architecture
+#endif
+>>>>>>> origin/10.5
 
 #elif defined(__x86_64__)
 

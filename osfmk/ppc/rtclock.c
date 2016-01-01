@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -114,6 +118,7 @@ static struct rtclock {
 
 	clock_timer_func_t	timer_expire;
 
+<<<<<<< HEAD
 	timer_call_data_t	alarm_timer;
 
 	/* debugging */
@@ -148,6 +153,9 @@ static void		rtclock_alarm_timer(
 #define DECREMENTER_MIN		0xAUL
 
 natural_t		rtclock_decrementer_min;
+=======
+decl_simple_lock_data(static,rtclock_lock)
+>>>>>>> origin/10.5
 
 /*
  *	Macros to lock/unlock real-time clock device.
@@ -1117,6 +1125,7 @@ clock_timebase_info(
 }	
 
 void
+<<<<<<< HEAD
 clock_set_timer_deadline(
 	uint64_t				deadline)
 {
@@ -1253,6 +1262,12 @@ static void
 rtclock_alarm_timer(
 	timer_call_param_t		p0,
 	timer_call_param_t		p1)
+=======
+clock_interval_to_absolutetime_interval(
+	uint32_t			interval,
+	uint32_t			scale_factor,
+	uint64_t			*result)
+>>>>>>> origin/10.5
 {
 	mach_timespec_t		timestamp;
 

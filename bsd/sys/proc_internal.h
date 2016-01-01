@@ -364,10 +364,13 @@ struct	proc {
 	void *	p_rcall;
 	int		p_ractive;
 	int	p_idversion;		/* version of process identity */
+<<<<<<< HEAD
 	void *	p_pthhash;			/* pthread waitqueue hash */
 	volatile uint64_t was_throttled __attribute__((aligned(8))); /* Counter for number of throttled I/Os */
 	volatile uint64_t did_throttle __attribute__((aligned(8)));  /* Counter for number of I/Os this proc throttled */
 
+=======
+>>>>>>> origin/10.5
 #if DIAGNOSTIC
 	unsigned int p_fdlock_pc[4];
 	unsigned int p_fdunlock_pc[4];

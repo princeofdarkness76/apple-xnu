@@ -158,8 +158,17 @@ CAT = /bin/cat
 MKDIR = /bin/mkdir -p
 CHMOD = /bin/chmod
 FIND = /usr/bin/find
+<<<<<<< HEAD
 XARGS = /usr/bin/xargs
 PAX = /bin/pax
+=======
+INSTALL = /usr/bin/install
+
+TAR = /usr/bin/gnutar
+STRIP = /usr/bin/strip
+LIPO = /usr/bin/lipo
+
+>>>>>>> origin/10.5
 BASENAME = /usr/bin/basename
 DIRNAME = /usr/bin/dirname
 TR = /usr/bin/tr

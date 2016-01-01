@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -240,6 +244,7 @@ struct inpcb {
 	} inp_depend6;
 
 	caddr_t inp_saved_ppcb;		/* place to save pointer while cached */
+<<<<<<< HEAD
 #if CONFIG_MACF_NET
 	struct label *inp_label;	/* MAC label */
 #endif
@@ -266,6 +271,23 @@ struct inpcb {
 	u_int8_t inp_cstat_store[sizeof (struct inp_stat) + sizeof (u_int64_t)];
 	u_int8_t inp_wstat_store[sizeof (struct inp_stat) + sizeof (u_int64_t)];
 	u_int8_t inp_Wstat_store[sizeof (struct inp_stat) + sizeof (u_int64_t)];
+=======
+	struct inpcbpolicy *inp_sp;
+#ifdef _KERN_LOCKS_H_
+	lck_mtx_t *inpcb_mtx;	/* inpcb per-socket mutex */
+#else
+	void	  *inpcb_mtx;
+#endif
+	unsigned int inp_boundif;	/* interface scope for INP_BOUND_IF */
+	u_int32_t inp_reserved[3];	/* reserved for future use */
+#if CONFIG_MACF_NET
+	struct label *inp_label;	/* MAC label */
+#endif
+#if CONFIG_IP_EDGEHOLE
+	u_int32_t	inpcb_edgehole_flags;
+	u_int32_t	inpcb_edgehole_mask;
+#endif
+>>>>>>> origin/10.5
 };
 
 #define	INP_ADD_STAT(_inp, _cnt_cellular, _cnt_wifi, _cnt_wired, _a, _n)\
@@ -585,10 +607,16 @@ struct inpcbinfo {
 	struct inpcbhead	*ipi_listhead;
 	uint32_t		ipi_count;
 
+<<<<<<< HEAD
 	/*
 	 * Count of pcbs marked with INP2_TIMEWAIT flag.
 	 */
 	uint32_t		ipi_twcount;
+=======
+#define INP_RECVTTL		0x1000
+#define	INP_UDP_NOCKSUM		0x2000	/* Turn off outbound UDP checksum */
+#define	INP_BOUND_IF		0x4000	/* bind socket to an ifindex */
+>>>>>>> origin/10.5
 
 	/*
 	 * Generation count -- incremented each time a connection is
@@ -732,6 +760,7 @@ struct inpcbinfo {
 #define	INPLOOKUP_WILDCARD	1
 
 #define	sotoinpcb(so)	((struct inpcb *)(so)->so_pcb)
+<<<<<<< HEAD
 #define	sotoin6pcb(so)	sotoinpcb(so)
 
 struct sysctl_req;
@@ -845,5 +874,95 @@ extern boolean_t inp_restricted_send(struct inpcb *, struct ifnet *);
 #ifdef KERNEL_PRIVATE
 /* exported for PPP */
 extern void inp_clear_INP_INADDR_ANY(struct socket *);
+=======
+#define	sotoin6pcb(so)	sotoinpcb(so) /* for KAME src sync over BSD*'s */
+
+#define	INP_SOCKAF(so) so->so_proto->pr_domain->dom_family
+
+#define	INP_CHECK_SOCKAF(so, af) 	(INP_SOCKAF(so) == af)
+
+#ifdef KERNEL
+extern int	ipport_lowfirstauto;
+extern int	ipport_lowlastauto;
+extern int	ipport_firstauto;
+extern int	ipport_lastauto;
+extern int	ipport_hifirstauto;
+extern int	ipport_hilastauto;
+
+#define INPCB_STATE_INUSE	0x1	/* freshly allocated PCB, it's in use */
+#define INPCB_STATE_CACHED	0x2	/* this pcb is sitting in a a cache */
+#define INPCB_STATE_DEAD	0x3	/* should treat as gone, will be garbage collected and freed */
+
+#define WNT_STOPUSING	0xffff	/* marked as ready to be garbaged collected, should be treated as not found */
+#define WNT_ACQUIRE	0x1		/* that pcb is being acquired, do not recycle this time */
+#define WNT_RELEASE	0x2		/* release acquired mode, can be garbage collected when wantcnt is null */
+
+
+void	in_pcbpurgeif0(struct inpcb *, struct ifnet *);
+void	in_losing(struct inpcb *);
+void	in_rtchange(struct inpcb *, int);
+int	in_pcballoc(struct socket *, struct inpcbinfo *, struct proc *);
+int	in_pcbbind(struct inpcb *, struct sockaddr *, struct proc *);
+int	in_pcbconnect(struct inpcb *, struct sockaddr *, struct proc *);
+void	in_pcbdetach(struct inpcb *);
+void	in_pcbdispose (struct inpcb *);
+void	in_pcbdisconnect(struct inpcb *);
+int	in_pcbinshash(struct inpcb *, int);
+int	in_pcbladdr(struct inpcb *, struct sockaddr *, struct sockaddr_in **);
+struct inpcb *
+	in_pcblookup_local(struct inpcbinfo *, struct in_addr, u_int, int);
+struct inpcb *
+	in_pcblookup_local_and_cleanup(struct inpcbinfo *, struct in_addr, u_int, int);
+struct inpcb *
+	in_pcblookup_hash(struct inpcbinfo *,
+			       struct in_addr, u_int, struct in_addr, u_int,
+			       int, struct ifnet *);
+void	in_pcbnotifyall(struct inpcbinfo *, struct in_addr,
+	    int, void (*)(struct inpcb *, int));
+void	in_pcbrehash(struct inpcb *);
+int	in_setpeeraddr(struct socket *so, struct sockaddr **nam);
+int	in_setsockaddr(struct socket *so, struct sockaddr **nam);
+int	in_pcb_checkstate(struct inpcb *pcb, int mode, int locked);
+
+int
+in_pcb_grab_port (struct inpcbinfo *pcbinfo,
+		       u_short		options,
+		       struct in_addr	laddr, 
+		       u_short		*lport,  
+		       struct in_addr	faddr,
+		       u_short		fport,
+		       u_int		cookie, 
+		       u_char		owner_id);
+
+int	
+in_pcb_letgo_port(struct inpcbinfo *pcbinfo, 
+		       struct in_addr laddr, 
+		       u_short lport,
+		       struct in_addr faddr,
+		       u_short fport, u_char owner_id);
+
+u_char
+in_pcb_get_owner(struct inpcbinfo *pcbinfo, 
+		      struct in_addr laddr, 
+		      u_short lport, 
+		      struct in_addr faddr,
+		      u_short fport,
+		      u_int *cookie);
+
+void in_pcb_nat_init(struct inpcbinfo *pcbinfo, int afamily, int pfamily,
+		     int protocol);
+
+int
+in_pcb_new_share_client(struct inpcbinfo *pcbinfo, u_char *owner_id);
+
+int
+in_pcb_rem_share_client(struct inpcbinfo *pcbinfo, u_char owner_id);
+
+void	in_pcbremlists(struct inpcb *inp);
+int 	in_pcb_ckeckstate(struct inpcb *, int, int);
+void	inpcb_to_compat(struct inpcb *inp, struct inpcb_compat *inp_compat);
+
+#endif /* KERNEL */
+>>>>>>> origin/10.5
 #endif /* KERNEL_PRIVATE */
 #endif /* !_NETINET_IN_PCB_H_ */

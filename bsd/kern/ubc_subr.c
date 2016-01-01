@@ -1,9 +1,13 @@
 /*
 <<<<<<< HEAD
+<<<<<<< HEAD
  * Copyright (c) 1999-2014 Apple Inc. All rights reserved.
 =======
  * Copyright (c) 1999-2002 Apple Computer, Inc. All rights reserved.
 >>>>>>> origin/10.2
+=======
+ * Copyright (c) 1999-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -100,6 +104,8 @@
 
 #include <security/mac_framework.h>
 #include <stdbool.h>
+
+#include <security/mac_framework.h>
 
 /* XXX These should be in a BSD accessible Mach header, but aren't. */
 extern kern_return_t memory_object_pages_resident(memory_object_control_t,
@@ -340,8 +346,11 @@ CS_CodeDirectory *findCodeDirectory(
 		 */
 		cd = (const CS_CodeDirectory *) embedded;
 	}
+<<<<<<< HEAD
 
 <<<<<<< HEAD
+=======
+>>>>>>> origin/10.5
 	if (cd &&
 	    cs_valid_range(cd, cd + 1, lower_bound, upper_bound) &&
 	    cs_valid_range(cd, (const char *) cd + ntohl(cd->length),
@@ -2206,7 +2215,11 @@ ubc_unmap(struct vnode *vp)
 	struct ubc_info *uip;
 	int	need_rele = 0;
 	int	need_wakeup = 0;
+<<<<<<< HEAD
 
+=======
+	
+>>>>>>> origin/10.5
 	if (vnode_getwithref(vp))
 	        return;
 
@@ -2224,9 +2237,13 @@ ubc_unmap(struct vnode *vp)
 		SET(uip->ui_flags, UI_MAPBUSY);
 
 		if (ISSET(uip->ui_flags, UI_ISMAPPED)) {
+<<<<<<< HEAD
 			if (ISSET(uip->ui_flags, UI_MAPPEDWRITE))
 				want_fsevent = true;
 
+=======
+	        CLR(uip->ui_flags, UI_ISMAPPED);
+>>>>>>> origin/10.5
 			need_rele = 1;
 
 			/*
@@ -2236,6 +2253,7 @@ ubc_unmap(struct vnode *vp)
 			 */
 		}
 		vnode_unlock(vp);
+<<<<<<< HEAD
 
 		if (need_rele) {
 				vfs_context_t ctx = vfs_context_current();
@@ -2263,6 +2281,12 @@ ubc_unmap(struct vnode *vp)
 #endif
 
 		        vnode_rele(vp);
+=======
+	
+		if (need_rele) {
+			(void) VNOP_MNOMAP(vp, vfs_context_current());
+			vnode_rele(vp);
+>>>>>>> origin/10.5
 		}
 
 		vnode_lock_spin(vp);
@@ -2279,7 +2303,7 @@ ubc_unmap(struct vnode *vp)
 		vnode_unlock(vp);
 
 		if (need_wakeup)
-		        wakeup(&uip->ui_flags);
+		    wakeup(&uip->ui_flags);
 
 	}
 	/*
@@ -2591,7 +2615,11 @@ upl_size_t
 ubc_upl_maxbufsize(
 	void)
 {
+<<<<<<< HEAD
 	return(MAX_UPL_SIZE_BYTES);
+=======
+	return(MAX_UPL_SIZE * PAGE_SIZE);
+>>>>>>> origin/10.5
 }
 
 /*
@@ -2671,7 +2699,11 @@ ubc_upl_commit(
 	kern_return_t 	kr;
 
 	pl = UPL_GET_INTERNAL_PAGE_LIST(upl);
+<<<<<<< HEAD
 	kr = upl_commit(upl, pl, MAX_UPL_SIZE_BYTES >> PAGE_SHIFT);
+=======
+	kr = upl_commit(upl, pl, MAX_UPL_SIZE);
+>>>>>>> origin/10.5
 	upl_deallocate(upl);
 	return kr;
 }
@@ -2750,7 +2782,11 @@ ubc_upl_commit_range(
 	pl = UPL_GET_INTERNAL_PAGE_LIST(upl);
 
 	kr = upl_commit_range(upl, offset, size, flags,
+<<<<<<< HEAD
 			      pl, MAX_UPL_SIZE_BYTES >> PAGE_SHIFT, &empty);
+=======
+						  pl, MAX_UPL_SIZE, &empty);
+>>>>>>> origin/10.5
 
 	if((flags & UPL_COMMIT_FREE_ON_EMPTY) && empty)
 		upl_deallocate(upl);
@@ -3023,6 +3059,39 @@ ubc_cs_blob_deallocate(
 #endif	/* CS_BLOB_PAGEABLE */
 }
 
+kern_return_t
+ubc_cs_blob_allocate(
+	vm_offset_t	*blob_addr_p,
+	vm_size_t	*blob_size_p)
+{
+	kern_return_t	kr;
+
+#if CS_BLOB_PAGEABLE
+	*blob_size_p = round_page(*blob_size_p);
+	kr = kmem_alloc(kernel_map, blob_addr_p, *blob_size_p);
+#else	/* CS_BLOB_PAGEABLE */
+	*blob_addr_p = (vm_offset_t) kalloc(*blob_size_p);
+	if (*blob_addr_p == 0) {
+		kr = KERN_NO_SPACE;
+	} else {
+		kr = KERN_SUCCESS;
+	}
+#endif	/* CS_BLOB_PAGEABLE */
+	return kr;
+}
+
+void
+ubc_cs_blob_deallocate(
+	vm_offset_t	blob_addr,
+	vm_size_t	blob_size)
+{
+#if CS_BLOB_PAGEABLE
+	kmem_free(kernel_map, blob_addr, blob_size);
+#else	/* CS_BLOB_PAGEABLE */
+	kfree((void *) blob_addr, blob_size);
+#endif	/* CS_BLOB_PAGEABLE */
+}
+	
 int
 ubc_cs_blob_add(
 	struct vnode	*vp,
@@ -3090,10 +3159,13 @@ ubc_cs_blob_add(
 	blob->csb_mem_offset = 0;
 	blob->csb_mem_handle = blob_handle;
 	blob->csb_mem_kaddr = addr;
+<<<<<<< HEAD
 	blob->csb_flags = 0;
 	blob->csb_platform_binary = 0;
 	blob->csb_platform_path = 0;
 	blob->csb_teamid = NULL;
+=======
+>>>>>>> origin/10.5
 	
 	/*
 	 * Validate the blob's contents
@@ -3139,13 +3211,17 @@ ubc_cs_blob_add(
 		blob->csb_hashtype->cs_update(&mdctx, md_base, md_size);
 		blob->csb_hashtype->cs_final(hash, &mdctx);
 
+<<<<<<< HEAD
 		memcpy(blob->csb_cdhash, hash, CS_CDHASH_LEN);
 	}
 
+=======
+>>>>>>> origin/10.5
 	/* 
 	 * Let policy module check whether the blob's signature is accepted.
 	 */
 #if CONFIG_MACF
+<<<<<<< HEAD
 	error = mac_vnode_check_signature(vp, 
 					  base_offset, 
 					  blob->csb_cdhash, 
@@ -3181,6 +3257,13 @@ ubc_cs_blob_add(
 		}
 	}
 	
+=======
+	error = mac_vnode_check_signature(vp, blob->csb_sha1, (void*)addr, size);
+	if (error) 
+		goto out;
+#endif	
+	
+>>>>>>> origin/10.5
 	/*
 	 * Validate the blob's coverage
 	 */
@@ -3719,8 +3802,20 @@ cs_validate_page(
 		embedded = (const CS_SuperBlob *) blob_addr;
 		cd = findCodeDirectory(embedded, lower_bound, upper_bound);
 		if (cd != NULL) {
+<<<<<<< HEAD
 			/* all CD's that have been injected is already validated */
 
+=======
+			if (cd->pageSize != PAGE_SHIFT ||
+			    cd->hashType != 0x1 ||
+			    cd->hashSize != SHA1_RESULTLEN) {
+				/* bogus blob ? */
+				continue;
+			}
+			    
+			end_offset = round_page(ntohl(cd->codeLimit));
+			start_offset = end_offset - (ntohl(cd->nCodeSlots) * PAGE_SIZE);
+>>>>>>> origin/10.5
 			offset = page_offset - blob->csb_base_offset;
 			if (offset < blob->csb_start_offset ||
 			    offset >= blob->csb_end_offset) {
@@ -3735,12 +3830,20 @@ cs_validate_page(
 				panic("hash size too large");
 
 			codeLimit = ntohl(cd->codeLimit);
+<<<<<<< HEAD
 
 			hash = hashes(cd, (uint32_t)(offset>>PAGE_SHIFT_4K),
 				      hashtype->cs_size,
 				      lower_bound, upper_bound);
 			if (hash != NULL) {
 				bcopy(hash, expected_hash, sizeof(expected_hash));
+=======
+			hash = hashes(cd, atop(offset),
+				      lower_bound, upper_bound);
+			if (hash != NULL) {
+				bcopy(hash, expected_hash,
+				      sizeof (expected_hash));
+>>>>>>> origin/10.5
 				found_hash = TRUE;
 			}
 
@@ -3767,20 +3870,33 @@ cs_validate_page(
 		*tainted = 0;
 	} else {
 
+<<<<<<< HEAD
 		*tainted = 0;
 
 		size = PAGE_SIZE_4K;
 		const uint32_t *asha1, *esha1;
 		if ((off_t)(offset + size) > codeLimit) {
+=======
+		size = PAGE_SIZE;
+		const uint32_t *asha1, *esha1;
+		if (offset + size > codeLimit) {
+>>>>>>> origin/10.5
 			/* partial page at end of segment */
 			assert(offset < codeLimit);
 			size = (size_t) (codeLimit & PAGE_MASK_4K);
 			*tainted |= CS_VALIDATE_NX;
 		}
+<<<<<<< HEAD
 
 		hashtype->cs_init(&mdctx);
 		hashtype->cs_update(&mdctx, data, size);
 		hashtype->cs_final(actual_hash, &mdctx);
+=======
+		/* compute the actual page's SHA1 hash */
+		SHA1Init(&sha1ctxt);
+		SHA1UpdateUsePhysicalAddress(&sha1ctxt, data, size);
+		SHA1Final(actual_hash, &sha1ctxt);
+>>>>>>> origin/10.5
 
 		asha1 = (const uint32_t *) actual_hash;
 		esha1 = (const uint32_t *) expected_hash;

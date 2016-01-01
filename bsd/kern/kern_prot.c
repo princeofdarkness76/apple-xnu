@@ -2083,7 +2083,11 @@ set_security_token(proc_t p)
 	audit_token.val[3] = my_pcred->cr_ruid;
 	audit_token.val[4] = my_pcred->cr_rgid;
 	audit_token.val[5] = p->p_pid;
+<<<<<<< HEAD
 	audit_token.val[6] = my_cred->cr_audit.as_aia_p->ai_asid;
+=======
+	audit_token.val[6] = my_cred->cr_au.ai_asid;
+>>>>>>> origin/10.5
 	audit_token.val[7] = p->p_idversion;
 
 	host_priv = (sec_token.val[0]) ? HOST_PRIV_NULL : host_priv_self();

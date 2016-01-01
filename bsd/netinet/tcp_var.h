@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -1501,10 +1505,18 @@ void	 tcp_mtudisc(struct inpcb *, int);
 struct tcpcb *
 	 tcp_newtcpcb(struct inpcb *);
 int	 tcp_output(struct tcpcb *);
+<<<<<<< HEAD
 void	 tcp_respond(struct tcpcb *, void *, struct tcphdr *, struct mbuf *,
     tcp_seq, tcp_seq, int, struct tcp_respond_args *);
 struct rtentry *
 	 tcp_rtlookup(struct inpcb *, unsigned int);
+=======
+void	 tcp_quench(struct inpcb *, int);
+void	 tcp_respond(struct tcpcb *, void *,
+	    struct tcphdr *, struct mbuf *, tcp_seq, tcp_seq, int,
+	    unsigned int);
+struct rtentry *tcp_rtlookup(struct inpcb *, unsigned int);
+>>>>>>> origin/10.5
 void	 tcp_setpersist(struct tcpcb *);
 void	 tcp_gc(struct inpcbinfo *);
 void     tcp_itimer(struct inpcbinfo *ipi);

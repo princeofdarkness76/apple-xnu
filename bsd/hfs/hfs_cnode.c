@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2002-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2002-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -276,6 +280,13 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 	 */
 	if (v_type == VDIR) {
 		hfs_reldirhints(cp, 0);
+<<<<<<< HEAD
+=======
+	}
+	
+	if (cp->c_flag & C_HARDLINK) {
+		hfs_relorigins(cp);
+>>>>>>> origin/10.5
 	}
 	if (cp->c_flag & C_HARDLINK) {
 		hfs_relorigins(cp);
@@ -448,6 +459,7 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 					bzero (lookup_rsrc, sizeof (struct cat_lookup_buffer));
 				}
 
+<<<<<<< HEAD
 				if (cp->c_desc.cd_namelen == 0) {
 					/* Initialize the rsrc descriptor for lookup if necessary*/
 					MAKE_DELETED_NAME (lookup_rsrc->lookup_name, HFS_TEMPLOOKUP_NAMELEN, cp->c_fileid);
@@ -464,6 +476,13 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 				}
 
 				lockflags = hfs_systemfile_lock (hfsmp, SFL_CATALOG, HFS_SHARED_LOCK);
+=======
+		if (cp->c_blocks > 0) {
+			printf("hfs_inactive: deleting non-empty%sfile %d, "
+			       "blks %d\n", VNODE_IS_RSRC(vp) ? " rsrc " : " ",
+			       (int)cp->c_fileid, (int)cp->c_blocks);
+		}
+>>>>>>> origin/10.5
 
 				error = cat_lookup (hfsmp, desc_ptr, 1, 0, (struct cat_desc *) NULL, 
 						(struct cat_attr*) NULL, &lookup_rsrc->lookup_fork.ff_data, NULL);
@@ -621,6 +640,7 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 	hfs_update(vp, reclaim ? HFS_UPDATE_FORCE : 0);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	/*
 	 * Since we are about to finish what might be an inactive call, propagate
 	 * any remaining modified or touch bits from the cnode to the vnode.  This
@@ -637,6 +657,20 @@ int hfs_cnode_teardown (struct vnode *vp, vfs_context_t ctx, int reclaim)
 		vnode_setdirty(vp);
 	} else {
 		vnode_cleardirty(vp);
+=======
+	/*
+	 * A file may have had delayed allocations, in which case hfs_update
+	 * would not have updated the catalog record (cat_update).  We need
+	 * to do that now, before we lose our fork data.  We also need to
+	 * force the update, or hfs_update will again skip the cat_update.
+	 */
+	if ((cp->c_flag & C_MODIFIED) ||
+	    cp->c_touch_acctime || cp->c_touch_chgtime || cp->c_touch_modtime) {
+		if ((cp->c_flag & C_MODIFIED) || cp->c_touch_modtime){
+			cp->c_flag |= C_FORCEUPDATE;
+		}
+		hfs_update(vp, 0);
+>>>>>>> origin/10.5
 	}
         
 out:
@@ -861,8 +895,43 @@ hfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 	}
 
 	/*
+<<<<<<< HEAD
 	 * Keep track of an inactive hot file.  Don't bother on ssd's since
 	 * the tracking is done differently (it's done at read() time)
+=======
+	 * Check if a deleted resource fork vnode missed a
+	 * VNOP_INACTIVE call and requires truncation.
+	 */
+	if (VNODE_IS_RSRC(vp) &&
+	    (cp->c_flag & C_DELETED) &&
+	    (VTOF(vp)->ff_blocks != 0)) {
+		hfs_unlock(cp);
+		ubc_setsize(vp, 0);
+
+		hfs_lock_truncate(cp, TRUE);
+		(void) hfs_lock(VTOC(vp), HFS_FORCE_LOCK);
+
+		(void) hfs_truncate(vp, (off_t)0, IO_NDELAY, 1, ap->a_context);
+
+		hfs_unlock_truncate(cp, TRUE);
+	}
+	/*
+	 * A file may have had delayed allocations, in which case hfs_update
+	 * would not have updated the catalog record (cat_update).  We need
+	 * to do that now, before we lose our fork data.  We also need to
+	 * force the update, or hfs_update will again skip the cat_update.
+	 */
+	if ((cp->c_flag & C_MODIFIED) ||
+		cp->c_touch_acctime || cp->c_touch_chgtime || cp->c_touch_modtime) {
+		if ((cp->c_flag & C_MODIFIED) || cp->c_touch_modtime){
+			cp->c_flag |= C_FORCEUPDATE;
+		}	
+		hfs_update(vp, 0);
+	}
+
+	/*
+	 * Keep track of an inactive hot file.
+>>>>>>> origin/10.5
 	 */
 	if (!vnode_isdir(vp) &&
 	    !vnode_issystem(vp) &&
@@ -904,10 +973,18 @@ hfs_vnop_reclaim(struct vnop_reclaim_args *ap)
 		if (vnode_isdir(vp)) {
 			hfs_reldirhints(cp, 0);
 		}
+<<<<<<< HEAD
 		
 		if(cp->c_flag & C_HARDLINK) {
 			hfs_relorigins(cp);
 		}
+=======
+	
+		if (cp->c_flag & C_HARDLINK) {
+			hfs_relorigins(cp);
+		}
+
+>>>>>>> origin/10.5
 	}
 	/* Release the file fork and related data */
 	if (fp) {
@@ -1555,11 +1632,19 @@ hfs_getnewvnode(
 		 * occurred during the attachment, then cleanup the cnode.
 		 */
 		if ((cp->c_vp == NULL) && (cp->c_rsrc_vp == NULL)) {
+<<<<<<< HEAD
 			hfs_chash_abort(hfsmp, cp);
 			hfs_reclaim_cnode(hfsmp, cp);
 		} 
 		else {
 			hfs_chashwakeup(hfsmp, cp, H_ALLOC | H_ATTACH);
+=======
+			hfs_chash_abort(cp);
+			hfs_reclaim_cnode(cp);
+		} 
+		else {
+			hfs_chashwakeup(cp, H_ALLOC | H_ATTACH);
+>>>>>>> origin/10.5
 			if ((flags & GNV_SKIPLOCK) == 0){
 				hfs_unlock(cp);
 			}
@@ -1575,6 +1660,7 @@ hfs_getnewvnode(
 	if (cp->c_flag & C_HARDLINK) {
 		vnode_setmultipath(vp);
 	}
+<<<<<<< HEAD
 
 	if (cp->c_attr.ca_recflags & kHFSFastDevCandidateMask) {
 		vnode_setfastdevicecandidate(vp);
@@ -1597,12 +1683,15 @@ hfs_getnewvnode(
 		vnode_update_identity (vp, dvp, (const char *)cp->c_desc.cd_nameptr, cp->c_desc.cd_namelen, 0, VNODE_UPDATE_NAME);
 	}
 
+=======
+>>>>>>> origin/10.5
 	/*
 	 * Tag resource fork vnodes as needing an VNOP_INACTIVE
 	 * so that any deferred removes (open unlinked files)
 	 * have the chance to process the resource fork.
 	 */
 	if (VNODE_IS_RSRC(vp)) {
+<<<<<<< HEAD
 		int err;
 
 		KERNEL_DEBUG_CONSTANT(HFSDBG_GETNEWVNODE, VM_KERNEL_ADDRPERM(cp->c_vp), VM_KERNEL_ADDRPERM(cp->c_rsrc_vp), 0, 0, 0);
@@ -1614,6 +1703,13 @@ hfs_getnewvnode(
 		}
 	}
 	hfs_chashwakeup(hfsmp, cp, H_ALLOC | H_ATTACH);
+=======
+		/* Force VL_NEEDINACTIVE on this vnode */
+		vnode_ref(vp);
+		vnode_rele(vp);
+	}
+	hfs_chashwakeup(cp, H_ALLOC | H_ATTACH);
+>>>>>>> origin/10.5
 
 	/*
 	 * Stop tracking an active hot file.

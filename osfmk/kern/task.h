@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2010, 2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -214,7 +218,12 @@ struct task {
 
 	int			thread_count;
 	uint32_t		active_thread_count;
+<<<<<<< HEAD
 	int			suspend_count;	/* Internal scheduling only */
+=======
+	processor_set_t			pset_hint;
+	struct affinity_space	*affinity_space;
+>>>>>>> origin/10.5
 
 	/* User-visible scheduling information */
 	integer_t		user_stop_count;	/* outstanding stops */
@@ -591,11 +600,16 @@ extern void		task_set_64bit(
 extern void		task_backing_store_privileged(
 					task_t		task);
 
+<<<<<<< HEAD
 extern void		task_set_dyld_info(
     					task_t		task,
 					mach_vm_address_t addr,
 					mach_vm_size_t size);
 
+=======
+extern int		get_task_numactivethreads(
+					task_t		task);
+>>>>>>> origin/10.5
 /* Get number of activations in a task */
 extern int		get_task_numacts(
 					task_t		task);

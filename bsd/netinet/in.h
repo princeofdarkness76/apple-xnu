@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -480,9 +484,13 @@ struct ip_opts {
 #define IP_STRIPHDR      	23   /* bool: drop receive of raw IP header */
 #endif
 #define IP_RECVTTL		24   /* bool; receive reception TTL w/dgram */
+<<<<<<< HEAD
 #define	IP_BOUND_IF		25   /* int; set/get bound interface */
 #define	IP_PKTINFO		26   /* get pktinfo on recv socket, set src on sent dgram  */
 #define	IP_RECVPKTINFO		IP_PKTINFO	/* receive pktinfo w/dgram */
+=======
+#define	IP_BOUND_IF		25   /* set/get bound interface */
+>>>>>>> origin/10.5
 
 
 #define	IP_FW_ADD     		40   /* add a firewall rule to chain */
@@ -507,6 +515,7 @@ struct ip_opts {
 #define	IP_DUMMYNET_GET		64   /* get entire dummynet pipes */
 
 #define	IP_TRAFFIC_MGT_BACKGROUND	65   /* int*; get background IO flags; set background IO */
+<<<<<<< HEAD
 #define	IP_MULTICAST_IFINDEX	66   /* int*; set/get IP multicast i/f index */
 
 /* IPv4 Source Filter Multicast API [RFC3678] */
@@ -532,6 +541,18 @@ struct ip_opts {
 #define	IP_NO_IFT_PDP		IP_NO_IFT_CELLULAR /* deprecated */
 #define	IP_OUT_IF		9696 /* for internal use only */
 #endif /* PRIVATE */
+=======
+
+#ifdef PRIVATE
+#define	IP_FORCE_OUT_IFP	69  /* deprecated; use IP_BOUND_IF instead */
+#endif
+
+/* Background socket configuration flags */
+#ifdef __APPLE_API_UNSTABLE
+#define TRAFFIC_MGT_SO_BACKGROUND	0x0001
+#define TRAFFIC_MGT_SO_BG_SUPPRESSED	0x0002
+#endif /* __APPLE_API_UNSTABLE */
+>>>>>>> origin/10.5
 
 /*
  * Defaults and limits for options

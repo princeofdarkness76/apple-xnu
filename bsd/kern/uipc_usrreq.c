@@ -198,9 +198,16 @@ static void	unp_disconnect(struct unpcb *);
 static void	unp_shutdown(struct unpcb *);
 static void	unp_drop(struct unpcb *, int);
 __private_extern__ void	unp_gc(void);
+<<<<<<< HEAD
 static void	unp_scan(struct mbuf *, void (*)(struct fileglob *, void *arg), void *arg);
 static void	unp_mark(struct fileglob *, __unused void *);
 static void	unp_discard(struct fileglob *, void *);
+=======
+static void	unp_scan(struct mbuf *, void (*)(struct fileglob *));
+static void	unp_mark(struct fileglob *);
+static void	unp_discard(struct fileglob *);
+static void	unp_discard_fdlocked(struct fileglob *, proc_t);
+>>>>>>> origin/10.5
 static int	unp_internalize(struct mbuf *, proc_t);
 static int	unp_listen(struct unpcb *, proc_t);
 static void	unpcb_to_compat(struct unpcb *, struct unpcb_compat *);
@@ -990,6 +997,28 @@ unp_detach(struct unpcb *unp)
 	soisdisconnected(unp->unp_socket);
 	/* makes sure we're getting dealloced */
 	unp->unp_socket->so_flags |= SOF_PCBCLEARING;
+<<<<<<< HEAD
+=======
+	unp->unp_socket->so_pcb = NULL;
+	if (unp_rights) {
+		/*
+		 * Normally the receive buffer is flushed later,
+		 * in sofree, but if our receive buffer holds references
+		 * to descriptors that are now garbage, we will dispose
+		 * of those descriptor references after the garbage collector
+		 * gets them (resulting in a "panic: closef: count < 0").
+		 */
+		sorflush(unp->unp_socket);
+
+		/* Per domain mutex deadlock avoidance */
+		socket_unlock(unp->unp_socket, 0);
+		unp_gc();
+		socket_lock(unp->unp_socket, 0);
+	}
+	if (unp->unp_addr)
+		FREE(unp->unp_addr, M_SONAME);
+	zfree(unp_zone, unp);
+>>>>>>> origin/10.5
 }
 
 /*
@@ -2117,7 +2146,11 @@ unp_gc(void)
 	struct fileglob *fg, *nextfg;
 	struct socket *so;
 	static struct fileglob **extra_ref;
+<<<<<<< HEAD
 	struct fileglob **fpp;
+=======
+        struct fileglob **fpp;
+>>>>>>> origin/10.5
 	int nunref, i;
 	int need_gcwakeup = 0;
 
@@ -2220,12 +2253,20 @@ unp_gc(void)
 			 * message buffers. Follow those links and mark them
 			 * as accessible too.
 			 *
+<<<<<<< HEAD
 			 * In case a file is passed onto itself we need to 
+=======
+			 * In case a file is passed onto itself we need to
+>>>>>>> origin/10.5
 			 * release the file lock.
 			 */
 			lck_mtx_unlock(&fg->fg_lock);
 
+<<<<<<< HEAD
 			unp_scan(so->so_rcv.sb_mb, unp_mark, 0);
+=======
+			unp_scan(so->so_rcv.sb_mb, unp_mark);
+>>>>>>> origin/10.5
 		}
 	} while (unp_defer);
 	/*
@@ -2304,12 +2345,20 @@ unp_gc(void)
 
 		tfg = *fpp;
 
+<<<<<<< HEAD
 		if (FILEGLOB_DTYPE(tfg) == DTYPE_SOCKET &&
 		    tfg->fg_data != NULL) {
 			so = (struct socket *)(tfg->fg_data);
 
 			socket_lock(so, 0);
 			
+=======
+		if (tfg->fg_type == DTYPE_SOCKET && tfg->fg_data != NULL) {
+			so = (struct socket *)(tfg->fg_data);
+
+			socket_lock(so, 0);
+
+>>>>>>> origin/10.5
 			sorflush(so);
 
 			socket_unlock(so, 0);

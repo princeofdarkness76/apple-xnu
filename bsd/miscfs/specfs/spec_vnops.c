@@ -846,6 +846,7 @@ loop:
 int
 spec_kqfilter(vnode_t vp, struct knote *kn)
 {
+<<<<<<< HEAD
 	dev_t dev;
 	int err;
 
@@ -863,6 +864,135 @@ spec_kqfilter(vnode_t vp, struct knote *kn)
 	err = filt_specattach(kn);
 
 	return err;
+=======
+	return spec_fsync_internal(ap->a_vp, ap->a_waitfor, ap->a_context);
+}
+
+/*
+ * Just call the device strategy routine
+ */
+extern int hard_throttle_on_root;
+void IOSleep(int);
+
+// the low priority process may wait for at most LOWPRI_MAX_DELAY millisecond
+#define LOWPRI_INITIAL_WINDOW_MSECS 100
+#define LOWPRI_WINDOW_MSECS_INC	50
+#define LOWPRI_MAX_WINDOW_MSECS 200
+#define LOWPRI_MAX_WAITING_MSECS 200
+#define LOWPRI_SLEEP_INTERVAL 5
+
+struct _throttle_io_info_t {
+	struct timeval	last_normal_IO_timestamp;
+	struct timeval  last_IO_timestamp;
+	SInt32 numthreads_throttling;
+};
+
+struct _throttle_io_info_t _throttle_io_info[LOWPRI_MAX_NUM_DEV];
+int 	lowpri_IO_initial_window_msecs  = LOWPRI_INITIAL_WINDOW_MSECS;
+int 	lowpri_IO_window_msecs_inc  = LOWPRI_WINDOW_MSECS_INC;
+int 	lowpri_max_window_msecs  = LOWPRI_MAX_WINDOW_MSECS;
+int     lowpri_max_waiting_msecs = LOWPRI_MAX_WAITING_MSECS;
+
+SYSCTL_INT(_debug, OID_AUTO, lowpri_IO_initial_window_msecs, CTLFLAG_RW, &lowpri_IO_initial_window_msecs, LOWPRI_INITIAL_WINDOW_MSECS, "");
+SYSCTL_INT(_debug, OID_AUTO, lowpri_IO_window_inc, CTLFLAG_RW, &lowpri_IO_window_msecs_inc, LOWPRI_INITIAL_WINDOW_MSECS, "");
+SYSCTL_INT(_debug, OID_AUTO, lowpri_max_window_msecs, CTLFLAG_RW, &lowpri_max_window_msecs, LOWPRI_INITIAL_WINDOW_MSECS, "");
+SYSCTL_INT(_debug, OID_AUTO, lowpri_max_waiting_msecs, CTLFLAG_RW, &lowpri_max_waiting_msecs, LOWPRI_INITIAL_WINDOW_MSECS, "");
+
+void
+throttle_info_get_last_io_time(mount_t mp, struct timeval *tv)
+{
+	size_t devbsdunit;
+		
+	devbsdunit = mp->mnt_devbsdunit;
+
+	if (devbsdunit < LOWPRI_MAX_NUM_DEV) {
+		*tv = _throttle_io_info[devbsdunit].last_IO_timestamp;
+	} else {
+		memset(tv, 0, sizeof(*tv));
+	}
+}
+
+void
+update_last_io_time(mount_t mp)
+{
+	size_t devbsdunit;
+		
+	devbsdunit = mp->mnt_devbsdunit;
+
+	if (devbsdunit < LOWPRI_MAX_NUM_DEV) {
+		microuptime(&_throttle_io_info[devbsdunit].last_IO_timestamp);
+	}
+}
+
+int throttle_io_will_be_throttled(int lowpri_window_msecs, size_t devbsdunit)
+{
+	struct timeval elapsed;
+	int elapsed_msecs;
+
+	microuptime(&elapsed);
+	timevalsub(&elapsed, &_throttle_io_info[devbsdunit].last_normal_IO_timestamp);
+	elapsed_msecs = elapsed.tv_sec * 1000 + elapsed.tv_usec / 1000;
+
+	if (lowpri_window_msecs == -1) // use the max waiting time
+		lowpri_window_msecs = lowpri_max_waiting_msecs;
+
+	return elapsed_msecs < lowpri_window_msecs;
+}
+
+void throttle_lowpri_io(boolean_t ok_to_sleep)
+{
+	int i;
+	int max_try_num;
+	struct uthread *ut;
+
+	ut = get_bsdthread_info(current_thread());
+
+	if (ut->uu_lowpri_window == 0)
+		return;
+
+	max_try_num = lowpri_max_waiting_msecs / LOWPRI_SLEEP_INTERVAL * MAX(1, _throttle_io_info[ut->uu_devbsdunit].numthreads_throttling);
+
+	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 97)) | DBG_FUNC_START,
+		     ut->uu_lowpri_window, 0, 0, 0, 0);
+
+	if (ok_to_sleep == TRUE) {
+		for (i=0; i<max_try_num; i++) {
+			if (throttle_io_will_be_throttled(ut->uu_lowpri_window, ut->uu_devbsdunit)) {
+				IOSleep(LOWPRI_SLEEP_INTERVAL);
+			} else {
+				break;
+			}
+		}
+	}
+	KERNEL_DEBUG((FSDBG_CODE(DBG_FSRW, 97)) | DBG_FUNC_END,
+		     ut->uu_lowpri_window, i*5, 0, 0, 0);
+	SInt32 oldValue;
+	oldValue = OSDecrementAtomic(&_throttle_io_info[ut->uu_devbsdunit].numthreads_throttling);
+	ut->uu_lowpri_window = 0;
+
+	if (oldValue <= 0) {
+		panic("%s: numthreads negative", __func__);
+	}
+}
+
+int throttle_get_io_policy(struct uthread **ut)
+{
+	int policy = IOPOL_DEFAULT;
+	proc_t p = current_proc();
+
+	*ut = get_bsdthread_info(current_thread());
+		
+	if (p != NULL)
+		policy = p->p_iopol_disk;
+
+	if (*ut != NULL) {
+		// the I/O policy of the thread overrides that of the process
+		// unless the I/O policy of the thread is default
+		if ((*ut)->uu_iopol_disk != IOPOL_DEFAULT)
+			policy = (*ut)->uu_iopol_disk;
+	}
+	return policy;
+>>>>>>> origin/10.5
 }
 
 /*
@@ -886,6 +1016,7 @@ spec_advlock(ap)
 	off_t start, end;
 	int error;
 
+<<<<<<< HEAD
 	/*
 	 * Avoid the common case of unlocking when inode has no locks.
 	 */
@@ -899,6 +1030,24 @@ spec_advlock(ap)
 	 * Convert the flock structure into a start and end.
 	 */
 	switch (fl->l_whence) {
+=======
+		KERNEL_DEBUG_CONSTANT(FSDBG_CODE(DBG_DKRW, code) | DBG_FUNC_NONE,
+				      (unsigned int)bp, bdev, (int)buf_blkno(bp), buf_count(bp), 0);
+        }
+	if (((bflags & (B_PAGEIO | B_READ)) == (B_PAGEIO | B_READ)) &&
+	    (buf_vnode(bp)->v_mount->mnt_kern_flag & MNTK_ROOTDEV))
+	        hard_throttle_on_root = 1;
+
+	if (lowpri_IO_initial_window_msecs) {
+		struct uthread	*ut;
+		int policy;
+		int is_throttleable_io = 0;
+		int is_passive_io = 0;
+		size_t devbsdunit;
+		SInt32 oldValue;
+
+		policy = throttle_get_io_policy(&ut);
+>>>>>>> origin/10.5
 
 	case SEEK_SET:
 	case SEEK_CUR:
@@ -913,6 +1062,7 @@ spec_advlock(ap)
 		start = ap->a_vp->v_specinfo->si_devsize + fl->l_start;
 		break;
 
+<<<<<<< HEAD
 	default:
 		return (EINVAL);
 	}
@@ -944,6 +1094,62 @@ spec_advlock(ap)
 	switch(ap->a_op) {
 	case F_SETLK:
 		return (spec_lf_setlock(lock));
+=======
+		if (buf_vnode(bp)->v_mount != NULL)
+			devbsdunit = buf_vnode(bp)->v_mount->mnt_devbsdunit;
+		else
+			devbsdunit = LOWPRI_MAX_NUM_DEV - 1;
+		if (!is_throttleable_io) {
+			if (!is_passive_io){
+				microuptime(&_throttle_io_info[devbsdunit].last_normal_IO_timestamp);
+			}
+		} else {
+			/*
+			 * I'd really like to do the IOSleep here, but
+			 * we may be holding all kinds of filesystem related locks
+			 * and the pages for this I/O marked 'busy'...
+			 * we don't want to cause a normal task to block on
+			 * one of these locks while we're throttling a task marked
+			 * for low priority I/O... we'll mark the uthread and
+			 * do the delay just before we return from the system
+			 * call that triggered this I/O or from vnode_pagein
+			 */
+			if (ut->uu_lowpri_window == 0) {
+				ut->uu_devbsdunit = devbsdunit;
+				oldValue = OSIncrementAtomic(&_throttle_io_info[devbsdunit].numthreads_throttling);
+				if (oldValue < 0) {
+					panic("%s: numthreads negative", __func__);
+				}
+				ut->uu_lowpri_window = lowpri_IO_initial_window_msecs;
+				ut->uu_lowpri_window += lowpri_IO_window_msecs_inc * oldValue;
+			} else {
+				if (ut->uu_devbsdunit != devbsdunit) { // the thread sends I/Os to different devices within the same system call
+					// keep track of the numthreads in the right device
+					OSDecrementAtomic(&_throttle_io_info[ut->uu_devbsdunit].numthreads_throttling);
+					OSIncrementAtomic(&_throttle_io_info[devbsdunit].numthreads_throttling);
+					ut->uu_devbsdunit = devbsdunit;
+				}
+				int numthreads = MAX(1, _throttle_io_info[devbsdunit].numthreads_throttling);
+				ut->uu_lowpri_window += lowpri_IO_window_msecs_inc * numthreads;
+				if (ut->uu_lowpri_window > lowpri_max_window_msecs * numthreads)
+					ut->uu_lowpri_window = lowpri_max_window_msecs * numthreads;
+			}
+		}
+	}
+
+	if ((bflags & B_READ) == 0) {
+		size_t devbsdunit;
+
+		if (buf_vnode(bp)->v_mount != NULL)
+			devbsdunit = buf_vnode(bp)->v_mount->mnt_devbsdunit;
+		else
+			devbsdunit = LOWPRI_MAX_NUM_DEV - 1;
+		
+		microuptime(&_throttle_io_info[devbsdunit].last_IO_timestamp);
+	}
+
+        (*bdevsw[major(bdev)].d_strategy)(bp);
+>>>>>>> origin/10.5
 
 	case F_UNLCK:
 		error = spec_lf_clearlock(lock);
@@ -1036,9 +1242,34 @@ SYSCTL_INT(_debug, OID_AUTO, lowpri_throttle_tier1_window_msecs, CTLFLAG_RW | CT
 SYSCTL_INT(_debug, OID_AUTO, lowpri_throttle_tier2_window_msecs, CTLFLAG_RW | CTLFLAG_LOCKED, &throttle_windows_msecs[THROTTLE_LEVEL_TIER2], 0, "");
 SYSCTL_INT(_debug, OID_AUTO, lowpri_throttle_tier3_window_msecs, CTLFLAG_RW | CTLFLAG_LOCKED, &throttle_windows_msecs[THROTTLE_LEVEL_TIER3], 0, "");
 
+<<<<<<< HEAD
 SYSCTL_INT(_debug, OID_AUTO, lowpri_throttle_tier1_io_period_msecs, CTLFLAG_RW | CTLFLAG_LOCKED, &throttle_io_period_msecs[THROTTLE_LEVEL_TIER1], 0, "");
 SYSCTL_INT(_debug, OID_AUTO, lowpri_throttle_tier2_io_period_msecs, CTLFLAG_RW | CTLFLAG_LOCKED, &throttle_io_period_msecs[THROTTLE_LEVEL_TIER2], 0, "");
 SYSCTL_INT(_debug, OID_AUTO, lowpri_throttle_tier3_io_period_msecs, CTLFLAG_RW | CTLFLAG_LOCKED, &throttle_io_period_msecs[THROTTLE_LEVEL_TIER3], 0, "");
+=======
+		error = buf_invalidateblks(vp, BUF_WRITE_DATA, 0, 0);
+		if (error)
+			return (error);
+		/*
+		 * Since every use (buffer, vnode, swap, blockmap)
+		 * holds a reference to the vnode, and because we mark
+		 * any other vnodes that alias this device, when the
+		 * sum of the reference counts on all the aliased
+		 * vnodes descends to one, we are on last close.
+		 */
+		if (vcount(vp) > 0)
+			return (0);
+#else /* DEVFS_IMPLEMENTS_LOCKING */
+		/*
+		 * Since every use (buffer, vnode, swap, blockmap)
+		 * holds a reference to the vnode, and because we mark
+		 * any other vnodes that alias this device, when the
+		 * sum of the reference counts on all the aliased
+		 * vnodes descends to one, we are on last close.
+		 */
+		if (vcount(vp) > 0)
+			return (0);
+>>>>>>> origin/10.5
 
 SYSCTL_INT(_debug, OID_AUTO, lowpri_throttle_tier1_io_period_ssd_msecs, CTLFLAG_RW | CTLFLAG_LOCKED, &throttle_io_period_ssd_msecs[THROTTLE_LEVEL_TIER1], 0, "");
 SYSCTL_INT(_debug, OID_AUTO, lowpri_throttle_tier2_io_period_ssd_msecs, CTLFLAG_RW | CTLFLAG_LOCKED, &throttle_io_period_ssd_msecs[THROTTLE_LEVEL_TIER2], 0, "");

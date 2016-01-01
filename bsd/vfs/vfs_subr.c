@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -1656,6 +1660,7 @@ found_alias:
 		*vpp = nvp;
 
 		if (vp != NULLVP) {
+<<<<<<< HEAD
 			nvp->v_specflags |= SI_ALIASED;
 			vp->v_specflags |= SI_ALIASED;
 			SPECHASH_UNLOCK();
@@ -1663,6 +1668,12 @@ found_alias:
 			vnode_unlock(vp);
 		} else {
 			SPECHASH_UNLOCK();
+=======
+			nvp->v_flag |= VALIASED;
+			vp->v_flag |= VALIASED;
+			vnode_put_locked(vp);
+			vnode_unlock(vp);
+>>>>>>> origin/10.5
 		}
 
 		return (NULLVP);
@@ -1944,6 +1955,32 @@ vnode_list_remove_locked(vnode_t vp)
 
 /*
  * remove the vnode from appropriate free list.
+<<<<<<< HEAD
+=======
+ * called with vnode LOCKED and
+ * the list lock held
+ */
+static void
+vnode_list_remove_locked(vnode_t vp)
+{
+	if (VONLIST(vp)) {
+		/*
+		 * the v_listflag field is
+		 * protected by the vnode_list_lock
+		 */
+	        if (vp->v_listflag & VLIST_RAGE)
+		        VREMRAGE("vnode_list_remove", vp);
+		else if (vp->v_listflag & VLIST_DEAD)
+		        VREMDEAD("vnode_list_remove", vp);
+		else
+		        VREMFREE("vnode_list_remove", vp);
+	}
+}
+
+
+/*
+ * remove the vnode from appropriate free list.
+>>>>>>> origin/10.5
  * called with vnode LOCKED
  */
 static void
@@ -2258,7 +2295,10 @@ loop:
 #ifdef JOE_DEBUG
 				record_vp(vp, 1);
 #endif
+<<<<<<< HEAD
 				vnode_abort_advlocks(vp);
+=======
+>>>>>>> origin/10.5
 				vnode_reclaim_internal(vp, 1, 1, 0);
 				vnode_dropiocount(vp);
 				vnode_list_add(vp);
@@ -2321,6 +2361,10 @@ vclean(vnode_t vp, int flags)
 	int is_namedstream;
 #endif
 
+#if NAMEDSTREAMS
+	int is_namedstream;
+#endif
+
 	/*
 	 * Check to see if the vnode is in use.
 	 * If so we have to reference it before we clean it out
@@ -2344,6 +2388,10 @@ vclean(vnode_t vp, int flags)
 	already_terminating = (vp->v_lflag & VL_TERMINATE);
 
 	vp->v_lflag |= VL_TERMINATE;
+
+#if NAMEDSTREAMS
+	is_namedstream = vnode_isnamedstream(vp);
+#endif
 
 #if NAMEDSTREAMS
 	is_namedstream = vnode_isnamedstream(vp);
@@ -2392,6 +2440,7 @@ vclean(vnode_t vp, int flags)
 		VNOP_INACTIVE(vp, ctx);
 
 #if NAMEDSTREAMS
+<<<<<<< HEAD
 	if ((is_namedstream != 0) && (vp->v_parent != NULLVP)) {
 		vnode_t pvp = vp->v_parent;
 	    
@@ -2411,6 +2460,13 @@ vclean(vnode_t vp, int flags)
 			pvp->v_lflag &= ~VL_HASSTREAMS;
 			vnode_unlock(pvp);
 		}
+=======
+	/* Delete the shadow stream file before we reclaim its vnode */
+	if ((is_namedstream != 0) &&
+			(vp->v_parent != NULLVP) &&
+			(vnode_isshadow(vp))) {
+		vnode_relenamedstream(vp->v_parent, vp, ctx);
+>>>>>>> origin/10.5
 	}
 #endif
 
@@ -2513,12 +2569,17 @@ vn_revoke(vnode_t vp, __unused int flags, __unused vfs_context_t a_context)
 					SPECHASH_LOCK();	
 					break;
 				}
+<<<<<<< HEAD
 				vnode_lock(vq);
 				if (!(vq->v_lflag & VL_TERMINATE)) {
 					vnode_reclaim_internal(vq, 1, 1, 0);
 				}
 				vnode_put_locked(vq);
 				vnode_unlock(vq);
+=======
+				vnode_reclaim_internal(vq, 0, 1, 0);
+				vnode_put(vq);
+>>>>>>> origin/10.5
 				SPECHASH_LOCK();
 				break;
 			}
@@ -3470,13 +3531,13 @@ lck_mtx_t *fs_klist_lock;
 void
 vfs_event_init(void)
 {
-
 	klist_init(&fs_klist);
 	fs_klist_lck_grp = lck_grp_alloc_init("fs_klist", NULL);
 	fs_klist_lock = lck_mtx_alloc_init(fs_klist_lck_grp, NULL);
 }
 
 void
+<<<<<<< HEAD
 vfs_event_signal(fsid_t *fsid, u_int32_t event, intptr_t data)
 {
 	if (event == VQ_DEAD || event == VQ_NOTRESP) {
@@ -3491,6 +3552,10 @@ vfs_event_signal(fsid_t *fsid, u_int32_t event, intptr_t data)
 		}
 	}
 
+=======
+vfs_event_signal(__unused fsid_t *fsid, u_int32_t event, __unused intptr_t data)
+{
+>>>>>>> origin/10.5
 	lck_mtx_lock(fs_klist_lock);
 	KNOTE(&fs_klist, event);
 	lck_mtx_unlock(fs_klist_lock);
@@ -4189,6 +4254,7 @@ retry:
 	      (current_tv.tv_sec - rage_tv.tv_sec) >= RAGE_TIME_LIMIT)) {
 
 		TAILQ_FOREACH(vp, &vnode_rage_list, v_freelist) {
+<<<<<<< HEAD
 			if ( !(vp->v_listflag & VLIST_RAGE))
 				panic("new_vnode: vp (%p) on RAGE list not marked VLIST_RAGE", vp);
 
@@ -4212,6 +4278,18 @@ retry:
 				if (need_reliable_vp == FALSE || vnode_on_reliable_media(vp) == TRUE)
 					break;
 			}
+=======
+		    if ( !(vp->v_listflag & VLIST_RAGE) || !(vp->v_flag & VRAGE))
+		        panic("new_vnode: vp on RAGE list not marked both VLIST_RAGE and VRAGE");
+
+		    // if we're a dependency-capable process, skip vnodes that can
+		    // cause recycling deadlocks. (i.e. this process is diskimages
+		    // helper and the vnode is in a disk image).
+		    //
+		    if ((curproc->p_flag & P_DEPENDENCY_CAPABLE) == 0 || vp->v_mount == NULL || vp->v_mount->mnt_dependent_process == NULL) {
+			break;
+		    }
+>>>>>>> origin/10.5
 
 			// don't iterate more than MAX_WALK_COUNT vnodes to
 			// avoid keeping the vnode list lock held for too long.
@@ -4229,6 +4307,16 @@ retry:
 		 */
 		walk_count = 0;
 		TAILQ_FOREACH(vp, &vnode_free_list, v_freelist) {
+<<<<<<< HEAD
+=======
+		    // if we're a dependency-capable process, skip vnodes that can
+		    // cause recycling deadlocks. (i.e. this process is diskimages
+		    // helper and the vnode is in a disk image)
+		    //
+		    if ((curproc->p_flag & P_DEPENDENCY_CAPABLE) == 0 || vp->v_mount == NULL || vp->v_mount->mnt_dependent_process == NULL) {
+			break;
+		    }
+>>>>>>> origin/10.5
 
 			// if we're a dependency-capable process, skip vnodes that can
 			// cause recycling deadlocks. (i.e. this process is diskimages
@@ -4292,6 +4380,7 @@ retry:
 		vnode_list_unlock();
 		tablefull("vnode");
 		log(LOG_EMERG, "%d desired, %d numvnodes, "
+<<<<<<< HEAD
 			"%d free, %d dead, %d async, %d rage\n",
 		        desiredvnodes, numvnodes, freevnodes, deadvnodes, async_work_vnodes, ragevnodes);
 #if CONFIG_JETSAM
@@ -4300,6 +4389,30 @@ retry:
 		if (bootarg_no_vnode_jetsam)
 			panic("vnode table is full\n");
 #endif /* DEVELOPMENT || DEBUG */
+=======
+			"%d free, %d dead, %d rage\n",
+		        desiredvnodes, numvnodes, freevnodes, deadvnodes, ragevnodes);
+#if CONFIG_EMBEDDED
+		/*
+		 * Running out of vnodes tends to make a system unusable.  On an
+		 * embedded system, it's unlikely that the user can do anything
+		 * about it (or would know what to do, if they could).  So panic
+		 * the system so it will automatically restart (and hopefully we
+		 * can get a panic log that tells us why we ran out).
+		 */
+		panic("vnode table is full\n");
+#endif
+		*vpp = NULL;
+		return (ENFILE);
+	}
+steal_this_vp:
+	vpid = vp->v_id;
+
+	vnode_list_remove_locked(vp);
+
+	vnode_list_unlock();
+	vnode_lock_spin(vp);
+>>>>>>> origin/10.5
 
 		/*
 		 * Running out of vnodes tends to make a system unusable. Start killing
@@ -4333,10 +4446,19 @@ steal_this_vp:
 			int	elapsed_msecs;
 			struct timeval elapsed_tv;
 
+<<<<<<< HEAD
 			if (initial_tv.tv_sec == 0)
 				microuptime(&initial_tv);
 
 			vnode_list_lock();
+=======
+	/* Checks for anyone racing us for recycle */ 
+	if (vp->v_type != VBAD) {
+		if (vp->v_lflag & VL_DEAD)
+			panic("new_vnode: the vnode is VL_DEAD but not VBAD");
+		vnode_lock_convert(vp);
+		(void)vnode_reclaim_internal(vp, 1, 1, 0);
+>>>>>>> origin/10.5
 
 			dead_vnode_waited++;
 			dead_vnode_wanted++;
@@ -4699,8 +4821,11 @@ vnode_getiocount(vnode_t vp, unsigned int vid, int vflags)
 	int nodead = vflags & VNODE_NODEAD;
 	int nosusp = vflags & VNODE_NOSUSPEND;
 	int always = vflags & VNODE_ALWAYS;
+<<<<<<< HEAD
 	int beatdrain = vflags & VNODE_DRAINO;
 	int withvid = vflags & VNODE_WITHID;
+=======
+>>>>>>> origin/10.5
 
 	for (;;) {
 		int sleepflg = 0;
@@ -4731,6 +4856,7 @@ vnode_getiocount(vnode_t vp, unsigned int vid, int vflags)
 		    (vp->v_owner == current_thread())) {
 		        break;
 		}
+<<<<<<< HEAD
 		
 		if (always != 0) 
 			break;
@@ -4767,6 +4893,10 @@ vnode_getiocount(vnode_t vp, unsigned int vid, int vflags)
 			}
 		}
 
+=======
+		if (always != 0) 
+			break;
+>>>>>>> origin/10.5
 		vnode_lock_convert(vp);
 
 		if (vp->v_lflag & VL_TERMINATE) {
@@ -4908,9 +5038,17 @@ vnode_reclaim_internal(struct vnode * vp, int locked, int reuse, int flags)
 	        vnode_unlock(vp);
 }
 
+<<<<<<< HEAD
 static int
 vnode_create_internal(uint32_t flavor, uint32_t size, void *data, vnode_t *vpp,
     int init_vnode)
+=======
+/* USAGE:
+ *  vnode_create(int flavor, size_t size, void * param,  vnode_t  *vp)
+ */
+int  
+vnode_create(int flavor, size_t size, void *data, vnode_t *vpp)
+>>>>>>> origin/10.5
 {
 	int error;
 	int insert = 1;
@@ -5016,6 +5154,7 @@ vnode_create_internal(uint32_t flavor, uint32_t size, void *data, vnode_t *vpp,
 	record_vp(vp, 1);
 #endif
 
+<<<<<<< HEAD
 #if CONFIG_TRIGGERS
 	/*
 	 * For trigger vnodes, attach trigger info to vnode
@@ -5026,6 +5165,19 @@ vnode_create_internal(uint32_t flavor, uint32_t size, void *data, vnode_t *vpp,
 		 * mount if successful, which we would need to undo on a 
 		 * subsequent failure.
 		 */
+=======
+			vp->v_op = param->vnfs_vops;
+			vp->v_type = param->vnfs_vtype;
+			vp->v_data = param->vnfs_fsnode;
+
+			if (param->vnfs_markroot)
+				vp->v_flag |= VROOT;
+			if (param->vnfs_marksystem)
+				vp->v_flag |= VSYSTEM;
+			if (vp->v_type == VREG) {
+				error = ubc_info_init_withsize(vp, param->vnfs_filesize);
+				if (error) {
+>>>>>>> origin/10.5
 #ifdef JOE_DEBUG
 		record_vp(vp, -1);
 #endif
@@ -5065,6 +5217,7 @@ vnode_create_internal(uint32_t flavor, uint32_t size, void *data, vnode_t *vpp,
 			 */
 			vp = nvp;
 
+<<<<<<< HEAD
 			vclean(vp, 0);
 			vp->v_op = param->vnfs_vops;
 			vp->v_type = param->vnfs_vtype;
@@ -5081,6 +5234,69 @@ vnode_create_internal(uint32_t flavor, uint32_t size, void *data, vnode_t *vpp,
 
 			if (maj < (u_int)nchrdev && cdevsw[maj].d_type == D_TTY)
 				vp->v_flag |= VISTTY;
+=======
+			/* Add fs named reference. */
+			if (param->vnfs_flags & VNFS_ADDFSREF) {
+				vp->v_lflag |= VNAMED_FSHASH;
+			}
+			if (param->vnfs_mp) {
+					if (param->vnfs_mp->mnt_kern_flag & MNTK_LOCK_LOCAL)
+						vp->v_flag |= VLOCKLOCAL;
+			        if (insert) {
+					if ((vp->v_freelist.tqe_prev != (struct vnode **)0xdeadb))
+						panic("insmntque: vp on the free list\n");
+
+				        /*
+					 * enter in mount vnode list
+					 */
+				        insmntque(vp, param->vnfs_mp);
+				}
+#ifdef INTERIM_FSNODE_LOCK	
+				if (param->vnfs_mp->mnt_vtable->vfc_threadsafe == 0) {
+				        MALLOC_ZONE(vp->v_unsafefs, struct unsafe_fsnode *,
+						    sizeof(struct unsafe_fsnode), M_UNSAFEFS, M_WAITOK);
+					vp->v_unsafefs->fsnode_count = 0;
+					vp->v_unsafefs->fsnodeowner  = (void *)NULL;
+					lck_mtx_init(&vp->v_unsafefs->fsnodelock, vnode_lck_grp, vnode_lck_attr);
+				}
+#endif /* INTERIM_FSNODE_LOCK */
+			}
+			if (dvp && vnode_ref(dvp) == 0) {
+				vp->v_parent = dvp;
+			}
+			if (cnp) {
+				if (dvp && ((param->vnfs_flags & (VNFS_NOCACHE | VNFS_CANTCACHE)) == 0)) {
+					/*
+					 * enter into name cache
+					 * we've got the info to enter it into the name cache now
+					 */
+					cache_enter(dvp, vp, cnp);
+				}
+				vp->v_name = vfs_addname(cnp->cn_nameptr, cnp->cn_namelen, cnp->cn_hash, 0);
+				if ((cnp->cn_flags & UNIONCREATED) == UNIONCREATED)
+					vp->v_flag |= VISUNION;
+			}
+			if ((param->vnfs_flags & VNFS_CANTCACHE) == 0) {
+			        /*
+				 * this vnode is being created as cacheable in the name cache
+				 * this allows us to re-enter it in the cache
+				 */
+			        vp->v_flag |= VNCACHEABLE;
+			}
+			ut = get_bsdthread_info(current_thread());
+		
+			if ((current_proc()->p_lflag & P_LRAGE_VNODES) ||
+			    (ut->uu_flag & UT_RAGE_VNODES)) {
+			        /*
+				 * process has indicated that it wants any
+				 * vnodes created on its behalf to be rapidly
+				 * aged to reduce the impact on the cached set
+				 * of vnodes
+				 */
+			        vp->v_flag |= VRAGE;
+			}
+			return(0);
+>>>>>>> origin/10.5
 		}
 	}
 
@@ -6226,6 +6442,7 @@ out:
 	return error;
 }
 
+<<<<<<< HEAD
 int
 vn_authorize_mkdir(vnode_t dvp, struct componentname *cnp, struct vnode_attr *vap, vfs_context_t ctx, void *reserved)
 {
@@ -6233,6 +6450,56 @@ vn_authorize_mkdir(vnode_t dvp, struct componentname *cnp, struct vnode_attr *va
 #pragma unused(vap)
 #endif
 	int error;
+=======
+/*
+ * Authorize the deletion of the node vp from the directory dvp.
+ *
+ * We assume that:
+ * - Neither the node nor the directory are immutable.
+ * - The user is not the superuser.
+ *
+ * Deletion is not permitted if the directory is sticky and the caller is
+ * not owner of the node or directory.
+ *
+ * If either the node grants DELETE, or the directory grants DELETE_CHILD,
+ * the node may be deleted.  If neither denies the permission, and the
+ * caller has Posix write access to the directory, then the node may be
+ * deleted.
+ *
+ * As an optimization, we cache whether or not delete child is permitted
+ * on directories without the sticky bit set.
+ */
+int
+vnode_authorize_delete(vauth_ctx vcp, boolean_t cached_delete_child);
+/*static*/ int
+vnode_authorize_delete(vauth_ctx vcp, boolean_t cached_delete_child)
+{
+	struct vnode_attr	*vap = vcp->vap;
+	struct vnode_attr	*dvap = vcp->dvap;
+	kauth_cred_t		cred = vcp->ctx->vc_ucred;
+	struct kauth_acl_eval	eval;
+	int			error, delete_denied, delete_child_denied, ismember;
+
+	/* check the ACL on the directory */
+	delete_child_denied = 0;
+	if (!cached_delete_child && VATTR_IS_NOT(dvap, va_acl, NULL)) {
+		eval.ae_requested = KAUTH_VNODE_DELETE_CHILD;
+		eval.ae_acl = &dvap->va_acl->acl_ace[0];
+		eval.ae_count = dvap->va_acl->acl_entrycount;
+		eval.ae_options = 0;
+		if (vauth_dir_owner(vcp))
+			eval.ae_options |= KAUTH_AEVAL_IS_OWNER;
+		if ((error = vauth_dir_ingroup(vcp, &ismember)) != 0)
+			return(error);
+		if (ismember)
+			eval.ae_options |= KAUTH_AEVAL_IN_GROUP;
+		eval.ae_exp_gall = KAUTH_VNODE_GENERIC_ALL_BITS;
+		eval.ae_exp_gread = KAUTH_VNODE_GENERIC_READ_BITS;
+		eval.ae_exp_gwrite = KAUTH_VNODE_GENERIC_WRITE_BITS;
+		eval.ae_exp_gexec = KAUTH_VNODE_GENERIC_EXECUTE_BITS;
+
+		error = kauth_acl_evaluate(cred, &eval);
+>>>>>>> origin/10.5
 
 	if (reserved != NULL) {
 		panic("reserved not NULL in vn_authorize_mkdir()");	
@@ -6249,6 +6516,7 @@ vn_authorize_mkdir(vnode_t dvp, struct componentname *cnp, struct vnode_attr *va
 			goto out;
 	}
 
+<<<<<<< HEAD
 #if CONFIG_MACF
 	error = mac_vnode_check_create(ctx,
 	    dvp, cnp, vap);
@@ -6274,6 +6542,24 @@ vn_authorize_rmdir(vnode_t dvp, vnode_t vp, struct componentname *cnp, vfs_conte
 #endif
 	if (reserved != NULL) {
 		panic("Non-NULL reserved argument to vn_authorize_rmdir()");
+=======
+	/*
+	 * enforce sticky bit behaviour; the cached_delete_child property will
+	 * be false and the dvap contents valis for sticky bit directories;
+	 * this makes us check the directory each time, but it's unavoidable,
+	 * as sticky bit is an exception to caching.
+	 */
+	if (!cached_delete_child && (dvap->va_mode & S_ISTXT) && !vauth_file_owner(vcp) && !vauth_dir_owner(vcp)) {
+		KAUTH_DEBUG("%p    DENIED - sticky bit rules (user %d  file %d  dir %d)",
+		    vcp->vp, cred->cr_uid, vap->va_uid, dvap->va_uid);
+		return(EACCES);
+	}
+
+	/* check the directory */
+	if (!cached_delete_child && (error = vnode_authorize_posix(vcp, VWRITE, 1 /* on_dir */)) != 0) {
+		KAUTH_DEBUG("%p    ALLOWED - granted by posix permisssions", vcp->vp);
+		return(error);
+>>>>>>> origin/10.5
 	}
 
 	if (vp->v_type != VDIR) {
@@ -6609,6 +6895,7 @@ vauth_dir_ingroup(vauth_ctx vcp, int *ismember, int idontknow)
 static int
 vnode_authorize_posix(vauth_ctx vcp, int action, int on_dir)
 {
+<<<<<<< HEAD
 	struct vnode_attr *vap;
 	int needed, error, owner_ok, group_ok, world_ok, ismember;
 #ifdef KAUTH_DEBUG_ENABLE
@@ -6621,6 +6908,85 @@ vnode_authorize_posix(vauth_ctx vcp, int action, int on_dir)
 	/* checking file or directory? */
 	if (on_dir) {
 		vap = vcp->dvap;
+=======
+	struct _vnode_authorize_context auth_context;
+	vauth_ctx		vcp;
+	vfs_context_t		ctx;
+	vnode_t			vp, dvp;
+	kauth_cred_t		cred;
+	kauth_ace_rights_t	rights;
+	struct vnode_attr	va, dva;
+	int			result;
+	int			*errorp;
+	int			noimmutable;
+	boolean_t		parent_authorized_for_delete_child = FALSE;
+	boolean_t		found_deny = FALSE;
+	boolean_t		parent_ref= FALSE;
+
+	vcp = &auth_context;
+	ctx = vcp->ctx = (vfs_context_t)arg0;
+	vp = vcp->vp = (vnode_t)arg1;
+	dvp = vcp->dvp = (vnode_t)arg2;
+	errorp = (int *)arg3;
+	/*
+	 * Note that we authorize against the context, not the passed cred
+	 * (the same thing anyway)
+	 */
+	cred = ctx->vc_ucred;
+
+	VATTR_INIT(&va);
+	vcp->vap = &va;
+	VATTR_INIT(&dva);
+	vcp->dvap = &dva;
+
+	vcp->flags = vcp->flags_valid = 0;
+
+#if DIAGNOSTIC
+	if ((ctx == NULL) || (vp == NULL) || (cred == NULL))
+		panic("vnode_authorize: bad arguments (context %p  vp %p  cred %p)", ctx, vp, cred);
+#endif
+
+	KAUTH_DEBUG("%p  AUTH - %s %s%s%s%s%s%s%s%s%s%s%s%s%s%s%s on %s '%s' (0x%x:%p/%p)",
+	    vp, vfs_context_proc(ctx)->p_comm,
+	    (action & KAUTH_VNODE_ACCESS)		? "access" : "auth",
+	    (action & KAUTH_VNODE_READ_DATA)		? vnode_isdir(vp) ? " LIST_DIRECTORY" : " READ_DATA" : "",
+	    (action & KAUTH_VNODE_WRITE_DATA)		? vnode_isdir(vp) ? " ADD_FILE" : " WRITE_DATA" : "",
+	    (action & KAUTH_VNODE_EXECUTE)		? vnode_isdir(vp) ? " SEARCH" : " EXECUTE" : "",
+	    (action & KAUTH_VNODE_DELETE)		? " DELETE" : "",
+	    (action & KAUTH_VNODE_APPEND_DATA)		? vnode_isdir(vp) ? " ADD_SUBDIRECTORY" : " APPEND_DATA" : "",
+	    (action & KAUTH_VNODE_DELETE_CHILD)		? " DELETE_CHILD" : "",
+	    (action & KAUTH_VNODE_READ_ATTRIBUTES)	? " READ_ATTRIBUTES" : "",
+	    (action & KAUTH_VNODE_WRITE_ATTRIBUTES)	? " WRITE_ATTRIBUTES" : "",
+	    (action & KAUTH_VNODE_READ_EXTATTRIBUTES)	? " READ_EXTATTRIBUTES" : "",
+	    (action & KAUTH_VNODE_WRITE_EXTATTRIBUTES)	? " WRITE_EXTATTRIBUTES" : "",
+	    (action & KAUTH_VNODE_READ_SECURITY)	? " READ_SECURITY" : "",
+	    (action & KAUTH_VNODE_WRITE_SECURITY)	? " WRITE_SECURITY" : "",
+	    (action & KAUTH_VNODE_CHANGE_OWNER)		? " CHANGE_OWNER" : "",
+	    (action & KAUTH_VNODE_NOIMMUTABLE)		? " (noimmutable)" : "",
+	    vnode_isdir(vp) ? "directory" : "file",
+	    vp->v_name ? vp->v_name : "<NULL>", action, vp, dvp);
+
+	/*
+	 * Extract the control bits from the action, everything else is
+	 * requested rights.
+	 */
+	noimmutable = (action & KAUTH_VNODE_NOIMMUTABLE) ? 1 : 0;
+	rights = action & ~(KAUTH_VNODE_ACCESS | KAUTH_VNODE_NOIMMUTABLE);
+ 
+	if (rights & KAUTH_VNODE_DELETE) {
+#if DIAGNOSTIC
+		if (dvp == NULL)
+			panic("vnode_authorize: KAUTH_VNODE_DELETE test requires a directory");
+#endif
+		/*
+		 * check to see if we've already authorized the parent
+		 * directory for deletion of its children... if so, we
+		 * can skip a whole bunch of work... we will still have to
+		 * authorize that this specific child can be removed
+		 */
+		if (vnode_cache_is_authorized(dvp, ctx, KAUTH_VNODE_DELETE_CHILD) == TRUE)
+		        parent_authorized_for_delete_child = TRUE;
+>>>>>>> origin/10.5
 	} else {
 		vap = vcp->vap;
 	}
@@ -6688,10 +7054,23 @@ vnode_authorize_posix(vauth_ctx vcp, int action, int on_dir)
 		_SETWHERE("group/world");
 		goto out;
 	}
+<<<<<<< HEAD
 	if (!group_ok && !world_ok) {
 		_SETWHERE("group/world");
 		error = EACCES;
 		goto out;
+=======
+	if (dvp && parent_authorized_for_delete_child == FALSE) {
+		VATTR_WANTED(&dva, va_mode);
+		VATTR_WANTED(&dva, va_uid);
+		VATTR_WANTED(&dva, va_gid);
+		VATTR_WANTED(&dva, va_flags);
+		VATTR_WANTED(&dva, va_acl);
+		if ((result = vnode_getattr(dvp, &dva, ctx)) != 0) {
+			KAUTH_DEBUG("%p    ERROR - failed to get directory vnode attributes - %d", vp, result);
+			goto out;
+		}
+>>>>>>> origin/10.5
 	}
 
 	/* Check group membership (most expensive) */
@@ -6714,10 +7093,25 @@ vnode_authorize_posix(vauth_ctx vcp, int action, int on_dir)
 			ismember = 1;
 		error = 0;
 	}
+<<<<<<< HEAD
 	if (ismember) {
 		_SETWHERE("group");
 		if (!group_ok)
 			error = EACCES;
+=======
+
+	/*
+	 * Check for immutability.
+	 *
+	 * In the deletion case, parent directory immutability vetoes specific
+	 * file rights.
+	 */
+	if ((result = vnode_authorize_checkimmutable(vp, &va, rights, noimmutable)) != 0)
+		goto out;
+	if ((rights & KAUTH_VNODE_DELETE) &&
+	    parent_authorized_for_delete_child == FALSE &&
+	    ((result = vnode_authorize_checkimmutable(dvp, &dva, KAUTH_VNODE_DELETE_CHILD, 0)) != 0))
+>>>>>>> origin/10.5
 		goto out;
 	}
 
@@ -6726,7 +7120,20 @@ vnode_authorize_posix(vauth_ctx vcp, int action, int on_dir)
 	if (!world_ok)
 		error = EACCES;
 
+<<<<<<< HEAD
 	/* FALLTHROUGH */
+=======
+	/*
+	 * If we're not the superuser, authorize based on file properties;
+	 * note that even if parent_authorized_for_delete_child is TRUE, we
+	 * need to check on the node itself.
+	 */
+	if (!vfs_context_issuser(ctx)) {
+		/* process delete rights */
+		if ((rights & KAUTH_VNODE_DELETE) &&
+		    ((result = vnode_authorize_delete(vcp, parent_authorized_for_delete_child)) != 0))
+		    goto out;
+>>>>>>> origin/10.5
 
 out:
 	KAUTH_DEBUG("%p    %s - posix %s permissions : need %s%s%s %x have %s%s%s%s%s%s%s%s%s UID = %d file = %d,%d",
@@ -6876,11 +7283,28 @@ vnode_authorize_delete(vauth_ctx vcp, boolean_t cached_delete_child)
 			break;
 		}
 	}
+<<<<<<< HEAD
 
 	/* if denied by ACL on directory or node, return denial */
 	if (delete_denied || delete_child_denied) {
 		KAUTH_DEBUG("%p    DENIED - denied by ACL", vcp->vp);
 		return(EACCES);
+=======
+	if ((rights & KAUTH_VNODE_DELETE) && parent_authorized_for_delete_child == FALSE) {
+	        /*
+		 * parent was successfully and newly authorized for content deletions
+		 * add it to the cache, but only if it doesn't have the sticky
+		 * bit set on it.  This same  check is done earlier guarding
+		 * fetching of dva, and if we jumped to out without having done
+		 * this, we will have returned already because of a non-zero
+		 * 'result' value.
+		 */
+		if (VATTR_IS_SUPPORTED(&dva, va_mode) &&
+		    !(dva.va_mode & (S_ISVTX))) {
+		    	/* OK to cache delete rights */
+			vnode_cache_authorized_action(dvp, ctx, KAUTH_VNODE_DELETE_CHILD);
+		}
+>>>>>>> origin/10.5
 	}
 
 	/* enforce sticky bit behaviour */
@@ -9226,6 +9650,7 @@ triggerisdescendant(mount_t mp, mount_t rmp)
 
 	name_cache_unlock();
 
+<<<<<<< HEAD
 	return (match);
 }
 
@@ -9243,6 +9668,45 @@ trigger_unmount_callback(mount_t mp, void * arg)
 {
 	struct trigger_unmount_info * infop = (struct trigger_unmount_info *)arg;
 	boolean_t mountedtrigger = FALSE;
+=======
+		while ((cpos < cend)) {
+			/*
+			 * Check for . and .. as well as directories
+			 */
+			if (dp->d_ino != 0 && 
+					!((dp->d_namlen == 1 && dp->d_name[0] == '.') ||
+					    (dp->d_namlen == 2 && dp->d_name[0] == '.' && dp->d_name[1] == '.'))) {
+				/*
+				 * Check for irregular files and ._ files
+				 * If there is a ._._ file abort the op
+				 */
+				if ( dp->d_namlen < 2 ||
+						strncmp(dp->d_name,"._",2) ||
+						(dp->d_namlen >= 4 && !strncmp(&(dp->d_name[2]), "._",2))) {
+					error = ENOTEMPTY;
+					goto outsc;
+				}
+			}
+			cpos += dp->d_reclen;
+			dp = (struct dirent*)cpos;
+		}
+		
+		/*
+		 * workaround for HFS/NFS setting eofflag before end of file 
+		 */
+		if (vp->v_tag == VT_HFS && nentries > 2)
+			eofflag=0;
+
+		if (vp->v_tag == VT_NFS) {
+			if (eofflag && !full_erase_flag) {
+				full_erase_flag = 1;
+				eofflag = 0;
+				uio_reset(auio, 0, UIO_SYSSPACE, UIO_READ);
+			}
+			else if (!eofflag && full_erase_flag)
+				full_erase_flag = 0;
+		}
+>>>>>>> origin/10.5
 
 	/*
 	 * When we encounter the top level mount we're done
@@ -9250,10 +9714,21 @@ trigger_unmount_callback(mount_t mp, void * arg)
 	if (mp == infop->top_mp)
 		return (VFS_RETURNED_DONE);
 
+<<<<<<< HEAD
 	if ((mp->mnt_vnodecovered == NULL) ||
 	    (vnode_getwithref(mp->mnt_vnodecovered) != 0)) {
 		return (VFS_RETURNED);
 	}
+=======
+	uio_reset(auio, 0, UIO_SYSSPACE, UIO_READ);
+	eofflag = 0;
+	full_erase_flag = 0;
+
+	do {
+		siz = UIO_BUFF_SIZE;
+		uio_reset(auio, uio_offset(auio), UIO_SYSSPACE, UIO_READ);
+		uio_addiov(auio, CAST_USER_ADDR_T(rbuf), UIO_BUFF_SIZE);
+>>>>>>> origin/10.5
 
 	if ((mp->mnt_vnodecovered->v_mountedhere == mp) &&
 	    (mp->mnt_vnodecovered->v_resolve != NULL) &&

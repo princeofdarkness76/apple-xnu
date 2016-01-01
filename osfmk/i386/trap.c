@@ -127,12 +127,17 @@
 #endif
 #include <mach/i386/syscall_sw.h>
 
+<<<<<<< HEAD
 #include <libkern/OSDebug.h>
 #include <i386/cpu_threads.h>
 #include <machine/pal_routines.h>
 
 extern void throttle_lowpri_io(int);
 extern void kprint_state(x86_saved_state64_t *saved_state);
+=======
+
+extern void throttle_lowpri_io(boolean_t);
+>>>>>>> origin/10.5
 
 /*
  * Forward declarations
@@ -213,7 +218,22 @@ thread_syscall_return(
 				ret);
 #endif
 	}
+<<<<<<< HEAD
 	throttle_lowpri_io(1);
+=======
+	throttle_lowpri_io(TRUE);
+
+	thread_exception_return();
+        /*NOTREACHED*/
+}
+
+
+#if	MACH_KDB
+boolean_t	debug_all_traps_with_kdb = FALSE;
+extern struct db_watchpoint *db_watchpoint_list;
+extern boolean_t db_watchpoints_inserted;
+extern boolean_t db_breakpoints_inserted;
+>>>>>>> origin/10.5
 
 	thread_exception_return();
         /*NOTREACHED*/
@@ -894,6 +914,242 @@ panic_trap(x86_saved_state64_t *regs, uint32_t pl)
 	cr0 = 0;
 }
 
+<<<<<<< HEAD
+=======
+extern void     kprintf_break_lock(void);
+
+
+/*
+ * Called from locore on a special reserved stack after a double-fault
+ * is taken in kernel space.
+ * Kernel stack overflow is one route here.
+ */
+void
+panic_double_fault(
+#if CONFIG_NO_PANIC_STRINGS
+		__unused int code
+#else
+		int code
+#endif
+		)
+{
+#if MACH_KDP || !CONFIG_NO_PANIC_STRINGS
+	struct i386_tss *my_ktss = current_ktss();
+#endif
+
+	/* Set postcode (DEBUG only) */
+	postcode(PANIC_DOUBLE_FAULT);
+
+	/*
+	 * Issue an I/O port read if one has been requested - this is an
+	 * event logic analyzers can use as a trigger point.
+	 */
+	panic_io_port_read();
+
+	/*
+	 * Break kprintf lock in case of recursion,
+	 * and record originally faulted instruction address.
+	 */
+	kprintf_break_lock();
+
+#if MACH_KDP
+	/*
+	 * Print backtrace leading to first fault:
+	 */
+	panic_i386_backtrace((void *) my_ktss->ebp, 10, NULL, FALSE, NULL);
+#endif
+
+	panic("Double fault at 0x%08x, thread:%p, code:0x%x, "
+	      "registers:\n"
+	      "CR0: 0x%08x, CR2: 0x%08x, CR3: 0x%08x, CR4: 0x%08x\n"
+	      "EAX: 0x%08x, EBX: 0x%08x, ECX: 0x%08x, EDX: 0x%08x\n"
+	      "ESP: 0x%08x, EBP: 0x%08x, ESI: 0x%08x, EDI: 0x%08x\n"
+	      "EFL: 0x%08x, EIP: 0x%08x\n",
+	      my_ktss->eip, current_thread(), code,
+	      get_cr0(), get_cr2(), get_cr3(), get_cr4(),
+	      my_ktss->eax, my_ktss->ebx, my_ktss->ecx, my_ktss->edx,
+	      my_ktss->esp, my_ktss->ebp, my_ktss->esi, my_ktss->edi,
+	      my_ktss->eflags, my_ktss->eip);
+}
+
+
+/*
+ * Called from locore on a special reserved stack after a machine-check
+ */
+void
+panic_machine_check(
+#if CONFIG_NO_PANIC_STRINGS
+		__unused int code
+#else
+		int code
+#endif
+		)
+{
+#if !CONFIG_NO_PANIC_STRINGS
+	struct i386_tss *my_ktss = current_ktss();
+#endif
+
+	/* Set postcode (DEBUG only) */
+	postcode(PANIC_MACHINE_CHECK);
+
+	/*
+	 * Issue an I/O port read if one has been requested - this is an
+	 * event logic analyzers can use as a trigger point.
+	 */
+	panic_io_port_read();
+
+	/*
+	 * Break kprintf lock in case of recursion,
+	 * and record originally faulted instruction address.
+	 */
+	kprintf_break_lock();
+
+	/*
+	 * Dump the contents of the machine check MSRs (if any).
+	 */
+	mca_dump();
+
+	/*
+	 * And that's all folks, we don't attempt recovery...
+	 */
+	panic("Machine-check at 0x%08x, thread:%p, code:0x%x, "
+	      "registers:\n"
+	      "CR0: 0x%08x, CR2: 0x%08x, CR3: 0x%08x, CR4: 0x%08x\n"
+	      "EAX: 0x%08x, EBX: 0x%08x, ECX: 0x%08x, EDX: 0x%08x\n"
+	      "ESP: 0x%08x, EBP: 0x%08x, ESI: 0x%08x, EDI: 0x%08x\n"
+	      "EFL: 0x%08x, EIP: 0x%08x\n",
+	      my_ktss->eip, current_thread(), code,
+	      get_cr0(), get_cr2(), get_cr3(), get_cr4(),
+	      my_ktss->eax, my_ktss->ebx, my_ktss->ecx, my_ktss->edx,
+	      my_ktss->esp, my_ktss->ebp, my_ktss->esi, my_ktss->edi,
+	      my_ktss->eflags, my_ktss->eip);
+}
+
+void
+panic_double_fault64(x86_saved_state_t *esp)
+{
+	/* Set postcode (DEBUG only) */
+	postcode(PANIC_DOUBLE_FAULT);
+
+	/*
+	 * Issue an I/O port read if one has been requested - this is an
+	 * event logic analyzers can use as a trigger point.
+	 */
+	panic_io_port_read();
+
+	/*
+	 * Break kprintf lock in case of recursion,
+	 * and record originally faulted instruction address.
+	 */
+	kprintf_break_lock();
+
+	/*
+	 * Dump the interrupt stack frame at last kernel entry.
+	 */
+	if (is_saved_state64(esp)) {
+#if !CONFIG_NO_PANIC_STRINGS
+		x86_saved_state64_t	*ss64p = saved_state64(esp);
+#endif
+		panic("Double fault thread:%p, trapno:0x%x, err:0x%qx, "
+		      "registers:\n"
+		      "CR0: 0x%08x, CR2: 0x%08x, CR3: 0x%08x, CR4: 0x%08x\n"
+		      "RAX: 0x%016qx, RBX: 0x%016qx, RCX: 0x%016qx, RDX: 0x%016qx\n"
+		      "RSP: 0x%016qx, RBP: 0x%016qx, RSI: 0x%016qx, RDI: 0x%016qx\n"
+		      "R8:  0x%016qx, R9:  0x%016qx, R10: 0x%016qx, R11: 0x%016qx\n"
+		      "R12: 0x%016qx, R13: 0x%016qx, R14: 0x%016qx, R15: 0x%016qx\n"
+		      "RFL: 0x%016qx, RIP: 0x%016qx, CR2: 0x%016qx\n",
+		      current_thread(), ss64p->isf.trapno, ss64p->isf.err,
+		      get_cr0(), get_cr2(), get_cr3(), get_cr4(),
+		      ss64p->rax, ss64p->rbx, ss64p->rcx, ss64p->rdx,
+		      ss64p->isf.rsp, ss64p->rbp, ss64p->rsi, ss64p->rdi,
+		      ss64p->r8, ss64p->r9, ss64p->r10, ss64p->r11,
+		      ss64p->r12, ss64p->r13, ss64p->r14, ss64p->r15,
+		      ss64p->isf.rflags, ss64p->isf.rip, ss64p->cr2);
+	} else {
+#if !CONFIG_NO_PANIC_STRINGS
+		x86_saved_state32_t	*ss32p = saved_state32(esp);
+#endif
+		panic("Double fault at 0x%08x, thread:%p, trapno:0x%x, err:0x%x),"
+		      "registers:\n"
+		      "CR0: 0x%08x, CR2: 0x%08x, CR3: 0x%08x, CR4: 0x%08x\n"
+		      "EAX: 0x%08x, EBX: 0x%08x, ECX: 0x%08x, EDX: 0x%08x\n"
+		      "ESP: 0x%08x, EBP: 0x%08x, ESI: 0x%08x, EDI: 0x%08x\n"
+		      "EFL: 0x%08x, EIP: 0x%08x\n",
+		      ss32p->eip, current_thread(), ss32p->trapno, ss32p->err,
+		      get_cr0(), get_cr2(), get_cr3(), get_cr4(),
+		      ss32p->eax, ss32p->ebx, ss32p->ecx, ss32p->edx,
+		      ss32p->uesp, ss32p->ebp, ss32p->esi, ss32p->edi,
+		      ss32p->efl, ss32p->eip);
+	}
+}
+
+/*
+ * Machine check handler for 64-bit.
+ */
+void
+panic_machine_check64(x86_saved_state_t *esp)
+{
+	/* Set postcode (DEBUG only) */
+	postcode(PANIC_MACHINE_CHECK);
+
+	/*
+	 * Issue an I/O port read if one has been requested - this is an
+	 * event logic analyzers can use as a trigger point.
+	 */
+	panic_io_port_read();
+
+	/*
+	 * Break kprintf lock in case of recursion,
+	 * and record originally faulted instruction address.
+	 */
+	kprintf_break_lock();
+
+	/*
+	 * Dump the contents of the machine check MSRs (if any).
+	 */
+	mca_dump();
+
+	/*
+	 * And that's all folks, we don't attempt recovery...
+	 */
+	if (is_saved_state64(esp)) {
+#if !CONFIG_NO_PANIC_STRINGS
+		x86_saved_state64_t	*ss64p = saved_state64(esp);
+#endif
+		panic("Machine Check thread:%p, trapno:0x%x, err:0x%qx, "
+		      "registers:\n"
+		      "CR0: 0x%08x, CR2: 0x%08x, CR3: 0x%08x, CR4: 0x%08x\n"
+		      "RAX: 0x%016qx, RBX: 0x%016qx, RCX: 0x%016qx, RDX: 0x%016qx\n"
+		      "RSP: 0x%016qx, RBP: 0x%016qx, RSI: 0x%016qx, RDI: 0x%016qx\n"
+		      "R8:  0x%016qx, R9:  0x%016qx, R10: 0x%016qx, R11: 0x%016qx\n"
+		      "R12: 0x%016qx, R13: 0x%016qx, R14: 0x%016qx, R15: 0x%016qx\n"
+		      "RFL: 0x%016qx, RIP: 0x%016qx\n",
+		      current_thread(), ss64p->isf.trapno, ss64p->isf.err,
+		      get_cr0(), get_cr2(), get_cr3(), get_cr4(),
+		      ss64p->rax, ss64p->rbx, ss64p->rcx, ss64p->rdx,
+		      ss64p->isf.rsp, ss64p->rbp, ss64p->rsi, ss64p->rdi,
+		      ss64p->r8, ss64p->r9, ss64p->r10, ss64p->r11,
+		      ss64p->r12, ss64p->r13, ss64p->r14, ss64p->r15,
+		      ss64p->isf.rflags, ss64p->isf.rip);
+	} else {
+#if !CONFIG_NO_PANIC_STRINGS
+		x86_saved_state32_t	*ss32p = saved_state32(esp);
+#endif
+		panic("Machine Check at 0x%08x, thread:%p, trapno:0x%x, err:0x%x, "
+		      "registers:\n"
+		      "CR0: 0x%08x, CR2: 0x%08x, CR3: 0x%08x, CR4: 0x%08x\n"
+		      "EAX: 0x%08x, EBX: 0x%08x, ECX: 0x%08x, EDX: 0x%08x\n"
+		      "ESP: 0x%08x, EBP: 0x%08x, ESI: 0x%08x, EDI: 0x%08x\n"
+		      "EFL: 0x%08x, EIP: 0x%08x\n",
+		      ss32p->eip, current_thread(), ss32p->trapno, ss32p->err,
+		      get_cr0(), get_cr2(), get_cr3(), get_cr4(),
+		      ss32p->eax, ss32p->ebx, ss32p->ecx, ss32p->edx,
+		      ss32p->uesp, ss32p->ebp, ss32p->esi, ss32p->edi,
+		      ss32p->efl, ss32p->eip);
+	}
+}
+
+>>>>>>> origin/10.5
 #if CONFIG_DTRACE
 extern kern_return_t dtrace_user_probe(x86_saved_state_t *);
 #endif

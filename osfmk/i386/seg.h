@@ -198,6 +198,12 @@ struct fake_descriptor64 {
 	uint32_t	access:8;		/* access */
 	uint32_t	reserved:32;		/* reserved/zero */
 };
+<<<<<<< HEAD
+=======
+#define	FAKE_UBER64(addr32)	{ (uint32_t) (addr32), KERNEL_UBER_BASE_HI32 }
+#define	FAKE_COMPAT(addr32)	{ (uint32_t) (addr32), 0x0 }
+#define	UBER64(addr32)		((addr64_t) (uintptr_t)addr32 + KERNEL_UBER_BASE)
+>>>>>>> origin/10.5
 
 /*
  * Boot-time data for master (or only) CPU

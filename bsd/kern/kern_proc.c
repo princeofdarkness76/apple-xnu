@@ -727,7 +727,11 @@ proc_checkdeadrefs(__unused proc_t p)
 	if (p->p_refcount != 0)
 		panic("proc being freed and pending refcount %p:%d\n", p, p->p_refcount);
 	if (p->p_parentref != 0)
+<<<<<<< HEAD
 		panic("proc being freed and pending parentrefs %p:%d\n", p, p->p_parentref);
+=======
+		panic("proc being freed and pending parentrefs %x:%x\n", (unsigned int)p, (unsigned int)p->p_parentref);
+>>>>>>> origin/10.5
 #endif
 }
 
@@ -1035,6 +1039,7 @@ proc_pidversion(proc_t p)
 	return(p->p_idversion);
 }
 
+<<<<<<< HEAD
 uint64_t
 proc_uniqueid(proc_t p)
 {
@@ -1070,12 +1075,15 @@ proc_did_throttle(proc_t p)
 	return (p->did_throttle);
 }
 
+=======
+>>>>>>> origin/10.5
 int
 proc_getcdhash(proc_t p, unsigned char *cdhash)
 {
 	return vn_getcdhash(p->p_textvp, p->p_textoff, cdhash);
 }
 
+<<<<<<< HEAD
 void
 proc_getexecutableuuid(proc_t p, unsigned char *uuidbuf, unsigned long size)
 {
@@ -1100,6 +1108,8 @@ proc_getexecutablevnode(proc_t p)
 }
 
 
+=======
+>>>>>>> origin/10.5
 void
 bsd_set_dependency_capable(task_t task)
 {
@@ -1938,7 +1948,27 @@ csops_internal(pid_t pid, int ops, user_addr_t uaddr, user_size_t usersize, user
 		case CS_OPS_PIDOFFSET:
 			toff = pt->p_textoff;
 			proc_rele(pt);
+<<<<<<< HEAD
 			error = copyout(&toff, uaddr, sizeof(toff));
+=======
+
+			buf = (char *)kalloc(usize);
+			if (buf == NULL) 
+				return(ENOMEM);
+			bzero(buf, usize);
+
+			error = vnode_getwithvid(tvp, vid);
+			if (error == 0) {
+				int len; 
+				len = usize;
+				error = vn_getpath(tvp, buf, &len);
+				vnode_put(tvp);
+				if (error == 0) {
+					error = copyout(buf, uaddr, usize);
+				}
+				kfree(buf, usize);
+			}
+>>>>>>> origin/10.5
 			return(error);
 
 		case CS_OPS_CDHASH:
@@ -2867,7 +2897,12 @@ proc_selfpgrpid()
 
 /* return control and action states */
 int
+<<<<<<< HEAD
 proc_getpcontrol(int pid, int * pcontrolp)
+=======
+cs_invalid_page(
+	addr64_t vaddr)
+>>>>>>> origin/10.5
 {
 	proc_t p;
 
@@ -2888,6 +2923,7 @@ proc_dopcontrol(proc_t p)
 
 	proc_lock(p);
 
+<<<<<<< HEAD
 	pcontrol = PROC_CONTROL_STATE(p);
 
 	if (PROC_ACTION_STATE(p) == 0) {
@@ -3245,6 +3281,44 @@ proc_chrooted(proc_t p)
 		proc_fdlock(p);
 		retval = (p->p_fd->fd_rdir != NULL) ? 1 : 0;
 		proc_fdunlock(p);
+=======
+	/* CS_KILL triggers us to send a kill signal. Nothing else. */
+	if (p->p_csflags & CS_KILL) {
+		proc_unlock(p);
+		if (cs_debug) {
+			printf("CODE SIGNING: cs_invalid_page(0x%llx): "
+			       "p=%d[%s] honoring CS_KILL\n",
+			       vaddr, p->p_pid, p->p_comm);
+		}
+		cs_procs_killed++;
+		psignal(p, SIGKILL);
+		proc_lock(p);
+	}
+	
+	/* CS_HARD means fail the mapping operation so the process stays valid. */
+	if (p->p_csflags & CS_HARD) {
+		proc_unlock(p);
+		if (cs_debug) {
+			printf("CODE SIGNING: cs_invalid_page(0x%llx): "
+			       "p=%d[%s] honoring CS_HARD\n",
+			       vaddr, p->p_pid, p->p_comm);
+		}
+		retval = 1;
+	} else {
+		if (p->p_csflags & CS_VALID) {
+			p->p_csflags &= ~CS_VALID;
+			
+			proc_unlock(p);
+			cs_procs_invalidated++;
+			printf("CODE SIGNING: cs_invalid_page(0x%llx): "
+			       "p=%d[%s] clearing CS_VALID\n",
+			       vaddr, p->p_pid, p->p_comm);
+		} else {
+			proc_unlock(p);
+		}
+		
+		retval = 0;
+>>>>>>> origin/10.5
 	}
 
 	return retval;

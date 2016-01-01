@@ -703,8 +703,58 @@ void IOPMrootDomain::updateConsoleUsers(void)
         tasks_system_suspend(tasksSuspended);
     }
 }
+<<<<<<< HEAD
 =======
     OSDictionary                            *tmpDict;
+=======
+
+// **********************************************************************************
+// start
+//
+// We don't do much here.  The real initialization occurs when the platform
+// expert informs us we are the root.
+// **********************************************************************************
+
+#define kRootDomainSettingsCount        16
+
+static SYSCTL_STRUCT(_kern, OID_AUTO, sleeptime, 
+		     CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, 
+		     &gIOLastSleepTime, timeval, "");
+
+static SYSCTL_STRUCT(_kern, OID_AUTO, waketime, 
+		     CTLFLAG_RD | CTLFLAG_NOAUTO | CTLFLAG_KERN, 
+		     &gIOLastWakeTime, timeval, "");
+
+static const OSSymbol * gIOPMSettingAutoWakeSecondsKey;
+
+bool IOPMrootDomain::start ( IOService * nub )
+{
+    OSIterator      *psIterator;
+    OSDictionary    *tmpDict;
+
+    gIOPMSettingAutoWakeSecondsKey = OSSymbol::withCString(kIOPMSettingAutoWakeSecondsKey);
+
+    const OSSymbol  *settingsArr[kRootDomainSettingsCount] = 
+        {
+            OSSymbol::withCString(kIOPMSettingSleepOnPowerButtonKey),
+            gIOPMSettingAutoWakeSecondsKey,
+            OSSymbol::withCString(kIOPMSettingAutoPowerSecondsKey),
+            OSSymbol::withCString(kIOPMSettingAutoWakeCalendarKey),
+            OSSymbol::withCString(kIOPMSettingAutoPowerCalendarKey),
+            OSSymbol::withCString(kIOPMSettingDebugWakeRelativeKey),
+            OSSymbol::withCString(kIOPMSettingDebugPowerRelativeKey),
+            OSSymbol::withCString(kIOPMSettingWakeOnRingKey),
+            OSSymbol::withCString(kIOPMSettingRestartOnPowerLossKey),
+            OSSymbol::withCString(kIOPMSettingWakeOnClamshellKey),
+            OSSymbol::withCString(kIOPMSettingWakeOnACChangeKey),
+            OSSymbol::withCString(kIOPMSettingTimeZoneOffsetKey),
+            OSSymbol::withCString(kIOPMSettingDisplaySleepUsesDimKey),
+            OSSymbol::withCString(kIOPMSettingMobileMotionModuleKey),
+            OSSymbol::withCString(kIOPMSettingGraphicsSwitchKey),
+            OSSymbol::withCString(kIOPMStateConsoleShutdown)
+        };
+    
+>>>>>>> origin/10.5
 
     pmPowerStateQueue = 0;
 
@@ -1244,7 +1294,34 @@ IOReturn IOPMrootDomain::registerPlatformPowerProfiles
 
     setProperty(kIOSleepSupportedKey, true);
 
+<<<<<<< HEAD
     bzero(&gPMStats, sizeof(gPMStats));
+=======
+        case DOZE_STATE:
+            if ( previousState != DOZE_STATE ) 
+            {
+                IOLog("System Doze\n");
+            }
+            // re-enable this timer for next sleep
+            idleSleepPending = false;
+            gSleepOrShutdownPending = 0;
+
+            // Invalidate prior activity tickles to allow wake from doze.
+            if (wrangler) wrangler->changePowerStateTo(0);
+            break;
+            
+    	case RESTART_STATE:
+            IOLog("System Restart\n");
+            PEHaltRestart(kPERestartCPU);
+            break;
+            
+    	case OFF_STATE:
+            IOLog("System Halt\n");
+            PEHaltRestart(kPEHaltCPU);
+            break;
+    }
+}
+>>>>>>> origin/10.5
 
     pmTracer = PMTraceWorker::tracer(this);
 
@@ -8021,12 +8098,96 @@ uint64_t  PMTraceWorker::getPMStatusCode( )
 
 }
 
+<<<<<<< HEAD
 // MARK: -
 // MARK: PMHaltWorker
+=======
+//******************************************************************************
+// systemPowerEventOccurred
+//
+// The power controller is notifying us of a hardware-related power management
+// event that we must handle. 
+//
+// systemPowerEventOccurred covers the same functionality that receivePowerNotification
+// does; it simply provides a richer API for conveying more information.
+//******************************************************************************
+IOReturn IOPMrootDomain::systemPowerEventOccurred(
+    const OSSymbol *event,
+    uint32_t intValue)
+{
+    IOReturn        attempt = kIOReturnSuccess;
+    OSNumber        *newNumber = NULL;
+
+    if (!event) 
+        return kIOReturnBadArgument;
+        
+    newNumber = OSNumber::withNumber(intValue, 8*sizeof(intValue));
+    if (!newNumber)
+        return kIOReturnInternalError;
+
+    attempt = systemPowerEventOccurred(event, (OSObject *)newNumber);
+
+    newNumber->release();
+
+    return attempt;
+}
+
+IOReturn IOPMrootDomain::systemPowerEventOccurred(
+    const OSSymbol *event,
+    OSObject *value)
+{
+    OSDictionary *thermalsDict = NULL;
+    bool shouldUpdate = true;
+    
+    if (!event || !value) 
+        return kIOReturnBadArgument;
+
+    // LOCK
+    // We reuse featuresDict Lock because it already exists and guards
+    // the very infrequently used publish/remove feature mechanism; so there's zero rsk
+    // of stepping on that lock.
+    if (featuresDictLock) IOLockLock(featuresDictLock);
+
+    thermalsDict = (OSDictionary *)getProperty(kIOPMRootDomainPowerStatusKey);
+                   
+    if (thermalsDict && OSDynamicCast(OSDictionary, thermalsDict)) {
+        thermalsDict = OSDictionary::withDictionary(thermalsDict);                        
+    } else {
+        thermalsDict = OSDictionary::withCapacity(1);
+    }
+
+    if (!thermalsDict) {
+        shouldUpdate = false;
+        goto exit;
+    }
+
+    thermalsDict->setObject (event, value);
+
+    setProperty (kIOPMRootDomainPowerStatusKey, thermalsDict);
+
+    thermalsDict->release();
+
+exit:
+    // UNLOCK
+    if (featuresDictLock) IOLockUnlock(featuresDictLock);
+
+    if (shouldUpdate)
+        messageClients (kIOPMMessageSystemPowerEventOccurred, (void *)NULL);
+
+    return kIOReturnSuccess;
+}
+
+>>>>>>> origin/10.5
 
 //******************************************************************************
 // PMHaltWorker Class
 //
+<<<<<<< HEAD
+=======
+// The power controller is notifying us of a hardware-related power management
+// event that we must handle. This may be a result of an 'environment' interrupt from
+// the power mgt micro.
+>>>>>>> origin/10.5
 //******************************************************************************
 
 PMHaltWorker * PMHaltWorker::worker( void )
@@ -8842,6 +9003,7 @@ void PMSettingObject::clientHandleFreed( void )
 //*********************************************************************************
 // class PMAssertionsTracker Implementation
 
+<<<<<<< HEAD
 #define kAssertUniqueIDStart    500
 
 PMAssertionsTracker *PMAssertionsTracker::pmAssertionsTracker( IOPMrootDomain *rootDomain )
@@ -8863,6 +9025,38 @@ PMAssertionsTracker *PMAssertionsTracker::pmAssertionsTracker( IOPMrootDomain *r
 
         if (!myself->assertionsArray || !myself->assertionsArrayLock)
             myself = NULL;
+=======
+void IOPMrootDomain::tellChangeUp ( unsigned long stateNum)
+{
+    if ( stateNum == ON_STATE ) 
+    {
+        // Direct callout into OSMetaClass so it can disable kmod unloads
+        // during sleep/wake to prevent deadlocks.
+        OSMetaClassSystemSleepOrWake( kIOMessageSystemHasPoweredOn );
+
+	if (getPowerState() == ON_STATE)
+	{
+	    // this is a quick wake from aborted sleep
+	    if (idleSeconds && !wrangler)
+	    {
+		AbsoluteTime deadline;
+		sleepASAP = false;
+		// stay awake for at least idleSeconds
+		clock_interval_to_deadline(idleSeconds, kSecondScale, &deadline);	
+		thread_call_enter_delayed(extraSleepTimer, deadline);
+		// this gets turned off when we sleep again
+		idleSleepPending = true;
+	    }
+	    tellClients(kIOMessageSystemWillPowerOn);
+	}
+#if	HIBERNATION
+	else
+	{
+	    IOHibernateSystemPostWake();
+	}
+#endif
+        return tellClients(kIOMessageSystemHasPoweredOn);
+>>>>>>> origin/10.5
     }
 
     return myself;

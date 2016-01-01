@@ -278,9 +278,51 @@ extern errno_t dlil_set_bpf_tap(ifnet_t, bpf_tap_mode, bpf_packet_func);
 /*
  * Send arp internal bypasses the check for IPv4LL.
  */
+<<<<<<< HEAD
 extern errno_t dlil_send_arp_internal(ifnet_t, u_int16_t,
     const struct sockaddr_dl *, const struct sockaddr *,
     const struct sockaddr_dl *, const struct sockaddr *);
+=======
+errno_t
+dlil_send_arp_internal(
+	ifnet_t	ifp,
+	u_int16_t arpop,
+	const struct sockaddr_dl* sender_hw,
+	const struct sockaddr* sender_proto,
+	const struct sockaddr_dl* target_hw,
+	const struct sockaddr* target_proto);
+
+int
+dlil_output(
+	ifnet_t					ifp,
+	protocol_family_t		proto_family,
+	mbuf_t					packetlist,
+	void					*route,
+	const struct sockaddr	*dest,
+	int						raw);
+
+errno_t
+dlil_resolve_multi(
+	struct ifnet *ifp,
+	const struct sockaddr *proto_addr,
+	struct sockaddr *ll_addr,
+	size_t ll_len);
+
+errno_t
+dlil_send_arp(
+	ifnet_t	ifp,
+	u_int16_t arpop,
+	const struct sockaddr_dl* sender_hw,
+	const struct sockaddr* sender_proto,
+	const struct sockaddr_dl* target_hw,
+	const struct sockaddr* target_proto);
+
+int dlil_attach_filter(ifnet_t ifp, const struct iff_filter *if_filter,
+					   interface_filter_t *filter_ref);
+void dlil_detach_filter(interface_filter_t filter);
+int dlil_detach_protocol(ifnet_t ifp, u_long protocol);
+extern void dlil_proto_unplumb_all(ifnet_t);
+>>>>>>> origin/10.5
 
 /*
  * The following constants are used with the net_thread_mark_apply and

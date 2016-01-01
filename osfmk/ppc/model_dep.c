@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -208,20 +212,35 @@ machine_startup(boot_args *args)
 {
 	int	boot_arg;
 
+<<<<<<< HEAD
 	if (PE_parse_boot_arg("cpus", &wncpu)) {
 		if (!((wncpu > 0) && (wncpu < NCPUS)))
                         wncpu = NCPUS;
 	} else 
 		wncpu = NCPUS;
+=======
+	if (PE_parse_boot_argn("cpus", &wncpu, sizeof (wncpu))) {
+		if ((wncpu > 0) && (wncpu < MAX_CPUS))
+                        max_ncpus = wncpu;
+	}
+>>>>>>> origin/10.5
 
 	if( PE_get_hotkey( kPEControlKey ))
             halt_in_debugger = halt_in_debugger ? 0 : 1;
 
-	if (PE_parse_boot_arg("debug", &boot_arg)) {
+	if (PE_parse_boot_argn("debug", &boot_arg, sizeof (boot_arg))) {
 		if (boot_arg & DB_HALT) halt_in_debugger=1;
 		if (boot_arg & DB_PRT) disableDebugOuput=FALSE; 
 		if (boot_arg & DB_SLOG) systemLogDiags=TRUE; 
 	}
+<<<<<<< HEAD
+=======
+	
+	if (!PE_parse_boot_argn("nvram_paniclog", &commit_paniclog_to_nvram, sizeof (commit_paniclog_to_nvram)))
+		commit_paniclog_to_nvram = 1;
+
+	PE_parse_boot_argn("vmmforce", &lowGlo.lgVMMforcedFeats, sizeof (lowGlo.lgVMMforcedFeats));
+>>>>>>> origin/10.5
 
 	hw_lock_init(&debugger_lock);				/* initialize debugger lock */
 	hw_lock_init(&pbtlock);						/* initialize print backtrace lock */
@@ -249,6 +268,7 @@ machine_startup(boot_args *args)
 		active_debugger =1;
 	}
 #endif /* MACH_KDB */
+<<<<<<< HEAD
 	if (PE_parse_boot_arg("preempt", &boot_arg)) {
 		extern int default_preemption_rate;
 
@@ -274,6 +294,18 @@ machine_startup(boot_args *args)
 	if (PE_parse_boot_arg("yield", &boot_arg)) {
 		extern int sched_poll_yield_shift;
 
+=======
+	if (PE_parse_boot_argn("preempt", &boot_arg, sizeof (boot_arg))) {
+		default_preemption_rate = boot_arg;
+	}
+	if (PE_parse_boot_argn("unsafe", &boot_arg, sizeof (boot_arg))) {
+		max_unsafe_quanta = boot_arg;
+	}
+	if (PE_parse_boot_argn("poll", &boot_arg, sizeof (boot_arg))) {
+		max_poll_quanta = boot_arg;
+	}
+	if (PE_parse_boot_argn("yield", &boot_arg, sizeof (boot_arg))) {
+>>>>>>> origin/10.5
 		sched_poll_yield_shift = boot_arg;
 	}
 
@@ -311,7 +343,8 @@ machine_init(void)
 	clock_config();
 }
 
-void slave_machine_init(void)
+void
+slave_machine_init(__unused void *param)
 {
 	(void) ml_set_interrupts_enabled(FALSE);	/* Make sure we are disabled */
 	clock_init();				/* Init the clock */
@@ -430,7 +463,14 @@ print_backtrace(struct ppc_saved_state *ssp)
 	hw_atomic_sub(&pbtcnt, 1);				/* Show we are done */
 
 	while(pbtcnt);							/* Wait for completion */
+<<<<<<< HEAD
 
+=======
+pbt_exit:
+	panic_display_system_configuration();
+	panic_display_zprint();
+        dump_kext_info(&kdb_log);
+>>>>>>> origin/10.5
 	return;
 }
 

@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2003-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2003-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -425,9 +429,15 @@ i386_init(void)
 {
 	unsigned int	maxmem;
 	uint64_t	maxmemtouse;
+<<<<<<< HEAD
 	unsigned int	cpus = 0;
 	boolean_t	fidn;
 	boolean_t	IA32e = TRUE;
+=======
+	unsigned int	cpus;
+	boolean_t	legacy_mode;
+	boolean_t	fidn;
+>>>>>>> origin/10.5
 
 	postcode(I386_INIT_ENTRY);
 
@@ -455,9 +465,12 @@ i386_init(void)
 	kernel_debug_string_simple("PE_init_kprintf");
 	PE_init_kprintf(FALSE);
 
+<<<<<<< HEAD
 	kernel_debug_string_simple("kernel_early_bootstrap");
 	kernel_early_bootstrap();
 
+=======
+>>>>>>> origin/10.5
 	if (!PE_parse_boot_argn("diag", &dgWork.dgFlags, sizeof (dgWork.dgFlags)))
 		dgWork.dgFlags = 0;
 
@@ -491,25 +504,54 @@ i386_init(void)
 	/*
 	 * debug support for > 4G systems
 	 */
+<<<<<<< HEAD
 	PE_parse_boot_argn("himemory_mode", &vm_himemory_mode, sizeof (vm_himemory_mode));
 	if (vm_himemory_mode != 0)
 		kprintf("himemory_mode: %d\n", vm_himemory_mode);
+=======
+	if (!PE_parse_boot_argn("himemory_mode", &vm_himemory_mode, sizeof (vm_himemory_mode)))
+	        vm_himemory_mode = 0;
+>>>>>>> origin/10.5
 
 	if (!PE_parse_boot_argn("immediate_NMI", &fidn, sizeof (fidn)))
 		force_immediate_debugger_NMI = FALSE;
 	else
 		force_immediate_debugger_NMI = fidn;
 
+<<<<<<< HEAD
 #if DEBUG
 	nanoseconds_to_absolutetime(URGENCY_NOTIFICATION_ASSERT_NS, &urgency_notification_assert_abstime_threshold);
 #endif
 	PE_parse_boot_argn("urgency_notification_abstime",
 	    &urgency_notification_assert_abstime_threshold,
 	    sizeof(urgency_notification_assert_abstime_threshold));
+=======
+	/*
+	 * At this point we check whether we are a 64-bit processor
+	 * and that we're not restricted to legacy mode, 32-bit operation.
+	 */
+	boolean_t IA32e = FALSE;
+	if (cpuid_extfeatures() & CPUID_EXTFEATURE_EM64T) {
+		kprintf("EM64T supported");
+		if (PE_parse_boot_argn("-legacy", &legacy_mode, sizeof (legacy_mode))) {
+			kprintf(" but legacy mode forced\n");
+		} else {
+			IA32e = TRUE;
+			kprintf(" and will be enabled\n");
+		}
+	}
+>>>>>>> origin/10.5
 
 	if (!(cpuid_extfeatures() & CPUID_EXTFEATURE_XD))
 		nx_enabled = 0;
 
+<<<<<<< HEAD
+=======
+	/* Obtain "lcks" options:this currently controls lock statistics */
+	if (!PE_parse_boot_argn("lcks", &LcksOpts, sizeof (LcksOpts)))
+		LcksOpts = 0;
+
+>>>>>>> origin/10.5
 	/*   
 	 * VM initialization, after this we're using page tables...
 	 * Thn maximum number of cpus must be set beforehand.
@@ -517,6 +559,17 @@ i386_init(void)
 	kernel_debug_string_simple("i386_vm_init");
 	i386_vm_init(maxmemtouse, IA32e, kernelBootArgs);
 
+<<<<<<< HEAD
+=======
+	if ( ! PE_parse_boot_argn("novmx", &noVMX, sizeof (noVMX)))
+		noVMX = 0;	/* OK to support Altivec in rosetta? */
+
+	tsc_init();
+	power_management_init();
+
+	PE_init_platform(TRUE, kernelBootArgs);
+
+>>>>>>> origin/10.5
 	/* create the console for verbose or pretty mode */
 	/* Note: doing this prior to tsc_init() allows for graceful panic! */
 	PE_init_platform(TRUE, kernelBootArgs);

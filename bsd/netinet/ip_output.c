@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -123,7 +127,10 @@
 
 #include <net/if.h>
 #include <net/if_dl.h>
+<<<<<<< HEAD
 #include <net/if_types.h>
+=======
+>>>>>>> origin/10.5
 #include <net/route.h>
 #include <net/ntstat.h>
 #include <net/net_osdep.h>
@@ -190,6 +197,7 @@ static int sysctl_reset_ip_output_stats SYSCTL_HANDLER_ARGS;
 static int sysctl_ip_output_measure_bins SYSCTL_HANDLER_ARGS;
 static int sysctl_ip_output_getperf SYSCTL_HANDLER_ARGS;
 static void ip_out_cksum_stats(int, u_int32_t);
+<<<<<<< HEAD
 static struct mbuf *ip_insertoptions(struct mbuf *, struct mbuf *, int *);
 static int ip_optcopy(struct ip *, struct ip *);
 static int ip_pcbopts(int, struct mbuf **, struct mbuf *);
@@ -197,6 +205,23 @@ static void imo_trace(struct ip_moptions *, int);
 static void ip_mloopback(struct ifnet *, struct ifnet *, struct mbuf *,
     struct sockaddr_in *, int);
 static struct ifaddr *in_selectsrcif(struct ip *, struct route *, unsigned int);
+=======
+static struct ifaddr *in_selectsrcif(struct ip *, struct route *, unsigned int);
+static void ip_bindif(struct inpcb *, unsigned int);
+
+int ip_createmoptions(struct ip_moptions **imop);
+int ip_addmembership(struct ip_moptions *imo, struct ip_mreq *mreq);
+int ip_dropmembership(struct ip_moptions *imo, struct ip_mreq *mreq);
+int	ip_optcopy(struct ip *, struct ip *);
+void in_delayed_cksum_offset(struct mbuf *, int );
+void in_cksum_offset(struct mbuf* , size_t );
+
+extern int (*fr_checkp)(struct ip *, int, struct ifnet *, int, struct mbuf **);
+
+extern u_long  route_generation;
+
+extern	struct protosw inetsw[];
+>>>>>>> origin/10.5
 
 extern struct ip_linklocal_stat ip_linklocal_stat;
 
@@ -217,6 +242,7 @@ SYSCTL_INT(_net_inet_ip, OID_AUTO, forge_ce,
 #endif /* DEBUG */
 
 static int ip_select_srcif_debug = 0;
+<<<<<<< HEAD
 SYSCTL_INT(_net_inet_ip, OID_AUTO, select_srcif_debug,
 	CTLFLAG_RW | CTLFLAG_LOCKED, &ip_select_srcif_debug, 0,
 	"log source interface selection debug info");
@@ -270,6 +296,10 @@ static struct zone *imo_zone;		/* zone for ip_moptions */
 
 #define	IMO_ZONE_MAX		64		/* maximum elements in zone */
 #define	IMO_ZONE_NAME		"ip_moptions"	/* zone name */
+=======
+SYSCTL_INT(_net_inet_ip, OID_AUTO, select_srcif_debug, CTLFLAG_RW,
+    &ip_select_srcif_debug, 0, "log source interface selection debug info");
+>>>>>>> origin/10.5
 
 /*
  * IP output.  The packet in mbuf chain m contains a skeletal IP
@@ -278,10 +308,24 @@ static struct zone *imo_zone;		/* zone for ip_moptions */
  * The mbuf opt, if present, will not be freed.
  */
 int
+<<<<<<< HEAD
 ip_output(struct mbuf *m0, struct mbuf *opt, struct route *ro, int flags,
     struct ip_moptions *imo, struct ip_out_args *ipoa)
 {
 	return (ip_output_list(m0, 0, opt, ro, flags, imo, ipoa));
+=======
+ip_output(
+	struct mbuf *m0,
+	struct mbuf *opt,
+	struct route *ro,
+	int flags,
+	struct ip_moptions *imo,
+	struct ip_out_args *ipoa)
+{
+	int error;
+	error = ip_output_list(m0, 0, opt, ro, flags, imo, ipoa);
+	return error;
+>>>>>>> origin/10.5
 }
 
 /*
@@ -298,9 +342,21 @@ ip_output(struct mbuf *m0, struct mbuf *opt, struct route *ro, int flags,
  * inserted, so must have a NULL opt pointer.
  */
 int
+<<<<<<< HEAD
 ip_output_list(struct mbuf *m0, int packetchain, struct mbuf *opt,
     struct route *ro, int flags, struct ip_moptions *imo,
     struct ip_out_args *ipoa)
+=======
+ip_output_list(
+	struct mbuf *m0,
+	int packetchain,
+	struct mbuf *opt,
+	struct route *ro,
+	int flags,
+	struct ip_moptions *imo,
+	struct ip_out_args *ipoa
+	)
+>>>>>>> origin/10.5
 {
 	struct ip *ip;
 	struct ifnet *ifp = NULL;		/* not refcnt'd */
@@ -349,6 +405,7 @@ ip_output_list(struct mbuf *m0, int packetchain, struct mbuf *opt,
 		struct ip_fw_args args;
 #endif /* IPFIREWALL || DUMMYNET */
 #if IPFIREWALL_FORWARD
+<<<<<<< HEAD
 		struct route sro_fwd;
 #endif /* IPFIREWALL_FORWARD */
 #if DUMMYNET
@@ -382,6 +439,22 @@ ip_output_list(struct mbuf *m0, int packetchain, struct mbuf *opt,
 	(((_ipobf).nocell && IFNET_IS_CELLULAR(_ifp)) ||		\
 	 ((_ipobf).noexpensive && IFNET_IS_EXPENSIVE(_ifp)) ||		\
 	 (!(_ipobf).awdl_unrestricted && IFNET_IS_AWDL_RESTRICTED(_ifp)))
+=======
+	int fwd_rewrite_src = 0;
+#endif
+#if IPFIREWALL
+	struct ip_fw_args args;
+#endif
+	int didfilter = 0;
+	ipfilter_t inject_filter_ref = 0;
+	struct m_tag	*tag;
+	struct route	saved_route;
+	struct ip_out_args saved_ipoa;
+	struct mbuf * packetlist;
+	int pktcnt = 0;
+	unsigned int ifscope;
+	boolean_t select_srcif;
+>>>>>>> origin/10.5
 
 	if (ip_output_measure)
 		net_perf_start_time(&net_perf, &start_tv);
@@ -389,6 +462,7 @@ ip_output_list(struct mbuf *m0, int packetchain, struct mbuf *opt,
 
 	VERIFY(m0->m_flags & M_PKTHDR);
 	packetlist = m0;
+<<<<<<< HEAD
 
 	/* zero out {ipsec_state, args, sro_fwd, saved_route, ipf_pktops} */
 	bzero(&ipobz, sizeof (ipobz));
@@ -398,6 +472,15 @@ ip_output_list(struct mbuf *m0, int packetchain, struct mbuf *opt,
 	if (SLIST_EMPTY(&m0->m_pkthdr.tags))
 		goto ipfw_tags_done;
 
+=======
+#if IPFIREWALL
+	args.next_hop = NULL;
+	args.eh = NULL;
+	args.rule = NULL;
+	args.divert_rule = 0;			/* divert cookie */
+	args.ipoa = NULL;
+	
+>>>>>>> origin/10.5
 	/* Grab info from mtags prepended to the chain */
 #if DUMMYNET
 	if ((tag = m_tag_locate(m0, KERNEL_MODULE_TAG_ID,
@@ -412,6 +495,7 @@ ip_output_list(struct mbuf *m0, int packetchain, struct mbuf *opt,
 		ro = &saved_route;
 
 		imo = NULL;
+<<<<<<< HEAD
 		bcopy(&dn_tag->dn_dst, &dst_buf, sizeof (dst_buf));
 		dst = &dst_buf;
 		ifp = dn_tag->dn_ifp;
@@ -421,6 +505,14 @@ ip_output_list(struct mbuf *m0, int packetchain, struct mbuf *opt,
 			ipoa = &saved_ipoa;
 		}
 
+=======
+		dst = dn_tag->dn_dst;
+		ifp = dn_tag->ifp;
+		flags = dn_tag->flags;
+		saved_ipoa = dn_tag->ipoa;
+		ipoa = &saved_ipoa;
+		
+>>>>>>> origin/10.5
 		m_tag_delete(m0, tag);
 	}
 #endif /* DUMMYNET */
@@ -448,13 +540,43 @@ ip_output_list(struct mbuf *m0, int packetchain, struct mbuf *opt,
 		m_tag_delete(m0, tag);
 	}
 #endif /* IPFIREWALL */
+<<<<<<< HEAD
 
 ipfw_tags_done:
 #endif /* IPFIREWALL || DUMMYNET */
+=======
+>>>>>>> origin/10.5
 
 	m = m0;
 	m->m_pkthdr.pkt_flags &= ~(PKTF_LOOP|PKTF_IFAINFO);
 
+<<<<<<< HEAD
+=======
+	/*
+	 * Do not perform source interface selection when forwarding.
+	 * At present the IP_OUTARGS flag implies a request for IP to
+	 * perform source interface selection.
+	 */
+	if (ip_doscopedroute &&
+	    (flags & (IP_OUTARGS | IP_FORWARDING)) == IP_OUTARGS) {
+		select_srcif = TRUE;
+		ifscope = ipoa->ipoa_ifscope;
+	} else {
+		select_srcif = FALSE;
+		ifscope = IFSCOPE_NONE;
+	}
+
+#if IPFIREWALL
+	if (args.rule != NULL) {	/* dummynet already saw us */
+            ip = mtod(m, struct ip *);
+            hlen = IP_VHL_HL(ip->ip_vhl) << 2 ;
+	    lck_mtx_lock(rt_mtx);
+            if (ro->ro_rt != NULL) 
+                ia = (struct in_ifaddr *)ro->ro_rt->rt_ifa;
+   	    if (ia)
+		ifaref(&ia->ia_ifa);
+	    lck_mtx_unlock(rt_mtx);
+>>>>>>> origin/10.5
 #if IPSEC
 	if (ipsec_bypass == 0 && !(flags & IP_NOIPSEC)) {
 		/* If packet is bound to an interface, check bound policies */
@@ -581,6 +703,7 @@ loopit:
 		}
 	}
 	ip = mtod(m, struct ip *);
+<<<<<<< HEAD
 
 #if IPFIREWALL
 	/*
@@ -606,6 +729,13 @@ loopit:
 		error = EHOSTUNREACH;
 		goto bad;
 	}
+=======
+#if IPFIREWALL
+	pkt_dst = args.next_hop ? args.next_hop->sin_addr : ip->ip_dst;
+#else
+	pkt_dst = ip->ip_dst;
+#endif
+>>>>>>> origin/10.5
 
 	/*
 	 * Fill in IP header.
@@ -655,6 +785,7 @@ loopit:
 			src_ia = NULL;
 		}
 		/*
+<<<<<<< HEAD
 		 * Test rt_flags without holding rt_lock for performance
 		 * reasons; if the route is down it will hopefully be
 		 * caught by the layer below (since it uses this route
@@ -665,10 +796,13 @@ loopit:
 			ROUTE_RELEASE(ro);
 
 		/*
+=======
+>>>>>>> origin/10.5
 		 * If we're doing source interface selection, we may not
 		 * want to use this route; only synch up the generation
 		 * count otherwise.
 		 */
+<<<<<<< HEAD
 		if (!ipobf.select_srcif && ro->ro_rt != NULL &&
 		    RT_GENID_OUTOFSYNC(ro->ro_rt))
 			RT_GENID_SYNC(ro->ro_rt);
@@ -685,6 +819,11 @@ loopit:
 		rtfree(ro->ro_rt);
 		ro->ro_rt = (struct rtentry *)0;
 >>>>>>> origin/10.3
+=======
+		if (!select_srcif && ro->ro_rt != NULL &&
+		    ro->ro_rt->generation_id != route_generation)
+			ro->ro_rt->generation_id = route_generation;
+>>>>>>> origin/10.5
 	}
 	if (ro->ro_rt == NULL) {
 		bzero(dst, sizeof (*dst));
@@ -709,6 +848,7 @@ loopit:
 		}
 		ifp = ia->ia_ifp;
 		ip->ip_ttl = 1;
+<<<<<<< HEAD
 		ipobf.isbroadcast = in_broadcast(dst->sin_addr, ifp);
 		/*
 		 * For consistency with other cases below.  Loopback
@@ -722,10 +862,16 @@ loopit:
 		}
 	} else if (IN_MULTICAST(ntohl(pkt_dst.s_addr)) &&
 	    imo != NULL && (ifp = imo->imo_multicast_ifp) != NULL) {
+=======
+		isbroadcast = in_broadcast(dst->sin_addr, ifp);
+	} else if (IN_MULTICAST(ntohl(pkt_dst.s_addr)) &&
+	    imo != NULL && imo->imo_multicast_ifp != NULL) {
+>>>>>>> origin/10.5
 		/*
 		 * Bypass the normal routing lookup for multicast
 		 * packets if the interface is specified.
 		 */
+<<<<<<< HEAD
 		ipobf.isbroadcast = FALSE;
 		if (ia != NULL)
 			IFA_REMREF(&ia->ia_ifa);
@@ -734,6 +880,22 @@ loopit:
 		IFP_TO_IA(ifp, ia);
 	} else {
 		struct ifaddr *ia0 = NULL;
+=======
+		ifp = imo->imo_multicast_ifp;
+		isbroadcast = 0;
+		if (ia != NULL)
+			ifafree(&ia->ia_ifa);
+
+		/* Could use IFP_TO_IA instead but rt_mtx is already held */
+		for (ia = TAILQ_FIRST(&in_ifaddrhead);
+	            ia != NULL && ia->ia_ifp != ifp;
+		    ia = TAILQ_NEXT(ia, ia_link))
+			continue;
+
+		if (ia != NULL)
+			ifaref(&ia->ia_ifa);
+	} else {
+>>>>>>> origin/10.5
 		boolean_t cloneok = FALSE;
 		/*
 		 * Perform source interface selection; the source IP address
@@ -743,6 +905,7 @@ loopit:
 		 * or if we haven't done source interface selection on this
 		 * route (for this PCB instance) before.
 		 */
+<<<<<<< HEAD
 		if (ipobf.select_srcif &&
 		    ip->ip_src.s_addr != INADDR_ANY && (ROUTE_UNUSABLE(ro) ||
 		    !(ro->ro_flags & ROF_SRCIF_SELECTED))) {
@@ -776,6 +939,28 @@ loopit:
 			if (ia0 == NULL && (!(flags & IP_RAWOUTPUT) ||
 			    ipobf.srcbound) && ifscope != lo_ifp->if_index) {
 				error = EADDRNOTAVAIL;
+=======
+		if (select_srcif && ip->ip_src.s_addr != INADDR_ANY &&
+		    (ro->ro_rt == NULL ||
+		    ro->ro_rt->generation_id != route_generation ||
+		    !(ro->ro_flags & ROF_SRCIF_SELECTED))) {
+			struct ifaddr *ifa;
+
+			/* Find the source interface */
+			ifa = in_selectsrcif(ip, ro, ifscope);
+
+			/*
+			 * If the source address is spoofed (in the case
+			 * of IP_RAWOUTPUT), or if this is destined for
+			 * local/loopback, just let it go out using the
+			 * interface of the route.  Otherwise, there's no
+			 * interface having such an address, so bail out.
+			 */
+			if (ifa == NULL && !(flags & IP_RAWOUTPUT) &&
+			    ifscope != lo_ifp->if_index) {
+				error = EADDRNOTAVAIL;
+				lck_mtx_unlock(rt_mtx);
+>>>>>>> origin/10.5
 				goto bad;
 			}
 
@@ -793,9 +978,16 @@ loopit:
 			 * gateway points to that of the default gateway on
 			 * the primary interface of the system.
 			 */
+<<<<<<< HEAD
 			if (ia0 != NULL) {
 				if (ifscope == IFSCOPE_NONE)
 					ifscope = ia0->ifa_ifp->if_index;
+=======
+			if (ifa != NULL) {
+				if (ifscope == IFSCOPE_NONE)
+					ifscope = ifa->ifa_ifp->if_index;
+				ifafree(ifa);
+>>>>>>> origin/10.5
 				cloneok = (!(flags & IP_RAWOUTPUT) &&
 				    !(IN_LINKLOCAL(ntohl(ip->ip_dst.s_addr))));
 			}
@@ -833,6 +1025,7 @@ loopit:
 			if (cloneok || dst->sin_addr.s_addr == INADDR_BROADCAST)
 				ign &= ~RTF_PRCLONING;
 
+<<<<<<< HEAD
 			/*
 			 * Loosen the route lookup criteria if the ifscope
 			 * corresponds to the loopback interface; this is
@@ -870,6 +1063,13 @@ loopit:
 
 		if (ro->ro_rt == NULL) {
 			OSAddAtomic(1, &ipstat.ips_noroute);
+=======
+			rtalloc_scoped_ign_locked(ro, ign, ifscope);
+		}
+
+		if (ro->ro_rt == NULL) {
+			OSAddAtomic(1, (SInt32*)&ipstat.ips_noroute);
+>>>>>>> origin/10.5
 			error = EHOSTUNREACH;
 			if (ia0 != NULL) {
 				IFA_REMREF(ia0);
@@ -878,9 +1078,14 @@ loopit:
 			goto bad;
 		}
 
+<<<<<<< HEAD
 		if (ia != NULL)
 			IFA_REMREF(&ia->ia_ifa);
 		RT_LOCK_SPIN(ro->ro_rt);
+=======
+		if (ia)
+			ifafree(&ia->ia_ifa);
+>>>>>>> origin/10.5
 		ia = ifatoia(ro->ro_rt->rt_ifa);
 		if (ia != NULL) {
 			/* Become a regular mutex */
@@ -1602,7 +1807,11 @@ skip_ipsec:
 			goto pass;
 		}
 #if DUMMYNET
+<<<<<<< HEAD
 		if (DUMMYNET_LOADED && (ipfwoff & IP_FW_PORT_DYNT_FLAG) != 0) {
+=======
+                if (DUMMYNET_LOADED && (off & IP_FW_PORT_DYNT_FLAG) != 0) {
+>>>>>>> origin/10.5
 			/*
 			 * pass the pkt to dummynet. Need to include
 			 * pipe number, m, ifp, ro, dst because these are
@@ -1612,6 +1821,7 @@ skip_ipsec:
 			 * XXX note: if the ifp or ro entry are deleted
 			 * while a pkt is in dummynet, we are in trouble!
 			 */
+<<<<<<< HEAD
 			args.fwa_ro = ro;
 			args.fwa_dst = dst;
 			args.fwa_oflags = flags;
@@ -1620,6 +1830,16 @@ skip_ipsec:
 
 			error = ip_dn_io_ptr(m, ipfwoff & 0xffff, DN_TO_IP_OUT,
 			    &args, DN_CLIENT_IPFW);
+=======
+			args.ro = ro;
+			args.dst = dst;
+			args.flags = flags;
+			if (flags & IP_OUTARGS)
+				args.ipoa = ipoa;
+
+			error = ip_dn_io_ptr(m, off & 0xffff, DN_TO_IP_OUT,
+			    &args);
+>>>>>>> origin/10.5
 			goto done;
 		}
 #endif /* DUMMYNET */
@@ -2599,14 +2819,22 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 					break;
 			}
 
+<<<<<<< HEAD
 			if (sopt->sopt_valsize == 0 || ifname[0] == '\0') {
+=======
+			if (sopt->sopt_valsize == 0 || ifname[0] == NULL) {
+>>>>>>> origin/10.5
 				/* Unbind this socket from any interface */
 				ifscope = IFSCOPE_NONE;
 			} else {
 				ifnet_t	ifp;
 
 				/* Verify name is NULL terminated */
+<<<<<<< HEAD
 				if (ifname[sopt->sopt_valsize - 1] != '\0') {
+=======
+				if (ifname[sopt->sopt_valsize - 1] != NULL) {
+>>>>>>> origin/10.5
 					error = EINVAL;
 					break;
 				}
@@ -2626,7 +2854,11 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 				 */
 				ifnet_release(ifp);
 			}
+<<<<<<< HEAD
 			error = inp_bindif(inp, ifscope, NULL);
+=======
+			ip_bindif(inp, ifscope);
+>>>>>>> origin/10.5
 		}
 		break;
 #endif /* CONFIG_FORCE_OUT_IFP */
@@ -2749,11 +2981,19 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 		 * on the destination address type (e.g.  unicast, multicast,
 		 * or broadcast if applicable) or whether or not the host is
 		 * directly reachable.  Note that in the multicast transmit
+<<<<<<< HEAD
 		 * case, IP_MULTICAST_{IF,IFINDEX} takes precedence over
 		 * IP_BOUND_IF, since the former practically bypasses the
 		 * routing table; in this case, IP_BOUND_IF sets the default
 		 * interface used for sending multicast packets in the absence
 		 * of an explicit multicast transmit interface.
+=======
+		 * case, IP_MULTICAST_IF takes precedence over IP_BOUND_IF,
+		 * since the former practically bypasses the routing table;
+		 * in this case, IP_BOUND_IF sets the default interface used
+		 * for sending multicast packets in the absence of an explicit
+		 * transmit interface set via IP_MULTICAST_IF.
+>>>>>>> origin/10.5
 		 */
 		case IP_BOUND_IF:
 			/* This option is settable only for IPv4 */
@@ -2768,6 +3008,7 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 			if (error)
 				break;
 
+<<<<<<< HEAD
 			error = inp_bindif(inp, optval, NULL);
 			break;
 
@@ -2797,6 +3038,9 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 		case IP_OUT_IF:
 			/* This option is not settable */
 			error = EINVAL;
+=======
+			ip_bindif(inp, optval);
+>>>>>>> origin/10.5
 			break;
 
 		default:
@@ -2903,6 +3147,7 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 
 		case IP_BOUND_IF:
 			if (inp->inp_flags & INP_BOUND_IF)
+<<<<<<< HEAD
 				optval = inp->inp_boundifp->if_index;
 			error = sooptcopyout(sopt, &optval, sizeof (optval));
 			break;
@@ -2915,6 +3160,9 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 		case IP_OUT_IF:
 			optval = (inp->inp_last_outifp != NULL) ?
 			    inp->inp_last_outifp->if_index : 0;
+=======
+				optval = inp->inp_boundif;
+>>>>>>> origin/10.5
 			error = sooptcopyout(sopt, &optval, sizeof (optval));
 			break;
 
@@ -3699,3 +3947,191 @@ sysctl_ip_output_getperf SYSCTL_HANDLER_ARGS
 	return (SYSCTL_OUT(req, &net_perf, MIN(sizeof (net_perf), req->oldlen)));
 }
 
+<<<<<<< HEAD
+=======
+/*
+ * Given a source IP address (and route, if available), determine the best
+ * interface to send the packet from.
+ */
+static struct ifaddr *
+in_selectsrcif(struct ip *ip, struct route *ro, unsigned int ifscope)
+{
+	struct ifaddr *ifa = NULL;
+	struct sockaddr src = { sizeof (struct sockaddr_in), AF_INET, { 0, } };
+	struct ifnet *rt_ifp;
+	char ip_src[16], ip_dst[16];
+
+	if (ip_select_srcif_debug) {
+		(void) inet_ntop(AF_INET, &ip->ip_src.s_addr, ip_src,
+		    sizeof (ip_src));
+		(void) inet_ntop(AF_INET, &ip->ip_dst.s_addr, ip_dst,
+		    sizeof (ip_dst));
+	}
+
+	lck_mtx_assert(rt_mtx, LCK_MTX_ASSERT_OWNED);
+
+	((struct sockaddr_in *)&src)->sin_addr.s_addr = ip->ip_src.s_addr;
+	rt_ifp = (ro->ro_rt != NULL) ? ro->ro_rt->rt_ifp : NULL;
+
+	/*
+	 * Given the source IP address, find a suitable source interface
+	 * to use for transmission; if the caller has specified a scope,
+	 * optimize the search by looking at the addresses only for that
+	 * interface.  This is still suboptimal, however, as we need to
+	 * traverse the per-interface list.
+	 */
+	if (ifscope != IFSCOPE_NONE || ro->ro_rt != NULL) {
+		unsigned int scope = ifscope;
+
+		/*
+		 * If no scope is specified and the route is stale (pointing
+		 * to a defunct interface) use the current primary interface;
+		 * this happens when switching between interfaces configured
+		 * with the same IP address.  Otherwise pick up the scope
+		 * information from the route; the ULP may have looked up a
+		 * correct route and we just need to verify it here and mark
+		 * it with the ROF_SRCIF_SELECTED flag below.
+		 */
+		if (scope == IFSCOPE_NONE) {
+			scope = rt_ifp->if_index;
+			if (scope != get_primary_ifscope() &&
+			    ro->ro_rt->generation_id != route_generation)
+				scope = get_primary_ifscope();
+		}
+
+		ifa = ifa_ifwithaddr_scoped(&src, scope);
+
+		if (ip_select_srcif_debug && ifa != NULL) {
+			if (ro->ro_rt != NULL) {
+				printf("%s->%s ifscope %d->%d ifa_if %s%d "
+				    "ro_if %s%d\n", ip_src, ip_dst, ifscope,
+				    scope, ifa->ifa_ifp->if_name,
+				    ifa->ifa_ifp->if_unit, rt_ifp->if_name,
+				    rt_ifp->if_unit);
+			} else {
+				printf("%s->%s ifscope %d->%d ifa_if %s%d\n",
+				    ip_src, ip_dst, ifscope, scope,
+				    ifa->ifa_ifp->if_name,
+				    ifa->ifa_ifp->if_unit);
+			}
+		}
+	}
+
+	/*
+	 * Slow path; search for an interface having the corresponding source
+	 * IP address if the scope was not specified by the caller, and:
+	 *
+	 *   1) There currently isn't any route, or,
+	 *   2) The interface used by the route does not own that source
+	 *	IP address; in this case, the route will get blown away
+	 *	and we'll do a more specific scoped search using the newly
+	 *	found interface.
+	 */
+	if (ifa == NULL && ifscope == IFSCOPE_NONE) {
+		ifa = ifa_ifwithaddr(&src);
+
+		if (ip_select_srcif_debug && ifa != NULL) {
+			printf("%s->%s ifscope %d ifa_if %s%d\n",
+			    ip_src, ip_dst, ifscope, ifa->ifa_ifp->if_name,
+			    ifa->ifa_ifp->if_unit);
+		}
+	}
+
+	/*
+	 * If there is a non-loopback route with the wrong interface, or if
+	 * there is no interface configured with such an address, blow it
+	 * away.  Except for local/loopback, we look for one with a matching
+	 * interface scope/index.
+	 */
+	if (ro->ro_rt != NULL &&
+	    (ifa == NULL || (ifa->ifa_ifp != rt_ifp && rt_ifp != lo_ifp) ||
+	    !(ro->ro_rt->rt_flags & RTF_UP))) {
+		if (ip_select_srcif_debug) {
+			if (ifa != NULL) {
+				printf("%s->%s ifscope %d ro_if %s%d != "
+				    "ifa_if %s%d (cached route cleared)\n",
+				    ip_src, ip_dst, ifscope, rt_ifp->if_name,
+				    rt_ifp->if_unit, ifa->ifa_ifp->if_name,
+				    ifa->ifa_ifp->if_unit);
+			} else {
+				printf("%s->%s ifscope %d ro_if %s%d "
+				    "(no ifa_if found)\n",
+				    ip_src, ip_dst, ifscope, rt_ifp->if_name,
+				    rt_ifp->if_unit);
+			}
+		}
+
+		rtfree_locked(ro->ro_rt);
+		ro->ro_rt = NULL;
+		ro->ro_flags &= ~ROF_SRCIF_SELECTED;
+
+		/*
+		 * If the destination is IPv4 LLA and the route's interface
+		 * doesn't match the source interface, then the source IP
+		 * address is wrong; it most likely belongs to the primary
+		 * interface associated with the IPv4 LL subnet.  Drop the
+		 * packet rather than letting it go out and return an error
+		 * to the ULP.  This actually applies not only to IPv4 LL
+		 * but other shared subnets; for now we explicitly test only
+		 * for the former case and save the latter for future.
+		 */
+		if (IN_LINKLOCAL(ntohl(ip->ip_dst.s_addr)) &&
+		    !IN_LINKLOCAL(ntohl(ip->ip_src.s_addr)) && ifa != NULL) {
+			ifafree(ifa);
+			ifa = NULL;
+		}
+	}
+
+	if (ip_select_srcif_debug && ifa == NULL) {
+		printf("%s->%s ifscope %d (neither ro_if/ifa_if found)\n",
+		    ip_src, ip_dst, ifscope);
+	}
+
+	/*
+	 * If there is a route, mark it accordingly.  If there isn't one,
+	 * we'll get here again during the next transmit (possibly with a
+	 * route) and the flag will get set at that point.  For IPv4 LLA
+	 * destination, mark it only if the route has been fully resolved;
+	 * otherwise we want to come back here again when the route points
+	 * to the interface over which the ARP reply arrives on.
+	 */
+	if (ro->ro_rt != NULL && (!IN_LINKLOCAL(ntohl(ip->ip_dst.s_addr)) ||
+	    (ro->ro_rt->rt_gateway->sa_family == AF_LINK &&
+	    SDL(ro->ro_rt->rt_gateway)->sdl_alen != 0))) {
+		ro->ro_flags |= ROF_SRCIF_SELECTED;
+		ro->ro_rt->generation_id = route_generation;
+	}
+
+	return (ifa);
+}
+
+/*
+ * Handler for setting IP_FORCE_OUT_IFP or IP_BOUND_IF socket option.
+ */
+static void
+ip_bindif(struct inpcb *inp, unsigned int ifscope)
+{
+	/*
+	 * A zero interface scope value indicates an "unbind".
+	 * Otherwise, take in whatever value the app desires;
+	 * the app may already know the scope (or force itself
+	 * to such a scope) ahead of time before the interface
+	 * gets attached.  It doesn't matter either way; any
+	 * route lookup from this point on will require an
+	 * exact match for the embedded interface scope.
+	 */
+	inp->inp_boundif = ifscope;
+	if (inp->inp_boundif == IFSCOPE_NONE)
+		inp->inp_flags &= ~INP_BOUND_IF;
+	else
+		inp->inp_flags |= INP_BOUND_IF;
+
+	lck_mtx_lock(rt_mtx);
+	/* Blow away any cached route in the PCB */
+	if (inp->inp_route.ro_rt != NULL) {
+		rtfree_locked(inp->inp_route.ro_rt);
+		inp->inp_route.ro_rt = NULL;
+	}
+	lck_mtx_unlock(rt_mtx);
+}
+>>>>>>> origin/10.5

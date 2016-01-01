@@ -106,7 +106,12 @@
 #define RB_SAFEBOOT	0x100	/* booting safe */
 #define RB_UPSDELAY 0x200   /* Delays restart by 5 minutes */
 #define RB_QUICK	0x400	/* quick and ungraceful reboot with file system caches flushed*/
+<<<<<<< HEAD
 #define RB_PANIC	0x800   /* panic the kernel */
+=======
+#define RB_PANIC	0	/* reboot due to panic */
+#define RB_BOOT		1	/* reboot due to boot() */
+>>>>>>> origin/10.5
 
 #endif /* __APPLE_API_PRIVATE */
 

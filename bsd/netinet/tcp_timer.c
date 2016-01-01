@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -566,7 +570,13 @@ void
 tcp_gc(struct inpcbinfo *ipi)
 {
 	struct inpcb *inp, *nxt;
+<<<<<<< HEAD
 	struct tcpcb *tw_tp, *tw_ntp;
+=======
+	struct tcpcb *tp;
+	struct socket *so;
+	int i;
+>>>>>>> origin/10.5
 #if TCPDEBUG
 	int ostate;
 #endif
@@ -655,8 +665,30 @@ tcp_gc(struct inpcbinfo *ipi)
 		    tp->t_timer[TCPT_2MSL] = 0;
 >>>>>>> origin/10.3
 
+<<<<<<< HEAD
 	KERNEL_DEBUG(DBG_FNC_TCP_SLOW | DBG_FUNC_END, tws_checked,
 	    cur_tw_slot, 0, 0, 0);
+=======
+		if (tp->t_timer[TCPT_2MSL] == 0)  {
+
+			/* That pcb is ready for a close */	
+			tcp_free_sackholes(tp);
+			tp = tcp_close(tp);
+		}
+twunlock:
+		tcp_unlock(inp->inp_socket, 1, 0);
+	}
+
+
+    	LIST_FOREACH_SAFE(inp, &tcb, inp_list, nxt) {
+		tcp_garbage_collect(inp, 0);
+	}
+
+	/* Now cleanup the time wait ones */
+    	LIST_FOREACH_SAFE(inp, &time_wait_slots[cur_tw_slot], inp_list, nxt) {
+		tcp_garbage_collect(inp, 1);
+	}
+>>>>>>> origin/10.5
 
 	return;
 }
@@ -1061,6 +1093,7 @@ tcp_timers(tp, timer)
 		 * been retransmitted by way of the retransmission timer at
 		 * least once, the value of ssthresh is held constant
 		 */
+<<<<<<< HEAD
 		if (tp->t_rxtshift == 1 && 
 		    CC_ALGO(tp)->after_timeout != NULL) {
 			CC_ALGO(tp)->after_timeout(tp);
@@ -1071,6 +1104,17 @@ tcp_timers(tp, timer)
 			 */
 			if (TCP_ECN_ENABLED(tp))
 				tp->ecn_flags |= TE_SENDCWR;
+=======
+		if (tp->t_state >=  TCPS_ESTABLISHED) {
+			u_int win = min(tp->snd_wnd, tp->snd_cwnd) / 2 / tp->t_maxseg;
+			if (win < 2)
+				win = 2;
+			tp->snd_cwnd = tp->t_maxseg;
+			tp->snd_ssthresh = win * tp->t_maxseg;
+			tp->t_bytes_acked = 0;
+			tp->t_dupacks = 0;
+			tp->t_unacksegs = 0;
+>>>>>>> origin/10.5
 		}
 
 		EXIT_FASTRECOVERY(tp);
@@ -1164,6 +1208,7 @@ fc_output:
 			tcpstat.tcps_keepprobe++;
 			t_template = tcp_maketemplate(tp);
 			if (t_template) {
+<<<<<<< HEAD
 				struct inpcb *inp = tp->t_inpcb;
 				struct tcp_respond_args tra;
 
@@ -1178,6 +1223,18 @@ fc_output:
 				tcp_respond(tp, t_template->tt_ipgen,
 				    &t_template->tt_t, (struct mbuf *)NULL,
 				    tp->rcv_nxt, tp->snd_una - 1, 0, &tra);
+=======
+				unsigned int ifscope;
+
+				if (tp->t_inpcb->inp_flags & INP_BOUND_IF)
+					ifscope = tp->t_inpcb->inp_boundif;
+				else
+					ifscope = IFSCOPE_NONE;
+
+				tcp_respond(tp, t_template->tt_ipgen,
+				    &t_template->tt_t, (struct mbuf *)NULL,
+				    tp->rcv_nxt, tp->snd_una - 1, 0, ifscope);
+>>>>>>> origin/10.5
 				(void) m_free(dtom(t_template));
 				if (tp->t_flagsext & TF_DETECT_READSTALL)
 					tp->t_rtimo_probes++;

@@ -83,6 +83,9 @@ SYSCTL_INT(_net_appletalk, OID_AUTO, routermix, CTLFLAG_WR,
 at_ddp_stats_t at_ddp_stats;		/* DDP statistics */
 SYSCTL_STRUCT(_net_appletalk, OID_AUTO, ddpstats, CTLFLAG_RD,
 	      &at_ddp_stats, at_ddp_stats, "AppleTalk DDP Stats");
+extern int atp_resp_seqno2big;
+SYSCTL_INT(_net_appletalk, OID_AUTO, atp_resp_seqno2big, CTLFLAG_RD,
+                        &atp_resp_seqno2big, 0, "Appletalk ATP seqno too big count");
 
 atlock_t refall_lock;
 

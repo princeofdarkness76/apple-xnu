@@ -716,7 +716,13 @@ vnode_pagein(
 		goto out;
 	}
 	if (upl == (upl_t)NULL) {
+<<<<<<< HEAD
 		flags &= ~UPL_NOCOMMIT;
+=======
+	        if (size > (MAX_UPL_SIZE * PAGE_SIZE)) {
+
+		  	panic("vnode_pagein: size = %x\n", size);
+>>>>>>> origin/10.5
 
 <<<<<<< HEAD
 	        if (size > MAX_UPL_SIZE_BYTES) {
@@ -747,6 +753,12 @@ vnode_pagein(
 	        ubc_create_upl(vp, f_offset, size, &upl, &pl, UPL_UBC_PAGEIN | UPL_RET_ONLY_ABSENT);
 
 		if (upl == (upl_t)NULL) {
+<<<<<<< HEAD
+=======
+
+		  	panic("vnode_pagein: ubc_create_upl failed\n");
+
+>>>>>>> origin/10.5
 		        result =  PAGER_ABSENT;
 			error = PAGER_ABSENT;
 			goto out;
@@ -924,6 +936,21 @@ out:
 	thread_funnel_set(kernel_flock, funnel_state);
 >>>>>>> origin/10.1
 
+<<<<<<< HEAD
+=======
+	ut = get_bsdthread_info(current_thread());
+
+	if (ut->uu_lowpri_window) {
+	        /*
+		 * task is marked as a low priority I/O type
+		 * and the I/O we issued while in this page fault
+		 * collided with normal I/O operations... we'll
+		 * delay in order to mitigate the impact of this
+		 * task on the normal operation of the system
+		 */
+		throttle_lowpri_io(TRUE);
+	}
+>>>>>>> origin/10.5
 	return (error);
 }
 

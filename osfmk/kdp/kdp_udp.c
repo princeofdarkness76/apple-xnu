@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -69,7 +73,10 @@
 #include <kdp/kdp_en_debugger.h>
 #include <kdp/kdp_callout.h>
 #include <kdp/kdp_udp.h>
+<<<<<<< HEAD
 #include <kdp/kdp_core.h>
+=======
+>>>>>>> origin/10.5
 #if CONFIG_SERIAL_KDP
 #include <kdp/kdp_serial.h>
 #endif
@@ -110,6 +117,10 @@ extern char    *inet_ntoa_r(struct kdp_in_addr ina, char *buf,
 
 extern int kdp_getc(void);
 extern int reattach_wait;
+
+extern int serial_getc(void);
+extern void serial_putc(char);
+extern int serial_init(void);
 
 static u_short ip_id;                          /* ip packet ctr, for ids */
 
@@ -433,14 +444,26 @@ kdp_register_send_receive(
 {
 	unsigned int	debug = 0;
 
+<<<<<<< HEAD
+=======
+	debug_log_init();
+
+	kdp_timer_callout_init();
+
+>>>>>>> origin/10.5
 	PE_parse_boot_argn("debug", &debug, sizeof (debug));
 
 
 	if (!debug)
 		return;
 
+<<<<<<< HEAD
 	kdp_en_send_pkt   = send;
 	kdp_en_recv_pkt   = receive;
+=======
+	kdp_en_send_pkt = send;
+	kdp_en_recv_pkt = receive;
+>>>>>>> origin/10.5
 
 	if (debug & DB_KDP_BP_DIS)
 		kdp_flag |= KDP_BP_DIS;   
@@ -463,9 +486,12 @@ kdp_register_send_receive(
 	if (PE_parse_boot_argn("_panicd_ip", panicd_ip_str, sizeof (panicd_ip_str)))
 		panicd_specified = TRUE;
 
+<<<<<<< HEAD
 	if ((debug & DB_REBOOT_POST_CORE) && (panicd_specified == TRUE))
 		kdp_flag |= REBOOT_POST_CORE;
 
+=======
+>>>>>>> origin/10.5
 	if (PE_parse_boot_argn("_router_ip", router_ip_str, sizeof (router_ip_str)))
 		router_specified = TRUE;
 
@@ -1373,9 +1399,12 @@ kdp_debugger_loop(
     kdp.kdp_cpu = cpu_number();
     kdp.kdp_thread = current_thread();
 
+<<<<<<< HEAD
     if (kdp_en_setmode)  
         (*kdp_en_setmode)(TRUE); /* enabling link mode */
 
+=======
+>>>>>>> origin/10.5
     if (pkt.input)
 	kdp_panic("kdp_raise_exception");
 
@@ -1777,9 +1806,14 @@ kdp_get_xnu_version(char *versionbuf)
 	char *vptr;
 
 	strlcpy(vstr, "custom", 10);
+<<<<<<< HEAD
 	if (kdp_machine_vm_read((mach_vm_address_t)(uintptr_t)version, versionbuf, 128)) {
 		versionbuf[127] = '\0';
 		versionpos = strnstr(versionbuf, "xnu-", 115);
+=======
+	if (strlcpy(versionbuf, version, 95) < 95) {
+		versionpos = strnstr(versionbuf, "xnu-", 90);
+>>>>>>> origin/10.5
 		if (versionpos) {
 			strncpy(vstr, versionpos, sizeof(vstr));
 			vstr[sizeof(vstr)-1] = '\0';
@@ -1797,6 +1831,7 @@ kdp_get_xnu_version(char *versionbuf)
 	return retval;
 }
 
+<<<<<<< HEAD
 void
 kdp_set_dump_info(const uint32_t flags, const char *filename, 
                   const char *destipstr, const char *routeripstr,
@@ -1910,6 +1945,9 @@ kdp_get_dump_info(uint32_t *flags, char *filename, char *destipstr,
 	}
 }
 
+=======
+extern char *inet_aton(const char *cp, struct in_addr *pin);
+>>>>>>> origin/10.5
 
 /* Primary dispatch routine for the system dump */
 void 
@@ -2088,8 +2126,19 @@ static boolean_t needs_serial_init = TRUE;
 static void
 kdp_serial_send(void *rpkt, unsigned int rpkt_len)
 {
+<<<<<<< HEAD
 	//	printf("tx\n");
 	kdp_serialize_packet((unsigned char *)rpkt, rpkt_len, pal_serial_putc);
+=======
+	if (needs_serial_init)
+	{
+	    serial_init();
+	    needs_serial_init = FALSE;
+	}
+	
+	//	printf("tx\n");
+	kdp_serialize_packet((unsigned char *)rpkt, rpkt_len, serial_putc);
+>>>>>>> origin/10.5
 }
 
 static void 
@@ -2098,12 +2147,25 @@ kdp_serial_receive(void *rpkt, unsigned int *rpkt_len, unsigned int timeout)
 	int readkar;
 	uint64_t now, deadline;
 	
+<<<<<<< HEAD
+=======
+	if (needs_serial_init)
+	{
+	    serial_init();
+	    needs_serial_init = FALSE;
+	}
+	
+>>>>>>> origin/10.5
 	clock_interval_to_deadline(timeout, 1000 * 1000 /* milliseconds */, &deadline);
 
 //	printf("rx\n");
 	for(clock_get_uptime(&now); now < deadline; clock_get_uptime(&now))
 	{
+<<<<<<< HEAD
 		readkar = pal_serial_getc();
+=======
+		readkar = serial_getc();
+>>>>>>> origin/10.5
 		if(readkar >= 0)
 		{
 			unsigned char *packet;
@@ -2118,6 +2180,7 @@ kdp_serial_receive(void *rpkt, unsigned int *rpkt_len, unsigned int timeout)
 	*rpkt_len = 0;
 }
 
+<<<<<<< HEAD
 static boolean_t
 kdp_serial_setmode(boolean_t active)
 {
@@ -2135,6 +2198,9 @@ kdp_serial_setmode(boolean_t active)
 
 static void 
 kdp_serial_callout(__unused void *arg, kdp_event_t event)
+=======
+static void kdp_serial_callout(__unused void *arg, kdp_event_t event)
+>>>>>>> origin/10.5
 {
     /* When we stop KDP, set the bit to re-initialize the console serial port
      * the next time we send/receive a KDP packet.  We don't do it on
@@ -2161,6 +2227,7 @@ kdp_serial_callout(__unused void *arg, kdp_event_t event)
 void
 kdp_init(void)
 {
+<<<<<<< HEAD
 	strlcpy(kdp_kernelversion_string, version, sizeof(kdp_kernelversion_string));
 
 	/* Relies on platform layer calling panic_init() before kdp_init() */
@@ -2209,6 +2276,26 @@ kdp_init(void)
 
 	kdp_register_callout(kdp_serial_callout, NULL);
         kdp_register_link(NULL, kdp_serial_setmode);
+=======
+#if CONFIG_SERIAL_KDP
+	char kdpname[80];
+	struct in_addr ipaddr;
+	struct ether_addr macaddr;
+
+#if CONFIG_EMBEDDED
+	//serial will be the debugger, unless match name is explicitly provided, and it's not "serial"
+	if(PE_parse_boot_argn("kdp_match_name", kdpname, sizeof(kdpname)) && strncmp(kdpname, "serial", sizeof(kdpname)) != 0)
+		return;
+#else
+	// serial must be explicitly requested
+	if(!PE_parse_boot_argn("kdp_match_name", kdpname, sizeof(kdpname)) || strncmp(kdpname, "serial", sizeof(kdpname)) != 0)
+		return;
+#endif
+	
+	kprintf("Intializing serial KDP\n");
+
+	kdp_register_callout(kdp_serial_callout, NULL);
+>>>>>>> origin/10.5
 	kdp_register_send_receive(kdp_serial_send, kdp_serial_receive);
 	
 	/* fake up an ip and mac for early serial debugging */
@@ -2218,6 +2305,7 @@ kdp_init(void)
 	macaddr.ether_addr_octet[3] = 'i';
 	macaddr.ether_addr_octet[4] = 'a';
 	macaddr.ether_addr_octet[5] = 'l';
+<<<<<<< HEAD
 	ipaddr.s_addr = KDP_SERIAL_IPADDR;
 	kdp_set_ip_and_mac_addresses(&ipaddr, &macaddr);
         
@@ -2307,3 +2395,9 @@ kdp_raise_exception(
 }
 
 
+=======
+	ipaddr.s_addr = 0xABADBABE;
+	kdp_set_ip_and_mac_addresses(&ipaddr, &macaddr);
+#endif /* CONFIG_SERIAL_KDP */
+}
+>>>>>>> origin/10.5

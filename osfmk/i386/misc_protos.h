@@ -149,7 +149,10 @@ extern void	rtc_clock_stepped(
 			uint32_t new_frequency,
 			uint32_t old_frequency);
 extern void	rtc_clock_napped(uint64_t, uint64_t);
+<<<<<<< HEAD
 extern void	rtc_clock_adjust(uint64_t);
+=======
+>>>>>>> origin/10.5
 
 extern void     pmap_lowmem_finalize(void);
 

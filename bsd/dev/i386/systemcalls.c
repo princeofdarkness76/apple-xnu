@@ -236,8 +236,18 @@ unix_syscall(x86_saved_state_t *state)
 		error, regs->eax, regs->edx);
 
 	uthread->uu_flag &= ~UT_NOTCANCELPT;
+<<<<<<< HEAD
 
 	if (__improbable(uthread->uu_lowpri_window)) {
+=======
+#if DEBUG
+	/*
+	 * if we're holding the funnel panic
+	 */
+	syscall_exit_funnelcheck();
+#endif /* DEBUG */
+	if (uthread->uu_lowpri_window) {
+>>>>>>> origin/10.5
 	        /*
 		 * task is marked as a low priority I/O type
 		 * and the I/O we issued while in this system call
@@ -245,6 +255,7 @@ unix_syscall(x86_saved_state_t *state)
 		 * delay in order to mitigate the impact of this
 		 * task on the normal operation of the system
 		 */
+<<<<<<< HEAD
 		throttle_lowpri_io(1);
 	}
 	if (__probable(!code_is_kdebug_trace(code)))
@@ -259,6 +270,9 @@ unix_syscall(x86_saved_state_t *state)
 #if PROC_REF_DEBUG
 	if (__improbable(uthread_get_proc_refcount(uthread) != 0)) {
 		panic("system call returned with uu_proc_refcount != 0");
+=======
+		throttle_lowpri_io(TRUE);
+>>>>>>> origin/10.5
 	}
 #endif
 
@@ -440,7 +454,16 @@ unix_syscall64(x86_saved_state_t *state)
 	
 	uthread->uu_flag &= ~UT_NOTCANCELPT;
 
+<<<<<<< HEAD
 	if (__improbable(uthread->uu_lowpri_window)) {
+=======
+	/*
+	 * if we're holding the funnel panic
+	 */
+	syscall_exit_funnelcheck();
+
+	if (uthread->uu_lowpri_window) {
+>>>>>>> origin/10.5
 	        /*
 		 * task is marked as a low priority I/O type
 		 * and the I/O we issued while in this system call
@@ -448,7 +471,11 @@ unix_syscall64(x86_saved_state_t *state)
 		 * delay in order to mitigate the impact of this
 		 * task on the normal operation of the system
 		 */
+<<<<<<< HEAD
 		throttle_lowpri_io(1);
+=======
+		throttle_lowpri_io(TRUE);
+>>>>>>> origin/10.5
 	}
 	if (__probable(!code_is_kdebug_trace(code)))
 		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, 
@@ -573,6 +600,14 @@ unix_syscall_return(int error)
 
 	uthread->uu_flag &= ~UT_NOTCANCELPT;
 
+<<<<<<< HEAD
+=======
+	/*
+	 * if we're holding the funnel panic
+	 */
+	syscall_exit_funnelcheck();
+
+>>>>>>> origin/10.5
 	if (uthread->uu_lowpri_window) {
 	        /*
 		 * task is marked as a low priority I/O type
@@ -581,7 +616,11 @@ unix_syscall_return(int error)
 		 * delay in order to mitigate the impact of this
 		 * task on the normal operation of the system
 		 */
+<<<<<<< HEAD
 		throttle_lowpri_io(1);
+=======
+		throttle_lowpri_io(TRUE);
+>>>>>>> origin/10.5
 	}
 	if (!code_is_kdebug_trace(code))
 		KERNEL_DEBUG_CONSTANT_IST(KDEBUG_TRACE, 

@@ -143,8 +143,11 @@ struct mount {
 	lck_mtx_t	mnt_renamelock;		/* mutex that serializes renames that change shape of tree */
 	vnode_t		mnt_devvp;		/* the device mounted on for local file systems */
 	uint32_t	mnt_devbsdunit;		/* the BSD unit number of the device */
+<<<<<<< HEAD
 	uint64_t	mnt_throttle_mask;	/* the throttle mask of what devices will be affected by I/O from this mnt */
 	void		*mnt_throttle_info;	/* used by the throttle code */
+=======
+>>>>>>> origin/10.5
 	int32_t		mnt_crossref;		/* refernces to cover lookups  crossing into mp */
 	int32_t		mnt_iterref;		/* refernces to cover iterations; drained makes it -ve  */
 #if CONFIG_TRIGGERS
@@ -191,7 +194,19 @@ struct mount {
 	 * volumes marked 'MNTK_AUTH_OPAQUE'.
 	 */
 	int		mnt_authcache_ttl;
+<<<<<<< HEAD
 	char		fstypename_override[MFSTYPENAMELEN];
+=======
+	/*
+	 * The proc structure pointer and process ID form a
+	 * sufficiently unique duple identifying the process
+	 * hosting this mount point. Set by vfs_markdependency()
+	 * and utilized in new_vnode() to avoid reclaiming vnodes
+	 * with this dependency (radar 5192010).
+	 */
+	pid_t		mnt_dependent_pid;
+	void		*mnt_dependent_process;
+>>>>>>> origin/10.5
 };
 
 /*
@@ -408,11 +423,21 @@ struct user32_statfs {
 };
 
 /*
+<<<<<<< HEAD
  * throttle I/Os are affected only by normal I/Os happening on the same spindle.  Currently we use a 64-bit integer to
  * represent what devices are affected, so we can handle at most 64 different spindles.  Since
  * throttled I/O is usually useful in non-server environment only, this number is enough in most cases.
  */
 #define LOWPRI_MAX_NUM_DEV 64
+=======
+ * throttle I/Os are affected only by normal I/Os happening on the same bsd device node.  For example, disk1s3 and
+ * disk1s5 are the same device node, while disk1s3 and disk2 are not (although disk2 might be a mounted disk image file
+ * and the disk image file resides on a partition in disk1).  The following constant defines the maximum number of
+ * different bsd device nodes the algorithm can consider, and larger numbers are rounded by this maximum.  Since
+ * throttled I/O is usually useful in non-server environment only, a small number 16 is enough in most cases
+ */
+#define LOWPRI_MAX_NUM_DEV 16
+>>>>>>> origin/10.5
 
 __BEGIN_DECLS
 
@@ -453,6 +478,7 @@ void mount_iterdrop(mount_t);
 void mount_iterdrain(mount_t);
 void mount_iterreset(mount_t);
 
+<<<<<<< HEAD
 /* tags a volume as not supporting extended readdir for NFS exports */
 #ifdef BSD_KERNEL_PRIVATE
 void mount_set_noreaddirext (mount_t);
@@ -493,6 +519,12 @@ extern int num_trailing_0(uint64_t n);
 extern lck_mtx_t * sync_mtx_lck;
 
 extern int sync_timeout;
+=======
+/* throttled I/O api */
+int throttle_get_io_policy(struct uthread **ut);
+extern void throttle_lowpri_io(boolean_t ok_to_sleep);
+int throttle_io_will_be_throttled(int lowpri_window_msecs, size_t devbsdunit);
+>>>>>>> origin/10.5
 
 __END_DECLS
 

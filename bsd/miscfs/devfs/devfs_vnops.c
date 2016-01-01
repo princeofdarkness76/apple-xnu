@@ -676,8 +676,18 @@ devfsspec_close(struct vnop_close_args *ap)
 {
     	struct vnode *	    	vp = ap->a_vp;
 	register devnode_t * 	dnp;
+<<<<<<< HEAD
 
 	if (vnode_isinuse(vp, 0)) {
+=======
+	struct timeval now;
+	int ref = 1;
+
+	if (vp->v_type == VBLK)
+		ref = 0;
+
+	if (vnode_isinuse(vp, ref)) {
+>>>>>>> origin/10.5
 	    DEVFS_LOCK();
 	    dnp = VTODN(vp);
 	    dn_times_now(dnp, 0);

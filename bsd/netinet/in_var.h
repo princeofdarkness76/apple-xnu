@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -110,6 +114,7 @@
  * of the structure and is assumed to be first.
  */
 struct in_ifaddr {
+<<<<<<< HEAD
 	struct ifaddr ia_ifa;		/* protocol-independent info */
 #define	ia_ifp		ia_ifa.ifa_ifp
 #define	ia_flags	ia_ifa.ifa_flags
@@ -125,6 +130,22 @@ struct in_ifaddr {
 #define	ia_broadaddr	ia_dstaddr
 	struct sockaddr_in ia_sockmask;	/* reserve space for general netmask */
 	TAILQ_ENTRY(in_ifaddr) ia_hash;	/* hash bucket entry */
+=======
+	struct ifaddr		ia_ifa;		/* protocol-independent info */
+#define	ia_ifp			ia_ifa.ifa_ifp
+#define	ia_flags		ia_ifa.ifa_flags
+						/* ia_{,sub}net{,mask} in host order */
+	u_long			ia_net;		/* network number of interface */
+	u_long			ia_netmask;	/* mask of net part */
+	u_long			ia_subnet;	/* subnet number, including net */
+	u_long			ia_subnetmask;	/* mask of subnet part */
+	struct in_addr		ia_netbroadcast; /* to recognize net broadcasts */
+	TAILQ_ENTRY(in_ifaddr)	ia_link;	/* tailq macro glue */
+	struct sockaddr_in	ia_addr;	/* reserve space for interface name */
+	struct sockaddr_in	ia_dstaddr;	/* reserve space for broadcast addr */
+#define	ia_broadaddr		ia_dstaddr
+	struct sockaddr_in	ia_sockmask;	/* reserve space for general netmask */
+>>>>>>> origin/10.5
 };
 
 #define	ifatoia(ifa)	((struct in_ifaddr *)(void *)(ifa))
@@ -522,10 +543,44 @@ struct inpcb;
 /*
  * Return values for imo_multi_filter().
  */
+<<<<<<< HEAD
 #define	MCAST_PASS		0	/* Pass */
 #define	MCAST_NOTGMEMBER	1	/* This host not a member of group */
 #define	MCAST_NOTSMEMBER	2	/* This host excluded source */
 #define	MCAST_MUTED		3	/* [deprecated] */
+=======
+#define IN_NEXT_MULTI(step, inm) \
+	/* struct in_multistep  step; */ \
+	/* struct in_multi *inm; */ \
+do { \
+	if (((inm) = (step).i_inm) != NULL) \
+		(step).i_inm = LIST_NEXT((step).i_inm, inm_link); \
+} while(0)
+
+#define IN_FIRST_MULTI(step, inm) \
+	/* struct in_multistep step; */ \
+	/* struct in_multi *inm; */ \
+do { \
+	(step).i_inm = LIST_FIRST(&in_multihead); \
+	IN_NEXT_MULTI((step), (inm)); \
+} while(0)
+
+struct	route;
+struct	in_multi *in_addmulti(struct in_addr *, struct ifnet *);
+void	in_delmulti(struct in_multi **);
+int	in_control(struct socket *, u_long, caddr_t, struct ifnet *,
+			struct proc *);
+void	in_rtqdrain(void);
+extern struct radix_node *in_validate(struct radix_node *);
+void	ip_input(struct mbuf *);
+int	in_ifadown(struct ifaddr *ifa, int);
+void	in_ifscrub(struct ifnet *, struct in_ifaddr *, int);
+int	ipflow_fastforward(struct mbuf *);
+void	ipflow_create(const struct route *, struct mbuf *);
+void	ipflow_slowtimo(void);
+
+#endif /* KERNEL_PRIVATE */
+>>>>>>> origin/10.5
 
 /*
  * Per-interface IPv4 structures.

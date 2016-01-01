@@ -784,9 +784,18 @@ struct ip6_mtuinfo {
 #define	IPV6CTL_MAXDYNROUTES	49
 #define	ICMPV6CTL_ND6_ONLINKNSRFC4861	50
 
+#define IPV6CTL_NEIGHBORGCTHRESH 46
+#define IPV6CTL_MAXIFPREFIXES	47
+#define IPV6CTL_MAXIFDEFROUTERS 48
+#define IPV6CTL_MAXDYNROUTES	49
+
 /* New entries should be added here from current IPV6CTL_MAXID value. */
 /* to define items, should talk with KAME guys first, for *BSD compatibility */
+<<<<<<< HEAD
 #define	IPV6CTL_MAXID		51
+=======
+#define IPV6CTL_MAXID		50
+>>>>>>> origin/10.5
 
 #ifdef BSD_KERNEL_PRIVATE
 #define	CTL_IPV6PROTO_NAMES { \

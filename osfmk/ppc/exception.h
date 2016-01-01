@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000 Apple Computer, Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Computer, Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -424,6 +428,7 @@ struct per_proc_info {
 =======
 >>>>>>> origin/10.3
 	/* PPC cache line boundary here - 140 */
+<<<<<<< HEAD
 	unsigned int	spcTRc;				/* Special trace count */
 	unsigned int	spcTRp;				/* Special trace buffer pointer */
 	unsigned int 	Uassist;			/* User Assist Word */
@@ -434,6 +439,13 @@ struct per_proc_info {
 	unsigned int	FAMintercept;		/* vmm FAM Exceptions to intercept */
 >>>>>>> origin/10.2
 	
+=======
+	void *			pp_cbfr;
+	void *			pp_chud;
+	rtclock_timer_t	rtclock_timer;
+	unsigned int	ppbbTaskEnv;		/* BlueBox Task Environment */
+    
+>>>>>>> origin/10.5
 	/* PPC cache line boundary here - 160 */
 	time_base_enable_t	time_base_enable;
 	unsigned int	rsrvd164[7];		/* Reserved slots */

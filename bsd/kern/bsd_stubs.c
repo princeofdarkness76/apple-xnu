@@ -354,6 +354,7 @@ cdevsw_setkqueueok(int index, struct cdevsw * csw, int use_offset)
 int
 bsd_hostname(char * buf, int bufsize, int * len)
 {
+<<<<<<< HEAD
 	/*
 	 * "hostname" is null-terminated, and "hostnamelen" is equivalent to strlen(hostname).
 	 */
@@ -361,6 +362,12 @@ bsd_hostname(char * buf, int bufsize, int * len)
 		strlcpy(buf, hostname, bufsize);
 		*len = hostnamelen;
 		return 0;
+=======
+	char namep[16];
+
+	if (PE_parse_boot_argn("-s", namep, sizeof(namep))) {
+		return(1);
+>>>>>>> origin/10.5
 	} else {
 		return ENAMETOOLONG;
 	}

@@ -907,6 +907,59 @@ OSMetaClass::applyToInstances(OSOrderedSet * set,
     	IODelete(nextIndex, typeof(nextIndex[0]), maxDepth);
     	IODelete(sets, typeof(sets[0]), maxDepth);
     }
+<<<<<<< HEAD
+=======
+
+    do {
+
+	kmods = OSCollectionIterator::withCollection(sKModClassesDict);
+	if (!kmods)
+	    break;
+
+        didUnload = false;
+        while ( (kmodName = (OSSymbol *) kmods->getNextObject()) ) {
+
+            if (ki) {
+                kfree(ki, sizeof(kmod_info_t));
+                ki = 0;
+            }
+
+            ki = kmod_lookupbyname_locked((char *)kmodName->getCStringNoCopy());
+            if (!ki)
+                continue;
+
+            if (ki->reference_count) {
+                 continue;
+            }
+
+            kmodClasses = OSDynamicCast(OSSet,
+                                sKModClassesDict->getObject(kmodName));
+            classes = OSCollectionIterator::withCollection(kmodClasses);
+            if (!classes)
+                continue;
+    
+            while ((checkClass = (OSMetaClass *) classes->getNextObject())
+              && (0 == checkClass->getInstanceCount()))
+                {}
+            classes->release();
+
+            if (0 == checkClass) {
+                record_kext_unload(ki->id);
+                OSRuntimeUnloadCPP(ki, 0);	// call destructors
+                ret = kmod_destroy(host_priv_self(), ki->id);
+                didUnload = true;
+            }
+
+        }
+
+        kmods->release();
+
+    } while (didUnload);
+
+    mutex_unlock(loadLock);
+
+    kmod_unload_cache();
+>>>>>>> origin/10.5
 }
 
 void

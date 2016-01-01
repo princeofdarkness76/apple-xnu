@@ -374,6 +374,7 @@ __END_DECLS
 #define CPU_SUBTYPE_ARM_V5TEJ           ((cpu_subtype_t) 7)
 #define CPU_SUBTYPE_ARM_XSCALE		((cpu_subtype_t) 8)
 #define CPU_SUBTYPE_ARM_V7		((cpu_subtype_t) 9)
+<<<<<<< HEAD
 #define CPU_SUBTYPE_ARM_V7F		((cpu_subtype_t) 10) /* Cortex A9 */
 #define CPU_SUBTYPE_ARM_V7S		((cpu_subtype_t) 11) /* Swift */
 #define CPU_SUBTYPE_ARM_V7K		((cpu_subtype_t) 12)
@@ -390,6 +391,8 @@ __END_DECLS
 #define CPU_SUBTYPE_ARM64_V8            ((cpu_subtype_t) 1)
 
 #endif /* !__ASSEMBLER__ */
+=======
+>>>>>>> origin/10.5
 
 /*
  *	CPU families (sysctl hw.cpufamily)
@@ -402,6 +405,7 @@ __END_DECLS
  * Use feature flags (eg, hw.optional.altivec) to test for optional
  * functionality.
  */
+<<<<<<< HEAD
 #define CPUFAMILY_UNKNOWN   		0
 #define CPUFAMILY_POWERPC_G3		0xcee41549
 #define CPUFAMILY_POWERPC_G4		0x77c184ae
@@ -437,5 +441,28 @@ __END_DECLS
 #define CPUFAMILY_INTEL_CORE	CPUFAMILY_INTEL_YONAH
 #define CPUFAMILY_INTEL_CORE2	CPUFAMILY_INTEL_MEROM
 
+=======
+#define CPUFAMILY_UNKNOWN    0
+#define CPUFAMILY_POWERPC_G3 0xcee41549
+#define CPUFAMILY_POWERPC_G4 0x77c184ae
+#define CPUFAMILY_POWERPC_G5 0xed76d8aa
+#define CPUFAMILY_INTEL_6_13 0xaa33392b
+#define CPUFAMILY_INTEL_6_14 0x73d67300  /* "Intel Core Solo" and "Intel Core Duo" (32-bit Pentium-M with SSE3) */
+#define CPUFAMILY_INTEL_6_15 0x426f69ef  /* "Intel Core 2 Duo" */
+#define CPUFAMILY_INTEL_6_23 0x78ea4fbc  /* Penryn */
+#define CPUFAMILY_INTEL_6_26 0x6b5a4cd2  /* Nehalem */
+#define CPUFAMILY_ARM_9      0xe73283ae
+#define CPUFAMILY_ARM_11     0x8ff620d8
+#define CPUFAMILY_ARM_XSCALE 0x53b005f5
+#define CPUFAMILY_ARM_13     0x0cc90e64
+
+#define CPUFAMILY_INTEL_YONAH	CPUFAMILY_INTEL_6_14
+#define CPUFAMILY_INTEL_MEROM	CPUFAMILY_INTEL_6_15
+#define CPUFAMILY_INTEL_PENRYN	CPUFAMILY_INTEL_6_23
+#define CPUFAMILY_INTEL_NEHALEM	CPUFAMILY_INTEL_6_26
+
+#define CPUFAMILY_INTEL_CORE	CPUFAMILY_INTEL_6_14
+#define CPUFAMILY_INTEL_CORE2	CPUFAMILY_INTEL_6_15
+>>>>>>> origin/10.5
 
 #endif	/* _MACH_MACHINE_H_ */

@@ -719,6 +719,7 @@ fasttrap_return_common(x86_saved_state_t *regs, user_addr_t pc, pid_t pid,
 		    id->fti_probe->ftp_fsize)
 			continue;
 
+<<<<<<< HEAD
 		/*
 		 * Provide a hint to the stack trace functions to add the
 		 * following pc to the top of the stack since it's missing
@@ -726,6 +727,8 @@ fasttrap_return_common(x86_saved_state_t *regs, user_addr_t pc, pid_t pid,
 		 */
 		cookie = dtrace_interrupt_disable();
 		cpu_core[CPU->cpu_id].cpuc_missing_tos = pc;
+=======
+>>>>>>> origin/10.5
 		if (ISSET(current_proc()->p_lflag, P_LNOATTACH)) {
 			dtrace_probe(dtrace_probeid_error, 0 /* state */, id->fti_probe->ftp_id, 
 				     1 /* ndx */, -1 /* offset */, DTRACEFLT_UPRIV);

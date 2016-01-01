@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -143,12 +147,15 @@
 #include <netinet/in.h>
 #include <netinet/in_var.h>
 #include <netinet/ip_var.h>
+<<<<<<< HEAD
 #include <netinet/ip6.h>
 #include <netinet/ip_var.h>
 #include <netinet/tcp.h>
 #include <netinet/tcp_var.h>
 #include <netinet/udp.h>
 #include <netinet/udp_var.h>
+=======
+>>>>>>> origin/10.5
 #if INET6
 #include <netinet6/in6_var.h>
 #include <netinet6/in6_ifattach.h>
@@ -212,6 +219,7 @@ LIST_HEAD(, if_clone) if_cloners = LIST_HEAD_INITIALIZER(if_cloners);
 
 static struct ifaddr *ifa_ifwithnet_common(const struct sockaddr *,
     unsigned int);
+<<<<<<< HEAD
 static void if_attach_ifa_common(struct ifnet *, struct ifaddr *, int);
 static void if_detach_ifa_common(struct ifnet *, struct ifaddr *, int);
 
@@ -264,6 +272,8 @@ struct ifmultihead ifma_lostlist = LIST_HEAD_INITIALIZER(ifma_lostlist);
 
 static int	if_cloners_count;
 LIST_HEAD(, if_clone) if_cloners = LIST_HEAD_INITIALIZER(if_cloners);
+=======
+>>>>>>> origin/10.5
 
 #if INET6
 /*
@@ -891,6 +901,7 @@ if_next_index(void)
 }
 
 /*
+<<<<<<< HEAD
  * Create a clone network interface.
  */
 static int
@@ -1821,13 +1832,95 @@ if_qflush_sc(struct ifnet *ifp, mbuf_svc_class_t sc, u_int32_t flow,
  */
 struct ifnet *
 ifunit(const char *name)
+=======
+ * Locate the source address of an interface based on a complete address.
+ */
+struct ifaddr *
+ifa_ifwithaddr_scoped(const struct sockaddr *addr, unsigned int ifscope)
+{
+	struct ifaddr *result = NULL;
+	struct ifnet *ifp;
+
+	if (ifscope == IFSCOPE_NONE)
+		return (ifa_ifwithaddr(addr));
+
+	ifnet_head_lock_shared();
+	if (ifscope > (unsigned int)if_index) {
+		ifnet_head_done();
+		return (NULL);
+	}
+
+	ifp = ifindex2ifnet[ifscope];
+	if (ifp != NULL) {
+		struct ifaddr *ifa = NULL;
+
+		/*
+		 * This is suboptimal; there should be a better way
+		 * to search for a given address of an interface.
+		 */
+		ifnet_lock_shared(ifp);
+		for (ifa = ifp->if_addrhead.tqh_first; ifa != NULL;
+		    ifa = ifa->ifa_link.tqe_next) {
+			if (ifa->ifa_addr->sa_family != addr->sa_family)
+				continue;
+			if (equal(addr, ifa->ifa_addr)) {
+				result = ifa;
+				break;
+			}
+			if ((ifp->if_flags & IFF_BROADCAST) &&
+			    ifa->ifa_broadaddr != NULL &&
+			    /* IP6 doesn't have broadcast */
+			    ifa->ifa_broadaddr->sa_len != 0 &&
+			    equal(ifa->ifa_broadaddr, addr)) {
+				result = ifa;
+				break;
+			}
+		}
+		if (result != NULL)
+			ifaref(result);
+		ifnet_lock_done(ifp);
+	}
+	ifnet_head_done();
+
+	return (result);
+}
+
+struct ifaddr *
+ifa_ifwithnet(const struct sockaddr *addr)
+{
+	return (ifa_ifwithnet_common(addr, IFSCOPE_NONE));
+}
+
+struct ifaddr *
+ifa_ifwithnet_scoped(const struct sockaddr *addr, unsigned int ifscope)
+{
+	return (ifa_ifwithnet_common(addr, ifscope));
+}
+
+/*
+ * Find an interface on a specific network.  If many, choice
+ * is most specific found.
+ */
+static struct ifaddr *
+ifa_ifwithnet_common(const struct sockaddr *addr, unsigned int ifscope)
+>>>>>>> origin/10.5
 {
 	char namebuf[IFNAMSIZ + 1];
 	const char *cp;
 	struct ifnet *ifp;
+<<<<<<< HEAD
 	int unit;
 	unsigned len, m;
 	char c;
+=======
+	struct ifaddr *ifa = NULL;
+	struct ifaddr *ifa_maybe = (struct ifaddr *) 0;
+	u_int af = addr->sa_family;
+	const char *addr_data = addr->sa_data, *cplim;
+
+	if (!ip_doscopedroute || addr->sa_family != AF_INET)
+		ifscope = IFSCOPE_NONE;
+>>>>>>> origin/10.5
 
 	len = strlen(name);
 	if (len < 2 || len > IFNAMSIZ)
@@ -1885,6 +1978,62 @@ if_withname(struct sockaddr *sa)
 	 * and there might not be room to put the trailing null anyway, so we
 	 * make a local copy that we know we can null terminate safely.
 	 */
+<<<<<<< HEAD
+=======
+	for (ifp = ifnet_head.tqh_first; ifp; ifp = ifp->if_link.tqe_next) {
+		ifnet_lock_shared(ifp);
+		for (ifa = ifp->if_addrhead.tqh_first; ifa;
+		     ifa = ifa->ifa_link.tqe_next) {
+			const char *cp, *cp2, *cp3;
+
+			if (ifa->ifa_addr->sa_family != af)
+next:				continue;
+#ifndef __APPLE__
+/* This breaks tunneling application trying to install a route with
+ * a specific subnet and the local address as the destination
+ * It's breaks binary compatibility with previous version of MacOS X
+ */
+			if (
+ 
+#if INET6 /* XXX: for maching gif tunnel dst as routing entry gateway */
+			    addr->sa_family != AF_INET6 &&
+#endif
+			    ifp->if_flags & IFF_POINTOPOINT) {
+				/*
+				 * This is a bit broken as it doesn't
+				 * take into account that the remote end may
+				 * be a single node in the network we are
+				 * looking for.
+				 * The trouble is that we don't know the
+				 * netmask for the remote end.
+				 */
+				if (ifa->ifa_dstaddr != 0
+				    && equal(addr, ifa->ifa_dstaddr)) {
+				    break;
+ 				}
+			} else
+#endif /* __APPLE__*/
+			{
+				/*
+				 * If we're looking up with a scope,
+				 * find using a matching interface.
+				 */
+				if (ifscope != IFSCOPE_NONE &&
+				    ifp->if_index != ifscope)
+					continue;
+
+				/*
+				 * if we have a special address handler,
+				 * then use it instead of the generic one.
+				 */
+	          		if (ifa->ifa_claim_addr) {
+					if (ifa->ifa_claim_addr(ifa, addr)) {
+						break;
+					} else {
+						continue;
+					}
+				}
+>>>>>>> origin/10.5
 
 	bcopy(sdl->sdl_data, ifname, sdl->sdl_nlen);
 	ifname[sdl->sdl_nlen] = '\0';

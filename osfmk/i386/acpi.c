@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -48,12 +52,17 @@
 #include <i386/mp.h>
 #include <i386/mp_desc.h>
 #include <i386/serial_io.h>
+<<<<<<< HEAD
 #if CONFIG_MCA
 #include <i386/machine_check.h>
 #endif
 #include <i386/pmCPU.h>
 
 #include <i386/tsc.h>
+=======
+#include <i386/machine_check.h>
+#include <i386/pmCPU.h>
+>>>>>>> origin/10.5
 
 #include <kern/cpu_data.h>
 #include <kern/machine.h>
@@ -164,6 +173,7 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 #if HIBERNATION
 	acpi_hibernate_callback_data_t data;
 #endif
+<<<<<<< HEAD
 	boolean_t did_hibernate;
 	unsigned int	cpu;
 	kern_return_t	rc;
@@ -187,6 +197,27 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 	}
 
 	/* shutdown local APIC before passing control to firmware */
+=======
+	unsigned int	cpu;
+	kern_return_t	rc;
+	unsigned int	my_cpu;
+
+	kprintf("acpi_sleep_kernel hib=%d\n",
+			current_cpu_datap()->cpu_hibernate);
+
+	/* Geta ll CPUs to be in the "off" state */
+	my_cpu = cpu_number();
+	for (cpu = 0; cpu < real_ncpus; cpu += 1) {
+	    	if (cpu == my_cpu)
+			continue;
+		rc = pmCPUExitHaltToOff(cpu);
+		if (rc != KERN_SUCCESS)
+		    panic("Error %d trying to transition CPU %d to OFF",
+			  rc, cpu);
+	}
+
+	/* shutdown local APIC before passing control to BIOS */
+>>>>>>> origin/10.5
 	lapic_shutdown();
 
 #if HIBERNATION
@@ -196,11 +227,14 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 
 	/* Save power management timer state */
 	pmTimerSave();
+<<<<<<< HEAD
 
 #if HYPERVISOR
 	/* Notify hypervisor that we are about to sleep */
 	hv_suspend();
 #endif
+=======
+>>>>>>> origin/10.5
 
 #if CONFIG_VMX
 	/* 
@@ -234,12 +268,15 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 	acpi_sleep_cpu(func, refcon);
 #endif
 
+<<<<<<< HEAD
 	start = mach_absolute_time();
 
 	x86_64_post_sleep(old_cr3);
 
 #endif /* CONFIG_SLEEP */
 
+=======
+>>>>>>> origin/10.5
 	/* Reset UART if kprintf is enabled.
 	 * However kprintf should not be used before rtc_sleep_wakeup()
 	 * for compatibility with firewire kprintf.
@@ -304,6 +341,12 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 	elapsed += mach_absolute_time() - start;
 	acpi_wake_abstime = mach_absolute_time();
 
+	/*
+	 * Go through all of the CPUs and mark them as requiring
+	 * a full restart.
+	 */
+	pmMarkAllCPUsOff();
+
 	/* let the realtime clock reset */
 	rtc_sleep_wakeup(acpi_sleep_abstime);
 	acpi_wake_postrebase_abstime = mach_absolute_time();
@@ -334,6 +377,7 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 		hibernate_machine_init();
 		KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 2) | DBG_FUNC_END, 0, 0, 0, 0, 0);
 
+<<<<<<< HEAD
 		current_cpu_datap()->cpu_hibernate = 0;
 
 		KERNEL_DEBUG_CONSTANT(IOKDBG_CODE(DBG_HIBERNATE, 0) | DBG_FUNC_END, 0, 0, 0, 0, 0);
@@ -343,6 +387,17 @@ acpi_sleep_kernel(acpi_sleep_callback func, void *refcon)
 
 	/* Restore power management register state */
 	pmCPUMarkRunning(current_cpu_datap());
+=======
+	/* re-enable and re-init local apic */
+	if (lapic_probe())
+		lapic_configure();
+
+	/* Restore power management register state */
+	pmCPUMarkRunning(current_cpu_datap());
+
+	/* Restore power management timer state */
+	pmTimerRestore();
+>>>>>>> origin/10.5
 
 	/* Restore power management timer state */
 	pmTimerRestore();

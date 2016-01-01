@@ -181,6 +181,11 @@ Optimization Routines
 
 #include <sys/types.h>
 #include <sys/buf.h>
+<<<<<<< HEAD
+=======
+#include <sys/systm.h>
+#include <sys/disk.h>
+>>>>>>> origin/10.5
 
 #if !HFS_ALLOC_TEST
 
@@ -5762,7 +5767,35 @@ static void remove_free_extent_cache(struct hfsmount *hfsmp, u_int32_t startBloc
 
 	endBlock = startBlock + blockCount;
 
+<<<<<<< HEAD
 	lck_spin_lock(&hfsmp->vcbFreeExtLock);
+=======
+Inputs:
+	vcb				Pointer to volume where space is to be freed
+	startingBlock	First block number to mark as freed
+	numBlocks		Number of blocks to mark as freed
+_______________________________________________________________________
+*/
+__private_extern__
+OSErr BlockMarkFree(
+	ExtendedVCB		*vcb,
+	u_int32_t		startingBlock,
+	register u_int32_t	numBlocks)
+{
+	OSErr			err;
+	register u_int32_t	*currentWord;	//	Pointer to current word within bitmap block
+	register u_int32_t	wordsLeft;		//	Number of words left in this bitmap block
+	register u_int32_t	bitMask;		//	Word with given bits already set (ready to OR in)
+	u_int32_t			firstBit;		//	Bit index within word of first bit to allocate
+	u_int32_t			numBits;		//	Number of bits in word to allocate
+	u_int32_t			*buffer = NULL;
+	u_int32_t  blockRef;
+	u_int32_t  bitsPerBlock;
+	u_int32_t  wordsPerBlock;
+    // XXXdbg
+	struct hfsmount *hfsmp = VCBTOHFS(vcb);
+	dk_discard_t discard;
+>>>>>>> origin/10.5
 
 	/*
 	 * Iterate over all of the extents in the free extent cache, removing or
@@ -5839,7 +5872,14 @@ static void remove_free_extent_cache(struct hfsmount *hfsmp, u_int32_t startBloc
 		}
 	}
 
+<<<<<<< HEAD
 	lck_spin_unlock(&hfsmp->vcbFreeExtLock);
+=======
+	memset(&discard, 0, sizeof(dk_discard_t));
+	discard.offset = (uint64_t)startingBlock * (uint64_t)vcb->blockSize;
+	discard.length = (uint64_t)numBlocks * (uint64_t)vcb->blockSize;
+
+>>>>>>> origin/10.5
 
 	sanity_check_free_ext(hfsmp, 0);
 
@@ -6038,7 +6078,17 @@ static int clzll(uint64_t x)
 		return __builtin_clzll(x);
 }
 
+<<<<<<< HEAD
 #if !HFS_ALLOC_TEST
+=======
+	if (err == noErr) {
+		// it doesn't matter if this fails, it's just informational anyway
+		VNOP_IOCTL(vcb->hfs_devvp, DKIOCDISCARD, (caddr_t)&discard, 0, vfs_context_kernel());
+	}
+
+
+	return err;
+>>>>>>> origin/10.5
 
 static errno_t get_more_bits(bitmap_context_t *bitmap_ctx)
 {

@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2010, 2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -802,7 +806,12 @@ task_create_internal(
 	new_task->thread_count = 0;
 	new_task->active_thread_count = 0;
 	new_task->user_stop_count = 0;
+<<<<<<< HEAD
 	new_task->legacy_stop_count = 0;
+=======
+	new_task->pset_hint = PROCESSOR_SET_NULL;
+	new_task->role = TASK_UNSPECIFIED;
+>>>>>>> origin/10.5
 	new_task->active = TRUE;
 	new_task->halting = FALSE;
 	new_task->user_data = NULL;

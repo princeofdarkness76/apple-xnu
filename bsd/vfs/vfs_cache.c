@@ -428,7 +428,10 @@ again:
 			if (fixhardlink) {
 				if ((ret == 0) && (VATTR_IS_SUPPORTED(&va, va_name))) {
 					str = va.va_name;
+<<<<<<< HEAD
 					vnode_update_identity(vp, NULL, str, strlen(str), 0, VNODE_UPDATE_NAME);
+=======
+>>>>>>> origin/10.5
 				} else if (vp->v_name) {
 					str = vp->v_name;
 					ret = 0;
@@ -438,14 +441,19 @@ again:
 				}
 				len = strlen(str);
 
+<<<<<<< HEAD
 				/*
 				 * Check that there's enough space.
 				 */
+=======
+				/* Check that there's enough space. */
+>>>>>>> origin/10.5
 				if ((end - buff) < (len + 1)) {
 					ret = ENOSPC;
 				} else {
 					/* Copy the name backwards. */
 					str += len;
+<<<<<<< HEAD
 
 					for (; len > 0; len--) {
 						*--end = *--str;
@@ -453,6 +461,13 @@ again:
 					/*
 					 * Add a path separator.
 					 */
+=======
+					
+					for (; len > 0; len--) {
+						*--end = *--str;
+					}
+					/* Add a path separator. */
+>>>>>>> origin/10.5
 					*--end = '/';
 				}
 bad_news:
@@ -1069,7 +1084,11 @@ boolean_t vnode_cache_is_stale(vnode_t vp)
  */
 int 
 cache_lookup_path(struct nameidata *ndp, struct componentname *cnp, vnode_t dp, 
+<<<<<<< HEAD
 		vfs_context_t ctx, int *dp_authorized, vnode_t last_dp)
+=======
+		vfs_context_t ctx, int *trailing_slash, int *dp_authorized, vnode_t last_dp)
+>>>>>>> origin/10.5
 {
 	char		*cp;		/* pointer into pathname argument */
 	int		vid;
@@ -1079,13 +1098,16 @@ cache_lookup_path(struct nameidata *ndp, struct componentname *cnp, vnode_t dp,
 	kauth_cred_t	ucred;
 	boolean_t	ttl_enabled = FALSE;
 	struct timeval	tv;
-        mount_t		mp;
+    mount_t		mp;
 	unsigned int	hash;
 	int		error = 0;
+<<<<<<< HEAD
 
 #if CONFIG_TRIGGERS
 	vnode_t 	trigger_vp;
 #endif /* CONFIG_TRIGGERS */
+=======
+>>>>>>> origin/10.5
 
 	ucred = vfs_context_ucred(ctx);
 	ndp->ni_flag &= ~(NAMEI_TRAILINGSLASH);
@@ -1185,7 +1207,11 @@ skiprsrcfork:
 		if (!(cnp->cn_flags & DONOTAUTH)) {
 			error = mac_vnode_check_lookup(ctx, dp, cnp);
 			if (error) {
+<<<<<<< HEAD
 				NAME_CACHE_UNLOCK();
+=======
+				name_cache_unlock();
+>>>>>>> origin/10.5
 				goto errorout;
 			}
 		}
@@ -1343,7 +1369,11 @@ need_dp:
 				 * immediately w/o waiting... it always succeeds
 				 */
 				vnode_get(dp);
+<<<<<<< HEAD
 			} else if ((error = vnode_getwithvid_drainok(dp, vid))) {
+=======
+			} else if ( (vnode_getwithvid(dp, vid)) ) {
+>>>>>>> origin/10.5
 				/*
 				 * failure indicates the vnode
 				 * changed identity or is being
@@ -1353,6 +1383,7 @@ need_dp:
 				 * don't necessarily return ENOENT, though, because
 				 * we really want to go back to disk and make sure it's
 				 * there or not if someone else is changing this
+<<<<<<< HEAD
 				 * vnode. That being said, the one case where we do want
 				 * to return ENOENT is when the vnode's mount point is
 				 * in the process of unmounting and we might cause a deadlock
@@ -1365,6 +1396,11 @@ need_dp:
 				} else {
 					error = ERECYCLE;
 				}
+=======
+				 * vnode.
+				 */
+				error = ERECYCLE;
+>>>>>>> origin/10.5
 				goto errorout;
 			}
 		}
@@ -1391,6 +1427,7 @@ need_dp:
 	ndp->ni_dvp = dp;
 	ndp->ni_vp  = vp;
 
+<<<<<<< HEAD
 #if CONFIG_TRIGGERS
 	trigger_vp = vp ? vp : dp;
 	if ((error == 0) && (trigger_vp != NULLVP) && vnode_isdir(trigger_vp)) {
@@ -1405,6 +1442,8 @@ need_dp:
 	} 
 #endif /* CONFIG_TRIGGERS */
 
+=======
+>>>>>>> origin/10.5
 errorout:
 	/* 
 	 * If we came into cache_lookup_path after an iteration of the lookup loop that
@@ -2006,10 +2045,14 @@ cache_purge(vnode_t vp)
         struct namecache *ncp;
 	kauth_cred_t tcred = NULL;
 
+<<<<<<< HEAD
 	if ((LIST_FIRST(&vp->v_nclinks) == NULL) && 
 			(LIST_FIRST(&vp->v_ncchildren) == NULL) && 
 			(vp->v_cred == NOCRED) &&
 			(vp->v_parent == NULLVP))
+=======
+	if ((LIST_FIRST(&vp->v_nclinks) == NULL) && (LIST_FIRST(&vp->v_ncchildren) == NULL) && (vp->v_cred == NOCRED))
+>>>>>>> origin/10.5
 	        return;
 
 	NAME_CACHE_LOCK();

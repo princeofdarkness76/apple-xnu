@@ -360,6 +360,7 @@ LEAF_ENTRY(hw_lock_to)
 	 * and then spin re-checking the lock but pausing
 	 * every so many (INNER_LOOP_COUNT) spins to check for timeout.
 	 */
+<<<<<<< HEAD
 	push	%r9
 	lfence
 	rdtsc				/* read cyclecount into %edx:%eax */
@@ -367,6 +368,20 @@ LEAF_ENTRY(hw_lock_to)
 	orq	%rdx, %rax		/* load 64-bit quantity into %rax */
 	addq	%rax, %rsi		/* %rsi is the timeout expiry */
 	
+=======
+	movl	L_ARG1,%ecx		/* fetch timeout */
+	push	%edi
+	push	%ebx
+	mov	%edx,%edi
+
+	lfence
+	rdtsc				/* read cyclecount into %edx:%eax */
+	lfence
+	addl	%ecx,%eax		/* fetch and timeout */
+	adcl	$0,%edx			/* add carry */
+	mov	%edx,%ecx
+	mov	%eax,%ebx		/* %ecx:%ebx is the timeout expiry */
+>>>>>>> origin/10.5
 4:
 	/*
 	 * The inner-loop spin to look for the lock being freed.
@@ -385,9 +400,14 @@ LEAF_ENTRY(hw_lock_to)
 	 */
 	lfence
 	rdtsc				/* cyclecount into %edx:%eax */
+<<<<<<< HEAD
 	shlq	$32, %rdx
 	orq	%rdx, %rax		/* load 64-bit quantity into %rax */
 	cmpq	%rsi, %rax		/* compare to timeout */
+=======
+	lfence
+	cmpl	%ecx,%edx		/* compare high-order 32-bits */
+>>>>>>> origin/10.5
 	jb	4b			/* continue spinning if less, or */
 	xor	%rax,%rax		/* with 0 return value */
 	pop	%r9

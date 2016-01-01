@@ -56,11 +56,26 @@
 #include <vm/vm_pageout.h>
 #include <vm/vm_protos.h>
 
+<<<<<<< HEAD
 #if CONFIG_FREEZE
 #include <vm/vm_map.h>
 #endif /* CONFIG_FREEZE */
 
 #include <sys/kern_memorystatus.h> 
+=======
+extern unsigned int    vm_page_free_count;
+extern unsigned int    vm_page_active_count;
+extern unsigned int    vm_page_inactive_count;
+extern unsigned int    vm_page_purgeable_count;
+extern unsigned int    vm_page_wire_count;
+
+static void kern_memorystatus_thread(void);
+
+int kern_memorystatus_wakeup = 0;
+int kern_memorystatus_level = 0;
+int kern_memorystatus_last_level = 0;
+unsigned int kern_memorystatus_kev_failure_count = 0;
+>>>>>>> origin/10.5
 
 #if CONFIG_JETSAM
 /* For logging clarity */
@@ -470,11 +485,23 @@ extern struct knote *vm_find_knote_from_pid(pid_t, struct klist *);
 static void
 memorystatus_debug_dump_bucket_locked (unsigned int bucket_index)
 {
+<<<<<<< HEAD
 	proc_t p = NULL;
 	uint32_t pages = 0;
 	uint32_t pages_in_mb = 0;
 	unsigned int b = bucket_index;
 	boolean_t traverse_all_buckets = FALSE;
+=======
+	struct kev_msg ev_msg;
+	struct {
+		uint32_t free_pages;
+		uint32_t active_pages;
+		uint32_t inactive_pages;
+		uint32_t purgeable_pages;
+		uint32_t wired_pages;
+	} data;
+	int ret;
+>>>>>>> origin/10.5
 
         if (bucket_index >= MEMSTAT_BUCKET_COUNT) {
 		traverse_all_buckets = TRUE;
@@ -580,11 +607,23 @@ sysctl_memorystatus_highwater_enable SYSCTL_HANDLER_ARGS
 	while (p) {
 		boolean_t trigger_exception;
 
+<<<<<<< HEAD
 		if (enable) {
 			/*
 			 * No need to consider P_MEMSTAT_MEMLIMIT_BACKGROUND anymore.
 			 * Background limits are described via the inactive limit slots.
 			 */
+=======
+		ev_msg.dv[0].data_length = sizeof data;
+		ev_msg.dv[0].data_ptr = &data;
+		ev_msg.dv[1].data_length = 0;
+
+		data.free_pages = vm_page_free_count;
+		data.active_pages = vm_page_active_count;
+		data.inactive_pages = vm_page_inactive_count;
+		data.purgeable_pages = vm_page_purgeable_count;
+		data.wired_pages = vm_page_wire_count;
+>>>>>>> origin/10.5
 
 			if (proc_jetsam_state_is_active_locked(p) == TRUE) {
 				CACHE_ACTIVE_LIMITS_LOCKED(p, trigger_exception);
@@ -602,6 +641,7 @@ sysctl_memorystatus_highwater_enable SYSCTL_HANDLER_ARGS
 			trigger_exception = TRUE;
 		}
 
+<<<<<<< HEAD
 		/*
 		 * Enforce the cached limit by writing to the ledger.
 		 */
@@ -763,6 +803,11 @@ sysctl_memorystatus_vm_pressure_send SYSCTL_HANDLER_ARGS
 
 	return ret;
 }
+=======
+		if (kern_memorystatus_level >= kern_memorystatus_last_level + 5 ||
+		    kern_memorystatus_level <= kern_memorystatus_last_level - 5)
+			continue;
+>>>>>>> origin/10.5
 
 SYSCTL_PROC(_kern, OID_AUTO, memorystatus_vm_pressure_send, CTLTYPE_INT|CTLFLAG_WR|CTLFLAG_LOCKED|CTLFLAG_MASKED,
     0, 0, &sysctl_memorystatus_vm_pressure_send, "I", "");

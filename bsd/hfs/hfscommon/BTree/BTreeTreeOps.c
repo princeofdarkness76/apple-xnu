@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -638,7 +642,11 @@ static OSErr	InsertNode	(BTreeControlBlockPtr	 btreePtr,
 	
 	if ( !recordFit && leftNodeNum > 0 )
 	{
+<<<<<<< HEAD
 		PanicIf ( leftNode->buffer != nil, " InsertNode: leftNode already acquired!");
+=======
+		PanicIf ( leftNode->buffer != nil, "\p InsertNode: leftNode already acquired!");
+>>>>>>> origin/10.5
 
 		if ( leftNode->buffer == nil )
 		{

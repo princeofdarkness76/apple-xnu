@@ -1899,12 +1899,24 @@ ip6_copyexthdr(struct mbuf **mp, caddr_t hdr, int hlen)
 	if (m == NULL)
 		return (ENOBUFS);
 
+<<<<<<< HEAD
 	if (hlen > MLEN) {
 		MCLGET(m, M_DONTWAIT);
 		if (!(m->m_flags & M_EXT)) {
 			m_free(m);
 			return (ENOBUFS);
 		}
+=======
+done:
+	if (!locked)
+		lck_mtx_unlock(ip6_mutex);
+	if (ro == &ip6route && ro->ro_rt) { /* brace necessary for rtfree */
+		rtfree(ro->ro_rt);
+		ro->ro_rt = NULL;
+	} else if (ro_pmtu == &ip6route && ro_pmtu->ro_rt) {
+		rtfree(ro_pmtu->ro_rt);
+		ro_pmtu->ro_rt = NULL;
+>>>>>>> origin/10.5
 	}
 	m->m_len = hlen;
 	if (hdr != NULL)
@@ -3445,9 +3457,108 @@ im6o_remref(struct ip6_moptions *im6o)
 	for (i = 0; i < im6o->im6o_num_memberships; ++i) {
 		struct in6_mfilter *imf;
 
+<<<<<<< HEAD
 		imf = im6o->im6o_mfilters ? &im6o->im6o_mfilters[i] : NULL;
 		if (imf != NULL)
 			im6f_leave(imf);
+=======
+	case IPV6_JOIN_GROUP:
+		/*
+		 * Add a multicast group membership.
+		 * Group must be a valid IP6 multicast address.
+		 */
+		if (m == NULL || m->m_len != sizeof(struct ipv6_mreq)) {
+			error = EINVAL;
+			break;
+		}
+		mreq = mtod(m, struct ipv6_mreq *);
+		/*
+		 * If the interface is specified, validate it.
+		 */
+		if (mreq->ipv6mr_interface < 0
+		 || if_index < mreq->ipv6mr_interface) {
+			error = ENXIO;	/* XXX EINVAL? */
+			break;
+		}
+		
+		if (IN6_IS_ADDR_UNSPECIFIED(&mreq->ipv6mr_multiaddr)) {
+			/*
+			 * We use the unspecified address to specify to accept
+			 * all multicast addresses. Only super user is allowed
+			 * to do this.
+			 */
+			if (suser(kauth_cred_get(), 0))
+			{
+				error = EACCES;
+				break;
+			}
+		} else if (IN6_IS_ADDR_V4MAPPED(&mreq->ipv6mr_multiaddr)) {
+			struct ip_mreq v4req;
+			
+			v4req.imr_multiaddr.s_addr = mreq->ipv6mr_multiaddr.s6_addr32[3];
+			v4req.imr_interface.s_addr = INADDR_ANY;
+			
+			/* Find an IPv4 address on the specified interface. */
+			if (mreq->ipv6mr_interface != 0) {
+				struct in_ifaddr *ifa;
+
+				ifp = ifindex2ifnet[mreq->ipv6mr_interface];
+
+				lck_mtx_lock(rt_mtx);
+				TAILQ_FOREACH(ifa, &in_ifaddrhead, ia_link) {
+					if (ifa->ia_ifp == ifp) {
+						v4req.imr_interface = IA_SIN(ifa)->sin_addr;
+						break;
+					}
+				}
+				lck_mtx_unlock(rt_mtx);
+				
+				if (v4req.imr_multiaddr.s_addr == 0) {
+					/* Interface has no IPv4 address. */
+					error = EINVAL;
+					break;
+				}
+			}
+			
+			error = ip_addmembership(imo, &v4req);
+			break;
+		} else if (!IN6_IS_ADDR_MULTICAST(&mreq->ipv6mr_multiaddr)) {
+			error = EINVAL;
+			break;
+		}
+		/*
+		 * If no interface was explicitly specified, choose an
+		 * appropriate one according to the given multicast address.
+		 */
+		if (mreq->ipv6mr_interface == 0) {
+			/*
+			 * If the multicast address is in node-local scope,
+			 * the interface should be a loopback interface.
+			 * Otherwise, look up the routing table for the
+			 * address, and choose the outgoing interface.
+			 *   XXX: is it a good approach?
+			 */
+			if (IN6_IS_ADDR_MC_NODELOCAL(&mreq->ipv6mr_multiaddr)) {
+				ifp = lo_ifp;
+			} else {
+				ro.ro_rt = NULL;
+				dst = (struct sockaddr_in6 *)&ro.ro_dst;
+				bzero(dst, sizeof(*dst));
+				dst->sin6_len = sizeof(struct sockaddr_in6);
+				dst->sin6_family = AF_INET6;
+				dst->sin6_addr = mreq->ipv6mr_multiaddr;
+				rtalloc((struct route *)&ro);
+				if (ro.ro_rt == NULL) {
+					error = EADDRNOTAVAIL;
+					break;
+				}
+				ifp = ro.ro_rt->rt_ifp;
+				rtfree(ro.ro_rt);
+				ro.ro_rt = NULL;
+			}
+		} else
+			ifp = ifindex2ifnet[mreq->ipv6mr_interface];
+>>>>>>> origin/10.5
 
 		(void) in6_mc_leave(im6o->im6o_membership[i], imf);
 

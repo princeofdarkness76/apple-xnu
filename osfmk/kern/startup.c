@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2010 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -157,6 +161,10 @@
 
 #if ALTERNATE_DEBUGGER
 #include <arm64/alternate_debugger.h>
+#endif
+
+#if MACH_KDP
+#include <kdp/kdp.h>
 #endif
 
 #if MACH_KDP
@@ -476,8 +484,18 @@ kernel_bootstrap_thread(void)
 	device_service_create();
 
 	kth_started = 1;
+<<<<<<< HEAD
 		
 #if (defined(__i386__) || defined(__x86_64__)) && NCOPY_WINDOWS > 0
+=======
+
+#if MACH_KDP
+	kernel_bootstrap_kprintf("calling kdp_init\n");
+	kdp_init();
+#endif
+		
+#ifdef i386
+>>>>>>> origin/10.5
 	/*
 	 * Create and initialize the physical copy window for processor 0
 	 * This is required before starting kicking off  IOKit.
@@ -722,14 +740,22 @@ load_context(
 	load_context_kprintf("processor_up\n");
 	processor_up(processor);
 
+<<<<<<< HEAD
 	PMAP_ACTIVATE_KERNEL(processor->cpu_id);
+=======
+	PMAP_ACTIVATE_KERNEL(processor->cpu_num);
+>>>>>>> origin/10.5
 
 	/*
 	 * Acquire a stack if none attached.  The panic
 	 * should never occur since the thread is expected
 	 * to have reserved stack.
 	 */
+<<<<<<< HEAD
 	load_context_kprintf("thread %p, stack %lx, stackptr %lx\n", thread,
+=======
+	load_context_kprintf("stack %x, stackptr %x\n", 
+>>>>>>> origin/10.5
 			     thread->kernel_stack, thread->machine.kstackptr);
 	if (!thread->kernel_stack) {
 		load_context_kprintf("stack_alloc_try\n");
@@ -757,7 +783,11 @@ load_context(
 	timer_start(&PROCESSOR_DATA(processor, system_state), processor->last_dispatch);
 	PROCESSOR_DATA(processor, current_state) = &PROCESSOR_DATA(processor, system_state);
 
+<<<<<<< HEAD
 	PMAP_ACTIVATE_USER(thread, processor->cpu_id);
+=======
+	PMAP_ACTIVATE_USER(thread, processor->cpu_num);
+>>>>>>> origin/10.5
 
 	load_context_kprintf("machine_load_context\n");
 	machine_load_context(thread);

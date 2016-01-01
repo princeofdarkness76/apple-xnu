@@ -167,8 +167,13 @@ __private_extern__ void	ubc_destroy_named(vnode_t);
 /* internal only */
 __private_extern__ void	cluster_release(struct ubc_info *);
 __private_extern__ uint32_t cluster_max_io_size(mount_t, int);
+<<<<<<< HEAD
 __private_extern__ uint32_t cluster_throttle_io_limit(vnode_t, uint32_t *);
 
+=======
+ 
+ 
+>>>>>>> origin/10.5
 
 /* Flags for ubc_getobject() */
 #define UBC_FLAGS_NONE		0x0000
@@ -187,6 +192,7 @@ int	ubc_isinuse_locked(vnode_t, int, int);
 
 int	ubc_getcdhash(vnode_t, off_t, unsigned char *);
 
+<<<<<<< HEAD
 __attribute__((pure)) boolean_t ubc_is_mapped(const struct vnode *, boolean_t *writable);
 __attribute__((pure)) boolean_t ubc_is_mapped_writable(const struct vnode *);
 
@@ -200,12 +206,23 @@ int	ubc_cs_blob_add(vnode_t, cpu_type_t, off_t, vm_address_t, vm_size_t, int, st
 int	ubc_cs_sigpup_add(vnode_t, vm_address_t, vm_size_t);
 struct cs_blob *ubc_get_cs_blobs(vnode_t);
 void	ubc_get_cs_mtime(vnode_t, struct timespec *);
+=======
+int UBCINFOEXISTS(vnode_t);
+
+/* code signing */
+struct cs_blob;
+int	ubc_cs_blob_add(vnode_t, cpu_type_t, off_t, vm_address_t, vm_size_t);
+struct cs_blob *ubc_get_cs_blobs(vnode_t);
+>>>>>>> origin/10.5
 int	ubc_cs_getcdhash(vnode_t, off_t, unsigned char *);
 kern_return_t ubc_cs_blob_allocate(vm_offset_t *, vm_size_t *);
 void ubc_cs_blob_deallocate(vm_offset_t, vm_size_t);
 
+<<<<<<< HEAD
 kern_return_t	ubc_cs_validation_bitmap_allocate( vnode_t );
 void		ubc_cs_validation_bitmap_deallocate( vnode_t );
+=======
+>>>>>>> origin/10.5
 __END_DECLS
 
 

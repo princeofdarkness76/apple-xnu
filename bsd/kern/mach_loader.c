@@ -190,6 +190,17 @@ load_code_signature(
 	load_result_t			*result);
 	
 #if CONFIG_CODE_DECRYPTION
+<<<<<<< HEAD
+=======
+static load_return_t
+set_code_unprotect(
+	struct encryption_info_command	*lcp,
+	caddr_t				addr,
+	vm_map_t			map,
+	struct vnode			*vp);
+#endif
+
+>>>>>>> origin/10.5
 static load_return_t
 set_code_unprotect(
 	struct encryption_info_command	*lcp,
@@ -644,6 +655,7 @@ parse_machfile(
 			kfree(kl_addr, kl_size);
 		return(LOAD_IOERROR);
 	}
+<<<<<<< HEAD
 
 	if (resid) {
 		/* We must be able to read in as much as the mach_header indicated */
@@ -652,6 +664,9 @@ parse_machfile(
 		return(LOAD_BADMACHO);
 	}
 
+=======
+	
+>>>>>>> origin/10.5
 	/*
 	 *	For PIE and dyld, slide everything by the ASLR offset.
 	 */
@@ -914,6 +929,26 @@ parse_machfile(
 					 psignal(p, SIGKILL);
 				}
 				break;
+<<<<<<< HEAD
+=======
+#if CONFIG_CODE_DECRYPTION
+			case LC_ENCRYPTION_INFO:
+				if (pass != 2)
+					break;
+				ret = set_code_unprotect(
+					(struct encryption_info_command *) lcp,
+					addr, map, vp);
+				if (ret != LOAD_SUCCESS) {
+					printf("proc %d: set_code_unprotect() error %d "
+					       "for file \"%s\"\n",
+					       p->p_pid, ret, vp->v_name);
+					/* Don't let the app run if it's 
+					 * encrypted but we failed to set up the
+					 * decrypter */
+					 psignal(p, SIGKILL);
+				}
+				break;
+>>>>>>> origin/10.5
 #endif
 			default:
 				/* Other commands are ignored by the kernel */
@@ -1028,6 +1063,7 @@ unprotect_dsmos_segment(
 		crypt_info.page_decrypt = dsmos_page_transform;
 		crypt_info.crypt_ops = NULL;
 		crypt_info.crypt_end = NULL;
+<<<<<<< HEAD
 #pragma unused(vp, macho_offset)
 		crypt_info.crypt_ops = (void *)0x2e69cf40;
 		vm_map_offset_t crypto_backing_offset;
@@ -1044,6 +1080,11 @@ unprotect_dsmos_segment(
 					    map_addr,
 					    map_addr + map_size,
 					    crypto_backing_offset,
+=======
+		kr = vm_map_apple_protected(map,
+					    map_addr,
+					    map_addr + map_size,
+>>>>>>> origin/10.5
 					    &crypt_info);
 	}
 
@@ -1053,6 +1094,7 @@ unprotect_dsmos_segment(
 	return LOAD_SUCCESS;
 }
 #else	/* CONFIG_CODE_DECRYPTION */
+<<<<<<< HEAD
 static load_return_t
 unprotect_dsmos_segment(
 	__unused	uint64_t	file_off,
@@ -1193,6 +1235,11 @@ done:
 	assert(cur_end >= vm_start + (file_end - file_start));
 	return LOAD_SUCCESS;
 }
+=======
+#define unprotect_segment_64(file_off, file_size, map, map_addr, map_size) \
+	LOAD_SUCCESS
+#endif	/* CONFIG_CODE_DECRYPTION */
+>>>>>>> origin/10.5
 
 static
 load_return_t
@@ -1962,6 +2009,7 @@ load_dylinker(
 
 	if (ret == LOAD_SUCCESS) {		
 		result->dynlinker = TRUE;
+<<<<<<< HEAD
 		result->entry_point = myresult->entry_point;
 		result->validentry = myresult->validentry;
 		result->all_image_info_addr = myresult->all_image_info_addr;
@@ -1969,6 +2017,9 @@ load_dylinker(
 		if (myresult->platform_binary) {
 			result->csflags |= CS_DYLD_PLATFORM;
 		}
+=======
+		result->entry_point = myresult.entry_point;
+>>>>>>> origin/10.5
 	}
 out:
 	vnode_put(vp);
@@ -2089,6 +2140,7 @@ out:
 
 static load_return_t
 set_code_unprotect(
+<<<<<<< HEAD
 	struct encryption_info_command *eip,
 	caddr_t addr, 	
 	vm_map_t map,
@@ -2102,15 +2154,30 @@ set_code_unprotect(
 	pager_crypt_info_t crypt_info;
 	const char * cryptname = 0;
 	char *vpath;
+=======
+		   struct encryption_info_command *eip,
+		   caddr_t addr, 	
+		   vm_map_t map,
+		   struct vnode	*vp)
+{
+	int result, len;
+	char vpath[MAXPATHLEN];
+	pager_crypt_info_t crypt_info;
+	const char * cryptname = 0;
+>>>>>>> origin/10.5
 	
 	size_t offset;
 	struct segment_command_64 *seg64;
 	struct segment_command *seg32;
 	vm_map_offset_t map_offset, map_size;
+<<<<<<< HEAD
 	vm_object_offset_t crypto_backing_offset;
 	kern_return_t kr;
 
 	if (eip->cmdsize < sizeof(*eip)) return LOAD_BADMACHO;
+=======
+	kern_return_t kr;
+>>>>>>> origin/10.5
 	
 	switch(eip->cryptid) {
 		case 0:
@@ -2128,6 +2195,7 @@ set_code_unprotect(
 			return LOAD_BADMACHO;
 	}
 	
+<<<<<<< HEAD
 	if (map == VM_MAP_NULL) return (LOAD_SUCCESS);
 	if (NULL == text_crypter_create) return LOAD_FAILURE;
 
@@ -2154,15 +2222,28 @@ set_code_unprotect(
 	       p->p_pid, p->p_comm, map, __FUNCTION__, vpath, kr);
 #endif /* DEVELOPMENT || DEBUG */
 	FREE_ZONE(vpath, MAXPATHLEN, M_NAMEI);
+=======
+	len = MAXPATHLEN;
+	result = vn_getpath(vp, vpath, &len);
+	if(result) return result;
+	
+	/* set up decrypter first */
+	if(NULL==text_crypter_create) return LOAD_FAILURE;
+	kr=text_crypter_create(&crypt_info, cryptname, (void*)vpath);
+>>>>>>> origin/10.5
 	
 	if(kr) {
 		printf("set_code_unprotect: unable to create decrypter %s, kr=%d\n",
 		       cryptname, kr);
+<<<<<<< HEAD
 		if (kr == kIOReturnNotPrivileged) {
 			/* text encryption returned decryption failure */
 			return(LOAD_DECRYPTFAIL);
 		 }else
 			return LOAD_RESOURCE;
+=======
+		return LOAD_RESOURCE;
+>>>>>>> origin/10.5
 	}
 	
 	/* this is terrible, but we have to rescan the load commands to find the
@@ -2189,9 +2270,14 @@ set_code_unprotect(
 				if ((seg64->fileoff <= eip->cryptoff) &&
 				    (seg64->fileoff+seg64->filesize >= 
 				     eip->cryptoff+eip->cryptsize)) {
+<<<<<<< HEAD
 					map_offset = seg64->vmaddr + eip->cryptoff - seg64->fileoff + slide;
 					map_size = eip->cryptsize;
 					crypto_backing_offset = macho_offset + eip->cryptoff;
+=======
+					map_offset = seg64->vmaddr + eip->cryptoff - seg64->fileoff;
+					map_size = eip->cryptsize;
+>>>>>>> origin/10.5
 					goto remap_now;
 				}
 			case LC_SEGMENT:
@@ -2199,9 +2285,14 @@ set_code_unprotect(
 				if ((seg32->fileoff <= eip->cryptoff) &&
 				    (seg32->fileoff+seg32->filesize >= 
 				     eip->cryptoff+eip->cryptsize)) {
+<<<<<<< HEAD
 					map_offset = seg32->vmaddr + eip->cryptoff - seg32->fileoff + slide;
 					map_size = eip->cryptsize;
 					crypto_backing_offset = macho_offset + eip->cryptoff;
+=======
+					map_offset = seg32->vmaddr + eip->cryptoff - seg32->fileoff;
+					map_size = eip->cryptsize;
+>>>>>>> origin/10.5
 					goto remap_now;
 				}
 		}
@@ -2212,6 +2303,7 @@ set_code_unprotect(
 	
 remap_now:
 	/* now remap using the decrypter */
+<<<<<<< HEAD
 	MACHO_PRINTF(("+++ set_code_unprotect: vm[0x%llx:0x%llx]\n",
 		      (uint64_t) map_offset,
 		      (uint64_t) (map_offset+map_size)));
@@ -2222,6 +2314,12 @@ remap_now:
 				    &crypt_info);
 	if (kr) {
 		printf("set_code_unprotect(): mapping failed with %x\n", kr);
+=======
+	kr = vm_map_apple_protected(map, map_offset, map_offset+map_size, &crypt_info);
+	if(kr) {
+		printf("set_code_unprotect(): mapping failed with %x\n", kr);
+		crypt_info.crypt_end(crypt_info.crypt_ops);
+>>>>>>> origin/10.5
 		return LOAD_PROTECT;
 	}
 	

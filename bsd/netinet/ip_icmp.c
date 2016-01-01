@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -947,6 +951,7 @@ icmp_send(struct mbuf *m, struct mbuf *opts)
 	int hlen;
 	struct icmp *icp;
 	struct route ro;
+<<<<<<< HEAD
 	struct ip_out_args ipoa = { IFSCOPE_NONE, { 0 },
 	    IPOAF_SELECT_SRCIF | IPOAF_BOUND_SRCADDR, 0 };
 
@@ -954,6 +959,12 @@ icmp_send(struct mbuf *m, struct mbuf *opts)
 		ipoa.ipoa_boundif = m->m_pkthdr.rcvif->if_index;
 		ipoa.ipoa_flags |= IPOAF_BOUND_IF;
 	}
+=======
+	struct ip_out_args ipoa = { IFSCOPE_NONE };
+
+	if ((m->m_flags & M_PKTHDR) && m->m_pkthdr.rcvif != NULL)
+		ipoa.ipoa_ifscope = m->m_pkthdr.rcvif->if_index;
+>>>>>>> origin/10.5
 
 	hlen = IP_VHL_HL(ip->ip_vhl) << 2;
 	m->m_data += hlen;
@@ -978,7 +989,14 @@ icmp_send(struct mbuf *m, struct mbuf *opts)
 #endif
 	bzero(&ro, sizeof ro);
 	(void) ip_output(m, opts, &ro, IP_OUTARGS, NULL, &ipoa);
+<<<<<<< HEAD
 	ROUTE_RELEASE(&ro);
+=======
+	if (ro.ro_rt) {
+		rtfree(ro.ro_rt);
+		ro.ro_rt = NULL;
+	}
+>>>>>>> origin/10.5
 }
 
 u_int32_t
@@ -1206,9 +1224,14 @@ icmp_dgram_ctloutput(struct socket *so, struct sockopt *sopt)
 		case IP_RECVTTL:
 		case IP_BOUND_IF:
 #if CONFIG_FORCE_OUT_IFP
+<<<<<<< HEAD
                 case IP_FORCE_OUT_IFP:
 #endif
 		case IP_NO_IFT_CELLULAR:
+=======
+		case IP_FORCE_OUT_IFP:
+#endif
+>>>>>>> origin/10.5
 			error = rip_ctloutput(so, sopt);
 			break;
 

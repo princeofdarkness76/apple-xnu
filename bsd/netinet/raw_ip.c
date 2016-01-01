@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -152,6 +156,7 @@ ip_fw_ctl_t *ip_fw_ctl_ptr;
 #if DUMMYNET
 ip_dn_ctl_t *ip_dn_ctl_ptr;
 #endif /* DUMMYNET */
+#endif /* IPFIREWALL */
 
 /*
  * Nominal space allocated to a raw ip socket.
@@ -377,6 +382,7 @@ rip_output(
 	struct ip *ip;
 	struct inpcb *inp = sotoinpcb(so);
 	int flags = (so->so_options & SO_DONTROUTE) | IP_ALLOWBROADCAST;
+<<<<<<< HEAD
 	struct ip_out_args ipoa =
 	    { IFSCOPE_NONE, { 0 }, IPOAF_SELECT_SRCIF, 0 };
 	struct ip_moptions *imo;
@@ -416,6 +422,14 @@ rip_output(
 
 	if (inp->inp_flowhash == 0)
 		inp->inp_flowhash = inp_calc_flowhash(inp);
+=======
+	struct ip_out_args ipoa;
+
+	/* If socket was bound to an ifindex, tell ip_output about it */
+	ipoa.ipoa_ifscope = (inp->inp_flags & INP_BOUND_IF) ?
+	    inp->inp_boundif : IFSCOPE_NONE;
+	flags |= IP_OUTARGS;
+>>>>>>> origin/10.5
 
 	/*
 	 * If the user handed us a complete IP packet, use it.
@@ -497,6 +511,7 @@ rip_output(
 	mac_mbuf_label_associate_inpcb(inp, m);
 #endif
 
+<<<<<<< HEAD
 	imo = inp->inp_moptions;
 	if (imo != NULL)
 		IMO_ADDREF(imo);
@@ -548,6 +563,13 @@ rip_output(
 		soevent(so, (SO_FILT_HINT_LOCKED|SO_FILT_HINT_IFDENIED));
 
 	return (error);
+=======
+#if CONFIG_IP_EDGEHOLE
+	ip_edgehole_mbuf_tag(inp, m);
+#endif
+	return (ip_output(m, inp->inp_options, &inp->inp_route, flags,
+	    inp->inp_moptions, &ipoa));
+>>>>>>> origin/10.5
 }
 
 #if IPFIREWALL

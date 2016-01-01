@@ -661,7 +661,9 @@ kern_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		&& !(name[0] == KERN_PROC
 			|| name[0] == KERN_PROF 
 			|| name[0] == KERN_KDEBUG
+#if !CONFIG_EMBEDDED
 			|| name[0] == KERN_PROCARGS
+#endif
 			|| name[0] == KERN_PROCARGS2
 			|| name[0] == KERN_PCSAMPLES
 			|| name[0] == KERN_IPC
@@ -754,11 +756,16 @@ kern_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 #endif
 	case KERN_KDEBUG:
 		return (kdebug_ops(name + 1, namelen - 1, oldp, oldlenp, p));
+<<<<<<< HEAD
 	case KERN_PCSAMPLES:
 		return (pcsamples_ops(name + 1, namelen - 1, oldp, oldlenp, p));
+=======
+#if !CONFIG_EMBEDDED
+>>>>>>> origin/10.5
 	case KERN_PROCARGS:
 		/* new one as it does not use kinfo_proc */
 		return (sysctl_procargs(name + 1, namelen - 1, oldp, oldlenp, p));
+#endif
 	case KERN_PROCARGS2:
 		/* new one as it does not use kinfo_proc */
 		return (sysctl_procargs2(name + 1, namelen - 1, oldp, oldlenp, p));
@@ -825,6 +832,52 @@ SYSCTL_PROC(_kern, KERN_COUNT_SYSCALLS, count_syscalls, CTLTYPE_NODE|CTLFLAG_RD 
 #ifdef DEBUG
 >>>>>>> origin/10.2
 /*
+<<<<<<< HEAD
+=======
+ * Debugging related system variables.
+ */
+#if DIAGNOSTIC
+extern
+#endif /* DIAGNOSTIC */
+struct ctldebug debug0, debug1;
+struct ctldebug debug2, debug3, debug4;
+struct ctldebug debug5, debug6, debug7, debug8, debug9;
+struct ctldebug debug10, debug11, debug12, debug13, debug14;
+struct ctldebug debug15, debug16, debug17, debug18, debug19;
+static struct ctldebug *debugvars[CTL_DEBUG_MAXID] = {
+	&debug0, &debug1, &debug2, &debug3, &debug4,
+	&debug5, &debug6, &debug7, &debug8, &debug9,
+	&debug10, &debug11, &debug12, &debug13, &debug14,
+	&debug15, &debug16, &debug17, &debug18, &debug19,
+};
+int
+debug_sysctl(int *name, u_int namelen, user_addr_t oldp, size_t *oldlenp, 
+             user_addr_t newp, size_t newlen, __unused proc_t p)
+{
+	struct ctldebug *cdp;
+
+	/* all sysctl names at this level are name and field */
+	if (namelen != 2)
+		return (ENOTDIR);		/* overloaded */
+	if (name[0] < 0 || name[0] >= CTL_DEBUG_MAXID)
+                return (ENOTSUP);
+	cdp = debugvars[name[0]];
+	if (cdp->debugname == 0)
+		return (ENOTSUP);
+	switch (name[1]) {
+	case CTL_DEBUG_NAME:
+		return (sysctl_rdstring(oldp, oldlenp, newp, cdp->debugname));
+	case CTL_DEBUG_VALUE:
+		return (sysctl_int(oldp, oldlenp, newp, newlen, cdp->debugvar));
+	default:
+		return (ENOTSUP);
+	}
+	/* NOTREACHED */
+}
+#endif /* DEBUG */
+
+/*
+>>>>>>> origin/10.5
  * The following sysctl_* functions should not be used
  * any more, as they can only cope with callers in
  * user mode: Use new-style
@@ -833,6 +886,193 @@ SYSCTL_PROC(_kern, KERN_COUNT_SYSCALLS, count_syscalls, CTLTYPE_NODE|CTLFLAG_RD 
  *  sysctl_io_opaque()
  * instead.
  */
+<<<<<<< HEAD
+=======
+
+/*
+ * Validate parameters and get old / set new parameters
+ * for an integer-valued sysctl function.
+ */
+int
+sysctl_int(user_addr_t oldp, size_t *oldlenp, 
+           user_addr_t newp, size_t newlen, int *valp)
+{
+	int error = 0;
+
+	if (oldp != USER_ADDR_NULL && oldlenp == NULL)
+		return (EFAULT);
+	if (oldp && *oldlenp < sizeof(int))
+		return (ENOMEM);
+	if (newp && newlen != sizeof(int))
+		return (EINVAL);
+	*oldlenp = sizeof(int);
+	if (oldp)
+		error = copyout(valp, oldp, sizeof(int));
+	if (error == 0 && newp) {
+		error = copyin(newp, valp, sizeof(int));
+		AUDIT_ARG(value, *valp);
+	}
+	return (error);
+}
+
+/*
+ * As above, but read-only.
+ */
+int
+sysctl_rdint(user_addr_t oldp, size_t *oldlenp, user_addr_t newp, int val)
+{
+	int error = 0;
+
+	if (oldp != USER_ADDR_NULL && oldlenp == NULL)
+		return (EFAULT);
+	if (oldp && *oldlenp < sizeof(int))
+		return (ENOMEM);
+	if (newp)
+		return (EPERM);
+	*oldlenp = sizeof(int);
+	if (oldp)
+		error = copyout((caddr_t)&val, oldp, sizeof(int));
+	return (error);
+}
+
+/*
+ * Validate parameters and get old / set new parameters
+ * for an quad(64bit)-valued sysctl function.
+ */
+int
+sysctl_quad(user_addr_t oldp, size_t *oldlenp, 
+            user_addr_t newp, size_t newlen, quad_t *valp)
+{
+	int error = 0;
+
+	if (oldp != USER_ADDR_NULL && oldlenp == NULL)
+		return (EFAULT);
+	if (oldp && *oldlenp < sizeof(quad_t))
+		return (ENOMEM);
+	if (newp && newlen != sizeof(quad_t))
+		return (EINVAL);
+	*oldlenp = sizeof(quad_t);
+	if (oldp)
+		error = copyout(valp, oldp, sizeof(quad_t));
+	if (error == 0 && newp)
+		error = copyin(newp, valp, sizeof(quad_t));
+	return (error);
+}
+
+/*
+ * As above, but read-only.
+ */
+int
+sysctl_rdquad(user_addr_t oldp, size_t *oldlenp, user_addr_t newp, quad_t val)
+{
+	int error = 0;
+
+	if (oldp != USER_ADDR_NULL && oldlenp == NULL)
+		return (EFAULT);
+	if (oldp && *oldlenp < sizeof(quad_t))
+		return (ENOMEM);
+	if (newp)
+		return (EPERM);
+	*oldlenp = sizeof(quad_t);
+	if (oldp)
+		error = copyout((caddr_t)&val, oldp, sizeof(quad_t));
+	return (error);
+}
+
+/*
+ * Validate parameters and get old / set new parameters
+ * for a string-valued sysctl function.  Unlike sysctl_string, if you
+ * give it a too small (but larger than 0 bytes) buffer, instead of
+ * returning ENOMEM, it truncates the returned string to the buffer
+ * size.  This preserves the semantics of some library routines
+ * implemented via sysctl, which truncate their returned data, rather
+ * than simply returning an error. The returned string is always NUL
+ * terminated.
+ */
+int
+sysctl_trstring(user_addr_t oldp, size_t *oldlenp, 
+              user_addr_t newp, size_t newlen, char *str, int maxlen)
+{
+	int len, copylen, error = 0;
+
+	if (oldp != USER_ADDR_NULL && oldlenp == NULL)
+		return (EFAULT);
+	copylen = len = strlen(str) + 1;
+	if (oldp && (len < 0 || *oldlenp < 1))
+		return (ENOMEM);
+	if (oldp && (*oldlenp < (size_t)len))
+		copylen = *oldlenp + 1;
+	if (newp && (maxlen < 0 || newlen >= (size_t)maxlen))
+		return (EINVAL);
+	*oldlenp = copylen - 1; /* deal with NULL strings correctly */
+	if (oldp) {
+		error = copyout(str, oldp, copylen);
+		if (!error) {
+			unsigned char c = 0;
+			/* NUL terminate */
+			oldp += *oldlenp;
+			error = copyout((void *)&c, oldp, sizeof(char));
+		}
+	}
+	if (error == 0 && newp) {
+		error = copyin(newp, str, newlen);
+		str[newlen] = 0;
+		AUDIT_ARG(text, (char *)str);
+	}
+	return (error);
+}
+
+/*
+ * Validate parameters and get old / set new parameters
+ * for a string-valued sysctl function.
+ */
+int
+sysctl_string(user_addr_t oldp, size_t *oldlenp, 
+              user_addr_t newp, size_t newlen, char *str, int maxlen)
+{
+	int len, error = 0;
+
+	if (oldp != USER_ADDR_NULL && oldlenp == NULL)
+		return (EFAULT);
+	len = strlen(str) + 1;
+	if (oldp && (len < 0 || *oldlenp < (size_t)len))
+		return (ENOMEM);
+	if (newp && (maxlen < 0 || newlen >= (size_t)maxlen))
+		return (EINVAL);
+	*oldlenp = len -1; /* deal with NULL strings correctly */
+	if (oldp) {
+		error = copyout(str, oldp, len);
+	}
+	if (error == 0 && newp) {
+		error = copyin(newp, str, newlen);
+		str[newlen] = 0;
+		AUDIT_ARG(text, (char *)str);
+	}
+	return (error);
+}
+
+/*
+ * As above, but read-only.
+ */
+int
+sysctl_rdstring(user_addr_t oldp, size_t *oldlenp, 
+                user_addr_t newp, char *str)
+{
+	int len, error = 0;
+
+	if (oldp != USER_ADDR_NULL && oldlenp == NULL)
+		return (EFAULT);
+	len = strlen(str) + 1;
+	if (oldp && *oldlenp < (size_t)len)
+		return (ENOMEM);
+	if (newp)
+		return (EPERM);
+	*oldlenp = len;
+	if (oldp)
+		error = copyout(str, oldp, len);
+	return (error);
+}
+>>>>>>> origin/10.5
 
 /*
  * Validate parameters and get old / set new parameters
@@ -1522,6 +1762,7 @@ sysctl_kdebug_ops SYSCTL_HANDLER_ARGS
 
 	if (namelen == 0)
 		return(ENOTSUP);
+<<<<<<< HEAD
 	
 	ret = suser(kauth_cred_get(), &p->p_acflag);
 #if KPERF
@@ -1531,6 +1772,10 @@ sysctl_kdebug_ops SYSCTL_HANDLER_ARGS
 	if (ret)
 		ret = kperf_access_check();
 #endif /* KPERF */
+=======
+
+    ret = suser(kauth_cred_get(), &p->p_acflag);
+>>>>>>> origin/10.5
 	if (ret)
 		return(ret);
 	
@@ -1641,7 +1886,11 @@ SYSCTL_PROC(_kern, KERN_PROCARGS2, procargs2, CTLTYPE_NODE|CTLFLAG_RD | CTLFLAG_
 	NULL,			/* Data pointer */
 	"");
 
+<<<<<<< HEAD
 STATIC int
+=======
+static int
+>>>>>>> origin/10.5
 sysctl_procargsx(int *name, u_int namelen, user_addr_t where, 
                  size_t *sizep, proc_t cur_proc, int argc_yes)
 {
@@ -1664,7 +1913,11 @@ sysctl_procargsx(int *name, u_int namelen, user_addr_t where,
 
 	if ( namelen < 1 )
 		return(EINVAL);
+<<<<<<< HEAD
 	
+=======
+
+>>>>>>> origin/10.5
 	if (argc_yes)
 		buflen -= sizeof(int);		/* reserve first word to return argc */
 
@@ -2642,9 +2895,14 @@ sysctl_coredump
 (__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
 {
 #ifdef SECURE_KERNEL
+<<<<<<< HEAD
 	(void)req;
 	return (ENOTSUP);
 #else
+=======
+	return (ENOTSUP);
+#endif
+>>>>>>> origin/10.5
 	int new_value, changed;
 	int error = sysctl_io_number(req, do_coredump, sizeof(int), &new_value, &changed);
 	if (changed) {
@@ -2666,9 +2924,14 @@ sysctl_suid_coredump
 (__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
 {
 #ifdef SECURE_KERNEL
+<<<<<<< HEAD
 	(void)req;
 	return (ENOTSUP);
 #else
+=======
+	return (ENOTSUP);
+#endif
+>>>>>>> origin/10.5
 	int new_value, changed;
 	int error = sysctl_io_number(req, sugid_coredump, sizeof(int), &new_value, &changed);
 	if (changed) {
@@ -2838,9 +3101,14 @@ sysctl_nx
 (__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
 {
 #ifdef SECURE_KERNEL
+<<<<<<< HEAD
 	(void)req;
 	return ENOTSUP;
 #else
+=======
+	return ENOTSUP;
+#endif
+>>>>>>> origin/10.5
 	int new_value, changed;
 	int error;
 
@@ -2849,7 +3117,11 @@ sysctl_nx
 		return error;
 
 	if (changed) {
+<<<<<<< HEAD
 #if defined(__i386__) || defined(__x86_64__)
+=======
+#ifdef __i386__
+>>>>>>> origin/10.5
 		/*
 		 * Only allow setting if NX is supported on the chip
 		 */

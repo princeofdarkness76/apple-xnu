@@ -69,6 +69,7 @@ extern boolean_t mach_timer_coalescing_enabled;
 extern void timer_call_queue_init(mpqueue_head_t *);
 #endif
 
+<<<<<<< HEAD
 /*
  * NOTE: for now, bsd/dev/dtrace/dtrace_glue.c has its own definition
  * of this data structure, and the two had better match.
@@ -106,6 +107,19 @@ typedef void		(*timer_call_func_t)(
 #define TIMER_CALL_SYS_NORMAL		TIMEOUT_URGENCY_SYS_NORMAL
 #define TIMER_CALL_SYS_CRITICAL		TIMEOUT_URGENCY_SYS_CRITICAL
 #define TIMER_CALL_SYS_BACKGROUND	TIMEOUT_URGENCY_SYS_BACKGROUND
+=======
+extern boolean_t	timer_call_enter(
+						timer_call_t	call,
+						uint64_t		deadline);
+
+extern boolean_t	timer_call_enter1(
+						timer_call_t		call,
+						timer_call_param_t	param1,
+						uint64_t			deadline);
+
+extern boolean_t	timer_call_cancel(
+						timer_call_t	call);
+>>>>>>> origin/10.5
 
 #define TIMER_CALL_USER_MASK		TIMEOUT_URGENCY_USER_MASK
 #define TIMER_CALL_USER_NORMAL		TIMEOUT_URGENCY_USER_NORMAL
@@ -167,6 +181,7 @@ typedef struct {
 	uint32_t interrupt_timer_coalescing_ilat_threshold_abstime;
 	uint32_t timer_resort_threshold_abstime;
 
+<<<<<<< HEAD
 	int32_t timer_coalesce_rt_shift;
 	int32_t timer_coalesce_bg_shift;
 	int32_t timer_coalesce_kt_shift;
@@ -184,6 +199,14 @@ typedef struct {
 	boolean_t latency_tier_rate_limited[NUM_LATENCY_QOS_TIERS];
 } timer_coalescing_priority_params_t;
 extern timer_coalescing_priority_params_t tcoal_prio_params;
+=======
+extern void		timer_call_initialize(void);
+
+extern void		timer_call_setup(
+					timer_call_t		call,
+					timer_call_func_t	func,
+					timer_call_param_t	param0);
+>>>>>>> origin/10.5
 
 #endif /* XNU_KERNEL_PRIVATE */
 

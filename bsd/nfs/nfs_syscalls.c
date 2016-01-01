@@ -1027,8 +1027,19 @@ nfssvc_addsock(socket_t so, mbuf_t mynam)
 	slp->ns_sotype = sotype;
 	slp->ns_nam = mynam;
 
+<<<<<<< HEAD
 	/* set up the socket up-call */
 	nfsrv_uc_addsock(slp, first);
+=======
+	/* set up the socket upcall */
+	socket_lock(so, 1);
+	so->so_upcallarg = (caddr_t)slp;
+	so->so_upcall = nfsrv_rcv;
+	so->so_rcv.sb_flags |= SB_UPCALL;
+	socket_unlock(so, 1);
+	/* just playin' it safe */
+	sock_setsockopt(so, SOL_SOCKET, SO_UPCALLCLOSEWAIT, &on, sizeof(on));
+>>>>>>> origin/10.5
 
 	/* mark that the socket is not in the nfsrv_sockwg list */
 	slp->ns_wgq.tqe_next = SLPNOLIST;

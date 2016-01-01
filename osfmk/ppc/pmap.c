@@ -442,6 +442,10 @@ pmap_bootstrap(unsigned int mem_size, vm_offset_t *first_avail, vm_offset_t *fir
 	 * Initialize kernel pmap
 	 */
 	kernel_pmap = &kernel_pmap_store;
+<<<<<<< HEAD
+=======
+	kernel_pmap_phys = (addr64_t)(uintptr_t)&kernel_pmap_store;
+>>>>>>> origin/10.5
 	cursor_pmap = &kernel_pmap_store;
 
 	lock_init(&pmap_system_lock,

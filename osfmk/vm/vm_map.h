@@ -415,6 +415,7 @@ struct _vm_map {
 	decl_lck_mtx_data(,	s_lock)		/* Lock ref, res fields */
 	lck_mtx_ext_t		s_lock_ext;
 	vm_map_entry_t		hint;		/* hint for quick lookups */
+<<<<<<< HEAD
 	struct vm_map_links*	hole_hint;	/* hint for quick hole lookups */
 	union{
 		vm_map_entry_t		_first_free;	/* First free space hint */
@@ -434,6 +435,15 @@ struct _vm_map {
 	/* boolean_t */		map_disallow_data_exec:1, /* Disallow execution from data pages on exec-permissive architectures */
 	/* boolean_t */		holelistenabled:1,
 	/* reserved */		pad:24;
+=======
+	vm_map_entry_t		first_free;	/* First free space hint */
+	boolean_t		wait_for_space;	/* Should callers wait
+						   for space? */
+	boolean_t		wiring_required;/* All memory wired? */
+	boolean_t		no_zero_fill;	/* No zero fill absent pages */
+	boolean_t		mapped;		/* has this map been mapped */
+	boolean_t		prot_copy_allow;/* is VM_PROT_COPY allowed on this map */
+>>>>>>> origin/10.5
 	unsigned int		timestamp;	/* Version number */
 	unsigned int		color_rr;	/* next color (not protected by a lock) */
 #if CONFIG_FREEZE
@@ -1239,6 +1249,7 @@ extern void		vm_map_set_user_wire_limit(
 				vm_map_t		map,
 				vm_size_t		limit);
 
+<<<<<<< HEAD
 extern void vm_map_switch_protect(
 				vm_map_t		map, 
 				boolean_t		val);
@@ -1284,6 +1295,11 @@ extern kern_return_t vm_map_page_info(
 	mach_msg_type_number_t	*count);
 #endif /* XNU_KERNEL_PRIVATE */
 
+=======
+extern void		vm_map_set_prot_copy_allow(
+				vm_map_t		map,
+				boolean_t		allow);
+>>>>>>> origin/10.5
 
 #ifdef	MACH_KERNEL_PRIVATE
 

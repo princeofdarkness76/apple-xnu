@@ -226,6 +226,7 @@ static struct igmpstat_v3 igmpstat_v3 = {
 static struct igmpstat igmpstat; /* old IGMPv2 stats structure */
 static struct timeval igmp_gsrdelay = {10, 0};
 
+<<<<<<< HEAD
 static int igmp_recvifkludge = 1;
 static int igmp_sendra = 1;
 static int igmp_sendlocal = 1;
@@ -233,6 +234,10 @@ static int igmp_v1enable = 1;
 static int igmp_v2enable = 1;
 static int igmp_legacysupp = 0;
 static int igmp_default_version = IGMP_VERSION_3;
+=======
+static struct router_info *
+		find_rti(struct ifnet *ifp, int wait);
+>>>>>>> origin/10.5
 
 SYSCTL_STRUCT(_net_inet_igmp, IGMPCTL_STATS, stats, CTLFLAG_RD | CTLFLAG_LOCKED,
     &igmpstat, igmpstat, "");
@@ -339,6 +344,7 @@ igmp_save_context(struct mbuf *m, struct ifnet *ifp)
         m->m_pkthdr.rcvif = ifp;
 }
 
+<<<<<<< HEAD
 static __inline void
 igmp_scrub_context(struct mbuf *m)
 {
@@ -354,6 +360,39 @@ inet_ntop_haddr(in_addr_t haddr, char *buf, socklen_t size)
 	ia.s_addr = htonl(haddr);
 	return (inet_ntop(AF_INET, &ia, buf, size));
 }
+=======
+static struct router_info *
+find_rti(
+	struct ifnet *ifp, int wait)
+{
+	struct router_info *rti = Head;
+	
+	
+#if IGMP_DEBUG
+	printf("[igmp.c, _find_rti] --> entering \n");
+#endif
+	while (rti) {
+		if (rti->rti_ifp == ifp) {
+#if IGMP_DEBUG
+			printf("[igmp.c, _find_rti] --> found old entry \n");
+#endif
+			return rti;
+		}
+		rti = rti->rti_next;
+	}
+	
+	MALLOC(rti, struct router_info *, sizeof *rti, M_IGMP, wait);
+	if (rti != NULL)
+	{
+		rti->rti_ifp = ifp;
+		rti->rti_type = IGMP_V2_ROUTER;
+		rti->rti_time = 0;
+		rti->rti_next = Head;
+		Head = rti;
+	}
+#if IGMP_DEBUG
+	if (rti) printf("[igmp.c, _find_rti] --> created an entry \n");
+>>>>>>> origin/10.5
 #endif
 
 /*
@@ -388,9 +427,20 @@ sysctl_igmp_default_version SYSCTL_HANDLER_ARGS
 	if (error)
 		goto out_locked;
 
+<<<<<<< HEAD
 	if (new < IGMP_VERSION_1 || new > IGMP_VERSION_3) {
 		error = EINVAL;
 		goto out_locked;
+=======
+	ip = mtod(m, struct ip *);
+	timer = igmp->igmp_code * PR_FASTHZ / IGMP_TIMER_SCALE;
+	if (timer == 0)
+		timer = 1;
+	rti = find_rti(ifp, M_NOWAIT);
+	if (rti == NULL) {
+		m_freem(m);
+		return;
+>>>>>>> origin/10.5
 	}
 
 	IGMP_PRINTF(("%s: change igmp_default_version from %d to %d\n",
@@ -515,6 +565,7 @@ igmp_dispatch_queue(struct igmp_ifinfo *igi, struct ifqueue *ifq, int limit,
 	struct mbuf *m;
 	struct ip *ip;
 
+<<<<<<< HEAD
 	if (igi != NULL)
 		IGI_LOCK_ASSERT_HELD(igi);
 
@@ -535,6 +586,20 @@ igmp_dispatch_queue(struct igmp_ifinfo *igi, struct ifqueue *ifq, int limit,
 			IGI_LOCK(igi);
 		if (--limit == 0)
 			break;
+=======
+	if (inm->inm_addr.s_addr == igmp_all_hosts_group
+	    || inm->inm_ifp->if_flags & IFF_LOOPBACK) {
+		inm->inm_timer = 0;
+		inm->inm_state = IGMP_OTHERMEMBER;
+	} else {
+		inm->inm_rti = find_rti(inm->inm_ifp, M_WAITOK);
+		if (inm->inm_rti == NULL) return ENOMEM;
+		igmp_sendpkt(inm, inm->inm_rti->rti_type, 0);
+		inm->inm_timer = IGMP_RANDOM_DELAY(
+					IGMP_MAX_HOST_REPORT_DELAY*PR_FASTHZ);
+		inm->inm_state = IGMP_IREPORTEDLAST;
+		igmp_timers_are_running = 1;
+>>>>>>> origin/10.5
 	}
 
 	if (igi != NULL)
@@ -646,12 +711,28 @@ igmp_domifreattach(struct igmp_ifinfo *igi)
 	igmp_initsilent(ifp, igi);
 	ifnet_lock_done(ifp);
 
+<<<<<<< HEAD
 	LIST_INSERT_HEAD(&igi_head, igi, igi_link);
 
 	IGMP_UNLOCK();
 
 	IGMP_PRINTF(("%s: reattached igmp_ifinfo for ifp 0x%llx(%s)\n",
 	    __func__, (uint64_t)VM_KERNEL_ADDRPERM(ifp), ifp->if_name));
+=======
+	igmp_timers_are_running = 0;
+	IN_FIRST_MULTI(step, inm);
+	while (inm != NULL) {
+		if (inm->inm_timer == 0) {
+			/* do nothing */
+		} else if ((--inm->inm_timer == 0) && (inm->inm_rti != NULL)) {
+			igmp_sendpkt(inm, inm->inm_rti->rti_type, 0);
+			inm->inm_state = IGMP_IREPORTEDLAST;
+		} else {
+			igmp_timers_are_running = 1;
+		}
+		IN_NEXT_MULTI(step, inm);
+	}
+>>>>>>> origin/10.5
 }
 
 /*

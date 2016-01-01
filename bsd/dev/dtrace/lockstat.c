@@ -72,8 +72,13 @@ typedef struct lockstat_probe {
 
 lockstat_probe_t lockstat_probes[] =
 {
+<<<<<<< HEAD
 #if defined(__x86_64__)
 	/* Only provide implemented probes for each architecture  */
+=======
+#ifdef __i386__
+	/* Not implemented yet on PPC... */
+>>>>>>> origin/10.5
 	{ LS_LCK_MTX_LOCK,	LSA_ACQUIRE,	LS_LCK_MTX_LOCK_ACQUIRE, DTRACE_IDNONE },
 	{ LS_LCK_MTX_LOCK,	LSA_SPIN,	LS_LCK_MTX_LOCK_SPIN, DTRACE_IDNONE },
 	{ LS_LCK_MTX_LOCK,	LSA_BLOCK,	LS_LCK_MTX_LOCK_BLOCK, DTRACE_IDNONE },	
@@ -229,8 +234,12 @@ static dtrace_provider_id_t lockstat_id;
 static int
 lockstat_enable(void *arg, dtrace_id_t id, void *parg)
 {
+<<<<<<< HEAD
 #pragma unused(arg) /* __APPLE__ */
     
+=======
+#pragma unused(arg)
+>>>>>>> origin/10.5
 	lockstat_probe_t *probe = parg;
 
 	ASSERT(!lockstat_probemap[probe->lsp_probe]);
@@ -248,8 +257,12 @@ lockstat_enable(void *arg, dtrace_id_t id, void *parg)
 static void
 lockstat_disable(void *arg, dtrace_id_t id, void *parg)
 {
+<<<<<<< HEAD
 #pragma unused(arg, id) /* __APPLE__ */
 
+=======
+#pragma unused(arg,id)
+>>>>>>> origin/10.5
 	lockstat_probe_t *probe = parg;
 	int i;
 
@@ -279,8 +292,12 @@ lockstat_disable(void *arg, dtrace_id_t id, void *parg)
 static void
 lockstat_provide(void *arg, const dtrace_probedesc_t *desc)
 {
+<<<<<<< HEAD
 #pragma unused(arg, desc) /* __APPLE__ */
     
+=======
+#pragma unused(arg,desc)
+>>>>>>> origin/10.5
 	int i = 0;
 
 	for (i = 0; lockstat_probes[i].lsp_func != NULL; i++) {
@@ -302,8 +319,12 @@ lockstat_provide(void *arg, const dtrace_probedesc_t *desc)
 static void
 lockstat_destroy(void *arg, dtrace_id_t id, void *parg)
 {
+<<<<<<< HEAD
 #pragma unused(arg, id) /* __APPLE__ */
     
+=======
+#pragma unused(arg,id)
+>>>>>>> origin/10.5
 	lockstat_probe_t *probe = parg;
 
 	ASSERT(!lockstat_probemap[probe->lsp_probe]);

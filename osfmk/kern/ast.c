@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -242,6 +246,7 @@ ast_taken(
 			/*
 			 * Check for preemption. Conditions may have changed from when the AST_PREEMPT was originally set.
 			 */
+<<<<<<< HEAD
 			thread_lock(thread);
 			if (reasons & AST_PREEMPT)
 				reasons = csw_check(current_processor(), reasons & AST_QUANTUM);
@@ -250,6 +255,13 @@ ast_taken(
 			assert(waitq_wait_possible(thread));
 
 			if (reasons & AST_PREEMPT) {
+=======
+			if (reasons & AST_PREEMPT)
+				reasons = csw_check(current_processor());
+
+			if (	(reasons & AST_PREEMPT)				&&
+					wait_queue_assert_possible(thread)		) {		
+>>>>>>> origin/10.5
 				counter(c_ast_taken_block++);
 				thread_block_reason((thread_continue_t)thread_exception_return, NULL, reasons & AST_PREEMPTION);
 			}
@@ -266,11 +278,20 @@ void
 ast_check(
 	processor_t processor)
 {
+<<<<<<< HEAD
 	thread_t thread = processor->active_thread;
 
 	if (processor->state == PROCESSOR_RUNNING ||
 	    processor->state == PROCESSOR_SHUTDOWN) {
 		ast_t preempt;
+=======
+	thread_t			thread = processor->active_thread;
+
+	processor->current_pri = thread->sched_pri;
+	if (	processor->state == PROCESSOR_RUNNING		||
+			processor->state == PROCESSOR_SHUTDOWN		) {
+		ast_t			preempt;
+>>>>>>> origin/10.5
 
 		/*
 		 *	Propagate thread ast to processor.
@@ -282,6 +303,7 @@ ast_check(
 		/*
 		 *	Context switch check.
 		 */
+<<<<<<< HEAD
 		thread_lock(thread);
 
 		processor->current_pri = thread->sched_pri;
@@ -289,6 +311,9 @@ ast_check(
 		processor->current_sfi_class = thread->sfi_class = sfi_thread_classify(thread);
 
 		if ((preempt = csw_check(processor, AST_NONE)) != AST_NONE)
+=======
+		if ((preempt = csw_check(processor)) != AST_NONE)
+>>>>>>> origin/10.5
 			ast_on(preempt);
 
 		thread_unlock(thread);

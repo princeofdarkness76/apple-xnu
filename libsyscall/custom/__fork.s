@@ -98,7 +98,11 @@ L1:
 L2:
 	// parent ends up here skipping child portion
 	addq	$24, %rsp   // restore the stack
+<<<<<<< HEAD
 	ret
+=======
+	ret		
+>>>>>>> origin/10.5
 
 #else
 #error Unsupported architecture

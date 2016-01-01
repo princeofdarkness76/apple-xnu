@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -788,8 +792,21 @@ tcp_maketemplate(tp)
  * NOTE: If m != NULL, then ti must point to *inside* the mbuf.
  */
 void
+<<<<<<< HEAD
 tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
     tcp_seq ack, tcp_seq seq, int flags, struct tcp_respond_args *tra)
+=======
+tcp_respond(
+	struct tcpcb *tp,
+	void *ipgen,
+	register struct tcphdr *th,
+	register struct mbuf *m,
+	tcp_seq ack,
+	tcp_seq seq,
+	int flags,
+	unsigned int ifscope
+	)
+>>>>>>> origin/10.5
 {
 	int tlen;
 	int win = 0;
@@ -803,7 +820,10 @@ tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
 	struct ip6_hdr *ip6;
 	int isipv6;
 #endif /* INET6 */
+<<<<<<< HEAD
 	struct ifnet *outif;
+=======
+>>>>>>> origin/10.5
 
 #if INET6
 	isipv6 = IP_VHL_V(((struct ip *)ipgen)->ip_vhl) == 6;
@@ -928,7 +948,16 @@ tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
 		mac_netinet_tcp_reply(m);
 	}
 #endif
+<<<<<<< HEAD
 
+=======
+	
+#if CONFIG_IP_EDGEHOLE
+	if (tp && tp->t_inpcb)
+		ip_edgehole_mbuf_tag(tp->t_inpcb, m);
+#endif
+	
+>>>>>>> origin/10.5
 	nth->th_seq = htonl(seq);
 	nth->th_ack = htonl(ack);
 	nth->th_x2 = 0;
@@ -997,6 +1026,7 @@ tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
 
 #if INET6
 	if (isipv6) {
+<<<<<<< HEAD
 		struct ip6_out_args ip6oa = { tra->ifscope, { 0 },
 		    IP6OAF_SELECT_SRCIF | IP6OAF_BOUND_SRCADDR, 0 };
 
@@ -1053,6 +1083,23 @@ tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
 			inp_route_copyin(tp->t_inpcb, &sro);
 		} else {
 			ROUTE_RELEASE(&sro);
+=======
+		(void)ip6_output(m, NULL, ro6, 0, NULL, NULL, 0);
+		if (ro6 == &sro6 && ro6->ro_rt) {
+			rtfree(ro6->ro_rt);
+			ro6->ro_rt = NULL;
+		}
+	} else
+#endif /* INET6 */
+	{
+		struct ip_out_args ipoa = { ifscope };
+
+		(void) ip_output(m, NULL, ro, IP_OUTARGS, NULL, &ipoa);
+
+		if (ro == &sro && ro->ro_rt) {
+			rtfree(ro->ro_rt);
+			ro->ro_rt = NULL;
+>>>>>>> origin/10.5
 		}
 	}
 }
@@ -1123,6 +1170,7 @@ tcp_newtcpcb(inp)
 	tp->snd_cwnd = TCP_CC_CWND_INIT_BYTES;
 	tp->snd_ssthresh = TCP_MAXWIN << TCP_MAX_WINSHIFT;
 	tp->snd_ssthresh_prev = TCP_MAXWIN << TCP_MAX_WINSHIFT;
+<<<<<<< HEAD
 	tp->t_rcvtime = tcp_now;
 	tp->tentry.timer_start = tcp_now;
 	tp->t_persist_timeout = tcp_max_persist_timeout;
@@ -1134,6 +1182,10 @@ tcp_newtcpcb(inp)
 	tp->t_twentry.tqe_next = NULL;
 	tp->t_twentry.tqe_prev = NULL;
 
+=======
+	tp->t_rcvtime = 0;
+	tp->t_bw_rtttime = 0;
+>>>>>>> origin/10.5
 	/*
 	 * IPv4 TTL initialization is necessary for an IPv6 socket as well,
 	 * because the socket may be bound to an IPv6 wildcard address,
@@ -2635,7 +2687,7 @@ tcp_mtudisc(
 
 /*
  * Look-up the routing entry to the peer of this inpcb.  If no route
- * is found and it cannot be allocated the return NULL.  This routine
+ * is found and it cannot be allocated then return NULL.  This routine
  * is called by TCP routines that access the rmx structure and by tcp_mss
  * to get the interface MTU.  If a route is found, this routine will
  * hold the rtentry lock; the caller is responsible for unlocking.
@@ -2678,11 +2730,18 @@ tcp_rtlookup(inp, input_ifscope)
 			 * input_ifscope is IFSCOPE_NONE).
 			 */
 			ifscope = (inp->inp_flags & INP_BOUND_IF) ?
+<<<<<<< HEAD
 			    inp->inp_boundifp->if_index : input_ifscope;
 
 			rtalloc_scoped(ro, ifscope);
 			if ((rt = ro->ro_rt) != NULL)
 				RT_LOCK(rt);
+=======
+			    inp->inp_boundif : input_ifscope;
+
+			rtalloc_scoped_ign_locked(ro, 0UL, ifscope);
+			rt = ro->ro_rt;
+>>>>>>> origin/10.5
 		}
 	}
 	if (rt != NULL)
@@ -2704,6 +2763,7 @@ tcp_rtlookup(inp, input_ifscope)
 	else
 		tp->t_flags |= TF_PMTUD;
 
+<<<<<<< HEAD
 #if CONFIG_IFEF_NOWINDOWSCALE
 	if (tcp_obey_ifef_nowindowscale &&
 	    tp->t_state == TCPS_SYN_SENT && rt != NULL && rt->rt_ifp != NULL &&
@@ -2733,6 +2793,17 @@ tcp_rtlookup(inp, input_ifscope)
 	/*
 	 * Caller needs to call RT_UNLOCK(rt).
 	 */
+=======
+#ifdef IFEF_NOWINDOWSCALE
+	if (tp->t_state == TCPS_SYN_SENT && rt != NULL && rt->rt_ifp != NULL &&
+		(rt->rt_ifp->if_eflags & IFEF_NOWINDOWSCALE) != 0)
+	{
+		// Timestamps are not enabled on this interface
+		tp->t_flags &= ~(TF_REQ_SCALE);
+	}
+#endif
+
+>>>>>>> origin/10.5
 	return rt;
 }
 

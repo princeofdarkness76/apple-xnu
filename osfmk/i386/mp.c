@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -60,17 +64,30 @@
 #include <kern/machine.h>
 #include <kern/pms.h>
 #include <kern/misc_protos.h>
+<<<<<<< HEAD
 #include <kern/timer_call.h>
 #include <kern/kalloc.h>
 #include <kern/queue.h>
 #include <prng/random.h>
+=======
+>>>>>>> origin/10.5
 
 #include <vm/vm_map.h>
 #include <vm/vm_kern.h>
 
 #include <profiling/profile-mk.h>
 
+<<<<<<< HEAD
 #include <i386/bit_routines.h>
+=======
+#include <i386/mp.h>
+#include <i386/mp_events.h>
+#include <i386/mp_slave_boot.h>
+#include <i386/lapic.h>
+#include <i386/ipl.h>
+#include <i386/fpu.h>
+#include <i386/cpuid.h>
+>>>>>>> origin/10.5
 #include <i386/proc_reg.h>
 #include <i386/cpu_threads.h>
 #include <i386/mp_desc.h>
@@ -85,7 +102,10 @@
 #include <i386/fpu.h>
 #include <i386/machine_cpu.h>
 #include <i386/pmCPU.h>
+<<<<<<< HEAD
 #if CONFIG_MCA
+=======
+>>>>>>> origin/10.5
 #include <i386/machine_check.h>
 #endif
 #include <i386/acpi.h>
@@ -105,6 +125,7 @@
 #define PAUSE
 #endif	/* MP_DEBUG */
 
+<<<<<<< HEAD
 /* Debugging/test trace events: */
 #define	TRACE_MP_TLB_FLUSH		MACHDBG_CODE(DBG_MACH_MP, 0)
 #define	TRACE_MP_CPUS_CALL		MACHDBG_CODE(DBG_MACH_MP, 1)
@@ -116,6 +137,10 @@
 #define	TRACE_MP_CPU_DEACTIVATE		MACHDBG_CODE(DBG_MACH_MP, 7)
 
 #define ABS(v)		(((v) > 0)?(v):-(v))
+=======
+#define FULL_SLAVE_INIT	(NULL)
+#define FAST_SLAVE_INIT	((void *)(uintptr_t)1)
+>>>>>>> origin/10.5
 
 void 		slave_boot_init(void);
 void		i386_cpu_IPI(int cpu);
@@ -126,10 +151,20 @@ static void	mp_kdp_wait(boolean_t flush, boolean_t isNMI);
 static void	mp_rendezvous_action(void);
 static void 	mp_broadcast_action(void);
 
+<<<<<<< HEAD
 #if MACH_KDP
 static boolean_t	cpu_signal_pending(int cpu, mp_event_t event);
 #endif /* MACH_KDP */
 static int		NMIInterruptHandler(x86_saved_state_t *regs);
+=======
+static boolean_t	cpu_signal_pending(int cpu, mp_event_t event);
+static int		cpu_signal_handler(x86_saved_state_t *regs);
+static int		NMIInterruptHandler(x86_saved_state_t *regs);
+
+boolean_t 	smp_initialized = FALSE;
+volatile boolean_t	force_immediate_debugger_NMI = FALSE;
+volatile boolean_t	pmap_tlb_flush_timeout = FALSE;
+>>>>>>> origin/10.5
 
 boolean_t 		smp_initialized = FALSE;
 uint32_t 		TSC_sync_margin = 0xFFF;
@@ -173,6 +208,7 @@ static void        (*mp_bc_action_func)(void *arg);
 static void        *mp_bc_func_arg;
 static int     	mp_bc_ncpus;
 static volatile long   mp_bc_count;
+<<<<<<< HEAD
 decl_lck_mtx_data(static, mp_bc_lock);
 lck_mtx_ext_t	mp_bc_lock_ext;
 static	volatile int 	debugger_cpu = -1;
@@ -194,6 +230,13 @@ boolean_t i386_smp_init(int nmi_vector, i386_intr_func_t nmi_handler,
 		int ipi_vector, i386_intr_func_t ipi_handler);
 void i386_start_cpu(int lapic_id, int cpu_num);
 void i386_send_NMI(int cpu);
+=======
+decl_mutex_data(static, mp_bc_lock);
+static	volatile int 	debugger_cpu = -1;
+
+static void	mp_cpus_call_action(void); 
+static void	mp_call_PM(void);
+>>>>>>> origin/10.5
 
 #if GPROF
 /*
@@ -249,6 +292,14 @@ smp_init(void)
 				LAPIC_VECTOR(INTERPROCESSOR), cpu_signal_handler))
 		return;
 
+<<<<<<< HEAD
+=======
+	lapic_init();
+	lapic_configure();
+	lapic_set_intr_func(LAPIC_NMI_INTERRUPT,  NMIInterruptHandler);
+	lapic_set_intr_func(LAPIC_VECTOR(INTERPROCESSOR), cpu_signal_handler);
+
+>>>>>>> origin/10.5
 	cpu_thread_init();
 
 	GPROF_INIT();
@@ -266,6 +317,7 @@ smp_init(void)
 	}
 	smp_initialized = TRUE;
 
+<<<<<<< HEAD
 	cpu_prewarm_init();
 
 	return;
@@ -285,12 +337,18 @@ static volatile long		tsc_entry_barrier __attribute__((aligned(64)));
 static volatile long		tsc_exit_barrier  __attribute__((aligned(64)));
 static volatile uint64_t	tsc_target	  __attribute__((aligned(64)));
 
+=======
+	return;
+}
+
+>>>>>>> origin/10.5
 /*
  * Poll a CPU to see when it has marked itself as running.
  */
 static void
 mp_wait_for_cpu_up(int slot_num, unsigned int iters, unsigned int usecdelay)
 {
+<<<<<<< HEAD
 	while (iters-- > 0) {
 		if (cpu_datap(slot_num)->cpu_running)
 			break;
@@ -433,6 +491,52 @@ start_cpu(void *arg)
 				psip->target_cpu, tsc_target, tsc_delta);
 		}
 	}
+=======
+    	while (iters-- > 0) {
+		if (cpu_datap(slot_num)->cpu_running)
+	    		break;
+		delay(usecdelay);
+	}
+}
+
+typedef struct {
+	int		target_cpu;
+	int		target_lapic;
+	int		starter_cpu;
+ 	boolean_t	is_nehalem;
+} processor_start_info_t;
+
+static processor_start_info_t start_info;
+
+static void
+start_cpu(void *arg)
+{
+	int			i = 1000;
+	processor_start_info_t	*psip = (processor_start_info_t *) arg;
+
+	/* Ignore this if the current processor is not the starter */
+	if (cpu_number() != psip->starter_cpu)
+		return;
+
+	LAPIC_WRITE(ICRD, psip->target_lapic << LAPIC_ICRD_DEST_SHIFT);
+	LAPIC_WRITE(ICR, LAPIC_ICR_DM_INIT);
+	delay(psip->is_nehalem ? 100 : 10000);
+
+	LAPIC_WRITE(ICRD, psip->target_lapic << LAPIC_ICRD_DEST_SHIFT);
+	LAPIC_WRITE(ICR, LAPIC_ICR_DM_STARTUP|(MP_BOOT>>12));
+
+	if (!psip->is_nehalem) {
+		delay(200);
+		LAPIC_WRITE(ICRD, psip->target_lapic << LAPIC_ICRD_DEST_SHIFT);
+		LAPIC_WRITE(ICR, LAPIC_ICR_DM_STARTUP|(MP_BOOT>>12));
+	}
+
+#ifdef	POSTCODE_DELAY
+	/* Wait much longer if postcodes are displayed for a delay period. */
+	i *= 10000;
+#endif
+	mp_wait_for_cpu_up(psip->target_cpu, i*100, 100);
+>>>>>>> origin/10.5
 }
 
 kern_return_t
@@ -456,11 +560,16 @@ intel_startCPU(
 	cpu_desc_init64(cpu_datap(slot_num));
 
 	/* Serialize use of the slave boot stack, etc. */
+<<<<<<< HEAD
 	lck_mtx_lock(&mp_cpu_boot_lock);
+=======
+	mutex_lock(&mp_cpu_boot_lock);
+>>>>>>> origin/10.5
 
 	istate = ml_set_interrupts_enabled(FALSE);
 	if (slot_num == get_cpu_number()) {
 		ml_set_interrupts_enabled(istate);
+<<<<<<< HEAD
 		lck_mtx_unlock(&mp_cpu_boot_lock);
 		return KERN_SUCCESS;
 	}
@@ -482,6 +591,30 @@ intel_startCPU(
 
 	ml_set_interrupts_enabled(istate);
 	lck_mtx_unlock(&mp_cpu_boot_lock);
+=======
+		mutex_unlock(&mp_cpu_boot_lock);
+		return KERN_SUCCESS;
+	}
+
+	start_info.starter_cpu = cpu_number();
+	start_info.is_nehalem = (cpuid_info()->cpuid_model
+					== CPUID_MODEL_NEHALEM);
+	start_info.target_cpu = slot_num;
+	start_info.target_lapic = lapic;
+
+	/*
+	 * For Nehalem, perform the processor startup with all running
+	 * processors rendezvous'ed. This is required during periods when
+	 * the cache-disable bit is set for MTRR/PAT initialization.
+	 */
+	if (start_info.is_nehalem)
+		mp_rendezvous_no_intrs(start_cpu, (void *) &start_info);
+	else
+		start_cpu((void *) &start_info);
+
+	ml_set_interrupts_enabled(istate);
+	mutex_unlock(&mp_cpu_boot_lock);
+>>>>>>> origin/10.5
 
 	if (!cpu_datap(slot_num)->cpu_running) {
 		kprintf("Failed to start CPU %02d\n", slot_num);
@@ -495,6 +628,93 @@ intel_startCPU(
 	}
 }
 
+<<<<<<< HEAD
+=======
+/*
+ * Quickly bring a CPU back online which has been halted.
+ */
+kern_return_t
+intel_startCPU_fast(int slot_num)
+{
+    	kern_return_t	rc;
+
+	/*
+	 * Try to perform a fast restart
+	 */
+	rc = pmCPUExitHalt(slot_num);
+	if (rc != KERN_SUCCESS)
+		/*
+		 * The CPU was not eligible for a fast restart.
+		 */
+		return(rc);
+
+	/*
+	 * Wait until the CPU is back online.
+	 */
+	mp_disable_preemption();
+    
+	/*
+	 * We use short pauses (1us) for low latency.  30,000 iterations is
+	 * longer than a full restart would require so it should be more
+	 * than long enough.
+	 */
+	mp_wait_for_cpu_up(slot_num, 30000, 1);
+	mp_enable_preemption();
+
+	/*
+	 * Check to make sure that the CPU is really running.  If not,
+	 * go through the slow path.
+	 */
+	if (cpu_datap(slot_num)->cpu_running)
+		return(KERN_SUCCESS);
+    	else
+		return(KERN_FAILURE);
+}
+
+extern char	slave_boot_base[];
+extern char	slave_boot_end[];
+extern void	slave_pstart(void);
+
+void
+slave_boot_init(void)
+{
+	DBG("V(slave_boot_base)=%p P(slave_boot_base)=%p MP_BOOT=%p sz=0x%x\n",
+		slave_boot_base,
+		kvtophys((vm_offset_t) slave_boot_base),
+		MP_BOOT,
+		slave_boot_end-slave_boot_base);
+
+	/*
+	 * Copy the boot entry code to the real-mode vector area MP_BOOT.
+	 * This is in page 1 which has been reserved for this purpose by
+	 * machine_startup() from the boot processor.
+	 * The slave boot code is responsible for switching to protected
+	 * mode and then jumping to the common startup, _start().
+	 */
+	bcopy_phys(kvtophys((vm_offset_t) slave_boot_base),
+		   (addr64_t) MP_BOOT,
+		   slave_boot_end-slave_boot_base);
+
+	/*
+	 * Zero a stack area above the boot code.
+	 */
+	DBG("bzero_phys 0x%x sz 0x%x\n",MP_BOOTSTACK+MP_BOOT-0x400, 0x400);
+	bzero_phys((addr64_t)MP_BOOTSTACK+MP_BOOT-0x400, 0x400);
+
+	/*
+	 * Set the location at the base of the stack to point to the
+	 * common startup entry.
+	 */
+	DBG("writing 0x%x at phys 0x%x\n",
+		kvtophys((vm_offset_t) &slave_pstart), MP_MACH_START+MP_BOOT);
+	ml_phys_write_word(MP_MACH_START+MP_BOOT,
+			   (unsigned int)kvtophys((vm_offset_t) &slave_pstart));
+	
+	/* Flush caches */
+	__asm__("wbinvd");
+}
+
+>>>>>>> origin/10.5
 #if	MP_DEBUG
 cpu_signal_event_log_t	*cpu_signal[MAX_CPUS];
 cpu_signal_event_log_t	*cpu_handle[MAX_CPUS];
@@ -503,9 +723,12 @@ MP_EVENT_NAME_DECL();
 
 #endif	/* MP_DEBUG */
 
+<<<<<<< HEAD
 /*
  * Note: called with NULL state when polling for TLB flush and cross-calls.
  */
+=======
+>>>>>>> origin/10.5
 int
 cpu_signal_handler(x86_saved_state_t *regs)
 {
@@ -568,6 +791,7 @@ cpu_signal_handler(x86_saved_state_t *regs)
 			DBGLOG(cpu_handle,my_cpu,MP_CALL_PM);
 			i_bit_clear(MP_CALL_PM, my_word);
 			mp_call_PM();
+<<<<<<< HEAD
 		}
 		if (regs == NULL) {
 			/* Called to poll only for cross-calls and TLB flush */
@@ -593,6 +817,57 @@ NMIInterruptHandler(x86_saved_state_t *regs)
 			pmSafeMode(&current_cpu_datap()->lcpu, PM_SAFE_FL_SAFE);
 		for(;;)
 			cpu_pause();
+=======
+		}
+	} while (*my_word);
+
+	mp_enable_preemption();
+
+	return 0;
+}
+
+static int
+NMIInterruptHandler(x86_saved_state_t *regs)
+{
+	void 	*stackptr;
+	
+	sync_iss_to_iks_unconditionally(regs);
+	__asm__ volatile("movl %%ebp, %0" : "=m" (stackptr));
+
+	if (cpu_number() == debugger_cpu)
+			goto NMExit;
+
+	if (pmap_tlb_flush_timeout == TRUE && current_cpu_datap()->cpu_tlb_invalid) {
+		char pstr[128];
+		snprintf(&pstr[0], sizeof(pstr), "Panic(CPU %d): Unresponsive processor\n", cpu_number());
+		panic_i386_backtrace(stackptr, 10, &pstr[0], TRUE, regs);
+		panic_io_port_read();
+		mca_check_save();
+		if (pmsafe_debug)
+			pmSafeMode(&current_cpu_datap()->lcpu, PM_SAFE_FL_SAFE);
+		for(;;) {
+			cpu_pause();
+		}
+	}
+	mp_kdp_wait(FALSE);
+NMExit:	
+	return 1;
+}
+
+#ifdef	MP_DEBUG
+int		max_lock_loops = 1000000;
+int		trappedalready = 0;	/* (BRINGUP */
+#endif	/* MP_DEBUG */
+
+static void
+i386_cpu_IPI(int cpu)
+{
+	boolean_t	state;
+	
+#ifdef	MP_DEBUG
+	if(cpu_datap(cpu)->cpu_signals & 6) {	/* (BRINGUP) */
+		kprintf("i386_cpu_IPI: sending enter debugger signal (%08X) to cpu %d\n", cpu_datap(cpu)->cpu_signals, cpu);
+>>>>>>> origin/10.5
 	}
 
 	atomic_incl(&NMIPI_acks, 1);
@@ -644,8 +919,28 @@ NMIInterruptHandler(x86_saved_state_t *regs)
 	if (pmsafe_debug && !kdp_snapshot)
 		pmSafeMode(&current_cpu_datap()->lcpu, PM_SAFE_FL_NORMAL);
 #endif
+<<<<<<< HEAD
 NMExit:	
 	return 1;
+=======
+
+	/* Wait for previous interrupt to be delivered... */
+#ifdef	MP_DEBUG
+	int     pending_busy_count = 0;
+	while (LAPIC_READ(ICR) & LAPIC_ICR_DS_PENDING) {
+		if (++pending_busy_count > max_lock_loops)
+			panic("i386_cpu_IPI() deadlock\n");
+#else
+	while (LAPIC_READ(ICR) & LAPIC_ICR_DS_PENDING) {
+#endif	/* MP_DEBUG */
+		cpu_pause();
+	}
+
+	state = ml_set_interrupts_enabled(FALSE);
+	LAPIC_WRITE(ICRD, cpu_to_lapic[cpu] << LAPIC_ICRD_DEST_SHIFT);
+	LAPIC_WRITE(ICR, LAPIC_VECTOR(INTERPROCESSOR) | LAPIC_ICR_DM_FIXED);
+	(void) ml_set_interrupts_enabled(state);
+>>>>>>> origin/10.5
 }
 
 
@@ -675,6 +970,7 @@ void
 cpu_NMI_interrupt(int cpu)
 {
 	if (smp_initialized) {
+<<<<<<< HEAD
 		i386_send_NMI(cpu);
 	}
 }
@@ -729,7 +1025,47 @@ cpu_PM_interrupt(int cpu)
 			mp_PM_func();
 		else
 			i386_signal_cpu(cpu, MP_CALL_PM, ASYNC);
+=======
+		state = ml_set_interrupts_enabled(FALSE);
+/* Program the interrupt command register */
+		LAPIC_WRITE(ICRD, cpu_to_lapic[cpu] << LAPIC_ICRD_DEST_SHIFT);
+/* The vector is ignored in this case--the target CPU will enter on the
+ * NMI vector.
+ */
+		LAPIC_WRITE(ICR, LAPIC_VECTOR(INTERPROCESSOR)|LAPIC_ICR_DM_NMI);
+		(void) ml_set_interrupts_enabled(state);
+>>>>>>> origin/10.5
 	}
+}
+
+static volatile void	(*mp_PM_func)(void) = NULL;
+
+static void
+mp_call_PM(void)
+{
+	assert(!ml_get_interrupts_enabled());
+
+	if (mp_PM_func != NULL)
+		mp_PM_func();
+}
+
+void
+cpu_PM_interrupt(int cpu)
+{
+	assert(!ml_get_interrupts_enabled());
+
+	if (mp_PM_func != NULL) {
+		if (cpu == cpu_number())
+			mp_PM_func();
+		else
+			i386_signal_cpu(cpu, MP_CALL_PM, ASYNC);
+	}
+}
+
+void
+PM_interrupt_register(void (*fn)(void))
+{
+	mp_PM_func = fn;
 }
 
 void
@@ -1525,6 +1861,8 @@ i386_activate_cpu(void)
 	flush_tlb_raw();
 }
 
+extern void etimer_timer_expire(void	*arg);
+
 void
 i386_deactivate_cpu(void)
 {
@@ -1539,6 +1877,10 @@ i386_deactivate_cpu(void)
 	simple_lock(&x86_topo_lock);
 	cdp->cpu_running = FALSE;
 	simple_unlock(&x86_topo_lock);
+
+	timer_queue_shutdown(&cdp->rtclock_timer.queue);
+	cdp->rtclock_timer.deadline = EndOfAllTime;
+	mp_cpus_call(cpu_to_cpumask(master_cpu), ASYNC, etimer_timer_expire, NULL);
 
 	/*
 	 * Move all of this cpu's timers to the master/boot cpu,
@@ -1582,7 +1924,11 @@ void
 mp_kdp_enter(void)
 {
 	unsigned int	cpu;
+<<<<<<< HEAD
 	unsigned int	ncpus = 0;
+=======
+	unsigned int	ncpus;
+>>>>>>> origin/10.5
 	unsigned int	my_cpu;
 	uint64_t	tsc_timeout;
 
@@ -1621,8 +1967,13 @@ mp_kdp_enter(void)
 #endif
 		simple_lock(&mp_kdp_lock);
 	}
+<<<<<<< HEAD
 	debugger_cpu = my_cpu;
 	ncpus = 1;
+=======
+	my_cpu = cpu_number();
+	debugger_cpu = my_cpu;
+>>>>>>> origin/10.5
 	mp_kdp_ncpus = 1;	/* self */
 	mp_kdp_trap = TRUE;
 	debugger_entry_time = cpu_datap(my_cpu)->debugger_entry_time;
@@ -1818,7 +2169,11 @@ void
 cause_ast_check(
 	processor_t	processor)
 {
+<<<<<<< HEAD
 	int	cpu = processor->cpu_id;
+=======
+	int	cpu = processor->cpu_num;
+>>>>>>> origin/10.5
 
 	if (cpu != cpu_number()) {
 		i386_signal_cpu(cpu, MP_AST, ASYNC);
@@ -1890,6 +2245,7 @@ free_warm_timer_call(timer_call_t call)
 	splx(x);
 }
 
+<<<<<<< HEAD
 /*
  * Runs in timer call context (interrupts disabled).
  */
@@ -1908,13 +2264,97 @@ cpu_warm_timer_call_func(
 static void
 _cpu_warm_setup(
 		void *arg)
+=======
+static void
+do_init_slave(boolean_t fast_restart)
+{
+	void	*init_param	= FULL_SLAVE_INIT;
+
+	postcode(I386_INIT_SLAVE);
+
+	if (!fast_restart) {
+		/* Ensure that caching and write-through are enabled */
+		set_cr0(get_cr0() & ~(CR0_NW|CR0_CD));
+
+		DBG("i386_init_slave() CPU%d: phys (%d) active.\n",
+		    get_cpu_number(), get_cpu_phys_number());
+
+		assert(!ml_get_interrupts_enabled());
+
+		cpu_mode_init(current_cpu_datap());
+
+		mca_cpu_init();
+
+		lapic_configure();
+		LAPIC_DUMP();
+		LAPIC_CPU_MAP_DUMP();
+
+		init_fpu();
+
+		mtrr_update_cpu();
+	} else
+	    	init_param = FAST_SLAVE_INIT;
+
+	/* resume VT operation */
+	vmx_resume();
+
+	if (!fast_restart)
+		pat_init();
+
+	cpu_thread_init();	/* not strictly necessary */
+
+	cpu_init();	/* Sets cpu_running which starter cpu waits for */ 
+
+	slave_main(init_param);
+
+	panic("do_init_slave() returned from slave_main()");
+}
+
+/*
+ * i386_init_slave() is called from pstart.
+ * We're in the cpu's interrupt stack with interrupts disabled.
+ * At this point we are in legacy mode. We need to switch on IA32e
+ * if the mode is set to 64-bits.
+ */
+void
+i386_init_slave(void)
+{
+    	do_init_slave(FALSE);
+}
+
+/*
+ * i386_init_slave_fast() is called from pmCPUHalt.
+ * We're running on the idle thread and need to fix up
+ * some accounting and get it so that the scheduler sees this
+ * CPU again.
+ */
+void
+i386_init_slave_fast(void)
+{
+    	do_init_slave(TRUE);
+}
+
+void
+slave_machine_init(void *param)
+>>>>>>> origin/10.5
 {
 	cpu_warm_data_t cwdp = (cpu_warm_data_t)arg;
 
+<<<<<<< HEAD
 	timer_call_enter(cwdp->cwd_call, cwdp->cwd_deadline, TIMER_CALL_SYS_CRITICAL | TIMER_CALL_LOCAL);
 	cwdp->cwd_result = 0;
 
 	return;
+=======
+	if (param == FULL_SLAVE_INIT) {
+		/*
+		 * Cold start
+		 */
+		clock_init();
+
+		cpu_machine_init();	/* Interrupts enabled hereafter */
+	}
+>>>>>>> origin/10.5
 }
 
 /*

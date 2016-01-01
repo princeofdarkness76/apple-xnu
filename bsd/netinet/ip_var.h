@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2014 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -285,6 +289,7 @@ struct ip_moptions;
 
 #ifdef BSD_KERNEL_PRIVATE
 /* flags passed to ip_output as last parameter */
+<<<<<<< HEAD
 #define	IP_FORWARDING	0x1		/* most of ip header exists */
 #define	IP_RAWOUTPUT	0x2		/* raw ip header exists */
 #define	IP_NOIPSEC	0x4		/* No IPSec processing */
@@ -309,12 +314,21 @@ struct ip_moptions;
 	}								\
 } while (0)
 #endif /* !__i386__ && !__x86_64__ */
+=======
+#define	IP_FORWARDING		0x1		/* most of ip header exists */
+#define	IP_RAWOUTPUT		0x2		/* raw ip header exists */
+#define	IP_NOIPSEC		0x4		/* No IPSec processing */
+#define	IP_ROUTETOIF		SO_DONTROUTE	/* bypass routing tables (0x0010) */
+#define	IP_ALLOWBROADCAST	SO_BROADCAST	/* can send broadcast packets (0x0020) */
+#define	IP_OUTARGS		0x100		/* has ancillary output info */
+>>>>>>> origin/10.5
 
 struct ip;
 struct inpcb;
 struct route;
 struct sockopt;
 
+<<<<<<< HEAD
 #include <net/flowadv.h>
 
 /*
@@ -361,10 +375,41 @@ extern int ip_checkrouteralert(struct mbuf *);
 extern int ip_ctloutput(struct socket *, struct sockopt *sopt);
 extern void ip_drain(void);
 extern void ip_init(struct protosw *, struct domain *);
+=======
+/*
+ * Extra information passed to ip_output when IP_OUTARGS is set.
+ */
+struct ip_out_args {
+	unsigned int	ipoa_ifscope;	/* interface scope */
+};
+
+extern struct	ipstat	ipstat;
+#if !defined(RANDOM_IP_ID) || RANDOM_IP_ID == 0
+extern u_short	ip_id;				/* ip packet ctr, for ids */
+#endif
+extern int	ip_defttl;			/* default IP ttl */
+extern int	ipforwarding;			/* ip forwarding */
+extern struct protosw *ip_protox[];
+extern struct socket *ip_rsvpd;	/* reservation protocol daemon */
+extern struct socket *ip_mrouter; /* multicast routing daemon */
+extern int	(*legal_vif_num)(int);
+extern u_long	(*ip_mcast_src)(int);
+extern int rsvp_on;
+extern struct	pr_usrreqs rip_usrreqs;
+extern int	ip_doscopedroute;
+
+int	 ip_ctloutput(struct socket *, struct sockopt *sopt);
+void	 ip_drain(void);
+void	 ip_freemoptions(struct ip_moptions *);
+void	 ip_init(void) __attribute__((section("__TEXT, initcode")));
+extern int	 (*ip_mforward)(struct ip *, struct ifnet *, struct mbuf *,
+			  struct ip_moptions *);
+>>>>>>> origin/10.5
 extern int ip_output(struct mbuf *, struct mbuf *, struct route *, int,
     struct ip_moptions *, struct ip_out_args *);
 extern int ip_output_list(struct mbuf *, int, struct mbuf *, struct route *,
     int, struct ip_moptions *, struct ip_out_args *);
+<<<<<<< HEAD
 extern void ip_output_checksum(struct ifnet *, struct mbuf *, int, int,
     uint32_t *);
 extern struct in_ifaddr *ip_rtaddr(struct in_addr);
@@ -390,6 +435,35 @@ extern int rip_output(struct mbuf *, struct socket *, u_int32_t, struct mbuf *);
 extern int rip_unlock(struct socket *, int, void *);
 extern int rip_send(struct socket *, int, struct mbuf *, struct sockaddr *,
     struct mbuf *, struct proc *);
+=======
+struct in_ifaddr *
+	 ip_rtaddr(struct in_addr, struct route *);
+void	 ip_savecontrol(struct inpcb *, struct mbuf **, struct ip *,
+		struct mbuf *);
+void	 ip_slowtimo(void);
+struct mbuf *
+	 ip_srcroute(void);
+void	 ip_stripoptions(struct mbuf *, struct mbuf *);
+#if RANDOM_IP_ID
+u_int16_t	
+	 ip_randomid(void);
+#endif
+int	rip_ctloutput(struct socket *, struct sockopt *);
+void	rip_ctlinput(int, struct sockaddr *, void *);
+void	rip_init(void) __attribute__((section("__TEXT, initcode")));
+void	rip_input(struct mbuf *, int);
+int	rip_output(struct mbuf *, struct socket *, u_long);
+int	rip_unlock(struct socket *, int, int);
+void	ipip_input(struct mbuf *, int);
+void	rsvp_input(struct mbuf *, int);
+int	ip_rsvp_init(struct socket *);
+int	ip_rsvp_done(void);
+int	ip_rsvp_vif_init(struct socket *, struct sockopt *);
+int	ip_rsvp_vif_done(struct socket *, struct sockopt *);
+void	ip_rsvp_force_done(struct socket *);
+
+void	in_delayed_cksum(struct mbuf *m);
+>>>>>>> origin/10.5
 
 extern void tcp_in_cksum_stats(u_int32_t);
 extern void tcp_out_cksum_stats(u_int32_t);

@@ -2347,7 +2347,11 @@ fasttrap_attach(dev_info_t *devi, ddi_attach_cmd_t cmd)
 	fasttrap_max = (sane_size >> 28) * 100000;
 	if (fasttrap_max == 0)
 		fasttrap_max = 50000;
+<<<<<<< HEAD
 
+=======
+#endif
+>>>>>>> origin/10.5
 	fasttrap_total = 0;
 
 	/*

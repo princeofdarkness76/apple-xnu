@@ -241,7 +241,28 @@ unsigned int	mac_vnode_enforce = 1;
 SYSCTL_UINT(_security_mac, OID_AUTO, vnode_enforce, SECURITY_MAC_CTLFLAGS,
 	   &mac_vnode_enforce, 0, "Enforce MAC policy on vnode operations");
 
+<<<<<<< HEAD
 #if CONFIG_AUDIT
+=======
+
+#if CONFIG_MACF_MACH
+unsigned int	mac_port_enforce = 0;
+SYSCTL_UINT(_security_mac, OID_AUTO, port_enforce, CTLFLAG_RW,
+    &mac_port_enforce, 0, "Enforce MAC policy on Mach port operations");
+
+unsigned int	mac_task_enforce = 0;
+SYSCTL_UINT(_security_mac, OID_AUTO, task_enforce, CTLFLAG_RW,
+    &mac_task_enforce, 0, "Enforce MAC policy on Mach task operations");
+#endif
+
+#if CONFIG_MACF_NET
+unsigned int mac_label_mbufs	= 1;
+SYSCTL_UINT(_security_mac, OID_AUTO, label_mbufs, CTLFLAG_RW,
+	&mac_label_mbufs, 0, "Label all MBUFs");
+#endif
+
+#if AUDIT
+>>>>>>> origin/10.5
 /*
  * mac_audit_data_zone is the zone used for data pushed into the audit
  * record by policies. Using a zone simplifies memory management of this
@@ -419,7 +440,11 @@ mac_policy_initbsd(void)
 	struct mac_policy_conf *mpc;
 	u_int i;
 
+<<<<<<< HEAD
 #if CONFIG_AUDIT
+=======
+#if AUDIT
+>>>>>>> origin/10.5
 	mac_audit_data_zone = zinit(MAC_AUDIT_DATA_LIMIT,
 				    AQ_HIWATER * MAC_AUDIT_DATA_LIMIT,
 				    8192, "mac_audit_data_zone");

@@ -586,6 +586,7 @@ struct sysent sysent[] = {
 	syss(truncate,3),		/* 200 = truncate */
 	syss(ftruncate,3),		/* 201 = ftruncate */
 #endif
+<<<<<<< HEAD
 	syss(__sysctl,6),		/* 202 = __sysctl */
 	sysp(mlock, 2),			/* 203 = mlock */
 	syss(munlock, 2),		/* 204 = munlock */
@@ -601,6 +602,85 @@ struct sysent sysent[] = {
 	syss(nosys,0),			/* 213 = Reserved for AppleTalk */
 	syss(nosys,0),			/* 214 = Reserved for AppleTalk */
 	syss(nosys,0),			/* 215 = Reserved for AppleTalk */
+=======
+#if CONFIG_WORKQUEUE
+	{AC(bsdthread_create_args), 0, 0, (sy_call_t *)bsdthread_create, munge_wwwww, munge_ddddd, _SYSCALL_RET_ADDR_T, 20}, /* 360 = bsdthread_create */
+	{AC(bsdthread_terminate_args), 0, 0, (sy_call_t *)bsdthread_terminate, munge_wwww, munge_dddd, _SYSCALL_RET_INT_T, 16}, /* 361 = bsdthread_terminate */
+#else
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 360 = nosys */
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 361 = nosys */
+#endif
+	{0, 0, 0, (sy_call_t *)kqueue, NULL, NULL, _SYSCALL_RET_INT_T, 0},                          /* 362 = kqueue */
+	{AC(kevent_args), 0, 0, (sy_call_t *)kevent, munge_wwwwww, munge_dddddd, _SYSCALL_RET_INT_T, 24}, /* 363 = kevent */
+	{AC(lchown_args), 0, 0, (sy_call_t *)lchown, munge_www, munge_ddd, _SYSCALL_RET_INT_T, 12},  /* 364 = lchown */
+	{AC(stack_snapshot_args), 0, 0, (sy_call_t *)stack_snapshot, munge_wwww, munge_dddd, _SYSCALL_RET_INT_T, 16}, /* 365 = stack_snapshot */
+#if CONFIG_WORKQUEUE
+	{AC(bsdthread_register_args), 0, 0, (sy_call_t *)bsdthread_register, munge_www, munge_ddd, _SYSCALL_RET_INT_T, 12}, /* 366 = bsdthread_register */
+	{0, 0, 0, (sy_call_t *)workq_open, NULL, NULL, _SYSCALL_RET_INT_T, 0},                      /* 367 = workq_open */
+	{AC(workq_ops_args), 0, 0, (sy_call_t *)workq_ops, munge_www, munge_ddd, _SYSCALL_RET_INT_T, 12}, /* 368 = workq_ops */
+#else
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 366 = nosys */
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 367 = nosys */
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 368 = nosys */
+#endif
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 369 = nosys */
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 370 = nosys */
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 371 = nosys */
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 372 = nosys */
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 373 = nosys */
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 374 = nosys */
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 375 = nosys */
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 376 = nosys */
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 377 = nosys */
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 378 = nosys */
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 379 = nosys */
+	{AC(__mac_execve_args), 0, 0, (sy_call_t *)__mac_execve, munge_wwww, munge_dddd, _SYSCALL_RET_INT_T, 16}, /* 380 = __mac_execve */
+	{AC(__mac_syscall_args), 0, 0, (sy_call_t *)__mac_syscall, munge_www, munge_ddd, _SYSCALL_RET_INT_T, 12}, /* 381 = __mac_syscall */
+	{AC(__mac_get_file_args), 0, 0, (sy_call_t *)__mac_get_file, munge_ww, munge_dd, _SYSCALL_RET_INT_T, 8}, /* 382 = __mac_get_file */
+	{AC(__mac_set_file_args), 0, 0, (sy_call_t *)__mac_set_file, munge_ww, munge_dd, _SYSCALL_RET_INT_T, 8}, /* 383 = __mac_set_file */
+	{AC(__mac_get_link_args), 0, 0, (sy_call_t *)__mac_get_link, munge_ww, munge_dd, _SYSCALL_RET_INT_T, 8}, /* 384 = __mac_get_link */
+	{AC(__mac_set_link_args), 0, 0, (sy_call_t *)__mac_set_link, munge_ww, munge_dd, _SYSCALL_RET_INT_T, 8}, /* 385 = __mac_set_link */
+	{AC(__mac_get_proc_args), 0, 0, (sy_call_t *)__mac_get_proc, munge_w, munge_d, _SYSCALL_RET_INT_T, 4}, /* 386 = __mac_get_proc */
+	{AC(__mac_set_proc_args), 0, 0, (sy_call_t *)__mac_set_proc, munge_w, munge_d, _SYSCALL_RET_INT_T, 4}, /* 387 = __mac_set_proc */
+	{AC(__mac_get_fd_args), 0, 0, (sy_call_t *)__mac_get_fd, munge_ww, munge_dd, _SYSCALL_RET_INT_T, 8}, /* 388 = __mac_get_fd */
+	{AC(__mac_set_fd_args), 0, 0, (sy_call_t *)__mac_set_fd, munge_ww, munge_dd, _SYSCALL_RET_INT_T, 8}, /* 389 = __mac_set_fd */
+	{AC(__mac_get_pid_args), 0, 0, (sy_call_t *)__mac_get_pid, munge_ww, munge_dd, _SYSCALL_RET_INT_T, 8}, /* 390 = __mac_get_pid */
+	{AC(__mac_get_lcid_args), 0, 0, (sy_call_t *)__mac_get_lcid, munge_ww, munge_dd, _SYSCALL_RET_INT_T, 8}, /* 391 = __mac_get_lcid */
+	{AC(__mac_get_lctx_args), 0, 0, (sy_call_t *)__mac_get_lctx, munge_w, munge_d, _SYSCALL_RET_INT_T, 4}, /* 392 = __mac_get_lctx */
+	{AC(__mac_set_lctx_args), 0, 0, (sy_call_t *)__mac_set_lctx, munge_w, munge_d, _SYSCALL_RET_INT_T, 4}, /* 393 = __mac_set_lctx */
+	{AC(setlcid_args), 0, 0, (sy_call_t *)setlcid, munge_ww, munge_dd, _SYSCALL_RET_INT_T, 8},  /* 394 = setlcid */
+	{AC(getlcid_args), 0, 0, (sy_call_t *)getlcid, munge_w, munge_d, _SYSCALL_RET_INT_T, 4},    /* 395 = getlcid */
+	{AC(read_nocancel_args), 0, 0, (sy_call_t *)read_nocancel, munge_www, munge_ddd, _SYSCALL_RET_SSIZE_T, 12}, /* 396 = read_nocancel */
+	{AC(write_nocancel_args), 0, 0, (sy_call_t *)write_nocancel, munge_www, munge_ddd, _SYSCALL_RET_SSIZE_T, 12}, /* 397 = write_nocancel */
+	{AC(open_nocancel_args), 0, 0, (sy_call_t *)open_nocancel, munge_www, munge_ddd, _SYSCALL_RET_INT_T, 12}, /* 398 = open_nocancel */
+	{AC(close_nocancel_args), 0, 0, (sy_call_t *)close_nocancel, munge_w, munge_d, _SYSCALL_RET_INT_T, 4}, /* 399 = close_nocancel */
+	{AC(wait4_nocancel_args), 0, 0, (sy_call_t *)wait4_nocancel, munge_wwww, munge_dddd, _SYSCALL_RET_INT_T, 16}, /* 400 = wait4_nocancel */
+#if SOCKETS
+	{AC(recvmsg_nocancel_args), 0, 0, (sy_call_t *)recvmsg_nocancel, munge_www, munge_ddd, _SYSCALL_RET_INT_T, 12}, /* 401 = recvmsg_nocancel */
+	{AC(sendmsg_nocancel_args), 0, 0, (sy_call_t *)sendmsg_nocancel, munge_www, munge_ddd, _SYSCALL_RET_INT_T, 12}, /* 402 = sendmsg_nocancel */
+	{AC(recvfrom_nocancel_args), 0, 0, (sy_call_t *)recvfrom_nocancel, munge_wwwwww, munge_dddddd, _SYSCALL_RET_INT_T, 24}, /* 403 = recvfrom_nocancel */
+	{AC(accept_nocancel_args), 0, 0, (sy_call_t *)accept_nocancel, munge_www, munge_ddd, _SYSCALL_RET_INT_T, 12}, /* 404 = accept_nocancel */
+#else
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 401 = nosys */
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 402 = nosys */
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 403 = nosys */
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 404 = nosys */
+#endif /* SOCKETS */
+	{AC(msync_nocancel_args), 0, 0, (sy_call_t *)msync_nocancel, munge_www, munge_ddd, _SYSCALL_RET_INT_T, 12}, /* 405 = msync_nocancel */
+	{AC(fcntl_nocancel_args), 0, 0, (sy_call_t *)fcntl_nocancel, munge_wws, munge_ddd, _SYSCALL_RET_INT_T, 12}, /* 406 = fcntl_nocancel */
+	{AC(select_nocancel_args), 0, 0, (sy_call_t *)select_nocancel, munge_wwwww, munge_ddddd, _SYSCALL_RET_INT_T, 20}, /* 407 = select_nocancel */
+	{AC(fsync_nocancel_args), 0, 0, (sy_call_t *)fsync_nocancel, munge_w, munge_d, _SYSCALL_RET_INT_T, 4}, /* 408 = fsync_nocancel */
+#if SOCKETS
+	{AC(connect_nocancel_args), 0, 0, (sy_call_t *)connect_nocancel, munge_www, munge_ddd, _SYSCALL_RET_INT_T, 12}, /* 409 = connect_nocancel */
+#else
+	{0, 0, 0, (sy_call_t *)nosys, NULL, NULL, _SYSCALL_RET_INT_T, 0},                           /* 409 = nosys */
+#endif /* SOCKETS */
+	{AC(sigsuspend_nocancel_args), 0, 0, (sy_call_t *)sigsuspend_nocancel, munge_w, munge_d, _SYSCALL_RET_INT_T, 4}, /* 410 = sigsuspend_nocancel */
+	{AC(readv_nocancel_args), 0, 0, (sy_call_t *)readv_nocancel, munge_www, munge_ddd, _SYSCALL_RET_SSIZE_T, 12}, /* 411 = readv_nocancel */
+	{AC(writev_nocancel_args), 0, 0, (sy_call_t *)writev_nocancel, munge_www, munge_ddd, _SYSCALL_RET_SSIZE_T, 12}, /* 412 = writev_nocancel */
+#if SOCKETS
+	{AC(sendto_nocancel_args), 0, 0, (sy_call_t *)sendto_nocancel, munge_wwwwww, munge_dddddd, _SYSCALL_RET_INT_T, 24}, /* 413 = sendto_nocancel */
+>>>>>>> origin/10.5
 #else
 	syss(nosys,0),			/* 206 = Reserved for AppleTalk */
 	syss(nosys,0),			/* 207 = Reserved for AppleTalk */

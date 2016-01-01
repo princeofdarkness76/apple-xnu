@@ -1121,9 +1121,15 @@ IODMACommand::genIOVMSegments(uint32_t op,
     if ((offset == internalState->fPreparedOffset) || (offset != state->fOffset) || internalState->fNewMD) {
 	state->fOffset                 = 0;
 	state->fIOVMAddr               = 0;
+<<<<<<< HEAD
 	internalState->fNextRemapPage  = NULL;
 	internalState->fNewMD	       = false;
 	state->fMapped                 = (0 != fMapper);
+=======
+	internalState->fNextRemapIndex = 0;
+	internalState->fNewMD	       = false;
+	state->fMapped                 = (IS_MAPPED(fMappingOptions) && fMapper);
+>>>>>>> origin/10.5
 	mdOp                           = kIOMDFirstSegment;
     };
 	

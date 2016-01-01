@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -817,7 +821,13 @@ inctl_ifaddr(struct ifnet *ifp, struct in_ifaddr *ia, u_long cmd,
 		/*
 		 * in_ifscrub kills the interface route.
 		 */
+<<<<<<< HEAD
 		in_ifscrub(ifp, ia, 0);
+=======
+		in_ifscrub(ifp, ia, 1);
+		ifa = &ia->ia_ifa;
+		lck_mtx_unlock(rt_mtx);
+>>>>>>> origin/10.5
 		ifnet_lock_exclusive(ifp);
 		IFA_LOCK(ifa);
 		/* if_detach_ifa() releases ifa_link reference */

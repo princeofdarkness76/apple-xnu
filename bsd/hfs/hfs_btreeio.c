@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2011 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -123,6 +127,9 @@ OSStatus GetBTreeBlock(FileReference vp, u_int32_t blockNum, GetBlockOptions opt
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> origin/10.5
 	/* If the btree block is being read using hint, it is 
 	 * fine for the swap code to find zeroed out nodes. 
 	 */
@@ -131,6 +138,7 @@ OSStatus GetBTreeBlock(FileReference vp, u_int32_t blockNum, GetBlockOptions opt
 	} else {
 			allow_empty_node = false;
 	}
+<<<<<<< HEAD
 =======
     if (options & kGetEmptyBlock)
         bp = getblk(vp, blockNum, block->blockSize, 0, 0, BLK_META);
@@ -148,6 +156,8 @@ OSStatus GetBTreeBlock(FileReference vp, u_int32_t blockNum, GetBlockOptions opt
     DBG_ASSERT(bp->b_bcount == block->blockSize);
     DBG_ASSERT(bp->b_lblkno == blockNum);
 >>>>>>> origin/10.1
+=======
+>>>>>>> origin/10.5
 
     if (options & kGetEmptyBlock) {
         daddr64_t blkno;
@@ -183,12 +193,31 @@ OSStatus GetBTreeBlock(FileReference vp, u_int32_t blockNum, GetBlockOptions opt
 					(((BTHeaderRec *)((char *)block->buffer + 14))->nodeSize != buf_count(bp)) &&
 					(SWAP_BE16 (((BTHeaderRec *)((char *)block->buffer + 14))->nodeSize) != buf_count(bp))) {
 
+<<<<<<< HEAD
+=======
+                /*
+                 * Don't swap the node descriptor, record offsets, or other records.
+                 * This record will be invalidated and re-read with the correct node
+                 * size once the B-tree control block is set up with the node size
+                 * from the header record.
+                 */
+                retval = hfs_swap_BTNode (block, vp, kSwapBTNodeHeaderRecordOnly, allow_empty_node);
+
+			} else if (block->blockReadFromDisk) {
+            	/*
+            	 * The node was just read from disk, so always swap/check it.
+            	 * This is necessary on big endian since the test below won't trigger.
+            	 */
+                retval = hfs_swap_BTNode (block, vp, kSwapBTNodeBigToHost, allow_empty_node);
+            } else if (*((u_int16_t *)((char *)block->buffer + (block->blockSize - sizeof (u_int16_t)))) == 0x0e00) {
+>>>>>>> origin/10.5
 				/*
 				 * Don't swap the node descriptor, record offsets, or other records.
 				 * This record will be invalidated and re-read with the correct node
 				 * size once the B-tree control block is set up with the node size
 				 * from the header record.
 				 */
+<<<<<<< HEAD
 				retval = hfs_swap_BTNode (block, vp, kSwapBTNodeHeaderRecordOnly, allow_empty_node);
 
 			} else {
@@ -238,6 +267,19 @@ OSStatus GetBTreeBlock(FileReference vp, u_int32_t blockNum, GetBlockOptions opt
 			 * the node might use the partially swapped node as-is.
 			 */
 			if (retval)
+=======
+                retval = hfs_swap_BTNode (block, vp, kSwapBTNodeBigToHost, allow_empty_node);
+            }
+            
+    		/*
+    		 * If we got an error, then the node is only partially swapped.
+    		 * We mark the buffer invalid so that the next attempt to get the
+    		 * node will read it and attempt to swap again, and will notice
+    		 * the error again.  If we didn't do this, the next attempt to get
+    		 * the node might use the partially swapped node as-is.
+    		 */
+            if (retval)
+>>>>>>> origin/10.5
 				buf_markinvalid(bp);
 		}
 	}

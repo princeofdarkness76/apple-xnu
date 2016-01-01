@@ -244,7 +244,11 @@ struct vnode {
 #define	VRAOFF		0x002000	/* read ahead disabled */
 #define	VNCACHEABLE	0x004000	/* vnode is allowed to be put back in name cache */
 #if NAMEDSTREAMS
+<<<<<<< HEAD
 #define	VISSHADOW	0x008000	/* vnode is a shadow file */
+=======
+#define VISSHADOW       0x008000        /* vnode is a shadow file */
+>>>>>>> origin/10.5
 #endif
 #define	VSWAP		0x010000	/* vnode is being used as swapfile */
 #define	VTHROTTLED	0x020000	/* writes or pageouts have been throttled */
@@ -502,10 +506,16 @@ int	vnode_ref_ext(vnode_t, int, int);
 
 void	vnode_rele_ext(vnode_t, int, int);
 void	vnode_rele_internal(vnode_t, int, int, int);
+<<<<<<< HEAD
 #ifdef BSD_KERNEL_PRIVATE
 int	vnode_getalways(vnode_t);
 int 	vget_internal(vnode_t, int, int);
 errno_t vnode_getiocount(vnode_t, unsigned int, int);
+=======
+int	vnode_getwithref(vnode_t);
+#ifdef BSD_KERNEL_PRIVATE
+int	vnode_getalways(vnode_t);
+>>>>>>> origin/10.5
 #endif /* BSD_KERNEL_PRIVATE */
 int	vnode_get_locked(vnode_t);
 int	vnode_put_locked(vnode_t);

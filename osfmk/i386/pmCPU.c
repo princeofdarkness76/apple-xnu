@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2004-2011 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2004-2009 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -31,6 +35,14 @@
  *
  * Implements the "wrappers" to the KEXT.
  */
+<<<<<<< HEAD
+=======
+#include <kern/machine.h>
+#include <i386/machine_routines.h>
+#include <i386/machine_cpu.h>
+#include <i386/misc_protos.h>
+#include <i386/pmap.h>
+>>>>>>> origin/10.5
 #include <i386/asm.h>
 #include <i386/machine_cpu.h>
 #include <i386/mp.h>
@@ -45,12 +57,24 @@
 #include <i386/cpu_threads.h>
 #include <i386/pmCPU.h>
 #include <i386/cpuid.h>
+<<<<<<< HEAD
 #include <i386/rtclock_protos.h>
 #include <kern/sched_prim.h>
 #include <i386/lapic.h>
 #include <i386/pal_routines.h>
 #include <sys/kdebug.h>
 #include <i386/tsc.h>
+=======
+#include <i386/rtclock.h>
+#include <kern/sched_prim.h>
+
+/*
+ * Kernel parameter determining whether threads are halted unconditionally
+ * in the idle state.  This is the default behavior.
+ * See machine_idle() for use.
+ */
+int idlehalt					= 1;
+>>>>>>> origin/10.5
 
 extern int disableConsoleOutput;
 
@@ -64,6 +88,7 @@ uint64_t *cpu_rtime_bins = &cpu_itime_bins[0];
  */
 pmDispatch_t	*pmDispatch	= NULL;
 
+<<<<<<< HEAD
 uint32_t		pmInitDone		= 0;
 static boolean_t	earlyTopology		= FALSE;
 static uint64_t		earlyMaxBusDelay	= DELAY_UNSET;
@@ -153,6 +178,10 @@ machine_idle(void)
 		if (earlyMaxIntDelay != DELAY_UNSET)
 			ml_set_maxintdelay(earlyMaxIntDelay);
 	}
+=======
+static uint32_t		pmInitDone	= 0;
+
+>>>>>>> origin/10.5
 
 	if (pmInitDone
 	    && pmDispatch != NULL
@@ -204,6 +233,7 @@ machine_idle(void)
 
 	pal_sti();
 
+<<<<<<< HEAD
 	if (do_process_pending_timers) {
 		TCOAL_DEBUG(0xBBBB0000 | DBG_FUNC_START, ctime, esdeadline, ehdeadline, idle_pending_timers_processed, 0);
 
@@ -221,6 +251,60 @@ machine_idle(void)
 		KERNEL_DEBUG_CONSTANT(0xceaa0000, cwakeups, 0, 0, 0, 0);
 	}
 #endif    
+=======
+/*
+ * Called when the CPU is idle.  It calls into the power management kext
+ * to determine the best way to idle the CPU.
+ */
+void
+machine_idle(void)
+{
+    cpu_data_t		*my_cpu		= current_cpu_datap();
+
+    if (my_cpu == NULL)
+	goto out;
+
+    /*
+     * If idlehalt isn't set, then don't do any power management related
+     * idle handling.
+     */
+    if (!idlehalt)
+	goto out;
+
+    my_cpu->lcpu.state = LCPU_IDLE;
+    my_cpu->lcpu.flags |= X86CORE_FL_IDLE;
+    DBGLOG(cpu_handle, cpu_number(), MP_IDLE);
+    MARK_CPU_IDLE(cpu_number());
+
+    if (pmInitDone
+	&& pmDispatch != NULL
+	&& pmDispatch->cstateMachineIdle != NULL)
+	(*pmDispatch->cstateMachineIdle)(0x7FFFFFFFFFFFFFFFULL);
+    else {
+	/*
+	 * If no power management, re-enable interrupts and halt.
+	 * This will keep the CPU from spinning through the scheduler
+	 * and will allow at least some minimal power savings (but it
+	 * cause problems in some MP configurations w.r.t. the APIC
+	 * stopping during a GV3 transition).
+	 */
+	__asm__ volatile ("sti; hlt");
+    }
+
+    /*
+     * Mark the CPU as running again.
+     */
+    MARK_CPU_ACTIVE(cpu_number());
+    DBGLOG(cpu_handle, cpu_number(), MP_UNIDLE);
+    my_cpu->lcpu.flags &= ~(X86CORE_FL_IDLE | X86CORE_FL_WAKEUP);
+    my_cpu->lcpu.state = LCPU_RUN;
+
+    /*
+     * Re-enable interrupts.
+     */
+  out:
+    __asm__ volatile("sti");
+>>>>>>> origin/10.5
 }
 
 /*
@@ -235,12 +319,20 @@ pmCPUHalt(uint32_t reason)
     switch (reason) {
     case PM_HALT_DEBUG:
 	cpup->lcpu.state = LCPU_PAUSE;
+<<<<<<< HEAD
 	pal_stop_cpu(FALSE);
+=======
+	__asm__ volatile ("wbinvd; hlt");
+>>>>>>> origin/10.5
 	break;
 
     case PM_HALT_PANIC:
 	cpup->lcpu.state = LCPU_PAUSE;
+<<<<<<< HEAD
 	pal_stop_cpu(TRUE);
+=======
+	__asm__ volatile ("cli; wbinvd; hlt");
+>>>>>>> origin/10.5
 	break;
 
     case PM_HALT_NORMAL:
@@ -257,6 +349,7 @@ pmCPUHalt(uint32_t reason)
 	    (*pmDispatch->pmCPUHalt)();
 
 	    /*
+<<<<<<< HEAD
 	     * We've exited halt, so get the CPU schedulable again.
 	     * - by calling the fast init routine for a slave, or
 	     * - by returning if we're the master processor.
@@ -267,6 +360,14 @@ pmCPUHalt(uint32_t reason)
 	    }
 	} else
 	{
+=======
+	     * We've exited halt, so get the the CPU schedulable again.
+	     */
+	    i386_init_slave_fast();
+
+	    panic("init_slave_fast returned");
+	} else {
+>>>>>>> origin/10.5
 	    /*
 	     * If no power managment and a processor is taken off-line,
 	     * then invalidate the cache and halt it (it will not be able
@@ -274,7 +375,11 @@ pmCPUHalt(uint32_t reason)
 	     */
 	    __asm__ volatile ("wbinvd");
 	    cpup->lcpu.state = LCPU_HALT;
+<<<<<<< HEAD
 	    pal_stop_cpu(FALSE);
+=======
+	    __asm__ volatile ( "wbinvd; hlt" );
+>>>>>>> origin/10.5
 
 	    panic("back from Halt");
 	}
@@ -425,12 +530,16 @@ pmCPUExitIdle(cpu_data_t *cpu)
 {
     boolean_t		do_ipi;
 
+    cpu->lcpu.flags |= X86CORE_FL_WAKEUP;
     if (pmInitDone
 	&& pmDispatch != NULL
 	&& pmDispatch->exitIdle != NULL)
 	do_ipi = (*pmDispatch->exitIdle)(&cpu->lcpu);
     else
 	do_ipi = TRUE;
+
+    if (do_ipi)
+	cpu->lcpu.flags &= ~X86CORE_FL_WAKEUP;
 
     return(do_ipi);
 }
@@ -451,7 +560,11 @@ pmCPUExitHalt(int cpu)
 kern_return_t
 pmCPUExitHaltToOff(int cpu)
 {
+<<<<<<< HEAD
     kern_return_t	rc	= KERN_SUCCESS;
+=======
+    kern_return_t	rc	= KERN_INVALID_ARGUMENT;
+>>>>>>> origin/10.5
 
     if (pmInitDone
 	&& pmDispatch != NULL
@@ -469,8 +582,11 @@ pmCPUStateInit(void)
 {
     if (pmDispatch != NULL && pmDispatch->pmCPUStateInit != NULL)
 	(*pmDispatch->pmCPUStateInit)();
+<<<<<<< HEAD
     else
 	earlyTopology = TRUE;
+=======
+>>>>>>> origin/10.5
 }
 
 /*
@@ -580,8 +696,11 @@ ml_set_maxbusdelay(uint32_t mdelay)
 	&& pmDispatch->setMaxBusDelay != NULL) {
 	earlyMaxBusDelay = DELAY_UNSET;
 	pmDispatch->setMaxBusDelay(maxdelay);
+<<<<<<< HEAD
     } else
 	earlyMaxBusDelay = maxdelay;
+=======
+>>>>>>> origin/10.5
 }
 
 uint64_t
@@ -603,6 +722,7 @@ void
 ml_set_maxintdelay(uint64_t mdelay)
 {
     if (pmDispatch != NULL
+<<<<<<< HEAD
 	&& pmDispatch->setMaxIntDelay != NULL) {
 	earlyMaxIntDelay = DELAY_UNSET;
 	pmDispatch->setMaxIntDelay(mdelay);
@@ -621,6 +741,10 @@ ml_get_interrupt_prewake_applicable()
 	applicable = pmDispatch->pmInterruptPrewakeApplicable();
 
     return applicable;
+=======
+	&& pmDispatch->setMaxIntDelay != NULL)
+	pmDispatch->setMaxIntDelay(mdelay);
+>>>>>>> origin/10.5
 }
 
 /*
@@ -677,6 +801,7 @@ machine_run_count(uint32_t count)
 	saved_run_count = count;
 }
 
+<<<<<<< HEAD
 processor_t
 machine_choose_processor(processor_set_t pset,
 			 processor_t preferred)
@@ -824,6 +949,16 @@ active_rt_threads(boolean_t active)
 	return;
 
     pmDispatch->pmActiveRTThreads(active);
+=======
+boolean_t
+machine_cpu_is_inactive(int cpu)
+{
+    if (pmDispatch != NULL
+	&& pmDispatch->pmIsCPUUnAvailable != NULL)
+	return(pmDispatch->pmIsCPUUnAvailable(cpu_to_lcpu(cpu)));
+    else
+	return(FALSE);
+>>>>>>> origin/10.5
 }
 
 static uint32_t
@@ -859,16 +994,25 @@ pmReSyncDeadlines(int cpu)
     static boolean_t	registered	= FALSE;
 
     if (!registered) {
+<<<<<<< HEAD
 	PM_interrupt_register(&timer_resync_deadlines);
+=======
+	PM_interrupt_register(&etimer_resync_deadlines);
+>>>>>>> origin/10.5
 	registered = TRUE;
     }
 
     if ((uint32_t)cpu == current_cpu_datap()->lcpu.cpu_num)
+<<<<<<< HEAD
 	timer_resync_deadlines();
+=======
+	etimer_resync_deadlines();
+>>>>>>> origin/10.5
     else
 	cpu_PM_interrupt(cpu);
 }
 
+<<<<<<< HEAD
 static void
 pmSendIPI(int cpu)
 {
@@ -901,6 +1045,8 @@ pmTimerQueueMigrate(int target_cpu)
 }
 
 
+=======
+>>>>>>> origin/10.5
 /*
  * Called by the power management kext to register itself and to get the
  * callbacks it might need into other kernel functions.  This interface
@@ -909,6 +1055,7 @@ pmTimerQueueMigrate(int target_cpu)
  */
 void
 pmKextRegister(uint32_t version, pmDispatch_t *cpuFuncs,
+<<<<<<< HEAD
     pmCallBacks_t *callbacks)
 {
 	if (callbacks != NULL && version == PM_DISPATCH_VERSION) {
@@ -942,6 +1089,32 @@ pmKextRegister(uint32_t version, pmDispatch_t *cpuFuncs,
 	} else {
 		panic("Version mis-match between Kernel and CPU PM");
 	}
+=======
+	       pmCallBacks_t *callbacks)
+{
+    if (callbacks != NULL && version == PM_DISPATCH_VERSION) {
+	callbacks->setRTCPop            = setPop;
+	callbacks->resyncDeadlines      = pmReSyncDeadlines;
+	callbacks->initComplete         = pmInitComplete;
+	callbacks->GetLCPU              = pmGetLogicalCPU;
+	callbacks->GetCore              = pmGetCore;
+	callbacks->GetDie               = pmGetDie;
+	callbacks->GetPackage           = pmGetPackage;
+	callbacks->GetMyLCPU            = pmGetMyLogicalCPU;
+	callbacks->GetMyCore            = pmGetMyCore;
+	callbacks->GetMyDie             = pmGetMyDie;
+	callbacks->GetMyPackage         = pmGetMyPackage;
+	callbacks->GetPkgRoot           = pmGetPkgRoot;
+	callbacks->LockCPUTopology      = pmLockCPUTopology;
+	callbacks->GetHibernate         = pmCPUGetHibernate;
+	callbacks->LCPUtoProcessor      = pmLCPUtoProcessor;
+	callbacks->ThreadBind           = thread_bind;
+	callbacks->GetSavedRunCount     = pmGetSavedRunCount;
+	callbacks->topoParms            = &topoParms;
+    } else {
+	panic("Version mis-match between Kernel and CPU PM");
+    }
+>>>>>>> origin/10.5
 
 	if (cpuFuncs != NULL) {
 		if (pmDispatch) {
@@ -973,6 +1146,7 @@ pmUnRegister(pmDispatch_t *cpuFuncs)
     }
 }
 
+<<<<<<< HEAD
 void machine_track_platform_idle(boolean_t entry) {
 	cpu_data_t		*my_cpu		= current_cpu_datap();
 
@@ -985,4 +1159,44 @@ void machine_track_platform_idle(boolean_t entry) {
  			my_cpu->lcpu.package->package_idle_exits++;
  		}
  	}
+=======
+/******************************************************************************
+ *
+ * All of the following are deprecated interfaces and no longer used.
+ *
+ ******************************************************************************/
+kern_return_t
+pmsControl(__unused uint32_t request, __unused user_addr_t reqaddr,
+	   __unused uint32_t reqsize)
+{
+    return(KERN_SUCCESS);
+}
+
+void
+pmsInit(void)
+{
+}
+
+void
+pmsStart(void)
+{
+}
+
+void
+pmsPark(void)
+{
+}
+
+void
+pmsRun(__unused uint32_t nstep)
+{
+}
+
+kern_return_t
+pmsBuild(__unused pmsDef *pd, __unused uint32_t pdsize,
+	 __unused pmsSetFunc_t *functab,
+	 __unused uint32_t platformData, __unused pmsQueryFunc_t queryFunc)
+{
+    return(KERN_SUCCESS);
+>>>>>>> origin/10.5
 }

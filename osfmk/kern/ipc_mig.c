@@ -172,6 +172,7 @@ mach_msg_send_from_kernel_proper(
 	if (mr != MACH_MSG_SUCCESS)
 		return mr;
 
+<<<<<<< HEAD
 	mr = ipc_kmsg_copyin_from_kernel(kmsg);
 	if (mr != MACH_MSG_SUCCESS) {
 		ipc_kmsg_free(kmsg);
@@ -181,6 +182,11 @@ mach_msg_send_from_kernel_proper(
 	mr = ipc_kmsg_send(kmsg, 
 			   MACH_SEND_KERNEL_DEFAULT,
 			   MACH_MSG_TIMEOUT_NONE);
+=======
+	ipc_kmsg_copyin_from_kernel(kmsg);
+
+	mr = ipc_kmsg_send_always(kmsg);
+>>>>>>> origin/10.5
 	if (mr != MACH_MSG_SUCCESS) {
 		ipc_kmsg_destroy(kmsg);
 	}
@@ -246,6 +252,7 @@ mach_msg_send_from_kernel_with_options_legacy(
 
 	mr = ipc_kmsg_copyin_from_kernel_legacy(kmsg);
 	if (mr != MACH_MSG_SUCCESS) {
+<<<<<<< HEAD
 		ipc_kmsg_free(kmsg);
 		return mr;
 	}
@@ -261,6 +268,8 @@ mach_msg_send_from_kernel_with_options_legacy(
 	mr = ipc_kmsg_send(kmsg, option, timeout_val);
 
 	if (mr != MACH_MSG_SUCCESS) {
+=======
+>>>>>>> origin/10.5
 		ipc_kmsg_destroy(kmsg);
 	}
 	
@@ -352,6 +361,7 @@ mach_msg_rpc_from_kernel_body(
 	kmsg->ikm_header->msgh_bits |=
 		MACH_MSGH_BITS(0, MACH_MSG_TYPE_MAKE_SEND_ONCE);
 
+<<<<<<< HEAD
 #if IKM_SUPPORT_LEGACY
     if(legacy)
         mr = ipc_kmsg_copyin_from_kernel_legacy(kmsg);
@@ -367,6 +377,13 @@ mach_msg_rpc_from_kernel_body(
 	mr = ipc_kmsg_send(kmsg, 
 			   MACH_SEND_KERNEL_DEFAULT,
 			   MACH_MSG_TIMEOUT_NONE);
+=======
+	ipc_port_reference(reply);
+
+	ipc_kmsg_copyin_from_kernel(kmsg);
+
+	mr = ipc_kmsg_send_always(kmsg);
+>>>>>>> origin/10.5
 	if (mr != MACH_MSG_SUCCESS) {
 		ipc_kmsg_destroy(kmsg);
 		return mr;

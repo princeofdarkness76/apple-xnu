@@ -56,6 +56,7 @@ extern uint64_t _rtc_tsc_to_nanoseconds(
 
 extern void	rtclock_intr(x86_saved_state_t *regs);
 
+<<<<<<< HEAD:osfmk/i386/rtclock_protos.h
 
 /*
  * Timer control.
@@ -67,6 +68,20 @@ typedef struct {
 extern rtc_timer_t	*rtc_timer;
 
 extern void		rtc_timer_init(void);
+=======
+#if 0 /* this is currently still MD */
+#pragma pack(push,4)
+struct rtclock_timer_t  {
+	uint64_t		deadline;
+	uint32_t
+	/*boolean_t*/	is_set:1,
+					has_expired:1,
+					:0;
+};
+#pragma pack(pop)
+typedef struct rtclock_timer_t rtclock_timer_t;
+#endif /* MD */
+>>>>>>> origin/10.5:osfmk/kern/etimer.h
 
 extern void		rtclock_early_init(void);
 

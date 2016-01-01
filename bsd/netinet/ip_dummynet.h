@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2013 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -179,8 +183,11 @@ struct dn_heap {
  */
 #ifdef KERNEL
 #include <netinet/ip_var.h>	/* for ip_out_args */
+<<<<<<< HEAD
 #include <netinet/ip6.h>	/* for ip6_out_args */
 #include <netinet6/ip6_var.h>	/* for ip6_out_args */
+=======
+>>>>>>> origin/10.5
 
 struct dn_pkt_tag {
     struct ip_fw	*dn_ipfw_rule;		/* matching IPFW rule */
@@ -189,6 +196,7 @@ struct dn_pkt_tag {
 #define DN_TO_IP_OUT	1
 #define DN_TO_IP_IN	2
 #define DN_TO_BDG_FWD	3
+<<<<<<< HEAD
 #define DN_TO_IP6_IN    4
 #define DN_TO_IP6_OUT   5
     dn_key 		dn_output_time;		/* when the pkt is due for delivery	*/
@@ -221,6 +229,15 @@ struct dn_pkt_tag {
     } 			dn_ipoa_;
 #define dn_ipoa dn_ipoa_._dn_ipoa
 #define dn_ip6oa dn_ipoa_._dn_ip6oa
+=======
+
+    dn_key output_time;		/* when the pkt is due for delivery	*/
+    struct ifnet *ifp;		/* interface, for ip_output		*/
+    struct sockaddr_in *dn_dst ;
+    struct route ro;		/* route, for ip_output. MUST COPY	*/
+    int flags ;			/* flags, for ip_output (IPv6 ?)	*/
+    struct ip_out_args ipoa;	/* output args, for ip_output. MUST COPY */
+>>>>>>> origin/10.5
 };
 #else
 struct dn_pkt;

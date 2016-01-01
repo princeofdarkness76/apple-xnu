@@ -397,8 +397,12 @@ void IOCPUSleepKernel(void)
     long cnt, numCPUs;
     IOCPU *target;
     IOCPU *bootCPU = NULL;
+<<<<<<< HEAD
     IOPMrootDomain  *rootDomain = IOService::getPMRootDomain();
 
+=======
+  
+>>>>>>> origin/10.5
     kprintf("IOCPUSleepKernel\n");
 
     IORegistryIterator * iter;
@@ -459,15 +463,22 @@ void IOCPUSleepKernel(void)
         }
     }
 
+<<<<<<< HEAD
     rootDomain->tracePoint( kIOPMTracePointSleepPlatformDriver );
 
+=======
+>>>>>>> origin/10.5
     // Now sleep the boot CPU.
     if (bootCPU)
         bootCPU->haltCPU();
 
+<<<<<<< HEAD
     rootDomain->tracePoint( kIOPMTracePointWakePlatformActions );
 
     iocpu_run_platform_actions(&gActionQueues[kQueueWake], 0, 0U-1,
+=======
+    iocpu_run_platform_actions(&gIOWakeActionQueue, 0, 0UL-1,
+>>>>>>> origin/10.5
 				    NULL, NULL, NULL);
 
     iocpu_platform_action_entry_t * entry;

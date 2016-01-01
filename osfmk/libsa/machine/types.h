@@ -50,8 +50,15 @@
 #ifndef _MACH_MACHINE_TYPES_H
 #define _MACH_MACHINE_TYPES_H
 
+<<<<<<< HEAD
 #if defined (__i386__) || defined (__x86_64__)
 #include "libsa/i386/types.h"
+=======
+#if defined (__ppc__)
+#include "ppc/types.h"
+#elif defined (__i386__)
+#include "i386/types.h"
+>>>>>>> origin/10.5
 #else
 #error architecture not supported
 #endif

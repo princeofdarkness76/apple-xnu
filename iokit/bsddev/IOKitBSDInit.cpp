@@ -76,6 +76,7 @@ int panic_on_exception_triage = 0;
 extern dev_t mdevadd(int devid, uint64_t base, unsigned int size, int phys);
 extern dev_t mdevlookup(int devid);
 extern void mdevremoveall(void);
+<<<<<<< HEAD
 extern void di_root_ramfile(IORegistryEntry * entry);
 
 
@@ -96,6 +97,8 @@ NewKernelCoreMedia(void * target, void * refCon,
 		   IONotifier * notifier);
 #endif /* IOPOLLED_COREFILE */
 
+=======
+>>>>>>> origin/10.5
 
 kern_return_t
 IOKitBSDInit( void )
@@ -201,6 +204,86 @@ OSDictionary * IOUUIDMatching( void )
     return IOService::resourceMatching( "boot-uuid-media" );
 }
 
+<<<<<<< HEAD
+=======
+
+OSDictionary * IOCDMatching( void )
+{
+    OSDictionary *	dict;
+    const OSSymbol *	str;
+    
+    dict = IOService::serviceMatching( "IOMedia" );
+    if( dict == 0 ) {
+        IOLog("Unable to find IOMedia\n");
+        return 0;
+    }
+    
+    str = OSSymbol::withCString( "CD_ROM_Mode_1" );
+    if( str == 0 ) {
+        dict->release();
+        return 0;
+    }
+    
+    dict->setObject( "Content Hint", (OSObject *)str );
+    str->release();        
+    return( dict );
+}
+
+OSDictionary * IONetworkMatching(  const char * path,
+				   char * buf, int maxLen )
+{
+    OSDictionary *	matching = 0;
+    OSDictionary *	dict;
+    OSString *		str;
+    char *		comp;
+    const char *	skip;
+    int			len;
+
+    do {
+
+	len = strlen( kIODeviceTreePlane ":" );
+	maxLen -= len;
+	if( maxLen <= 0)
+	    continue;
+
+	strlcpy( buf, kIODeviceTreePlane ":", len + 1 );
+	comp = buf + len;
+
+        // remove parameters following ':' from the path
+        skip = strchr( path, ':');
+	if( !skip)
+	    continue;
+
+        len = skip - path;
+	maxLen -= len;
+	if( maxLen <= 0)
+	    continue;
+	strlcpy( comp, path, len + 1 );
+
+	matching = IOService::serviceMatching( "IONetworkInterface" );
+	if( !matching)
+	    continue;
+	dict = IOService::addLocation( matching );
+	if( !dict)
+	    continue;
+
+	str = OSString::withCString( buf );
+	if( !str)
+	    continue;
+        dict->setObject( kIOPathMatchKey, str );
+	str->release();
+
+	return( matching );
+
+    } while( false );
+
+    if( matching)
+        matching->release();
+
+    return( 0 );
+}
+
+>>>>>>> origin/10.5
 OSDictionary * IONetworkNamePrefixMatching( const char * prefix )
 {
     OSDictionary *	 matching;
@@ -308,6 +391,110 @@ static bool IORegisterNetworkInterface( IOService * netif )
 	return ( netif->getProperty( kIOBSDNameKey ) != 0 );
 }
 
+<<<<<<< HEAD
+=======
+OSDictionary * IODiskMatching( const char * path, char * buf, int maxLen )
+{
+    const char * look;
+    const char * alias;
+    char *       comp;
+    long         unit = -1;
+    long         partition = -1;
+    long		 lun = -1;
+    char         c;
+    int          len;
+
+    // scan the tail of the path for "@unit:partition"
+    do {
+        // Have to get the full path to the controller - an alias may
+        // tell us next to nothing, like "hd:8"
+        alias = IORegistryEntry::dealiasPath( &path, gIODTPlane );
+		
+        look = path + strlen( path);
+        c = ':';
+        while( look != path) {
+            if( *(--look) == c) {
+                if( c == ':') {
+                    partition = strtol( look + 1, 0, 0 );
+                    c = '@';
+                } else if( c == '@') {
+                    unit = strtol( look + 1, &comp, 16 );
+
+                    if( *comp == ',') {
+                        lun = strtol( comp + 1, 0, 16 );
+                    }
+                    
+                    c = '/';
+                } else if( c == '/') {
+                    c = 0;
+                    break;
+                }
+            }
+
+	        if( alias && (look == path)) {
+                path = alias;
+                look = path + strlen( path);
+                alias = 0;
+            }
+        }
+        if( c || unit == -1 || partition == -1)
+            continue;
+		
+        len = strlen( "{" kIOPathMatchKey "='" kIODeviceTreePlane ":" );
+        maxLen -= len;
+        if( maxLen <= 0)
+            continue;
+
+        snprintf( buf, len + 1, "{" kIOPathMatchKey "='" kIODeviceTreePlane ":" );
+        comp = buf + len;
+
+        if( alias) {
+            len = strlen( alias );
+            maxLen -= len;
+            if( maxLen <= 0)
+                continue;
+
+            strlcpy( comp, alias, len + 1 );
+            comp += len;
+        }
+
+        if ( (look - path)) {
+            len = (look - path);
+            maxLen -= len;
+            if( maxLen <= 0)
+                continue;
+
+            strlcpy( comp, path, len + 1 );
+            comp += len;
+        }
+			
+        if ( lun != -1 )
+        {
+            len = strlen( "/@hhhhhhhh,hhhhhhhh:dddddddddd';}" );
+            maxLen -= len;
+            if( maxLen <= 0)
+                continue;
+
+            snprintf( comp, len + 1, "/@%lx,%lx:%ld';}", unit, lun, partition );
+        }
+        else
+        {
+            len = strlen( "/@hhhhhhhh:dddddddddd';}" );
+            maxLen -= len;
+            if( maxLen <= 0)
+                continue;
+
+            snprintf( comp, len + 1, "/@%lx:%ld';}", unit, partition );
+        }
+		
+        return( OSDynamicCast(OSDictionary, OSUnserialize( buf, 0 )) );
+
+    } while( false );
+
+    return( 0 );
+}
+
+>>>>>>> origin/10.5
 OSDictionary * IOOFPathMatching( const char * path, char * buf, int maxLen )
 {
     OSDictionary *	matching = NULL;
@@ -647,6 +834,24 @@ bool IORamDiskBSDRoot(void)
 
 void IOSecureBSDRoot(const char * rootName)
 {
+<<<<<<< HEAD
+=======
+#if CONFIG_EMBEDDED
+    IOReturn         result;
+    IOPlatformExpert *pe;
+    const OSSymbol   *functionName = OSSymbol::withCStringNoCopy("SecureRootName");
+    
+    while ((pe = IOService::getPlatform()) == 0) IOSleep(1 * 1000);
+    
+    // Returns kIOReturnNotPrivileged is the root device is not secure.
+    // Returns kIOReturnUnsupported if "SecureRootName" is not implemented.
+    result = pe->callPlatformFunction(functionName, false, (void *)rootName, (void *)0, (void *)0, (void *)0);
+    
+    functionName->release();
+    
+    if (result == kIOReturnNotPrivileged) mdevremoveall();
+#endif
+>>>>>>> origin/10.5
 }
 
 void *
@@ -696,6 +901,7 @@ kern_return_t IOBSDGetPlatformUUID( uuid_t uuid, mach_timespec_t timeout )
     return KERN_SUCCESS;
 }
 
+<<<<<<< HEAD
 kern_return_t IOBSDGetPlatformSerialNumber( char *serial_number_str, u_int32_t len )
 {
     OSDictionary * platform_dict;
@@ -770,6 +976,8 @@ void IOBSDIterateMediaWithContent(const char *content_uuid_cstring, int (*func)(
     }
 }
 
+=======
+>>>>>>> origin/10.5
 
 int IOBSDIsMediaEjectable( const char *cdev_name )
 {

@@ -494,8 +494,15 @@ enable_wrap(uint32_t old_slowcheck, boolean_t lostevents)
 	if ( !(old_slowcheck & SLOW_NOLOG))
 		kd_ctrl_page.kdebug_slowcheck &= ~SLOW_NOLOG;
 
+<<<<<<< HEAD
 	if (lostevents == TRUE)
 		kd_ctrl_page.kdebug_flags |= KDBG_WRAPPED;
+=======
+	/* get the number of cpus and cache it */
+#define BSD_HOST 1
+	host_info((host_t)BSD_HOST, HOST_BASIC_INFO, (host_info_t)&hinfo, &count);
+	kd_cpus = hinfo.logical_cpu_max;
+>>>>>>> origin/10.5
 
 	lck_spin_unlock(kds_spin_lock);
 	ml_set_interrupts_enabled(s);
@@ -2938,8 +2945,13 @@ kdbg_control_chud(int val, void *fn)
 int
 kdbg_control(int *name, u_int namelen, user_addr_t where, size_t *sizep)
 {
+<<<<<<< HEAD
 	int ret = 0;
 	size_t size = *sizep;
+=======
+        int ret=0;
+	size_t size=*sizep;
+>>>>>>> origin/10.5
 	unsigned int value = 0;
 	kd_regtype kd_Reg;
 	kbufinfo_t kd_bufinfo;
@@ -2969,6 +2981,7 @@ kdbg_control(int *name, u_int namelen, user_addr_t where, size_t *sizep)
 
 	lck_mtx_lock(kd_trace_mtx_sysctl);
 
+<<<<<<< HEAD
 	switch(name[0]) {
 		case KERN_KDGETBUF:
 			/*
@@ -3051,6 +3064,20 @@ kdbg_control(int *name, u_int namelen, user_addr_t where, size_t *sizep)
 				ret = EINVAL;
 				goto out;
 			}
+=======
+	if (name[0] == KERN_KDGETENTROPY ||
+		name[0] == KERN_KDEFLAGS ||
+		name[0] == KERN_KDDFLAGS ||
+		name[0] == KERN_KDENABLE ||
+		name[0] == KERN_KDSETBUF) {
+		
+		if ( namelen < 2 )
+	        return(EINVAL);
+		value = name[1];
+	}
+	
+	kdbg_lock_init();
+>>>>>>> origin/10.5
 
 			if (size != KDBG_TYPEFILTER_BITMAP_SIZE) {
 				ret = EINVAL;

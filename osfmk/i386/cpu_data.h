@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2012 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -88,9 +92,15 @@ struct prngContext;
  * Data structures embedded in per-cpu data:
  */
 typedef struct rtclock_timer {
+<<<<<<< HEAD
 	mpqueue_head_t		queue;
 	uint64_t		deadline;
 	uint64_t		when_set;
+=======
+	queue_head_t	queue;
+	uint64_t		deadline;
+	boolean_t		is_set;
+>>>>>>> origin/10.5
 	boolean_t		has_expired;
 } rtclock_timer_t;
 
@@ -163,8 +173,15 @@ typedef struct cpu_data
 							 * debugging
 							 */
 	ast_t			cpu_pending_ast;
+<<<<<<< HEAD
 	volatile int		cpu_running;
 	boolean_t		cpu_fixed_pmcs_enabled;
+=======
+	int			cpu_type;
+	int			cpu_subtype;
+	int			cpu_threadtype;
+	int			cpu_running;
+>>>>>>> origin/10.5
 	rtclock_timer_t		rtclock_timer;
 	volatile addr64_t	cpu_active_cr3 __attribute((aligned(64)));
 	union {
@@ -195,12 +212,18 @@ typedef struct cpu_data
 
 	vm_offset_t		cpu_physwindow_base;
 	uint64_t		*cpu_physwindow_ptep;
+<<<<<<< HEAD
 #endif
 
 #define HWINTCNT_SIZE 256
 	uint32_t		cpu_hwIntCnt[HWINTCNT_SIZE];	/* Interrupt counts */
  	uint64_t		cpu_hwIntpexits[HWINTCNT_SIZE];
 	uint64_t		cpu_hwIntcexits[HWINTCNT_SIZE];
+=======
+	void 			*cpu_hi_iss;
+	boolean_t		cpu_tlb_invalid;
+	uint32_t		cpu_hwIntCnt[256];	/* Interrupt counts */
+>>>>>>> origin/10.5
 	uint64_t		cpu_dr7; /* debug control register */
 	uint64_t		cpu_int_event_time;	/* intr entry/exit time */
 	pal_rtc_nanotime_t	*cpu_nanotime;		/* Nanotime info */
@@ -258,6 +281,7 @@ typedef struct cpu_data
 #endif
 #if CONFIG_MCA
 	struct mca_state	*cpu_mca_state;		/* State at MC fault */
+<<<<<<< HEAD
 #endif
 	struct prngContext	*cpu_prng;		/* PRNG's context */
  	int			cpu_type;
@@ -266,6 +290,19 @@ typedef struct cpu_data
  	boolean_t		cpu_iflag;
  	boolean_t		cpu_boot_complete;
  	int			cpu_hibernate;
+=======
+	uint64_t		cpu_uber_arg_store;	/* Double mapped address
+							 * of current thread's
+							 * uu_arg array.
+							 */
+	uint64_t		cpu_uber_arg_store_valid; /* Double mapped
+							   * address of pcb
+							   * arg store
+							   * validity flag.
+							   */
+	rtc_nanotime_t		*cpu_nanotime;		/* Nanotime info */
+							  
+>>>>>>> origin/10.5
 } cpu_data_t;
 
 extern cpu_data_t	*cpu_data_ptr[];  

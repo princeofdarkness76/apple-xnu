@@ -577,6 +577,7 @@ void sdt_init( void )
 void
 sdt_provide_module(void *arg, struct modctl *ctl)
 {
+<<<<<<< HEAD
 #pragma unused(arg)
 	ASSERT(ctl != NULL);
 	ASSERT(dtrace_kernel_symbol_mode != DTRACE_KERNEL_SYMBOLS_NEVER);
@@ -601,6 +602,19 @@ sdt_provide_module(void *arg, struct modctl *ctl)
 		/*
 		 * APPLE NOTE:  sdt probes for kexts not yet implemented
 		 */
+=======
+#pragma unused(ctl)
+#pragma unused(arg)
+    __sdt_provide_module(arg, &g_sdt_kernctl);
+
+	sdt_probedesc_t *sdpd = g_sdt_mach_module.sdt_probes;
+	while (sdpd) {
+		sdt_probedesc_t *this_sdpd = sdpd;
+		kmem_free((void *)sdpd->sdpd_name, strlen(sdpd->sdpd_name) + 1);
+		kmem_free((void *)sdpd->sdpd_func, strlen(sdpd->sdpd_func) + 1);
+		sdpd = sdpd->sdpd_next;
+		kmem_free((void *)this_sdpd, sizeof(sdt_probedesc_t));
+>>>>>>> origin/10.5
 	}
 	
 	/* Need to mark this module as completed */

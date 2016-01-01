@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -438,7 +442,11 @@ thread_depress_abstime(
 
 		self->sched_pri = DEPRESSPRI;
 		myprocessor->current_pri = self->sched_pri;
+<<<<<<< HEAD
 		self->sched_flags |= TH_SFLAG_DEPRESS;
+=======
+		self->sched_mode |= TH_MODE_DEPRESS;
+>>>>>>> origin/10.5
 
 		if (interval != 0) {
 			clock_absolutetime_interval_to_deadline(interval, &deadline);
@@ -542,7 +550,11 @@ thread_poll_yield(
 			if (!timer_call_enter(&self->depress_timer, abstime, TIMER_CALL_USER_CRITICAL))
 				self->depress_timer_active++;
 
+<<<<<<< HEAD
 			if ((preempt = csw_check(myprocessor, AST_NONE)) != AST_NONE)
+=======
+			if ((preempt = csw_check(myprocessor)) != AST_NONE)
+>>>>>>> origin/10.5
 				ast_on(preempt);
 
 			thread_unlock(self);

@@ -180,6 +180,10 @@ extern void	print_threads_registers(thread_t thread);
 extern void	print_uuid_info(task_t task);
 extern void	print_launchd_info(void);
 
+<<<<<<< HEAD
+=======
+extern void		panic_i386_backtrace(void *, int, const char *, boolean_t, x86_saved_state_t *);
+>>>>>>> origin/10.5
 #if MACH_KDP
 extern boolean_t	kdp_i386_trap(
 				unsigned int,

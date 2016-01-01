@@ -245,6 +245,7 @@ private:
     // Idle timer's period in seconds.
     unsigned long           IdleTimerPeriod;
     unsigned long           IdleTimerMinPowerState;
+<<<<<<< HEAD
     unsigned long           NextIdleTimerPeriod;
     AbsoluteTime            IdleTimerStartTime;
 
@@ -253,6 +254,8 @@ private:
 
     // This is the power state we desire currently.
     IOPMPowerStateIndex     DesiredPowerState;
+=======
+>>>>>>> origin/10.5
 
     // This is what our parent thinks our need is.
     IOPMPowerFlags          PreviousRequestPowerFlags;
@@ -393,8 +396,14 @@ private:
 #define fActivityLock               pwrMgt->ActivityLock
 #define fIdleTimerPeriod            pwrMgt->IdleTimerPeriod
 #define fIdleTimerMinPowerState     pwrMgt->IdleTimerMinPowerState
+<<<<<<< HEAD
 #define fNextIdleTimerPeriod        pwrMgt->NextIdleTimerPeriod
 #define fIdleTimerStartTime         pwrMgt->IdleTimerStartTime
+=======
+#define fDeviceActive               pwrMgt->DeviceActive
+#define fDeviceActiveTimestamp      pwrMgt->DeviceActiveTimestamp
+#define fDriverDesire               pwrMgt->DriverDesire
+>>>>>>> origin/10.5
 #define fDeviceDesire               pwrMgt->DeviceDesire
 #define fDesiredPowerState          pwrMgt->DesiredPowerState
 #define fPreviousRequestPowerFlags  pwrMgt->PreviousRequestPowerFlags
@@ -538,7 +547,35 @@ struct IOPMInterestContext {
 
 // assertPMDriverCall() options
 enum {
+<<<<<<< HEAD
     kIOPMADC_NoInactiveCheck = 1
+=======
+    /* Command Types */
+    kIOPMRequestTypeInvalid                = 0x00,
+    kIOPMRequestTypePMStop                 = 0x01,
+    kIOPMRequestTypeAddPowerChild1         = 0x02,
+    kIOPMRequestTypeAddPowerChild2         = 0x03,
+    kIOPMRequestTypeAddPowerChild3         = 0x04,
+    kIOPMRequestTypeRegisterPowerDriver    = 0x05,
+    kIOPMRequestTypeAdjustPowerState       = 0x06,
+    kIOPMRequestTypeMakeUsable             = 0x07,
+    kIOPMRequestTypeTemporaryPowerClamp    = 0x08,
+    kIOPMRequestTypePowerDomainWillChange  = 0x09,
+    kIOPMRequestTypePowerDomainDidChange   = 0x0A,
+    kIOPMRequestTypeChangePowerStateTo     = 0x0B,
+    kIOPMRequestTypeChangePowerStateToPriv = 0x0C,
+    kIOPMRequestTypePowerOverrideOnPriv    = 0x0D,
+    kIOPMRequestTypePowerOverrideOffPriv   = 0x0E,
+    kIOPMRequestTypeActivityTickle         = 0x0F,
+    /* Reply Types */
+    kIOPMRequestTypeReplyStart             = 0x80,
+    kIOPMRequestTypeAckPowerChange         = 0x81,
+    kIOPMRequestTypeAckSetPowerState       = 0x82,
+    kIOPMRequestTypeAllowPowerChange       = 0x83,
+    kIOPMRequestTypeCancelPowerChange      = 0x84,
+    kIOPMRequestTypeInterestChanged        = 0x85,
+    kIOPMRequestTypeIdleCancel             = 0x86
+>>>>>>> origin/10.5
 };
 
 //******************************************************************************

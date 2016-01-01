@@ -462,7 +462,14 @@ static int gFBTInited = 0;
 void
 fbt_init( void )
 {
+<<<<<<< HEAD
 	if (0 == gFBTInited)
+=======
+
+	PE_parse_boot_argn("DisableFBT", &gDisableFBT, sizeof (gDisableFBT));
+
+	if (0 == gDisableFBT)
+>>>>>>> origin/10.5
 	{
 		int majdevno = cdevsw_add(FBT_MAJOR, &fbt_cdevsw);
 		

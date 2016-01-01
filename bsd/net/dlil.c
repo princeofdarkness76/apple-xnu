@@ -1350,6 +1350,7 @@ dlil_affinity_set(struct thread *tp, u_int32_t tag)
 void
 dlil_init(void)
 {
+<<<<<<< HEAD
 	thread_t thread = THREAD_NULL;
 
 	/*
@@ -1553,6 +1554,10 @@ dlil_init(void)
 
 	ifnet_llreach_init();
 
+=======
+	PE_parse_boot_argn("net_affinity", &net_affinity, sizeof (net_affinity));
+	
+>>>>>>> origin/10.5
 	TAILQ_INIT(&dlil_ifnet_head);
 	TAILQ_INIT(&ifnet_head);
 	TAILQ_INIT(&ifnet_detaching_head);
@@ -8300,3 +8305,26 @@ done:
 	return (error);
 }
 
+<<<<<<< HEAD
+=======
+__private_extern__ void
+dlil_proto_unplumb_all(struct ifnet *ifp)
+{
+	/*
+	 * if_proto_hash[0-3] are for PF_INET, PF_INET6, PF_APPLETALK
+	 * and PF_VLAN, where each bucket contains exactly one entry;
+	 * PF_VLAN does not need an explicit unplumb.
+	 *
+	 * if_proto_hash[4] is for other protocols; we expect anything
+	 * in this bucket to respond to the DETACHING event (which would
+	 * have happened by now) and do the unplumb then.
+	 */
+	(void) proto_unplumb(PF_INET, ifp);
+#if INET6
+	(void) proto_unplumb(PF_INET6, ifp);
+#endif /* INET6 */
+#if NETAT
+	(void) proto_unplumb(PF_APPLETALK, ifp);
+#endif /* NETAT */
+}
+>>>>>>> origin/10.5

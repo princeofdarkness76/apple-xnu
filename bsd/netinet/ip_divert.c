@@ -391,10 +391,14 @@ div_output(struct socket *so, struct mbuf *m, struct sockaddr_in *sin,
 
 	/* Reinject packet into the system as incoming or outgoing */
 	if (!sin || sin->sin_addr.s_addr == 0) {
+<<<<<<< HEAD
 		struct ip_out_args ipoa =
 		    { IFSCOPE_NONE, { 0 }, IPOAF_SELECT_SRCIF, 0 };
 		struct route ro;
 		struct ip_moptions *imo;
+=======
+		struct ip_out_args ipoa = { IFSCOPE_NONE };
+>>>>>>> origin/10.5
 
 		/*
 		 * Don't allow both user specified and setsockopt options,
@@ -425,12 +429,23 @@ div_output(struct socket *so, struct mbuf *m, struct sockaddr_in *sin,
 #if CONFIG_MACF_NET
 		mac_mbuf_label_associate_inpcb(inp, m);
 #endif
+<<<<<<< HEAD
 		/* Send packet to output processing */
 		error = ip_output(m, inp->inp_options, &ro,
 			(so->so_options & SO_DONTROUTE) |
 			IP_ALLOWBROADCAST | IP_RAWOUTPUT | IP_OUTARGS,
 			imo, &ipoa);
 
+=======
+#if CONFIG_IP_EDGEHOLE
+		ip_edgehole_mbuf_tag(inp, m);
+#endif
+		error = ip_output(m,
+			    inp->inp_options, &inp->inp_route,
+			(so->so_options & SO_DONTROUTE) |
+			IP_ALLOWBROADCAST | IP_RAWOUTPUT | IP_OUTARGS,
+			inp->inp_moptions, &ipoa);
+>>>>>>> origin/10.5
 		socket_lock(so, 0);
 		if (imo != NULL)
 			IMO_REMREF(imo);
@@ -455,7 +470,11 @@ div_output(struct socket *so, struct mbuf *m, struct sockaddr_in *sin,
 				goto cantsend;
 			}
 			m->m_pkthdr.rcvif = ifa->ifa_ifp;
+<<<<<<< HEAD
 			IFA_REMREF(ifa);
+=======
+			ifafree(ifa);
+>>>>>>> origin/10.5
 		}
 #if CONFIG_MACF_NET
 		mac_mbuf_label_associate_socket(so, m);

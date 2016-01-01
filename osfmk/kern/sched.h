@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -278,7 +282,11 @@ sched_group_t   sched_group_create(void);
 void            sched_group_destroy(sched_group_t sched_group);
 #endif /* defined(CONFIG_SCHED_MULTIQ) */
 
+<<<<<<< HEAD
 
+=======
+extern struct run_queue		rt_runq;
+>>>>>>> origin/10.5
 
 /*
  *	Scheduler routines.
@@ -290,8 +298,12 @@ extern void		thread_quantum_expire(
 					timer_call_param_t	thread);
 
 /* Context switch check for current processor */
+<<<<<<< HEAD
 extern ast_t	csw_check(processor_t		processor,
 						ast_t			check_reason);
+=======
+extern ast_t	csw_check(processor_t		processor);
+>>>>>>> origin/10.5
 
 #if defined(CONFIG_SCHED_TIMESHARE_CORE)
 extern uint32_t	std_quantum, min_std_quantum;
@@ -371,6 +383,7 @@ extern uint32_t		avenrun[3], mach_factor[3];
 extern uint64_t		max_unsafe_computation;
 extern uint64_t		max_poll_computation;
 
+<<<<<<< HEAD
 /* TH_RUN & !TH_IDLE controls whether a thread has a run count */
 #define sched_run_incr(th)                                      \
 	hw_atomic_add(&sched_run_count, 1)                      \
@@ -414,6 +427,27 @@ MACRO_BEGIN                                             \
 MACRO_END
 
 #endif /* !MACH_ASSERT */
+=======
+#define sched_run_incr()			\
+MACRO_BEGIN													\
+	machine_run_count(hw_atomic_add(&sched_run_count, 1));	\
+MACRO_END
+
+#define sched_run_decr()			\
+MACRO_BEGIN													\
+	machine_run_count(hw_atomic_sub(&sched_run_count, 1));	\
+MACRO_END
+
+#define sched_share_incr()			\
+MACRO_BEGIN											\
+	(void)hw_atomic_add(&sched_share_count, 1);		\
+MACRO_END
+
+#define sched_share_decr()			\
+MACRO_BEGIN											\
+	(void)hw_atomic_sub(&sched_share_count, 1);		\
+MACRO_END
+>>>>>>> origin/10.5
 
 /*
  *	thread_timer_delta macro takes care of both thread timers.

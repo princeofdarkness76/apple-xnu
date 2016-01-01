@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -324,6 +328,10 @@ extern int ipsec_bypass;
 
 extern int slowlink_wsize;	/* window correction for slow links */
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+extern u_long  route_generation;
+>>>>>>> origin/10.5
 #if IPFIREWALL
 extern int fw_enable; 		/* firewall check for packet chaining */
 extern int fw_bypass; 		/* firewall check: disable packet chaining if there is rules */
@@ -1362,6 +1370,7 @@ after_sack_rexmit:
 		adv = imin(recwin, (int)TCP_MAXWIN << tp->rcv_scale) -
 			(tp->rcv_adv - tp->rcv_nxt);
 
+<<<<<<< HEAD
 		if (SEQ_GT(tp->rcv_adv, tp->rcv_nxt))
 			oldwin = tp->rcv_adv - tp->rcv_nxt;
 
@@ -1396,6 +1405,20 @@ after_sack_rexmit:
 			}
 		}
 		if (4 * adv >= (int32_t) so->so_rcv.sb_hiwat) 
+=======
+		if (adv >= (long) (2 * tp->t_maxseg)) {
+			
+			/* 
+			 * Update only if the resulting scaled value of the window changed, or
+			 * if there is a change in the sequence since the last ack.
+			 * This avoids what appears as dupe ACKS (see rdar://5640997)
+			 */
+
+			if ((tp->last_ack_sent != tp->rcv_nxt) || (((recwin + adv) >> tp->rcv_scale) > recwin)) 
+				goto send;
+		}
+		if (2 * adv >= (long) so->so_rcv.sb_hiwat) 
+>>>>>>> origin/10.5
 				goto send;
 	}
 
@@ -1426,9 +1449,14 @@ after_sack_rexmit:
 	 * after the retransmission timer has been turned off.  Make sure
 	 * that the retransmission timer is set.
 	 */
+<<<<<<< HEAD
 	if (SACK_ENABLED(tp) && (tp->t_state >= TCPS_ESTABLISHED) && 
 	    SEQ_GT(tp->snd_max, tp->snd_una) &&
 	    tp->t_timer[TCPT_REXMT] == 0 &&
+=======
+	if (tp->sack_enable && (tp->t_state >= TCPS_ESTABLISHED) && SEQ_GT(tp->snd_max, tp->snd_una) &&
+		tp->t_timer[TCPT_REXMT] == 0 &&
+>>>>>>> origin/10.5
 	    tp->t_timer[TCPT_PERSIST] == 0) {
 		tp->t_timer[TCPT_REXMT] = OFFSET_FROM_START(tp,
 			tp->t_rxtcur);
@@ -2138,6 +2166,9 @@ send:
 #if CONFIG_MACF_NET
 	mac_mbuf_label_associate_inpcb(inp, m);
 #endif
+#if CONFIG_IP_EDGEHOLE
+	ip_edgehole_mbuf_tag(tp->t_inpcb, m);
+#endif
 #if INET6
 	if (isipv6) {
 		ip6 = mtod(m, struct ip6_hdr *);
@@ -2221,12 +2252,16 @@ send:
 	}
 	th->th_ack = htonl(tp->rcv_nxt);
 	tp->last_ack_sent = tp->rcv_nxt;
+<<<<<<< HEAD
 #if MPTCP
 	/* Initialize the ACK field to a value as 0 ack fields are dropped */
 	if (early_data_sent) {
 		th->th_ack = th->th_seq + 1;
 	}
 #endif /* MPTCP */
+=======
+
+>>>>>>> origin/10.5
 	if (optlen) {
 		bcopy(opt, th + 1, optlen);
 		th->th_off = (sizeof (struct tcphdr) + optlen) >> 2;
@@ -2812,6 +2847,7 @@ tcp_ip_output(struct socket *so, struct tcpcb *tp, struct mbuf *pkt,
 	int error = 0;
 	boolean_t chain;
 	boolean_t unlocked = FALSE;
+<<<<<<< HEAD
 	boolean_t ifdenied = FALSE;
 	struct inpcb *inp = tp->t_inpcb;
 	struct ip_out_args ipoa =
@@ -2899,7 +2935,21 @@ tcp_ip_output(struct socket *so, struct tcpcb *tp, struct mbuf *pkt,
 
 	/* Increment the count of outstanding send operations */
 	inp->inp_sndinprog_cnt++;
+=======
+	struct inpcb *inp = tp->t_inpcb;
+	struct ip_out_args ipoa;
+>>>>>>> origin/10.5
 
+	/* If socket was bound to an ifindex, tell ip_output about it */
+	ipoa.ipoa_ifscope = (inp->inp_flags & INP_BOUND_IF) ?
+	    inp->inp_boundif : IFSCOPE_NONE;
+	flags |= IP_OUTARGS;
+
+	/* Make sure ACK/DELACK conditions are cleared before
+	 * we unlock the socket.
+	 */
+
+	tp->t_flags &= ~(TF_ACKNOW | TF_DELACK);
 	/*
 	 * If allowed, unlock TCP socket while in IP
 	 * but only if the connection is established and
@@ -2952,6 +3002,7 @@ tcp_ip_output(struct socket *so, struct tcpcb *tp, struct mbuf *pkt,
 			 */
 			cnt = 0;
 		}
+<<<<<<< HEAD
 #if INET6
 		if (isipv6) {
 			error = ip6_output_list(pkt, cnt,
@@ -2965,6 +3016,10 @@ tcp_ip_output(struct socket *so, struct tcpcb *tp, struct mbuf *pkt,
 			ifdenied = (ipoa.ipoa_retflags & IPOARF_IFDENIED);
 		}
 
+=======
+		error = ip_output_list(pkt, cnt, opt, &inp->inp_route,
+		    flags, 0, &ipoa);
+>>>>>>> origin/10.5
 		if (chain || error) {
 			/*
 			 * If we sent down a chain then we are done since

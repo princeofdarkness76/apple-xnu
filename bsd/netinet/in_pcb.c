@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
  * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+=======
+ * Copyright (c) 2000-2008 Apple Inc. All rights reserved.
+>>>>>>> origin/10.5
  *
 <<<<<<< HEAD
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
@@ -590,6 +594,7 @@ in_pcballoc(struct socket *so, struct inpcbinfo *pcbinfo, struct proc *p)
 		return (mac_error);
 	}
 	mac_inpcb_label_associate(so, inp);
+<<<<<<< HEAD
 #endif /* CONFIG_MACF_NET */
 	/* make sure inp_stat is always 64-bit aligned */
 	inp->inp_stat = (struct inp_stat *)P2ROUNDUP(inp->inp_stat_store,
@@ -627,6 +632,12 @@ in_pcballoc(struct socket *so, struct inpcbinfo *pcbinfo, struct proc *p)
 		/* NOTREACHED */
 	}
 	
+=======
+#endif
+#if CONFIG_IP_EDGEHOLE
+	ip_edgehole_attach(inp);
+#endif
+>>>>>>> origin/10.5
 	so->so_pcb = (caddr_t)inp;
 
 	if (so->so_proto->pr_flags & PR_PCBLOCK) {
@@ -689,6 +700,10 @@ in_pcblookup_local_and_cleanup(struct inpcbinfo *pcbinfo, struct in_addr laddr,
 	return (inp);
 }
 
+<<<<<<< HEAD
+=======
+#ifdef __APPLE_API_PRIVATE
+>>>>>>> origin/10.5
 static void
 in_pcb_conflict_post_msg(u_int16_t port)
 {
@@ -978,6 +993,7 @@ in_pcbbind(struct inpcb *inp, struct sockaddr *nam, struct proc *p)
 		}
 	}
 	socket_lock(so, 0);
+<<<<<<< HEAD
 
 	/*
 	 * We unlocked socket's protocol lock for a long time.
@@ -1013,6 +1029,16 @@ in_pcbbind(struct inpcb *inp, struct sockaddr *nam, struct proc *p)
 		return (EAGAIN);
 	}
 	lck_rw_done(pcbinfo->ipi_lock);
+=======
+	inp->inp_lport = lport;
+	if (in_pcbinshash(inp, 1) != 0) {
+		inp->inp_laddr.s_addr = INADDR_ANY;
+		inp->inp_lport = 0;
+		lck_rw_done(pcbinfo->mtx);
+		return (EAGAIN);
+	}
+	lck_rw_done(pcbinfo->mtx);
+>>>>>>> origin/10.5
 	sflt_notify(so, sock_evt_bound, NULL);
 	return (0);
 }
@@ -1055,6 +1081,7 @@ in_pcbladdr(struct inpcb *inp, struct sockaddr *nam, struct in_addr *laddr,
 		return (EAFNOSUPPORT);
 	if (SIN(nam)->sin_port == 0)
 		return (EADDRNOTAVAIL);
+<<<<<<< HEAD
 
 	/*
 	 * If the destination address is INADDR_ANY,
@@ -1074,6 +1101,91 @@ in_pcbladdr(struct inpcb *inp, struct sockaddr *nam, struct in_addr *laddr,
 			} else if (ia->ia_ifp->if_flags & IFF_BROADCAST) {
 				SIN(nam)->sin_addr =
 				    SIN(&ia->ia_broadaddr)->sin_addr;
+=======
+	
+	lck_mtx_lock(rt_mtx);
+	
+	if (!TAILQ_EMPTY(&in_ifaddrhead)) {
+		/*
+		 * If the destination address is INADDR_ANY,
+		 * use the primary local address.
+		 * If the supplied address is INADDR_BROADCAST,
+		 * and the primary interface supports broadcast,
+		 * choose the broadcast address for that interface.
+		 */
+#define	satosin(sa)	((struct sockaddr_in *)(sa))
+#define sintosa(sin)	((struct sockaddr *)(sin))
+#define ifatoia(ifa)	((struct in_ifaddr *)(ifa))
+		if (sin->sin_addr.s_addr == INADDR_ANY)
+		    sin->sin_addr = IA_SIN(TAILQ_FIRST(&in_ifaddrhead))->sin_addr;
+		else if (sin->sin_addr.s_addr == (u_long)INADDR_BROADCAST &&
+		  (TAILQ_FIRST(&in_ifaddrhead)->ia_ifp->if_flags & IFF_BROADCAST))
+		    sin->sin_addr = satosin(&TAILQ_FIRST(&in_ifaddrhead)->ia_broadaddr)->sin_addr;
+	}
+	if (inp->inp_laddr.s_addr == INADDR_ANY) {
+		struct route *ro;
+		unsigned int ifscope;
+
+		ia = (struct in_ifaddr *)0;
+		ifscope = (inp->inp_flags & INP_BOUND_IF) ?
+		    inp->inp_boundif : IFSCOPE_NONE;
+		/*
+		 * If route is known or can be allocated now,
+		 * our src addr is taken from the i/f, else punt.
+		 * Note that we should check the address family of the cached
+		 * destination, in case of sharing the cache with IPv6.
+		 */
+		ro = &inp->inp_route;
+		if (ro->ro_rt &&
+			(ro->ro_dst.sa_family != AF_INET ||
+			satosin(&ro->ro_dst)->sin_addr.s_addr !=
+			sin->sin_addr.s_addr ||
+		    inp->inp_socket->so_options & SO_DONTROUTE || 
+		    ro->ro_rt->generation_id != route_generation)) {
+			rtfree_locked(ro->ro_rt);
+			ro->ro_rt = (struct rtentry *)0;
+		}
+		if ((inp->inp_socket->so_options & SO_DONTROUTE) == 0 && /*XXX*/
+		    (ro->ro_rt == (struct rtentry *)0 ||
+		    ro->ro_rt->rt_ifp == 0)) {
+			/* No route yet, so try to acquire one */
+			bzero(&ro->ro_dst, sizeof(struct sockaddr_in));
+			ro->ro_dst.sa_family = AF_INET;
+			ro->ro_dst.sa_len = sizeof(struct sockaddr_in);
+			((struct sockaddr_in *) &ro->ro_dst)->sin_addr =
+				sin->sin_addr;
+			rtalloc_scoped_ign_locked(ro, 0UL, ifscope);
+		}
+		/*
+		 * If we found a route, use the address
+		 * corresponding to the outgoing interface
+		 * unless it is the loopback (in case a route
+		 * to our address on another net goes to loopback).
+		 */
+		if (ro->ro_rt && !(ro->ro_rt->rt_ifp->if_flags & IFF_LOOPBACK)) {
+			ia = ifatoia(ro->ro_rt->rt_ifa);
+			if (ia)
+				ifaref(&ia->ia_ifa);
+		}
+		if (ia == 0) {
+			u_short fport = sin->sin_port;
+
+			sin->sin_port = 0;
+			ia = ifatoia(ifa_ifwithdstaddr(sintosa(sin)));
+			if (ia == 0) {
+				ia = ifatoia(ifa_ifwithnet_scoped(sintosa(sin),
+				    ifscope));
+			}
+			sin->sin_port = fport;
+			if (ia == 0) {
+				ia = TAILQ_FIRST(&in_ifaddrhead);
+				if (ia)
+					ifaref(&ia->ia_ifa);
+			}
+			if (ia == 0) {
+				lck_mtx_unlock(rt_mtx);
+				return (EADDRNOTAVAIL);
+>>>>>>> origin/10.5
 			}
 			IFA_UNLOCK(&ia->ia_ifa);
 			ia = NULL;
@@ -1520,11 +1632,18 @@ in_pcbdispose(struct inpcb *inp)
 			lck_mtx_unlock(&inp->inpcb_mtx);
 			lck_mtx_destroy(&inp->inpcb_mtx, ipi->ipi_lock_grp);
 		}
+<<<<<<< HEAD
 		/* makes sure we're not called twice from so_close */
 		so->so_flags |= SOF_PCBCLEARING;
 		so->so_saved_pcb = (caddr_t)inp;
 		so->so_pcb = NULL;
 		inp->inp_socket = NULL;
+=======
+		so->so_flags |= SOF_PCBCLEARING; /* makes sure we're not called twice from so_close */
+		so->so_saved_pcb = (caddr_t) inp;
+		so->so_pcb = 0; 
+		inp->inp_socket = 0;
+>>>>>>> origin/10.5
 #if CONFIG_MACF_NET
 		mac_inpcb_label_destroy(inp);
 #endif /* CONFIG_MACF_NET */
@@ -2415,6 +2534,7 @@ stopusing:
 void
 inpcb_to_compat(struct inpcb *inp, struct inpcb_compat *inp_compat)
 {
+<<<<<<< HEAD
 	bzero(inp_compat, sizeof (*inp_compat));
 	inp_compat->inp_fport = inp->inp_fport;
 	inp_compat->inp_lport = inp->inp_lport;
@@ -2498,6 +2618,20 @@ inp_route_copyout(struct inpcb *inp, struct route *dst)
 		ROUTE_RELEASE(src);
 
 	route_copyout(dst, src, sizeof (*dst));
+=======
+	struct socket *so = inp->inp_socket;
+	struct inpcbinfo *pcbinfo = inp->inp_pcbinfo;
+	
+	if (so != &pcbinfo->nat_dummy_socket)
+		panic("in_pcb_detach_port: not a dummy_sock: so=%p, inp=%p\n", so, inp);
+	inp->inp_gencnt = ++pcbinfo->ipi_gencnt;
+	/*### access ipi in in_pcbremlists */
+	in_pcbremlists(inp);
+	
+	inp->inp_socket = 0;
+	zfree(pcbinfo->ipi_zone, inp);
+    	pcbinfo->nat_dummy_socket.so_pcb = (caddr_t)pcbinfo->nat_dummy_pcb; /* restores dummypcb */
+>>>>>>> origin/10.5
 }
 
 void

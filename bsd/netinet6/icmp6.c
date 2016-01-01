@@ -155,6 +155,12 @@ static struct timeval icmp6errppslim_last;
 static struct timeval icmp6rappslim_last;
 extern int icmp6_nodeinfo;
 extern struct inpcbinfo ripcbinfo;
+<<<<<<< HEAD
+=======
+extern lck_mtx_t *ip6_mutex; 
+extern lck_mtx_t *nd6_mutex;
+extern lck_mtx_t *inet6_domain_mutex;
+>>>>>>> origin/10.5
 
 static void icmp6_errcount(struct icmp6errstat *, int, int);
 static int icmp6_rip6_input(struct mbuf **, int);
@@ -627,6 +633,14 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 		if (code != 0)
 			goto badcode;
 
+<<<<<<< HEAD
+=======
+		if (icmp6_ratelimit(&ip6->ip6_dst, icmp6->icmp6_type, code)) {
+			icmp6stat.icp6s_toofreq++;
+			goto freeit;
+		}
+
+>>>>>>> origin/10.5
 		if ((n = m_copy(m, 0, M_COPYALL)) == NULL) {
 			/* Give up remote */
 			goto rate_limit_checked;
@@ -716,6 +730,14 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 		else
 			icmp6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_mldreport);
 
+<<<<<<< HEAD
+=======
+		if (icmp6_ratelimit(&ip6->ip6_dst, icmp6->icmp6_type, code)) {
+			icmp6stat.icp6s_toofreq++;
+			goto freeit;
+		}
+
+>>>>>>> origin/10.5
 		if ((n = m_copym(m, 0, M_COPYALL, M_DONTWAIT)) == NULL) {
 			/* give up local */
 			if (mld_input(m, off, icmp6len) == IPPROTO_DONE)
@@ -755,6 +777,13 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 		IP6_EXTHDR_CHECK(m, off, sizeof(struct icmp6_nodeinfo),
 				 return IPPROTO_DONE);
 #endif
+<<<<<<< HEAD
+=======
+		if (icmp6_ratelimit(&ip6->ip6_dst, icmp6->icmp6_type, code)) {
+			icmp6stat.icp6s_toofreq++;
+			goto freeit;
+		}
+>>>>>>> origin/10.5
 
 		n = m_copy(m, 0, M_COPYALL);
 		if (n)
@@ -780,6 +809,14 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 		if (icmp6len < sizeof(struct nd_router_solicit))
 			goto badlen;
 
+<<<<<<< HEAD
+=======
+		if (icmp6_ratelimit(&ip6->ip6_dst, icmp6->icmp6_type, code)) {
+			icmp6stat.icp6s_toofreq++;
+			goto freeit;
+		}
+
+>>>>>>> origin/10.5
 		if ((n = m_copym(m, 0, M_COPYALL, M_DONTWAIT)) == NULL) {
 			/* give up local */
 			nd6_rs_input(m, off, icmp6len);
@@ -798,6 +835,14 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 		if (icmp6len < sizeof(struct nd_router_advert))
 			goto badlen;
 
+<<<<<<< HEAD
+=======
+		if (icmp6_ratelimit(&ip6->ip6_dst, icmp6->icmp6_type, code)) {
+			icmp6stat.icp6s_toofreq++;
+			goto freeit;
+		}
+
+>>>>>>> origin/10.5
 		if ((n = m_copym(m, 0, M_COPYALL, M_DONTWAIT)) == NULL) {
 			/* give up local */
 			nd6_ra_input(m, off, icmp6len);
@@ -816,6 +861,14 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 		if (icmp6len < sizeof(struct nd_neighbor_solicit))
 			goto badlen;
 
+<<<<<<< HEAD
+=======
+		if (icmp6_ratelimit(&ip6->ip6_dst, icmp6->icmp6_type, code)) {
+			icmp6stat.icp6s_toofreq++;
+			goto freeit;
+		}
+
+>>>>>>> origin/10.5
 		if ((n = m_copym(m, 0, M_COPYALL, M_DONTWAIT)) == NULL) {
 			/* give up local */
 			nd6_ns_input(m, off, icmp6len);
@@ -834,6 +887,14 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 		if (icmp6len < sizeof(struct nd_neighbor_advert))
 			goto badlen;
 
+<<<<<<< HEAD
+=======
+		if (icmp6_ratelimit(&ip6->ip6_dst, icmp6->icmp6_type, code)) {
+			icmp6stat.icp6s_toofreq++;
+			goto freeit;
+		}
+
+>>>>>>> origin/10.5
 		if ((n = m_copym(m, 0, M_COPYALL, M_DONTWAIT)) == NULL) {
 			/* give up local */
 			nd6_na_input(m, off, icmp6len);
@@ -852,6 +913,14 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 		if (icmp6len < sizeof(struct nd_redirect))
 			goto badlen;
 
+<<<<<<< HEAD
+=======
+		if (icmp6_ratelimit(&ip6->ip6_dst, icmp6->icmp6_type, code)) {
+			icmp6stat.icp6s_toofreq++;
+			goto freeit;
+		}
+
+>>>>>>> origin/10.5
 		if ((n = m_copym(m, 0, M_COPYALL, M_DONTWAIT)) == NULL) {
 			/* give up local */
 			icmp6_redirect_input(m, off);
@@ -872,6 +941,11 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 		break;
 
 	default:
+		if (icmp6_ratelimit(&ip6->ip6_dst, icmp6->icmp6_type, code)) {
+			icmp6stat.icp6s_toofreq++;
+			goto freeit;
+		}
+
 		nd6log((LOG_DEBUG,
 		    "icmp6_input: unknown type %d(src=%s, dst=%s, ifid=%d)\n",
 		    icmp6->icmp6_type, ip6_sprintf(&ip6->ip6_src),
@@ -887,6 +961,11 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 			break;
 		}
 	deliver:
+		if (icmp6_ratelimit(&ip6->ip6_dst, icmp6->icmp6_type, code)) {
+			icmp6stat.icp6s_toofreq++;
+			goto freeit;
+		}
+
 		if (icmp6_notify_error(m, off, icmp6len, code)) {
 			/* In this case, m should've been freed. */
 			return(IPPROTO_DONE);
@@ -902,12 +981,24 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 		break;
 	}
 
+<<<<<<< HEAD
 rate_limit_checked:
 	/* deliver the packet to appropriate sockets (unless proxying) */
 	if (!proxy) {
 		icmp6_rip6_input(&m, *offp);
 		return IPPROTO_DONE;
 	}
+=======
+	if (icmp6_ratelimit(&ip6->ip6_dst, icmp6->icmp6_type, code)) {
+		icmp6stat.icp6s_toofreq++;
+		goto freeit;
+	}
+rate_limit_checked:
+	/* deliver the packet to appropriate sockets */
+	icmp6_rip6_input(&m, *offp);
+
+	return IPPROTO_DONE;
+>>>>>>> origin/10.5
 
 freeit:
 	m_freem(m);
@@ -1180,6 +1271,10 @@ icmp6_mtudisc_update(ip6cp, validated)
 	if (mtu < IPV6_MMTU)
 		mtu = IPV6_MMTU - 8;
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/10.5
 	bzero(&sin6, sizeof(sin6));
 	sin6.sin6_family = PF_INET6;
 	sin6.sin6_len = sizeof(struct sockaddr_in6);
@@ -2272,6 +2367,7 @@ icmp6_reflect(m, off)
 		sin6.sin6_addr = ip6->ip6_dst; /* zone ID should be embedded */
 
 		bzero(&ro, sizeof(ro));
+<<<<<<< HEAD
 		/*
 		 * in6_selectsrc() might return outif with its reference held
 		 * even in the error case, so we always need to release it
@@ -2280,6 +2376,13 @@ icmp6_reflect(m, off)
 		src = in6_selectsrc(&sin6, NULL, NULL, &ro, &outif,
 		    &src_storage, ip6oa.ip6oa_boundif, &e);
 		ROUTE_RELEASE(&ro);
+=======
+		src = in6_selectsrc(&sa6_src, NULL, NULL, &ro, NULL, &src_storage, &e);
+		if (ro.ro_rt) {
+			rtfree(ro.ro_rt); /* XXX: we could use this */
+			ro.ro_rt = NULL;
+		}
+>>>>>>> origin/10.5
 		if (src == NULL) {
 			nd6log((LOG_DEBUG,
 			    "icmp6_reflect: source can't be determined: "
@@ -2550,8 +2653,20 @@ icmp6_redirect_input(m, off)
 	sdst.sin6_family = AF_INET6;
 	sdst.sin6_len = sizeof(struct sockaddr_in6);
 	bcopy(&reddst6, &sdst.sin6_addr, sizeof(struct in6_addr));
+<<<<<<< HEAD
 
+=======
+	
+	/*
+         * Radar 6843900
+	 * Release the IPv6 domain lock because we are going to take domain_proto_mtx
+	 * and could otherwise cause a deadlock with other threads taking these locks 
+	 * in the reverse order -- e.g. frag6_slowtimo() from pfslowtimo()
+	 */
+	lck_mtx_unlock(inet6_domain_mutex);
+>>>>>>> origin/10.5
 	pfctlinput(PRC_REDIRECT_HOST, (struct sockaddr *)&sdst);
+	lck_mtx_lock(inet6_domain_mutex);
 #if IPSEC
 	key_sa_routechange((struct sockaddr *)&sdst);
 #endif
@@ -3140,6 +3255,78 @@ icmp6_dgram_attach(struct socket *so, int proto, struct proc *p)
 }
 
 
+<<<<<<< HEAD
+=======
+
+#ifndef HAVE_PPSRATECHECK
+#ifndef timersub
+#define	timersub(tvp, uvp, vvp)						\
+	do {								\
+		(vvp)->tv_sec = (tvp)->tv_sec - (uvp)->tv_sec;		\
+		(vvp)->tv_usec = (tvp)->tv_usec - (uvp)->tv_usec;	\
+		if ((vvp)->tv_usec < 0) {				\
+			(vvp)->tv_sec--;				\
+			(vvp)->tv_usec += 1000000;			\
+		}							\
+	} while (0)
+#endif
+
+/*
+ * ppsratecheck(): packets (or events) per second limitation.
+ */
+static int
+ppsratecheck(lasttime, curpps, maxpps)
+	struct timeval *lasttime;
+	int *curpps;
+	int maxpps;	/* maximum pps allowed */
+{
+	struct timeval tv, delta;
+	int rv;
+
+	microtime(&tv);
+
+	timersub(&tv, lasttime, &delta);
+
+	/*
+	 * Check for 0,0 so that the message will be seen at least once.
+	 * If more than one second has passed since the last update of
+	 * lasttime, reset the counter.
+	 *
+	 * we do increment *curpps even in *curpps < maxpps case, as some may
+	 * try to use *curpps for stat purposes as well.
+	 */
+	if ((lasttime->tv_sec == 0 && lasttime->tv_usec == 0) ||
+	    delta.tv_sec >= 1) {
+		*lasttime = tv;
+		*curpps = 0;
+		rv = 1;
+	} else if (maxpps < 0)
+		rv = 1;
+	else if (*curpps < maxpps)
+		rv = 1;
+	else
+		rv = 0;
+
+#if 1 /* DIAGNOSTIC? */
+	/* be careful about wrap-around */
+	if (*curpps + 1 > 0)
+		*curpps = *curpps + 1;
+#else
+	/*
+	 * assume that there's not too many calls to this function.
+	 * not sure if the assumption holds, as it depends on *caller's*
+	 * behavior, not the behavior of this function.
+	 * IMHO it is wrong to make assumption on the caller's behavior,
+	 * so the above #if is #if 1, not #ifdef DIAGNOSTIC.
+	 */
+	*curpps = *curpps + 1;
+#endif
+
+	return (rv);
+}
+#endif
+
+>>>>>>> origin/10.5
 /*
  * Perform rate limit check.
  * Returns 0 if it is okay to send the icmp6 packet.
